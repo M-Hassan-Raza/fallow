@@ -1,20 +1,11 @@
 <p align="center">
-  <img src="assets/logo.png" alt="fallow" width="280">
-</p>
-
-<p align="center">
-  <strong>Find dead code in JavaScript and TypeScript projects. Written in Rust.</strong>
-</p>
-
-<p align="center">
+  <img src="assets/logo.png" alt="fallow" width="280"><br>
+  <strong>Find dead code in JavaScript and TypeScript projects. Written in Rust.</strong><br><br>
   <a href="https://github.com/BartWaardenburg/fallow/actions/workflows/ci.yml"><img src="https://github.com/BartWaardenburg/fallow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="https://github.com/BartWaardenburg/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/BartWaardenburg/fallow/badges/coverage.json" alt="Coverage"></a>
   <a href="https://crates.io/crates/fallow-cli"><img src="https://img.shields.io/crates/v/fallow-cli.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/fallow"><img src="https://img.shields.io/npm/v/fallow.svg" alt="npm"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
-</p>
-
-<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a><br>
   <a href="#quick-start">Quick Start</a> ·
   <a href="#what-it-finds">What It Finds</a> ·
   <a href="#configuration">Configuration</a> ·
