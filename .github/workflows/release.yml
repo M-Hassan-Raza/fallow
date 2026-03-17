@@ -215,10 +215,17 @@ jobs:
 
       - name: Publish platform packages
         run: |
+          FAILED=0
           for dir in npm/darwin-arm64 npm/darwin-x64 npm/linux-x64-gnu npm/linux-arm64-gnu npm/linux-x64-musl npm/linux-arm64-musl npm/win32-x64-msvc; do
             echo "Publishing $(basename "$dir")..."
-            npm publish "$dir" --access public --provenance || echo "Skipping $(basename "$dir")"
+            if ! npm publish "$dir" --access public --provenance; then
+              echo "::error::Failed to publish $(basename "$dir")"
+              FAILED=1
+            fi
           done
+          if [ "$FAILED" -eq 1 ]; then
+            exit 1
+          fi
 
       - name: Publish fallow
         run: npm publish npm/fallow --access public --provenance --ignore-scripts
