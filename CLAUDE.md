@@ -25,7 +25,7 @@ Pipeline: Config → File Discovery → Parallel Parsing (rayon + oxc_parser) �
 Key modules in fallow-core:
 - `project.rs` — `ProjectState` struct: owns the file registry (stable FileIds sorted by path) and workspace metadata. Foundation for cross-workspace resolution and future incremental analysis.
 - `discover.rs` — File walking + entry point detection (also workspace-aware). FileIds are assigned deterministically by path sort order (not size) for stability across runs.
-- `extract.rs` — AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns; SFC (Vue/Svelte) script extraction
+- `extract.rs` — AST visitor extracting imports, exports, re-exports, members, whole-object uses, dynamic import patterns; SFC (Vue/Svelte) script extraction; Astro frontmatter extraction; MDX import/export extraction
 - `resolve.rs` — oxc_resolver-based import resolution + glob-based dynamic import pattern resolution + DashMap-backed bare specifier cache for lock-free parallel lookups. Cross-workspace imports resolve through node_modules symlinks via canonicalize.
 - `graph.rs` — Module graph with re-export chain propagation
 - `analyze.rs` — Dead code detection (10 issue types) with inline suppression filtering
@@ -57,13 +57,15 @@ cargo run -- fix --dry-run      # Auto-fix preview
 3. Unresolved imports, unlisted dependencies
 4. Duplicate exports across modules
 5. Re-export chain resolution through barrel files
-6. Vue/Svelte SFC parsing (regex-based `<script>` block extraction, `lang="ts"` detection)
-7. Dynamic import pattern resolution (template literals, string concat, import.meta.glob, require.context → glob matching against discovered files)
-8. Inline suppression comments (`// fallow-ignore-next-line [issue-type]`, `// fallow-ignore-file [issue-type]`) — supports all issue types including `code-duplication`
-9. Script binary analysis (package.json scripts → binary names mapped to packages, `--config` args as entry points, env wrapper/package manager runner handling)
-10. Clone family grouping: groups clone groups sharing the same file set into families with refactoring suggestions (extract function/module)
-11. Duplication baseline support: `--save-baseline` / `--baseline` for incremental CI adoption of duplication thresholds
-12. Production mode (`--production`): excludes test/dev files, only start/build scripts, detects type-only dependencies
+6. Vue/Svelte SFC parsing (regex-based `<script>` block extraction, `lang="ts"`/`lang="tsx"` detection, handles `>` in quoted attributes like `generic="T extends Foo<Bar>"`)
+7. Astro component parsing (frontmatter extraction between `---` delimiters, parsed as TypeScript)
+8. MDX file parsing (line-based import/export statement extraction with multi-line brace tracking, parsed as JSX)
+9. Dynamic import pattern resolution (template literals, string concat, import.meta.glob, require.context → glob matching against discovered files)
+10. Inline suppression comments (`// fallow-ignore-next-line [issue-type]`, `// fallow-ignore-file [issue-type]`) — supports all issue types including `code-duplication`
+11. Script binary analysis (package.json scripts → binary names mapped to packages, `--config` args as entry points, env wrapper/package manager runner handling)
+12. Clone family grouping: groups clone groups sharing the same file set into families with refactoring suggestions (extract function/module)
+13. Duplication baseline support: `--save-baseline` / `--baseline` for incremental CI adoption of duplication thresholds
+14. Production mode (`--production`): excludes test/dev files, only start/build scripts, detects type-only dependencies
 
 ## Framework support (40 plugins)
 

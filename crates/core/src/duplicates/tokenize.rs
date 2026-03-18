@@ -184,8 +184,13 @@ fn point_span(pos: u32) -> Span {
 ///
 /// For Vue/Svelte SFC files, extracts `<script>` blocks first and tokenizes
 /// their content, mirroring the main analysis pipeline's SFC handling.
+/// For Astro files, extracts frontmatter. For MDX files, extracts import/export statements.
 pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
-    use crate::extract::{extract_sfc_scripts, is_sfc_file};
+    use crate::extract::{
+        extract_astro_frontmatter, extract_mdx_statements, extract_sfc_scripts, is_sfc_file,
+    };
+
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
     // For Vue/Svelte SFCs, extract and tokenize `<script>` blocks.
     if is_sfc_file(path) {
@@ -193,10 +198,11 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
         let mut all_tokens = Vec::new();
 
         for script in &scripts {
-            let source_type = if script.is_typescript {
-                SourceType::tsx()
-            } else {
-                SourceType::jsx()
+            let source_type = match (script.is_typescript, script.is_jsx) {
+                (true, true) => SourceType::tsx(),
+                (true, false) => SourceType::ts(),
+                (false, true) => SourceType::jsx(),
+                (false, false) => SourceType::mjs(),
             };
             let allocator = Allocator::default();
             let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
@@ -216,6 +222,61 @@ pub fn tokenize_file(path: &Path, source: &str) -> FileTokens {
         let line_count = source.lines().count().max(1);
         return FileTokens {
             tokens: all_tokens,
+            source: source.to_string(),
+            line_count,
+        };
+    }
+
+    // For Astro files, extract and tokenize frontmatter.
+    if ext == "astro" {
+        if let Some(script) = extract_astro_frontmatter(source) {
+            let allocator = Allocator::default();
+            let parser_return = Parser::new(&allocator, &script.body, SourceType::ts()).parse();
+
+            let mut extractor = TokenExtractor::new();
+            extractor.visit_program(&parser_return.program);
+
+            let offset = script.byte_offset as u32;
+            for token in &mut extractor.tokens {
+                token.span = Span::new(token.span.start + offset, token.span.end + offset);
+            }
+
+            let line_count = source.lines().count().max(1);
+            return FileTokens {
+                tokens: extractor.tokens,
+                source: source.to_string(),
+                line_count,
+            };
+        }
+        // No frontmatter — return empty tokens.
+        let line_count = source.lines().count().max(1);
+        return FileTokens {
+            tokens: Vec::new(),
+            source: source.to_string(),
+            line_count,
+        };
+    }
+
+    // For MDX files, extract and tokenize import/export statements.
+    if ext == "mdx" {
+        let statements = extract_mdx_statements(source);
+        if !statements.is_empty() {
+            let allocator = Allocator::default();
+            let parser_return = Parser::new(&allocator, &statements, SourceType::jsx()).parse();
+
+            let mut extractor = TokenExtractor::new();
+            extractor.visit_program(&parser_return.program);
+
+            let line_count = source.lines().count().max(1);
+            return FileTokens {
+                tokens: extractor.tokens,
+                source: source.to_string(),
+                line_count,
+            };
+        }
+        let line_count = source.lines().count().max(1);
+        return FileTokens {
+            tokens: Vec::new(),
             source: source.to_string(),
             line_count,
         };

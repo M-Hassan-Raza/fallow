@@ -40,7 +40,7 @@ pub enum EntryPointSource {
 }
 
 const SOURCE_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte",
+    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro", "mdx",
 ];
 
 /// Glob patterns for test/dev/story files excluded in production mode.

@@ -236,9 +236,17 @@ pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
 }
 
 /// Regex to extract `<script>` block content from Vue/Svelte SFCs.
+/// The attrs pattern handles `>` inside quoted attribute values (e.g., `generic="T extends Foo<Bar>"`).
 static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?is)<script\b(?P<attrs>[^>]*)>(?P<body>[\s\S]*?)</script>"#)
-        .expect("valid regex")
+    regex::Regex::new(
+        r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</script>"#,
+    )
+    .expect("valid regex")
+});
+
+/// Regex to extract Astro frontmatter (content between `---` delimiters at file start).
+static ASTRO_FRONTMATTER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?s)\A\s*---[ \t]*\n(?P<body>.*?\n)---").expect("valid regex")
 });
 
 /// Regex to extract the `lang` attribute value from a script tag.
@@ -248,6 +256,8 @@ static LANG_ATTR_RE: LazyLock<regex::Regex> =
 pub(crate) struct SfcScript {
     pub body: String,
     pub is_typescript: bool,
+    /// Whether the script uses JSX syntax (lang="tsx" or lang="jsx").
+    pub is_jsx: bool,
     /// Byte offset of the script body within the full SFC source.
     pub byte_offset: usize,
 }
@@ -260,14 +270,16 @@ pub(crate) fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
             let body_match = cap.name("body");
             let byte_offset = body_match.map(|m| m.start()).unwrap_or(0);
             let body = body_match.map(|m| m.as_str()).unwrap_or("").to_string();
-            let is_typescript = LANG_ATTR_RE
+            let lang = LANG_ATTR_RE
                 .captures(attrs)
                 .and_then(|c| c.get(1))
-                .map(|m| matches!(m.as_str(), "ts" | "tsx"))
-                .unwrap_or(false);
+                .map(|m| m.as_str());
+            let is_typescript = matches!(lang, Some("ts" | "tsx"));
+            let is_jsx = matches!(lang, Some("tsx" | "jsx"));
             SfcScript {
                 body,
                 is_typescript,
+                is_jsx,
                 byte_offset,
             }
         })
@@ -278,6 +290,76 @@ pub(crate) fn is_sfc_file(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|ext| ext == "vue" || ext == "svelte")
+}
+
+fn is_astro_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext == "astro")
+}
+
+fn is_mdx_file(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext == "mdx")
+}
+
+/// Extract frontmatter from an Astro component.
+pub(crate) fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
+    ASTRO_FRONTMATTER_RE.captures(source).map(|cap| {
+        let body_match = cap.name("body");
+        SfcScript {
+            body: body_match.map(|m| m.as_str()).unwrap_or("").to_string(),
+            is_typescript: true, // Astro frontmatter is always TS-compatible
+            is_jsx: false,
+            byte_offset: body_match.map(|m| m.start()).unwrap_or(0),
+        }
+    })
+}
+
+/// Extract import/export statements from MDX content.
+///
+/// MDX files are Markdown with JSX. Only `import` and `export` lines are relevant
+/// for dead code analysis. Multi-line imports (with unmatched braces) are handled
+/// by tracking brace depth.
+///
+/// NOTE: CSS/SCSS `@apply` was considered but rejected — it references Tailwind
+/// utility classes, not JS/TS exports, and is not relevant to dead code detection.
+pub(crate) fn extract_mdx_statements(source: &str) -> String {
+    let mut statements = Vec::new();
+    let mut in_multiline = false;
+    let mut brace_depth: i32 = 0;
+
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if in_multiline {
+            statements.push(line.to_string());
+            brace_depth += trimmed.chars().filter(|&c| c == '{').count() as i32;
+            brace_depth -= trimmed.chars().filter(|&c| c == '}').count() as i32;
+            if brace_depth <= 0
+                || trimmed.ends_with(';')
+                || trimmed.contains(" from ")
+                || trimmed.contains(" from'")
+                || trimmed.contains(" from\"")
+            {
+                in_multiline = false;
+                brace_depth = 0;
+            }
+        } else if trimmed.starts_with("import ")
+            || trimmed.starts_with("import{")
+            || trimmed.starts_with("export ")
+            || trimmed.starts_with("export{")
+        {
+            statements.push(line.to_string());
+            brace_depth = trimmed.chars().filter(|&c| c == '{').count() as i32
+                - trimmed.chars().filter(|&c| c == '}').count() as i32;
+            if brace_depth > 0 && !trimmed.contains(" from ") {
+                in_multiline = true;
+            }
+        }
+    }
+
+    statements.join("\n")
 }
 
 /// Parse an SFC file by extracting and combining all `<script>` blocks.
@@ -304,10 +386,11 @@ fn parse_sfc_to_module(file_id: FileId, source: &str, content_hash: u64) -> Modu
     };
 
     for script in &scripts {
-        let source_type = if script.is_typescript {
-            SourceType::ts()
-        } else {
-            SourceType::mjs()
+        let source_type = match (script.is_typescript, script.is_jsx) {
+            (true, true) => SourceType::tsx(),
+            (true, false) => SourceType::ts(),
+            (false, true) => SourceType::jsx(),
+            (false, false) => SourceType::mjs(),
         };
         let allocator = Allocator::default();
         let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
@@ -332,6 +415,87 @@ fn parse_sfc_to_module(file_id: FileId, source: &str, content_hash: u64) -> Modu
     combined
 }
 
+/// Parse an Astro file by extracting the frontmatter section.
+fn parse_astro_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+    let suppressions = crate::suppress::parse_suppressions_from_source(source);
+
+    let mut info = ModuleInfo {
+        file_id,
+        exports: Vec::new(),
+        imports: Vec::new(),
+        re_exports: Vec::new(),
+        dynamic_imports: Vec::new(),
+        dynamic_import_patterns: Vec::new(),
+        require_calls: Vec::new(),
+        member_accesses: Vec::new(),
+        whole_object_uses: Vec::new(),
+        has_cjs_exports: false,
+        content_hash,
+        suppressions,
+    };
+
+    if let Some(script) = extract_astro_frontmatter(source) {
+        let source_type = SourceType::ts();
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.visit_program(&parser_return.program);
+
+        info.imports = extractor.imports;
+        info.exports = extractor.exports;
+        info.re_exports = extractor.re_exports;
+        info.dynamic_imports = extractor.dynamic_imports;
+        info.dynamic_import_patterns = extractor.dynamic_import_patterns;
+        info.require_calls = extractor.require_calls;
+        info.member_accesses = extractor.member_accesses;
+        info.whole_object_uses = extractor.whole_object_uses;
+        info.has_cjs_exports = extractor.has_cjs_exports;
+    }
+
+    info
+}
+
+/// Parse an MDX file by extracting import/export statements.
+fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+    let suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let statements = extract_mdx_statements(source);
+
+    let mut info = ModuleInfo {
+        file_id,
+        exports: Vec::new(),
+        imports: Vec::new(),
+        re_exports: Vec::new(),
+        dynamic_imports: Vec::new(),
+        dynamic_import_patterns: Vec::new(),
+        require_calls: Vec::new(),
+        member_accesses: Vec::new(),
+        whole_object_uses: Vec::new(),
+        has_cjs_exports: false,
+        content_hash,
+        suppressions,
+    };
+
+    if !statements.is_empty() {
+        let source_type = SourceType::jsx();
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, &statements, source_type).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.visit_program(&parser_return.program);
+
+        info.imports = extractor.imports;
+        info.exports = extractor.exports;
+        info.re_exports = extractor.re_exports;
+        info.dynamic_imports = extractor.dynamic_imports;
+        info.dynamic_import_patterns = extractor.dynamic_import_patterns;
+        info.require_calls = extractor.require_calls;
+        info.member_accesses = extractor.member_accesses;
+        info.whole_object_uses = extractor.whole_object_uses;
+        info.has_cjs_exports = extractor.has_cjs_exports;
+    }
+
+    info
+}
+
 /// Parse source text into a ModuleInfo.
 fn parse_source_to_module(
     file_id: FileId,
@@ -341,6 +505,12 @@ fn parse_source_to_module(
 ) -> ModuleInfo {
     if is_sfc_file(path) {
         return parse_sfc_to_module(file_id, source, content_hash);
+    }
+    if is_astro_file(path) {
+        return parse_astro_to_module(file_id, source, content_hash);
+    }
+    if is_mdx_file(path) {
+        return parse_mdx_to_module(file_id, source, content_hash);
     }
 
     let source_type = SourceType::from_path(path).unwrap_or_default();
@@ -1703,6 +1873,239 @@ export default {};
             "JsVue.vue",
         );
         assert_eq!(info.imports.len(), 1);
+    }
+
+    #[test]
+    fn vue_script_lang_tsx() {
+        let info = parse_sfc(
+            r#"
+<script lang="tsx">
+import { defineComponent } from 'vue';
+export default defineComponent({
+    render() { return <div>Hello</div>; }
+});
+</script>
+"#,
+            "TsxVue.vue",
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "vue");
+    }
+
+    #[test]
+    fn svelte_context_module_script() {
+        let info = parse_sfc(
+            r#"
+<script context="module" lang="ts">
+export const preload = () => {};
+</script>
+<script lang="ts">
+import { onMount } from 'svelte';
+let count = 0;
+</script>
+"#,
+            "Module.svelte",
+        );
+        assert!(info.imports.iter().any(|i| i.source == "svelte"));
+        assert!(!info.exports.is_empty());
+    }
+
+    #[test]
+    fn vue_script_with_generic_attr() {
+        let info = parse_sfc(
+            r#"
+<script setup lang="ts" generic="T extends Record<string, unknown>">
+import { ref } from 'vue';
+const items = ref<T[]>([]);
+</script>
+"#,
+            "Generic.vue",
+        );
+        assert_eq!(info.imports.len(), 1);
+        assert_eq!(info.imports[0].source, "vue");
+    }
+
+    // ── Astro frontmatter parsing ──────────────────────────────
+
+    #[test]
+    fn extracts_astro_frontmatter_imports() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("Layout.astro"),
+            r#"---
+import Layout from '../layouts/Layout.astro';
+import { Card } from '../components/Card';
+const title = "Hello";
+---
+<Layout title={title}>
+  <Card />
+</Layout>
+"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 2);
+        assert!(
+            info.imports
+                .iter()
+                .any(|i| i.source == "../layouts/Layout.astro")
+        );
+        assert!(
+            info.imports
+                .iter()
+                .any(|i| i.source == "../components/Card")
+        );
+    }
+
+    #[test]
+    fn astro_no_frontmatter_returns_empty() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("Simple.astro"),
+            "<div>No frontmatter here</div>",
+            0,
+        );
+        assert!(info.imports.is_empty());
+        assert!(info.exports.is_empty());
+    }
+
+    #[test]
+    fn astro_empty_frontmatter() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("Empty.astro"),
+            "---\n---\n<div>Content</div>",
+            0,
+        );
+        assert!(info.imports.is_empty());
+    }
+
+    #[test]
+    fn astro_frontmatter_with_dynamic_import() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("Dynamic.astro"),
+            r#"---
+const mod = await import('../utils/helper');
+---
+<div>{mod.value}</div>
+"#,
+            0,
+        );
+        assert_eq!(info.dynamic_imports.len(), 1);
+        assert_eq!(info.dynamic_imports[0].source, "../utils/helper");
+    }
+
+    #[test]
+    fn astro_frontmatter_with_reexport() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("ReExport.astro"),
+            r#"---
+export { default as Layout } from '../layouts/Layout.astro';
+---
+<div>Content</div>
+"#,
+            0,
+        );
+        assert_eq!(info.re_exports.len(), 1);
+    }
+
+    // ── MDX import extraction ──────────────────────────────────
+
+    #[test]
+    fn extracts_mdx_imports() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("post.mdx"),
+            r#"import { Chart } from './Chart'
+import Button from './Button'
+
+# My Post
+
+Some markdown content here.
+
+<Chart data={[1, 2, 3]} />
+<Button>Click me</Button>
+"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 2);
+        assert!(info.imports.iter().any(|i| i.source == "./Chart"));
+        assert!(info.imports.iter().any(|i| i.source == "./Button"));
+    }
+
+    #[test]
+    fn extracts_mdx_exports() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("post.mdx"),
+            r#"export const meta = { title: 'Hello' }
+
+# My Post
+
+Content here.
+"#,
+            0,
+        );
+        assert!(!info.exports.is_empty());
+    }
+
+    #[test]
+    fn mdx_no_imports_returns_empty() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("simple.mdx"),
+            "# Just Markdown\n\nNo imports here.\n",
+            0,
+        );
+        assert!(info.imports.is_empty());
+        assert!(info.exports.is_empty());
+    }
+
+    #[test]
+    fn mdx_multiline_import() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("multi.mdx"),
+            r#"import {
+  Chart,
+  Table,
+  Graph
+} from './components'
+
+# Dashboard
+
+<Chart />
+"#,
+            0,
+        );
+        // 3 named specifiers from a single import statement
+        assert_eq!(info.imports.len(), 3);
+        assert!(info.imports.iter().all(|i| i.source == "./components"));
+    }
+
+    #[test]
+    fn mdx_imports_between_content() {
+        let info = parse_source_to_module(
+            FileId(0),
+            Path::new("mixed.mdx"),
+            r#"import { Header } from './Header'
+
+# Section 1
+
+Some content.
+
+import { Footer } from './Footer'
+
+## Section 2
+
+More content.
+"#,
+            0,
+        );
+        assert_eq!(info.imports.len(), 2);
+        assert!(info.imports.iter().any(|i| i.source == "./Header"));
+        assert!(info.imports.iter().any(|i| i.source == "./Footer"));
     }
 
     // ── import.meta.glob / require.context ──────────────────────
