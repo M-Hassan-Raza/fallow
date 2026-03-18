@@ -80,11 +80,11 @@ Write a high-quality changelog for the GitHub release. Follow these rules:
 
 **Include at the bottom:**
 ```
-**Full Changelog**: https://github.com/bartwaardenburg/fallow/compare/{prev_tag}...v{version}
+**Full Changelog**: https://github.com/fallow-rs/fallow/compare/{prev_tag}...v{version}
 ```
 For the first release, use:
 ```
-**Full Changelog**: https://github.com/bartwaardenburg/fallow/commits/v{version}
+**Full Changelog**: https://github.com/fallow-rs/fallow/commits/v{version}
 ```
 
 ### 7. Push

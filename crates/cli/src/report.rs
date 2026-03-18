@@ -617,7 +617,7 @@ pub(crate) fn build_sarif(results: &AnalysisResults, root: &std::path::Path) -> 
                 "driver": {
                     "name": "fallow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/bartwaardenburg/fallow",
+                    "informationUri": "https://github.com/fallow-rs/fallow",
                     "rules": [
                         {
                             "id": "fallow/unused-file",
@@ -876,7 +876,7 @@ fn print_duplication_sarif(report: &DuplicationReport, root: &std::path::Path) -
                 "driver": {
                     "name": "fallow",
                     "version": env!("CARGO_PKG_VERSION"),
-                    "informationUri": "https://github.com/bartwaardenburg/fallow",
+                    "informationUri": "https://github.com/fallow-rs/fallow",
                     "rules": [{
                         "id": "fallow/code-duplication",
                         "shortDescription": { "text": "Duplicated code block" },
@@ -1030,7 +1030,7 @@ mod tests {
         assert!(driver["version"].is_string());
         assert_eq!(
             driver["informationUri"],
-            "https://github.com/bartwaardenburg/fallow"
+            "https://github.com/fallow-rs/fallow"
         );
     }
 

@@ -2,9 +2,9 @@
 
 Find dead code in JavaScript and TypeScript projects. Written in Rust.
 
-[![CI](https://github.com/BartWaardenburg/fallow/actions/workflows/ci.yml/badge.svg)](https://github.com/BartWaardenburg/fallow/actions/workflows/ci.yml)
+[![CI](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg)](https://github.com/fallow-rs/fallow/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/fallow.svg)](https://www.npmjs.com/package/fallow)
-[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/bartwaardenburg/fallow/blob/main/LICENSE)
+[![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/fallow-rs/fallow/blob/main/LICENSE)
 
 Fallow detects unused files, exports, dependencies, types, enum members, and class members across your codebase. It is a drop-in alternative to [knip](https://knip.dev) that runs **25-50x faster** on real-world projects by using the [Oxc](https://oxc.rs) parser instead of the TypeScript compiler.
 
@@ -66,7 +66,7 @@ Or generate one: `fallow init`
 
 ## Documentation
 
-Full documentation at [github.com/bartwaardenburg/fallow](https://github.com/bartwaardenburg/fallow).
+Full documentation at [github.com/fallow-rs/fallow](https://github.com/fallow-rs/fallow).
 
 ## License
 

@@ -27,7 +27,7 @@ const pkg = getPlatformPackage();
 if (!pkg) {
   console.warn(
     `fallow: No prebuilt binary for ${process.platform}-${process.arch}. ` +
-    `You can build from source: https://github.com/bartwaardenburg/fallow`
+    `You can build from source: https://github.com/fallow-rs/fallow`
   );
   process.exit(0);
 }

@@ -785,7 +785,7 @@ fn run_init(root: &std::path::Path) -> ExitCode {
     }
 
     let default_config = r#"# fallow.toml - Dead code analysis configuration
-# See https://github.com/bartwaardenburg/fallow for documentation
+# See https://github.com/fallow-rs/fallow for documentation
 
 # Additional entry points (beyond auto-detected ones)
 # entry = ["src/workers/*.ts"]
@@ -903,8 +903,9 @@ fn run_list(
                 // Add workspace entry points
                 let workspaces = fallow_config::discover_workspaces(root);
                 for ws in &workspaces {
-                    let ws_entries =
-                        fallow_core::discover::discover_workspace_entry_points(&ws.root, &config, disc);
+                    let ws_entries = fallow_core::discover::discover_workspace_entry_points(
+                        &ws.root, &config, disc,
+                    );
                     entries.extend(ws_entries);
                 }
                 // Add plugin-discovered entry points
@@ -972,8 +973,9 @@ fn run_list(
                 // Add workspace entry points
                 let workspaces = fallow_config::discover_workspaces(root);
                 for ws in &workspaces {
-                    let ws_entries =
-                        fallow_core::discover::discover_workspace_entry_points(&ws.root, &config, disc);
+                    let ws_entries = fallow_core::discover::discover_workspace_entry_points(
+                        &ws.root, &config, disc,
+                    );
                     entries.extend(ws_entries);
                 }
                 // Add plugin-discovered entry points

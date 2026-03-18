@@ -1,8 +1,8 @@
 <p align="center">
   <img src="assets/logo.png" alt="fallow" width="460"><br>
   <strong>Dead code and duplication analyzer for JavaScript and TypeScript, built in Rust.</strong><br><br>
-  <a href="https://github.com/BartWaardenburg/fallow/actions/workflows/ci.yml"><img src="https://github.com/BartWaardenburg/fallow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/BartWaardenburg/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/BartWaardenburg/fallow/badges/coverage.json" alt="Coverage"></a>
+  <a href="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml"><img src="https://github.com/fallow-rs/fallow/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/fallow-rs/fallow/actions/workflows/coverage.yml"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/fallow-rs/fallow/badges/coverage.json" alt="Coverage"></a>
   <a href="https://crates.io/crates/fallow-cli"><img src="https://img.shields.io/crates/v/fallow-cli.svg" alt="crates.io"></a>
   <a href="https://www.npmjs.com/package/fallow"><img src="https://img.shields.io/npm/v/fallow.svg" alt="npm"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
@@ -146,17 +146,17 @@ unused_types = true
 duplicate_exports = true
 ```
 
-See the [full configuration reference](https://github.com/BartWaardenburg/fallow/wiki/Configuration) for all options, including `[dupes]` settings, `[[ignore_exports]]` rules, and custom framework presets.
+See the [full configuration reference](https://github.com/fallow-rs/fallow/wiki/Configuration) for all options, including `[dupes]` settings, `[[ignore_exports]]` rules, and custom framework presets.
 
 ## Framework support
 
-Built-in support for Next.js, Vite, Vitest, Jest, Storybook, Remix, Astro, Nuxt, Angular, Playwright, Cypress, Prisma, ESLint, TypeScript, Webpack, Tailwind CSS, React Router, React Native, Expo, Sentry, Drizzle, Knex, and MSW. If your framework isn't listed, you can add a [custom preset](https://github.com/BartWaardenburg/fallow/wiki/Custom-Presets) in `fallow.toml`.
+Built-in support for Next.js, Vite, Vitest, Jest, Storybook, Remix, Astro, Nuxt, Angular, Playwright, Cypress, Prisma, ESLint, TypeScript, Webpack, Tailwind CSS, React Router, React Native, Expo, Sentry, Drizzle, Knex, and MSW. If your framework isn't listed, you can add a [custom preset](https://github.com/fallow-rs/fallow/wiki/Custom-Presets) in `fallow.toml`.
 
 ## CI integration
 
 ```yaml
 # GitHub Action — posts job summary, uploads SARIF to Code Scanning
-- uses: BartWaardenburg/fallow@v0
+- uses: fallow-rs/fallow@v0
   with:
     format: sarif
 
@@ -164,7 +164,7 @@ Built-in support for Next.js, Vite, Vitest, Jest, Storybook, Remix, Astro, Nuxt,
 - run: npx fallow check --format sarif > results.sarif
 ```
 
-Supports `--changed-since main` for PR-only analysis, `--baseline` for failing only on new issues, and `--format json` for machine-readable output. See the [CI guide](https://github.com/BartWaardenburg/fallow/wiki/CI-Integration) for full workflow examples.
+Supports `--changed-since main` for PR-only analysis, `--baseline` for failing only on new issues, and `--format json` for machine-readable output. See the [CI guide](https://github.com/fallow-rs/fallow/wiki/CI-Integration) for full workflow examples.
 
 ## Additional features
 
@@ -176,17 +176,17 @@ Supports `--changed-since main` for PR-only analysis, `--baseline` for failing o
 
 ## Limitations
 
-fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope, and some edge cases (Svelte `export let` props, Vue/Svelte template-only imports) may produce false positives. See [`ignore_exports`](https://github.com/BartWaardenburg/fallow/wiki/Configuration#ignoring-specific-exports) to suppress these.
+fallow uses syntactic analysis only — no type information. This is what makes it fast, but it means type-level dead code is out of scope, and some edge cases (Svelte `export let` props, Vue/Svelte template-only imports) may produce false positives. See [`ignore_exports`](https://github.com/fallow-rs/fallow/wiki/Configuration#ignoring-specific-exports) to suppress these.
 
 ## Learn more
 
-- [Documentation](https://github.com/BartWaardenburg/fallow/wiki)
-- [Migrating from knip](https://github.com/BartWaardenburg/fallow/wiki/Migrating-from-Knip)
-- [Full plugin list](https://github.com/BartWaardenburg/fallow/wiki/Frameworks)
+- [Documentation](https://github.com/fallow-rs/fallow/wiki)
+- [Migrating from knip](https://github.com/fallow-rs/fallow/wiki/Migrating-from-Knip)
+- [Full plugin list](https://github.com/fallow-rs/fallow/wiki/Frameworks)
 
 ## Contributing
 
-Missing a framework plugin? Found a false positive? [Open an issue](https://github.com/BartWaardenburg/fallow/issues).
+Missing a framework plugin? Found a false positive? [Open an issue](https://github.com/fallow-rs/fallow/issues).
 
 ```bash
 cargo build --workspace && cargo test --workspace
