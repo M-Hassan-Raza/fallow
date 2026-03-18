@@ -161,10 +161,10 @@ mod tests {
         let toml_str = r#"
 enabled = true
 mode = "semantic"
-min_tokens = 30
-min_lines = 3
+minTokens = 30
+minLines = 3
 threshold = 5.0
-skip_local = true
+skipLocal = true
 ignore = ["**/*.generated.ts"]
 "#;
         let config: DuplicatesConfig = toml::from_str(toml_str).unwrap();

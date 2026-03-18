@@ -24,16 +24,16 @@
       "description": "What to detect.",
       "$ref": "#/$defs/DetectConfig",
       "default": {
-        "unused_files": true,
-        "unused_exports": true,
-        "unused_dependencies": true,
-        "unused_dev_dependencies": true,
-        "unused_types": true,
-        "unused_enum_members": true,
-        "unused_class_members": true,
-        "unresolved_imports": true,
-        "unlisted_dependencies": true,
-        "duplicate_exports": true
+        "unusedFiles": true,
+        "unusedExports": true,
+        "unusedDependencies": true,
+        "unusedDevDependencies": true,
+        "unusedTypes": true,
+        "unusedEnumMembers": true,
+        "unusedClassMembers": true,
+        "unresolvedImports": true,
+        "unlistedDependencies": true,
+        "duplicateExports": true
       }
     },
     "framework": {
@@ -56,7 +56,7 @@
       ],
       "default": null
     },
-    "ignore_dependencies": {
+    "ignoreDependencies": {
       "description": "Dependencies to ignore (always considered used).",
       "type": "array",
       "items": {
@@ -64,7 +64,7 @@
       },
       "default": []
     },
-    "ignore_exports": {
+    "ignoreExports": {
       "description": "Export ignore rules.",
       "type": "array",
       "items": {
@@ -83,27 +83,27 @@
       "default": {
         "enabled": true,
         "mode": "mild",
-        "min_tokens": 50,
-        "min_lines": 5,
+        "minTokens": 50,
+        "minLines": 5,
         "threshold": 0.0,
         "ignore": [],
-        "skip_local": false
+        "skipLocal": false
       }
     },
     "rules": {
       "description": "Per-issue-type severity rules.",
       "$ref": "#/$defs/RulesConfig",
       "default": {
-        "unused_files": "error",
-        "unused_exports": "error",
-        "unused_types": "error",
-        "unused_dependencies": "error",
-        "unused_dev_dependencies": "error",
-        "unused_enum_members": "error",
-        "unused_class_members": "error",
-        "unresolved_imports": "error",
-        "unlisted_dependencies": "error",
-        "duplicate_exports": "error"
+        "unusedFiles": "error",
+        "unusedExports": "error",
+        "unusedTypes": "error",
+        "unusedDependencies": "error",
+        "unusedDevDependencies": "error",
+        "unusedEnumMembers": "error",
+        "unusedClassMembers": "error",
+        "unresolvedImports": "error",
+        "unlistedDependencies": "error",
+        "duplicateExports": "error"
       }
     },
     "production": {
@@ -118,52 +118,52 @@
       "description": "Controls which analyses to run.",
       "type": "object",
       "properties": {
-        "unused_files": {
+        "unusedFiles": {
           "description": "Detect unused files (not reachable from entry points).",
           "type": "boolean",
           "default": true
         },
-        "unused_exports": {
+        "unusedExports": {
           "description": "Detect unused exports (exported but never imported).",
           "type": "boolean",
           "default": true
         },
-        "unused_dependencies": {
+        "unusedDependencies": {
           "description": "Detect unused production dependencies.",
           "type": "boolean",
           "default": true
         },
-        "unused_dev_dependencies": {
+        "unusedDevDependencies": {
           "description": "Detect unused dev dependencies.",
           "type": "boolean",
           "default": true
         },
-        "unused_types": {
+        "unusedTypes": {
           "description": "Detect unused type exports.",
           "type": "boolean",
           "default": true
         },
-        "unused_enum_members": {
+        "unusedEnumMembers": {
           "description": "Detect unused enum members.",
           "type": "boolean",
           "default": true
         },
-        "unused_class_members": {
+        "unusedClassMembers": {
           "description": "Detect unused class members.",
           "type": "boolean",
           "default": true
         },
-        "unresolved_imports": {
+        "unresolvedImports": {
           "description": "Detect unresolved imports.",
           "type": "boolean",
           "default": true
         },
-        "unlisted_dependencies": {
+        "unlistedDependencies": {
           "description": "Detect unlisted dependencies (used but not in package.json).",
           "type": "boolean",
           "default": true
         },
-        "duplicate_exports": {
+        "duplicateExports": {
           "description": "Detect duplicate exports.",
           "type": "boolean",
           "default": true
@@ -171,7 +171,7 @@
       }
     },
     "FrameworkPreset": {
-      "description": "Declarative framework detection and entry point configuration.\n\nUsers can define custom framework presets via `fallow.toml` to add\nproject-specific entry points, always-used files, and used export rules.\nBuilt-in framework support is provided by the plugin system in fallow-core.",
+      "description": "Declarative framework detection and entry point configuration.\n\nUsers can define custom framework presets via the fallow config file to add\nproject-specific entry points, always-used files, and used export rules.\nBuilt-in framework support is provided by the plugin system in fallow-core.",
       "type": "object",
       "properties": {
         "name": {
@@ -190,7 +190,7 @@
           ],
           "default": null
         },
-        "entry_points": {
+        "entryPoints": {
           "description": "Glob patterns for files that are entry points.",
           "type": "array",
           "items": {
@@ -198,7 +198,7 @@
           },
           "default": []
         },
-        "always_used": {
+        "alwaysUsed": {
           "description": "Files that are always considered \"used\".",
           "type": "array",
           "items": {
@@ -206,7 +206,7 @@
           },
           "default": []
         },
-        "used_exports": {
+        "usedExports": {
           "description": "Exports that are always considered used in matching files.",
           "type": "array",
           "items": {
@@ -248,7 +248,7 @@
             },
             "type": {
               "type": "string",
-              "const": "file_exists"
+              "const": "fileExists"
             }
           },
           "required": [
@@ -315,7 +315,7 @@
       "description": "Exports considered used for files matching a pattern.",
       "type": "object",
       "properties": {
-        "file_pattern": {
+        "filePattern": {
           "description": "Files matching this glob pattern.",
           "type": "string"
         },
@@ -328,7 +328,7 @@
         }
       },
       "required": [
-        "file_pattern",
+        "filePattern",
         "exports"
       ]
     },
@@ -406,14 +406,14 @@
           "$ref": "#/$defs/DetectionMode",
           "default": "mild"
         },
-        "min_tokens": {
+        "minTokens": {
           "description": "Minimum number of tokens for a clone.",
           "type": "integer",
           "format": "uint",
           "minimum": 0,
           "default": 50
         },
-        "min_lines": {
+        "minLines": {
           "description": "Minimum number of lines for a clone.",
           "type": "integer",
           "format": "uint",
@@ -434,7 +434,7 @@
           },
           "default": []
         },
-        "skip_local": {
+        "skipLocal": {
           "description": "Only report cross-directory duplicates.",
           "type": "boolean",
           "default": false
@@ -470,43 +470,43 @@
       "description": "Per-issue-type severity configuration.\n\nControls which issue types cause CI failure, are reported as warnings,\nor are suppressed entirely. All fields default to `Severity::Error`\nfor backwards compatibility.",
       "type": "object",
       "properties": {
-        "unused_files": {
+        "unusedFiles": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unused_exports": {
+        "unusedExports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unused_types": {
+        "unusedTypes": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unused_dependencies": {
+        "unusedDependencies": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unused_dev_dependencies": {
+        "unusedDevDependencies": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unused_enum_members": {
+        "unusedEnumMembers": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unused_class_members": {
+        "unusedClassMembers": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unresolved_imports": {
+        "unresolvedImports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "unlisted_dependencies": {
+        "unlistedDependencies": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         },
-        "duplicate_exports": {
+        "duplicateExports": {
           "$ref": "#/$defs/Severity",
           "default": "error"
         }

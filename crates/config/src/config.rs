@@ -16,7 +16,7 @@ const CONFIG_NAMES: &[&str] = &["fallow.jsonc", "fallow.json", "fallow.toml", ".
 
 /// User-facing configuration loaded from `fallow.jsonc`, `fallow.json`, or `fallow.toml`.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FallowConfig {
     /// JSON Schema reference (ignored during deserialization).
     #[serde(rename = "$schema", default, skip_serializing)]
@@ -70,6 +70,7 @@ pub struct FallowConfig {
 
 /// Configuration for code duplication detection.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct DuplicatesConfig {
     /// Whether duplication detection is enabled.
     #[serde(default = "default_true")]
@@ -170,6 +171,7 @@ const fn default_min_lines() -> usize {
 
 /// Controls which analyses to run.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct DetectConfig {
     /// Detect unused files (not reachable from entry points).
     #[serde(default = "default_true")]
@@ -479,6 +481,7 @@ impl std::str::FromStr for Severity {
 /// or are suppressed entirely. All fields default to `Severity::Error`
 /// for backwards compatibility.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct RulesConfig {
     #[serde(default)]
     pub unused_files: Severity,
@@ -596,9 +599,9 @@ entry = ["src/main.ts"]
     fn fallow_config_deserialize_detect_overrides() {
         let toml_str = r#"
 [detect]
-unused_files = false
-unused_exports = true
-unused_dependencies = false
+unusedFiles = false
+unusedExports = true
+unusedDependencies = false
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert!(!config.detect.unused_files);
@@ -611,11 +614,11 @@ unused_dependencies = false
     #[test]
     fn fallow_config_deserialize_ignore_exports() {
         let toml_str = r#"
-[[ignore_exports]]
+[[ignoreExports]]
 file = "src/types/*.ts"
 exports = ["*"]
 
-[[ignore_exports]]
+[[ignoreExports]]
 file = "src/constants.ts"
 exports = ["FOO", "BAR"]
 "#;
@@ -629,7 +632,7 @@ exports = ["FOO", "BAR"]
     #[test]
     fn fallow_config_deserialize_ignore_dependencies() {
         let toml_str = r#"
-ignore_dependencies = ["autoprefixer", "postcss"]
+ignoreDependencies = ["autoprefixer", "postcss"]
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.ignore_dependencies, vec!["autoprefixer", "postcss"]);
@@ -818,9 +821,9 @@ ignore_dependencies = ["autoprefixer", "postcss"]
     fn rules_deserialize_mixed_severities() {
         let toml_str = r#"
 [rules]
-unused_files = "error"
-unused_exports = "warn"
-unused_types = "off"
+unusedFiles = "error"
+unusedExports = "warn"
+unusedTypes = "off"
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Error);
@@ -834,10 +837,10 @@ unused_types = "off"
     fn detect_false_forces_severity_off() {
         let toml_str = r#"
 [detect]
-unused_files = false
+unusedFiles = false
 
 [rules]
-unused_files = "error"
+unusedFiles = "error"
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, true);
@@ -849,10 +852,10 @@ unused_files = "error"
     fn rules_off_independent_of_detect() {
         let toml_str = r#"
 [detect]
-unused_files = true
+unusedFiles = true
 
 [rules]
-unused_files = "off"
+unusedFiles = "off"
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         let resolved = config.resolve(PathBuf::from("/tmp/test"), 4, true);
@@ -890,8 +893,8 @@ unknown_field = true
     }
 
     #[test]
-    fn fallow_config_deserialize_json() {
-        let json_str = r#"{"entry": ["src/main.ts"], "detect": {"unused_files": false}}"#;
+    fn fallow_config_deserialize_json_camel_case() {
+        let json_str = r#"{"entry": ["src/main.ts"], "detect": {"unusedFiles": false}}"#;
         let config: FallowConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(config.entry, vec!["src/main.ts"]);
         assert!(!config.detect.unused_files);
@@ -904,7 +907,7 @@ unknown_field = true
             // This is a comment
             "entry": ["src/main.ts"],
             "rules": {
-                "unused_files": "warn"
+                "unusedFiles": "warn"
             }
         }"#;
         let mut stripped = String::new();
@@ -966,7 +969,7 @@ unknown_field = true
         let config_path = dir.join("fallow.json");
         std::fs::write(
             &config_path,
-            r#"{"entry": ["src/index.ts"], "rules": {"unused_exports": "warn"}}"#,
+            r#"{"entry": ["src/index.ts"], "rules": {"unusedExports": "warn"}}"#,
         )
         .unwrap();
 
@@ -989,7 +992,7 @@ unknown_field = true
                 "entry": ["src/index.ts"],
                 /* Block comment */
                 "rules": {
-                    "unused_exports": "warn"
+                    "unusedExports": "warn"
                 }
             }"#,
         )
@@ -1000,5 +1003,61 @@ unknown_field = true
         assert_eq!(config.rules.unused_exports, Severity::Warn);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn json_config_ignore_dependencies_camel_case() {
+        let json_str = r#"{"ignoreDependencies": ["autoprefixer", "postcss"]}"#;
+        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(config.ignore_dependencies, vec!["autoprefixer", "postcss"]);
+    }
+
+    #[test]
+    fn json_config_all_camel_case_fields() {
+        let json_str = r#"{
+            "ignoreDependencies": ["lodash"],
+            "ignoreExports": [{"file": "src/*.ts", "exports": ["*"]}],
+            "detect": {
+                "unusedFiles": false,
+                "unusedExports": true,
+                "unusedDependencies": false,
+                "unusedDevDependencies": true,
+                "unusedTypes": false,
+                "unusedEnumMembers": true,
+                "unusedClassMembers": false,
+                "unresolvedImports": true,
+                "unlistedDependencies": false,
+                "duplicateExports": true
+            },
+            "rules": {
+                "unusedFiles": "off",
+                "unusedExports": "warn",
+                "unusedDependencies": "error",
+                "unusedDevDependencies": "off",
+                "unusedTypes": "warn",
+                "unusedEnumMembers": "error",
+                "unusedClassMembers": "off",
+                "unresolvedImports": "warn",
+                "unlistedDependencies": "error",
+                "duplicateExports": "off"
+            },
+            "duplicates": {
+                "minTokens": 100,
+                "minLines": 10,
+                "skipLocal": true
+            }
+        }"#;
+        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(config.ignore_dependencies, vec!["lodash"]);
+        assert!(!config.detect.unused_files);
+        assert!(config.detect.unused_exports);
+        assert!(config.detect.unused_enum_members);
+        assert!(!config.detect.unused_class_members);
+        assert_eq!(config.rules.unused_files, Severity::Off);
+        assert_eq!(config.rules.unused_exports, Severity::Warn);
+        assert_eq!(config.rules.unused_dependencies, Severity::Error);
+        assert_eq!(config.duplicates.min_tokens, 100);
+        assert_eq!(config.duplicates.min_lines, 10);
+        assert!(config.duplicates.skip_local);
     }
 }

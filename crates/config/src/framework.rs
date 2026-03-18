@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 /// project-specific entry points, always-used files, and used export rules.
 /// Built-in framework support is provided by the plugin system in fallow-core.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct FrameworkPreset {
     /// Unique name for this framework.
     pub name: String,
@@ -30,7 +31,7 @@ pub struct FrameworkPreset {
 
 /// How to detect if a framework is in use.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "camelCase")]
 pub enum FrameworkDetection {
     /// Framework detected if this package is in dependencies.
     Dependency { package: String },
@@ -51,6 +52,7 @@ pub struct FrameworkEntryPattern {
 
 /// Exports considered used for files matching a pattern.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct FrameworkUsedExport {
     /// Files matching this glob pattern.
     pub file_pattern: String,
@@ -129,7 +131,7 @@ mod tests {
 
     #[test]
     fn framework_detection_deserialize_file_exists() {
-        let json = r#"{"type": "file_exists", "pattern": "tsconfig.json"}"#;
+        let json = r#"{"type": "fileExists", "pattern": "tsconfig.json"}"#;
         let detection: FrameworkDetection = serde_json::from_str(json).unwrap();
         assert!(
             matches!(detection, FrameworkDetection::FileExists { pattern } if pattern == "tsconfig.json")
