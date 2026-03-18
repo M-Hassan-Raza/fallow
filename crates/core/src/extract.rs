@@ -242,10 +242,7 @@ pub(crate) fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
             let attrs = cap.name("attrs").map(|m| m.as_str()).unwrap_or("");
             let body_match = cap.name("body");
             let byte_offset = body_match.map(|m| m.start()).unwrap_or(0);
-            let body = body_match
-                .map(|m| m.as_str())
-                .unwrap_or("")
-                .to_string();
+            let body = body_match.map(|m| m.as_str()).unwrap_or("").to_string();
             let is_typescript = LANG_ATTR_RE
                 .captures(attrs)
                 .and_then(|c| c.get(1))

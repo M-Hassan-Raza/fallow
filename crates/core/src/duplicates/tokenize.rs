@@ -614,7 +614,10 @@ impl<'a> Visit<'a> for TokenExtractor {
             self.visit_binding_pattern(&param.pattern);
             self.push_op(OperatorType::Comma, point_span(param.span.end));
         }
-        self.push_punc(PunctuationType::CloseParen, point_span(params_span.end.saturating_sub(1)));
+        self.push_punc(
+            PunctuationType::CloseParen,
+            point_span(params_span.end.saturating_sub(1)),
+        );
         self.push_op(OperatorType::Arrow, point_span(params_span.end));
         walk::walk_arrow_function_expression(self, expr);
     }
@@ -659,7 +662,10 @@ impl<'a> Visit<'a> for TokenExtractor {
             self.visit_binding_pattern(&param.pattern);
             self.push_op(OperatorType::Comma, point_span(param.span.end));
         }
-        self.push_punc(PunctuationType::CloseParen, point_span(params_span.end.saturating_sub(1)));
+        self.push_punc(
+            PunctuationType::CloseParen,
+            point_span(params_span.end.saturating_sub(1)),
+        );
         walk::walk_function(self, func, flags);
     }
 
@@ -981,7 +987,8 @@ mod tests {
 
     #[test]
     fn tokenize_jsx_element() {
-        let tokens = tokenize_tsx("const x = <div className=\"foo\"><Button onClick={handler} /></div>;");
+        let tokens =
+            tokenize_tsx("const x = <div className=\"foo\"><Button onClick={handler} /></div>;");
         let has_div = tokens
             .iter()
             .any(|t| matches!(&t.kind, TokenKind::Identifier(name) if name == "div"));
@@ -1000,6 +1007,9 @@ mod tests {
                 )
             })
             .count();
-        assert!(brackets >= 4, "Should contain JSX angle brackets, got {brackets}");
+        assert!(
+            brackets >= 4,
+            "Should contain JSX angle brackets, got {brackets}"
+        );
     }
 }
