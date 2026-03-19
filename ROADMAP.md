@@ -21,6 +21,7 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 - **Inline suppression**: `// fallow-ignore-next-line [issue-type]` and `// fallow-ignore-file [issue-type]` comments, supporting all issue types including `code-duplication`
 - **Production mode**: `--production` flag excludes test/dev files, limits to production scripts, skips devDep warnings, reports type-only imports in production deps
 - **Script parser**: extracts binary names (mapped to packages), `--config` args (entry points), file path args from `package.json` scripts; handles env wrappers and package manager runners
+- **Cross-workspace resolution**: unified module graph across npm/yarn/pnpm workspaces, `--workspace` scoping, `exports` field subpath resolution with output→source fallback
 
 ### Duplication (`dupes`)
 - **4 detection modes**: strict (exact tokens), mild (normalized syntax), weak (different literals), semantic (renamed variables)
