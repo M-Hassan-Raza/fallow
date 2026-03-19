@@ -8,12 +8,13 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 
 ---
 
-## Current State (v0.2.x)
+## Current State (v0.3.x)
 
 ### Dead Code (`check`)
 - **10 issue types**: unused files, exports, types, dependencies, devDeps, enum members, class members, unresolved imports, unlisted deps, duplicate exports
-- **40 framework plugins**: declarative glob patterns + AST-based config parsing for ~20 plugins (15 with rich config extraction)
+- **46 framework plugins**: declarative glob patterns + AST-based config parsing for ~20 plugins (15 with rich config extraction)
 - **Deep config parsing** for all top 10 frameworks: ESLint, Vite, Jest, Storybook, Tailwind, Webpack, TypeScript, Babel, Rollup, PostCSS — extracts entry points, dependencies, setup files, and tooling references from config objects via Oxc AST analysis (no JS runtime)
+- **Non-JS file support**: Vue/Svelte SFC (`<script>` block extraction with HTML comment filtering, `lang="ts"`/`lang="tsx"`, `<script src="...">`), Astro (frontmatter), MDX (import/export statements), CSS/SCSS (`@import`, `@use`, `@forward`, `@apply`/`@tailwind` as Tailwind dependency usage)
 - **4 output formats**: human, JSON, SARIF, compact
 - **Auto-fix**: remove unused exports and dependencies (`fix --dry-run` to preview)
 - **CI features**: `--changed-since`, `--baseline`/`--save-baseline`, `--fail-on-issues`, SARIF for GitHub Code Scanning
@@ -28,11 +29,20 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 - **Clone families**: groups clone groups sharing the same file set with refactoring suggestions (extract function/module)
 - **Baseline tracking**: `--save-baseline` / `--baseline` for incremental CI adoption of duplication thresholds
 - **Filtering**: `--skip-local`, `--threshold`, `--min-lines`, `--min-tokens`, `duplicates.ignore` config globs
+- **Cross-language clone detection**: `--cross-language` strips TypeScript type annotations for `.ts` ↔ `.js` matching
+- **Configurable normalization**: fine-grained overrides (`ignore_identifiers`, `ignore_string_values`, `ignore_numeric_values`) on top of detection mode defaults
+- **Dead code × duplication cross-reference**: `check --include-dupes` identifies clone instances in unused files or overlapping unused exports as combined high-priority findings
 
 ### Shared Infrastructure
-- **CLI commands**: check, dupes, watch, fix, init, migrate, list, schema, config-schema
+- **CLI commands**: check, dupes, watch, fix, init, list, schema, config-schema, migrate
 - **Config format**: JSONC (default), JSON, TOML — with `$schema` support for IDE autocomplete/validation
 - **LSP server**: diagnostics for all 10 dead code issue types + quick-fix code actions
+- **VS Code extension**: tree views for dead code and duplicates, status bar, one-click fixes, auto-download of LSP binary
+- **MCP server**: stdio transport, exposes analyze/check_changed/find_dupes/fix_preview/fix_apply/project_info tools
+- **GitHub Action**: SARIF upload, PR comments, configurable thresholds, baseline support
+- **Debug & trace tooling**: `--trace FILE:EXPORT`, `--trace-file PATH`, `--trace-dependency PACKAGE`, `dupes --trace FILE:LINE`, `--performance`
+- **External plugins**: community-driven `fallow-plugin-*.toml` definitions with `docs/plugin-authoring.md` guide
+- **Migration**: `fallow migrate` reads knip/jscpd config and generates fallow config
 - **Performance**: rayon parallelism, oxc_parser, incremental bincode cache, flat graph storage, DashMap lock-free bare specifier cache
 - **Duplication accuracy**: curated benchmark corpus with 100% precision/recall on default settings
 
@@ -40,11 +50,11 @@ Fallow is a Rust-native dead code and duplication analyzer for JavaScript/TypeSc
 
 - **Syntactic analysis only**: No TypeScript type information. Projects using `isolatedModules: true` (required for esbuild/swc/vite) are well-served; legacy tsc-only projects may see false positives on type-only imports.
 - **Config parsing ceiling**: AST-based extraction covers static object literals, string arrays, and simple wrappers like `defineConfig(...)`. Computed values (`getPlugins()`), conditionals (`process.env.NODE_ENV`), and nested config factories are out of reach without JS eval.
-- **Dupes: no cross-language semantic matching yet**: Semantic mode works within JS/TS but doesn't yet detect clones between `.ts` and `.tsx` variants or across language boundaries.
+- **CSS/SCSS parsing is regex-based**: Handles `@import`, `@use`, `@forward`, `@apply`, `@tailwind` with comment stripping, but does not parse full CSS syntax. CSS Modules (`.module.css` class name exports) are not yet tracked. SCSS partials (`_variables.scss` from `@use "variables"`) rely on the resolver, not SCSS-specific partial resolution.
 
 ---
 
-## Phase 1: Trustworthy Results (v0.3.0)
+## Phase 1: Trustworthy Results (v0.4.0)
 
 The goal: a developer can run `fallow check` on a real project and get results they trust. This is the gate to 1.0.
 
@@ -64,69 +74,9 @@ Add benchmarks on 1,000+ and 5,000+ file projects for both `check` and `dupes`. 
 
 ---
 
-## Phase 2: Ecosystem & Integrations (v0.4.0)
+## Phase 2: Editor Experience (v0.5.0)
 
-Reach developers where they are: CI, editors, AI tools.
-
-### 2.1 GitHub Action ✅
-
-Published as a composite action with multi-command support (`check`, `dupes`, `fix`):
-- SARIF upload to GitHub Code Scanning with inline annotations
-- PR comments with markdown summaries (create or update)
-- Configurable: fail on new issues, duplication threshold, report-only mode, workspace scoping
-- Analysis cache via `actions/cache` for the `.fallow/` incremental cache
-- Job summaries with detailed breakdowns per command
-- Baseline support for incremental CI adoption
-
-### 2.2 MCP Server
-
-First-mover opportunity. The tool already outputs JSON and has a `schema` command — the MCP server is a thin wrapper:
-
-| Tool | Description |
-|------|-------------|
-| `analyze` | Full dead code analysis, returns structured results |
-| `check_changed` | Only files changed since a git ref |
-| `find_dupes` | Duplication detection with mode selection |
-| `fix_preview` | Dry-run of auto-fix, returns proposed changes |
-| `fix_apply` | Apply fixes |
-| `project_info` | Entry points, frameworks, file counts, duplication % |
-
-Ship alongside Claude Code skill and hook configurations — these are documentation, not features.
-
-### 2.3 Plugin Authoring Guide & External Plugins
-
-Community-driven plugin growth instead of writing 80 plugins solo:
-- Publish a comprehensive plugin authoring guide with examples
-- Support `fallow-plugin-*.toml` files for custom framework definitions
-- Ship a `plugins` directory convention
-- Defer plugin registry until there's proven demand
-
-### 2.4 More Plugins (community-prioritized)
-
-Add the most-requested plugins based on GitHub issues, not a waterfall list. Likely remaining priorities:
-- **Frameworks**: SvelteKit, Gatsby
-- **Bundlers**: Rspack/Rsbuild, unbuild
-- **Git hooks**: husky, lint-staged, lefthook
-
-### 2.5 Compilers for Non-JS File Types
-
-Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svelte` SFC support:
-- `.astro` components (extract frontmatter imports) ✅
-- `.mdx` files (extract import statements) ✅
-- `.css`/`.scss` with Tailwind (extract `@apply` class references) ✅
-- Audit existing Vue/Svelte regex extraction against edge cases (multiple `<script>` blocks, `<script setup>`, `lang="tsx"`) and upgrade to a proper parser if the regex approach proves insufficient on real projects ✅
-
-### 2.6 Duplication: Semantic Mode Improvements
-
-- **Cross-language awareness**: Detect clones between `.ts` and `.tsx`, or `.js` and `.ts` variants of the same logic
-- **Configurable normalization**: Let users define what "semantic equivalence" means (ignore comments, ignore types, ignore variable names — pick your level)
-- **Integration with dead code**: If a duplicated block is also unused, surface it as a single high-priority finding rather than two separate reports
-
----
-
-## Phase 3: Editor Experience (v0.5.0)
-
-### 3.1 Incremental Analysis
+### 2.1 Incremental Analysis
 
 **Two-phase approach** (per Rust architect review):
 
@@ -134,28 +84,12 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 
 **Phase B (fine-grained incremental, post-1.0)**: Patch the graph in place, track export-level dependencies, incremental re-export chain propagation. This requires redesigning the flat `Vec<Edge>` storage to support insertion/removal.
 
-### 3.2 VS Code Extension ✅
-
-- [x] Auto-download the `fallow-lsp` binary (platform-specific)
-- [x] Settings UI for toggling issue types and duplication thresholds
-- [x] Status bar: dead code count + duplication %
-- [x] Tree view: dead code by type, duplicated blocks by clone family
-- [x] One-click fix actions
-
-### 3.3 Enhanced Code Actions & Code Lens
+### 2.2 Enhanced Code Actions & Code Lens
 
 - Usage counts on exports (code lens)
 - "Remove unused export", "Delete unused file", "Remove unused dependency"
 - "Extract duplicate" — for duplication: offer to extract a clone family into a shared function
 - Hover: show where an export is used, or show other locations of a duplicate block
-
-### 3.4 Debug & Trace Tooling
-
-- [x] `--trace <file:export>` — why is this export considered used/unused?
-- [x] `--trace-file <path>` — all edges for a file
-- [x] `--trace-dependency <name>` — where is this dep used?
-- [x] `fallow dupes --trace <file:line>` — show all clones of the block at this location
-- [x] `--performance` — timing breakdown per phase
 
 ---
 
@@ -165,17 +99,8 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 
 - [ ] Trustworthy results on the top 20 JS/TS project archetypes (Next.js, Vite, monorepo, NestJS, React Native)
 - [ ] Cross-workspace resolution works for npm, yarn, and pnpm workspaces
-- [x] Config parsing for top 10 frameworks with documented accuracy ceiling
-- [x] Rules system with per-issue-type severity
-- [x] Inline suppression comments
-- [x] Script parser for package.json binary/config extraction
-- [x] Production mode for CI pipelines
 - [ ] Stable config format with backwards compatibility promise
 - [ ] Stable JSON output schema for CI consumers
-- [x] GitHub Action published
-- [ ] MCP server published
-- [x] VS Code extension published
-- [x] Duplication detection with clone families and baseline tracking
 - [ ] Large-scale benchmarks published (1000+ files, warm/cold cache, memory)
 - [ ] Migration guide from knip with worked examples
 
@@ -184,6 +109,9 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 ## Post-1.0: Exploration
 
 These are ideas, not commitments. They ship as 1.x releases based on user demand.
+
+### CSS Modules Support
+Track CSS Module class names (`.module.css`) as named exports, so `import styles from './Button.module.css'` + `styles.button` marks `.button` as used. Requires CSS class name extraction and mapping to JS import destructuring.
 
 ### Historical Trend Tracking
 Store baselines over time. Generate trend reports for both dead code and duplication: "dead code grew 15% this quarter, duplication dropped 3%." Dashboard-friendly JSON API.
@@ -214,14 +142,11 @@ These are not gated on any release — they should happen continuously:
 
 - **Documentation site**: Move from GitHub wiki to a proper docs site (Starlight, Nextra, or similar)
 - **CHANGELOG**: Maintain a changelog from v0.3 onward
-- **Migration guide**: Written migration guide from knip/jscpd with worked examples (`fallow migrate` CLI command is shipped)
 - **Communication**: GitHub Discussions for support, feedback, and RFCs
 - **Contributing guide**: Plugin authoring tutorial, "your first PR" guide, issue templates
 - **Compatibility matrix**: For each of the top 20 frameworks, document exactly what fallow detects vs. knip — let users make informed choices
 - **Blog posts**: Technical deep-dives on the suffix array algorithm, the Oxc parser integration, benchmark methodology
 - **Backwards compatibility policy**: State explicitly how config format and JSON output changes are handled across versions
-
-**If capacity is constrained**: The GitHub Action (2.1) and plugin authoring guide (2.3) are the highest-leverage items to prioritize. The VS Code extension (3.2) can be deferred — the LSP already works in any editor natively.
 
 ---
 
@@ -237,8 +162,8 @@ Fallow should be fast enough to run on every save and every commit — not as a 
 
 | Version | Theme | Key Deliverables |
 |---------|-------|-----------------|
-| **0.2** | Done | 10 issue types, 40 plugins (15 with deep config parsing), 4 duplication modes, clone families, LSP, CI features, rules system, inline suppression, production mode, script parser |
-| **0.3** | Trust | Cross-workspace resolution, large-scale benchmarks |
-| **0.4** | Reach | GitHub Action, MCP server, plugin authoring guide, more plugins, SFC compilers, dupes semantic improvements |
-| **0.5** | Editor | Incremental analysis, VS Code extension, code lens, trace tooling |
-| **1.0** | Stable | Quality milestone — trustworthy results, stable formats, full docs, migration guide |
+| **0.2** | Foundation | 10 issue types, 40 plugins, 4 duplication modes, clone families, LSP, CI features, rules system |
+| **0.3** | Reach | 46 plugins, CSS/SCSS support, cross-language dupes, MCP server, VS Code extension, GitHub Action, trace tooling, external plugins, migrate command |
+| **0.4** | Trust | Cross-workspace resolution, large-scale benchmarks |
+| **0.5** | Editor | Incremental analysis, code lens, enhanced code actions |
+| **1.0** | Stable | Quality milestone — trustworthy results, stable formats, full docs |
