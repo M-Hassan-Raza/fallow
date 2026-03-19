@@ -151,11 +151,11 @@ Extend import extraction to `.astro`, `.mdx`, and improve existing `.vue`/`.svel
 
 ### 3.4 Debug & Trace Tooling
 
-- `--trace <export-name>` — why is this export considered used/unused?
-- `--trace-file <path>` — all edges for a file
-- `--trace-dependency <name>` — where is this dep used?
-- `fallow dupes --trace <file:line>` — show all clones of the block at this location
-- `--performance` — timing breakdown per phase
+- [x] `--trace <file:export>` — why is this export considered used/unused?
+- [x] `--trace-file <path>` — all edges for a file
+- [x] `--trace-dependency <name>` — where is this dep used?
+- [ ] `fallow dupes --trace <file:line>` — show all clones of the block at this location
+- [x] `--performance` — timing breakdown per phase
 
 ---
 

@@ -697,6 +697,16 @@ impl ModuleGraph {
         }
         self.namespace_imported.contains(idx)
     }
+
+    /// Get the target FileIds of all outgoing edges for a module.
+    pub fn edges_for(&self, file_id: FileId) -> Vec<FileId> {
+        let idx = file_id.0 as usize;
+        if idx >= self.modules.len() {
+            return Vec::new();
+        }
+        let range = &self.modules[idx].edge_range;
+        self.edges[range.clone()].iter().map(|e| e.target).collect()
+    }
 }
 
 /// Check if an export name matches an imported name.

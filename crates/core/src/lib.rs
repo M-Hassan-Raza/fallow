@@ -13,6 +13,7 @@ pub mod resolve;
 pub mod results;
 pub mod scripts;
 pub mod suppress;
+pub mod trace;
 
 use std::path::Path;
 use std::time::Instant;
@@ -20,9 +21,27 @@ use std::time::Instant;
 use errors::FallowError;
 use fallow_config::{PackageJson, ResolvedConfig, discover_workspaces};
 use results::AnalysisResults;
+use trace::PipelineTimings;
+
+/// Result of the full analysis pipeline, including optional performance timings.
+pub struct AnalysisOutput {
+    pub results: AnalysisResults,
+    pub timings: Option<PipelineTimings>,
+    pub graph: Option<graph::ModuleGraph>,
+}
 
 /// Run the full analysis pipeline.
 pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> {
+    let output = analyze_full(config, false)?;
+    Ok(output.results)
+}
+
+/// Run the full analysis pipeline with optional performance timings and graph retention.
+pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, FallowError> {
+    analyze_full(config, true)
+}
+
+fn analyze_full(config: &ResolvedConfig, retain: bool) -> Result<AnalysisOutput, FallowError> {
     let _span = tracing::info_span!("fallow_analyze").entered();
     let pipeline_start = Instant::now();
 
@@ -199,7 +218,33 @@ pub fn analyze(config: &ResolvedConfig) -> Result<AnalysisResults, FallowError> 
         total_ms,
     );
 
-    Ok(result)
+    let timings = if retain {
+        Some(PipelineTimings {
+            discover_files_ms: discover_ms,
+            file_count: files.len(),
+            workspaces_ms,
+            workspace_count: workspaces.len(),
+            plugins_ms,
+            script_analysis_ms: scripts_ms,
+            parse_extract_ms: parse_ms,
+            module_count: modules.len(),
+            cache_update_ms: cache_ms,
+            entry_points_ms,
+            entry_point_count: entry_points.len(),
+            resolve_imports_ms: resolve_ms,
+            build_graph_ms: graph_ms,
+            analyze_ms,
+            total_ms,
+        })
+    } else {
+        None
+    };
+
+    Ok(AnalysisOutput {
+        results: result,
+        timings,
+        graph: if retain { Some(graph) } else { None },
+    })
 }
 
 /// Run plugins for root project and all workspace packages.

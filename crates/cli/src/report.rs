@@ -6,6 +6,7 @@ use colored::Colorize;
 use fallow_config::{OutputFormat, ResolvedConfig, RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, UnusedDependency, UnusedExport, UnusedMember};
+use fallow_core::trace::{DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
 fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
@@ -1085,6 +1086,306 @@ pub fn print_cross_reference_findings(
         exports,
         if exports == 1 { "" } else { "s" },
     );
+}
+
+// ── Trace output ──────────────────────────────────────────────────
+
+fn print_trace_json<T: serde::Serialize>(value: &T) {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => println!("{json}"),
+        Err(e) => {
+            eprintln!("Error: failed to serialize trace output: {e}");
+            std::process::exit(2);
+        }
+    }
+}
+
+/// Print export trace results.
+pub fn print_export_trace(trace: &ExportTrace, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => print_trace_json(trace),
+        _ => print_export_trace_human(trace),
+    }
+}
+
+fn print_export_trace_human(trace: &ExportTrace) {
+    eprintln!();
+    let status_icon = if trace.is_used {
+        "USED".green().bold()
+    } else {
+        "UNUSED".red().bold()
+    };
+    eprintln!(
+        "  {} {} in {}",
+        status_icon,
+        trace.export_name.bold(),
+        trace.file.display().to_string().dimmed()
+    );
+    eprintln!();
+
+    // File status
+    let reachable = if trace.file_reachable {
+        "reachable".green()
+    } else {
+        "unreachable".red()
+    };
+    let entry = if trace.is_entry_point {
+        " (entry point)".cyan().to_string()
+    } else {
+        String::new()
+    };
+    eprintln!("  File: {reachable}{entry}");
+    eprintln!("  Reason: {}", trace.reason);
+
+    if !trace.direct_references.is_empty() {
+        eprintln!();
+        eprintln!("  {} direct reference(s):", trace.direct_references.len());
+        for r in &trace.direct_references {
+            eprintln!(
+                "    {} {} ({})",
+                "->".dimmed(),
+                r.from_file.display(),
+                r.kind.dimmed()
+            );
+        }
+    }
+
+    if !trace.re_export_chains.is_empty() {
+        eprintln!();
+        eprintln!("  Re-exported through:");
+        for chain in &trace.re_export_chains {
+            eprintln!(
+                "    {} {} as '{}' ({} ref(s))",
+                "->".dimmed(),
+                chain.barrel_file.display(),
+                chain.exported_as,
+                chain.reference_count
+            );
+        }
+    }
+    eprintln!();
+}
+
+/// Print file trace results.
+pub fn print_file_trace(trace: &FileTrace, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => print_trace_json(trace),
+        _ => print_file_trace_human(trace),
+    }
+}
+
+fn print_file_trace_human(trace: &FileTrace) {
+    eprintln!();
+    let reachable = if trace.is_reachable {
+        "REACHABLE".green().bold()
+    } else {
+        "UNREACHABLE".red().bold()
+    };
+    let entry = if trace.is_entry_point {
+        format!(" {}", "(entry point)".cyan())
+    } else {
+        String::new()
+    };
+    eprintln!(
+        "  {} {}{}",
+        reachable,
+        trace.file.display().to_string().bold(),
+        entry
+    );
+
+    if !trace.exports.is_empty() {
+        eprintln!();
+        eprintln!("  Exports ({}):", trace.exports.len());
+        for export in &trace.exports {
+            let used_indicator = if export.reference_count > 0 {
+                format!("{} ref(s)", export.reference_count)
+                    .green()
+                    .to_string()
+            } else {
+                "unused".red().to_string()
+            };
+            let type_tag = if export.is_type_only {
+                " (type)".dimmed().to_string()
+            } else {
+                String::new()
+            };
+            eprintln!(
+                "    {} {}{} [{}]",
+                "export".dimmed(),
+                export.name.bold(),
+                type_tag,
+                used_indicator
+            );
+            for r in &export.referenced_by {
+                eprintln!(
+                    "      {} {} ({})",
+                    "->".dimmed(),
+                    r.from_file.display(),
+                    r.kind.dimmed()
+                );
+            }
+        }
+    }
+
+    if !trace.imports_from.is_empty() {
+        eprintln!();
+        eprintln!("  Imports from ({}):", trace.imports_from.len());
+        for path in &trace.imports_from {
+            eprintln!("    {} {}", "<-".dimmed(), path.display());
+        }
+    }
+
+    if !trace.imported_by.is_empty() {
+        eprintln!();
+        eprintln!("  Imported by ({}):", trace.imported_by.len());
+        for path in &trace.imported_by {
+            eprintln!("    {} {}", "->".dimmed(), path.display());
+        }
+    }
+
+    if !trace.re_exports.is_empty() {
+        eprintln!();
+        eprintln!("  Re-exports ({}):", trace.re_exports.len());
+        for re in &trace.re_exports {
+            eprintln!(
+                "    {} '{}' as '{}' from {}",
+                "re-export".dimmed(),
+                re.imported_name,
+                re.exported_name,
+                re.source_file.display()
+            );
+        }
+    }
+    eprintln!();
+}
+
+/// Print dependency trace results.
+pub fn print_dependency_trace(trace: &DependencyTrace, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => print_trace_json(trace),
+        _ => print_dependency_trace_human(trace),
+    }
+}
+
+fn print_dependency_trace_human(trace: &DependencyTrace) {
+    eprintln!();
+    let status = if trace.is_used {
+        "USED".green().bold()
+    } else {
+        "UNUSED".red().bold()
+    };
+    eprintln!(
+        "  {} {} ({} import(s))",
+        status,
+        trace.package_name.bold(),
+        trace.import_count
+    );
+
+    if !trace.imported_by.is_empty() {
+        eprintln!();
+        eprintln!("  Imported by:");
+        for path in &trace.imported_by {
+            let is_type_only = trace.type_only_imported_by.contains(path);
+            let tag = if is_type_only {
+                " (type-only)".dimmed().to_string()
+            } else {
+                String::new()
+            };
+            eprintln!("    {} {}{}", "->".dimmed(), path.display(), tag);
+        }
+    }
+    eprintln!();
+}
+
+/// Print pipeline performance timings.
+/// In JSON mode, outputs to stderr to avoid polluting the JSON analysis output on stdout.
+pub fn print_performance(timings: &PipelineTimings, format: &OutputFormat) {
+    match format {
+        OutputFormat::Json => match serde_json::to_string_pretty(timings) {
+            Ok(json) => eprintln!("{json}"),
+            Err(e) => eprintln!("Error: failed to serialize timings: {e}"),
+        },
+        _ => print_performance_human(timings),
+    }
+}
+
+fn print_performance_human(t: &PipelineTimings) {
+    eprintln!();
+    eprintln!(
+        "{}",
+        "┌─ Pipeline Performance ─────────────────────────────".dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!(
+            "│  discover files:   {:>8.1}ms  ({} files)",
+            t.discover_files_ms, t.file_count
+        )
+        .dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!(
+            "│  workspaces:       {:>8.1}ms  ({} workspaces)",
+            t.workspaces_ms, t.workspace_count
+        )
+        .dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!("│  plugins:          {:>8.1}ms", t.plugins_ms).dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!("│  script analysis:  {:>8.1}ms", t.script_analysis_ms).dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!(
+            "│  parse/extract:    {:>8.1}ms  ({} modules)",
+            t.parse_extract_ms, t.module_count
+        )
+        .dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!("│  cache update:     {:>8.1}ms", t.cache_update_ms).dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!(
+            "│  entry points:     {:>8.1}ms  ({} entries)",
+            t.entry_points_ms, t.entry_point_count
+        )
+        .dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!("│  resolve imports:  {:>8.1}ms", t.resolve_imports_ms).dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!("│  build graph:      {:>8.1}ms", t.build_graph_ms).dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!("│  analyze:          {:>8.1}ms", t.analyze_ms).dimmed()
+    );
+    eprintln!(
+        "{}",
+        "│  ────────────────────────────────────────────────".dimmed()
+    );
+    eprintln!(
+        "{}",
+        format!("│  TOTAL:            {:>8.1}ms", t.total_ms)
+            .bold()
+            .dimmed()
+    );
+    eprintln!(
+        "{}",
+        "└───────────────────────────────────────────────────".dimmed()
+    );
+    eprintln!();
 }
 
 #[cfg(test)]

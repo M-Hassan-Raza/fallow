@@ -1,0 +1,639 @@
+use std::path::{Path, PathBuf};
+
+use serde::Serialize;
+
+use crate::graph::{ModuleGraph, ReferenceKind};
+
+/// Result of tracing an export: why is it considered used or unused?
+#[derive(Debug, Serialize)]
+pub struct ExportTrace {
+    /// The file containing the export.
+    pub file: PathBuf,
+    /// The export name being traced.
+    pub export_name: String,
+    /// Whether the file is reachable from an entry point.
+    pub file_reachable: bool,
+    /// Whether the file is an entry point.
+    pub is_entry_point: bool,
+    /// Whether the export is considered used.
+    pub is_used: bool,
+    /// Files that reference this export directly.
+    pub direct_references: Vec<ExportReference>,
+    /// Re-export chains that pass through this export.
+    pub re_export_chains: Vec<ReExportChain>,
+    /// Reason summary.
+    pub reason: String,
+}
+
+/// A direct reference to an export.
+#[derive(Debug, Serialize)]
+pub struct ExportReference {
+    pub from_file: PathBuf,
+    pub kind: String,
+}
+
+/// A re-export chain showing how an export is propagated.
+#[derive(Debug, Serialize)]
+pub struct ReExportChain {
+    /// The barrel file that re-exports this symbol.
+    pub barrel_file: PathBuf,
+    /// The name it's re-exported as.
+    pub exported_as: String,
+    /// Number of references on the barrel's re-exported symbol.
+    pub reference_count: usize,
+}
+
+/// Result of tracing all edges for a file.
+#[derive(Debug, Serialize)]
+pub struct FileTrace {
+    /// The traced file.
+    pub file: PathBuf,
+    /// Whether this file is reachable from entry points.
+    pub is_reachable: bool,
+    /// Whether this file is an entry point.
+    pub is_entry_point: bool,
+    /// Exports declared by this file.
+    pub exports: Vec<TracedExport>,
+    /// Files that this file imports from.
+    pub imports_from: Vec<PathBuf>,
+    /// Files that import from this file.
+    pub imported_by: Vec<PathBuf>,
+    /// Re-exports declared by this file.
+    pub re_exports: Vec<TracedReExport>,
+}
+
+/// An export with its usage info.
+#[derive(Debug, Serialize)]
+pub struct TracedExport {
+    pub name: String,
+    pub is_type_only: bool,
+    pub reference_count: usize,
+    pub referenced_by: Vec<ExportReference>,
+}
+
+/// A re-export with source info.
+#[derive(Debug, Serialize)]
+pub struct TracedReExport {
+    pub source_file: PathBuf,
+    pub imported_name: String,
+    pub exported_name: String,
+}
+
+/// Result of tracing a dependency: where is it used?
+#[derive(Debug, Serialize)]
+pub struct DependencyTrace {
+    /// The dependency name being traced.
+    pub package_name: String,
+    /// Files that import this dependency.
+    pub imported_by: Vec<PathBuf>,
+    /// Files that import this dependency with type-only imports.
+    pub type_only_imported_by: Vec<PathBuf>,
+    /// Whether the dependency is used at all.
+    pub is_used: bool,
+    /// Total import count.
+    pub import_count: usize,
+}
+
+/// Pipeline performance timings.
+#[derive(Debug, Clone, Serialize)]
+pub struct PipelineTimings {
+    pub discover_files_ms: f64,
+    pub file_count: usize,
+    pub workspaces_ms: f64,
+    pub workspace_count: usize,
+    pub plugins_ms: f64,
+    pub script_analysis_ms: f64,
+    pub parse_extract_ms: f64,
+    pub module_count: usize,
+    pub cache_update_ms: f64,
+    pub entry_points_ms: f64,
+    pub entry_point_count: usize,
+    pub resolve_imports_ms: f64,
+    pub build_graph_ms: f64,
+    pub analyze_ms: f64,
+    pub total_ms: f64,
+}
+
+/// Trace why an export is considered used or unused.
+pub fn trace_export(
+    graph: &ModuleGraph,
+    root: &Path,
+    file_path: &str,
+    export_name: &str,
+) -> Option<ExportTrace> {
+    // Find the file in the graph
+    let module = graph.modules.iter().find(|m| {
+        let rel = m.path.strip_prefix(root).unwrap_or(&m.path);
+        let rel_str = rel.to_string_lossy();
+        rel_str == file_path || m.path.to_string_lossy() == file_path
+    })?;
+
+    // Find the export
+    let export = module.exports.iter().find(|e| {
+        let name_str = e.name.to_string();
+        name_str == export_name || (export_name == "default" && name_str == "default")
+    })?;
+
+    let direct_references: Vec<ExportReference> = export
+        .references
+        .iter()
+        .map(|r| {
+            let from_path = graph
+                .modules
+                .get(r.from_file.0 as usize)
+                .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(format!("<unknown:{}>", r.from_file.0)));
+            ExportReference {
+                from_file: from_path,
+                kind: format_reference_kind(&r.kind),
+            }
+        })
+        .collect();
+
+    // Find re-export chains involving this export
+    let re_export_chains: Vec<ReExportChain> = graph
+        .modules
+        .iter()
+        .flat_map(|m| {
+            m.re_exports
+                .iter()
+                .filter(|re| {
+                    re.source_file == module.file_id
+                        && (re.imported_name == export_name || re.imported_name == "*")
+                })
+                .map(|re| {
+                    let barrel_export = m.exports.iter().find(|e| {
+                        if re.exported_name == "*" {
+                            e.name.to_string() == export_name
+                        } else {
+                            e.name.to_string() == re.exported_name
+                        }
+                    });
+                    ReExportChain {
+                        barrel_file: m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf(),
+                        exported_as: re.exported_name.clone(),
+                        reference_count: barrel_export.map(|e| e.references.len()).unwrap_or(0),
+                    }
+                })
+        })
+        .collect();
+
+    let is_used = !export.references.is_empty();
+    let reason = if !module.is_reachable {
+        "File is unreachable from any entry point".to_string()
+    } else if is_used {
+        format!(
+            "Used by {} file(s){}",
+            export.references.len(),
+            if !re_export_chains.is_empty() {
+                format!(", re-exported through {} barrel(s)", re_export_chains.len())
+            } else {
+                String::new()
+            }
+        )
+    } else if module.is_entry_point {
+        "No internal references, but file is an entry point (export is externally accessible)"
+            .to_string()
+    } else if !re_export_chains.is_empty() {
+        format!(
+            "Re-exported through {} barrel(s) but no consumer imports it through the barrel",
+            re_export_chains.len()
+        )
+    } else {
+        "No references found — export is unused".to_string()
+    };
+
+    Some(ExportTrace {
+        file: module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf(),
+        export_name: export_name.to_string(),
+        file_reachable: module.is_reachable,
+        is_entry_point: module.is_entry_point,
+        is_used,
+        direct_references,
+        re_export_chains,
+        reason,
+    })
+}
+
+/// Trace all edges for a file.
+pub fn trace_file(graph: &ModuleGraph, root: &Path, file_path: &str) -> Option<FileTrace> {
+    let module = graph.modules.iter().find(|m| {
+        let rel = m.path.strip_prefix(root).unwrap_or(&m.path);
+        let rel_str = rel.to_string_lossy();
+        rel_str == file_path || m.path.to_string_lossy() == file_path
+    })?;
+
+    let exports: Vec<TracedExport> = module
+        .exports
+        .iter()
+        .map(|e| TracedExport {
+            name: e.name.to_string(),
+            is_type_only: e.is_type_only,
+            reference_count: e.references.len(),
+            referenced_by: e
+                .references
+                .iter()
+                .map(|r| {
+                    let from_path = graph
+                        .modules
+                        .get(r.from_file.0 as usize)
+                        .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
+                        .unwrap_or_else(|| PathBuf::from(format!("<unknown:{}>", r.from_file.0)));
+                    ExportReference {
+                        from_file: from_path,
+                        kind: format_reference_kind(&r.kind),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+
+    // Edges FROM this file (what it imports)
+    let imports_from: Vec<PathBuf> = graph
+        .edges_for(module.file_id)
+        .iter()
+        .filter_map(|target_id| {
+            graph
+                .modules
+                .get(target_id.0 as usize)
+                .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
+        })
+        .collect();
+
+    // Reverse deps: who imports this file
+    let imported_by: Vec<PathBuf> = graph
+        .reverse_deps
+        .get(module.file_id.0 as usize)
+        .map(|deps| {
+            deps.iter()
+                .filter_map(|fid| {
+                    graph
+                        .modules
+                        .get(fid.0 as usize)
+                        .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let re_exports: Vec<TracedReExport> = module
+        .re_exports
+        .iter()
+        .map(|re| {
+            let source_path = graph
+                .modules
+                .get(re.source_file.0 as usize)
+                .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
+                .unwrap_or_else(|| PathBuf::from(format!("<unknown:{}>", re.source_file.0)));
+            TracedReExport {
+                source_file: source_path,
+                imported_name: re.imported_name.clone(),
+                exported_name: re.exported_name.clone(),
+            }
+        })
+        .collect();
+
+    Some(FileTrace {
+        file: module
+            .path
+            .strip_prefix(root)
+            .unwrap_or(&module.path)
+            .to_path_buf(),
+        is_reachable: module.is_reachable,
+        is_entry_point: module.is_entry_point,
+        exports,
+        imports_from,
+        imported_by,
+        re_exports,
+    })
+}
+
+/// Trace where a dependency is used.
+pub fn trace_dependency(graph: &ModuleGraph, root: &Path, package_name: &str) -> DependencyTrace {
+    let imported_by: Vec<PathBuf> = graph
+        .package_usage
+        .get(package_name)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|fid| {
+                    graph
+                        .modules
+                        .get(fid.0 as usize)
+                        .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let type_only_imported_by: Vec<PathBuf> = graph
+        .type_only_package_usage
+        .get(package_name)
+        .map(|ids| {
+            ids.iter()
+                .filter_map(|fid| {
+                    graph
+                        .modules
+                        .get(fid.0 as usize)
+                        .map(|m| m.path.strip_prefix(root).unwrap_or(&m.path).to_path_buf())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let import_count = imported_by.len();
+    DependencyTrace {
+        package_name: package_name.to_string(),
+        imported_by,
+        type_only_imported_by,
+        is_used: import_count > 0,
+        import_count,
+    }
+}
+
+fn format_reference_kind(kind: &ReferenceKind) -> String {
+    match kind {
+        ReferenceKind::NamedImport => "named import".to_string(),
+        ReferenceKind::DefaultImport => "default import".to_string(),
+        ReferenceKind::NamespaceImport => "namespace import".to_string(),
+        ReferenceKind::ReExport => "re-export".to_string(),
+        ReferenceKind::DynamicImport => "dynamic import".to_string(),
+        ReferenceKind::SideEffectImport => "side-effect import".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use crate::extract::{ExportInfo, ExportName, ImportInfo, ImportedName};
+    use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
+
+    fn build_test_graph() -> ModuleGraph {
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/utils.ts"),
+                size_bytes: 50,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/unused.ts"),
+                size_bytes: 30,
+            },
+        ];
+
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/entry.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+
+        let resolved_modules = vec![
+            ResolvedModule {
+                file_id: FileId(0),
+                path: PathBuf::from("/project/src/entry.ts"),
+                exports: vec![],
+                re_exports: vec![],
+                resolved_imports: vec![ResolvedImport {
+                    info: ImportInfo {
+                        source: "./utils".to_string(),
+                        imported_name: ImportedName::Named("foo".to_string()),
+                        local_name: "foo".to_string(),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 10),
+                    },
+                    target: ResolveResult::InternalModule(FileId(1)),
+                }],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+            },
+            ResolvedModule {
+                file_id: FileId(1),
+                path: PathBuf::from("/project/src/utils.ts"),
+                exports: vec![
+                    ExportInfo {
+                        name: ExportName::Named("foo".to_string()),
+                        local_name: Some("foo".to_string()),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(0, 20),
+                        members: vec![],
+                    },
+                    ExportInfo {
+                        name: ExportName::Named("bar".to_string()),
+                        local_name: Some("bar".to_string()),
+                        is_type_only: false,
+                        span: oxc_span::Span::new(21, 40),
+                        members: vec![],
+                    },
+                ],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+            },
+            ResolvedModule {
+                file_id: FileId(2),
+                path: PathBuf::from("/project/src/unused.ts"),
+                exports: vec![ExportInfo {
+                    name: ExportName::Named("baz".to_string()),
+                    local_name: Some("baz".to_string()),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(0, 15),
+                    members: vec![],
+                }],
+                re_exports: vec![],
+                resolved_imports: vec![],
+                resolved_dynamic_imports: vec![],
+                resolved_dynamic_patterns: vec![],
+                member_accesses: vec![],
+                whole_object_uses: vec![],
+                has_cjs_exports: false,
+            },
+        ];
+
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    #[test]
+    fn trace_used_export() {
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_export(&graph, root, "src/utils.ts", "foo").unwrap();
+        assert!(trace.is_used);
+        assert!(trace.file_reachable);
+        assert_eq!(trace.direct_references.len(), 1);
+        assert_eq!(
+            trace.direct_references[0].from_file,
+            PathBuf::from("src/entry.ts")
+        );
+        assert_eq!(trace.direct_references[0].kind, "named import");
+    }
+
+    #[test]
+    fn trace_unused_export() {
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_export(&graph, root, "src/utils.ts", "bar").unwrap();
+        assert!(!trace.is_used);
+        assert!(trace.file_reachable);
+        assert!(trace.direct_references.is_empty());
+    }
+
+    #[test]
+    fn trace_unreachable_file_export() {
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_export(&graph, root, "src/unused.ts", "baz").unwrap();
+        assert!(!trace.is_used);
+        assert!(!trace.file_reachable);
+        assert!(trace.reason.contains("unreachable"));
+    }
+
+    #[test]
+    fn trace_nonexistent_export() {
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_export(&graph, root, "src/utils.ts", "nonexistent");
+        assert!(trace.is_none());
+    }
+
+    #[test]
+    fn trace_nonexistent_file() {
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_export(&graph, root, "src/nope.ts", "foo");
+        assert!(trace.is_none());
+    }
+
+    #[test]
+    fn trace_file_edges() {
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_file(&graph, root, "src/entry.ts").unwrap();
+        assert!(trace.is_entry_point);
+        assert!(trace.is_reachable);
+        assert_eq!(trace.imports_from.len(), 1);
+        assert_eq!(trace.imports_from[0], PathBuf::from("src/utils.ts"));
+        assert!(trace.imported_by.is_empty());
+    }
+
+    #[test]
+    fn trace_file_imported_by() {
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_file(&graph, root, "src/utils.ts").unwrap();
+        assert!(!trace.is_entry_point);
+        assert!(trace.is_reachable);
+        assert_eq!(trace.exports.len(), 2);
+        assert_eq!(trace.imported_by.len(), 1);
+        assert_eq!(trace.imported_by[0], PathBuf::from("src/entry.ts"));
+    }
+
+    #[test]
+    fn trace_unreachable_file() {
+        let graph = build_test_graph();
+        let root = Path::new("/project");
+
+        let trace = trace_file(&graph, root, "src/unused.ts").unwrap();
+        assert!(!trace.is_reachable);
+        assert!(!trace.is_entry_point);
+        assert!(trace.imported_by.is_empty());
+    }
+
+    #[test]
+    fn trace_dependency_used() {
+        // Build a graph with npm package usage
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/src/app.ts"),
+            size_bytes: 100,
+        }];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/app.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/src/app.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "lodash".to_string(),
+                    imported_name: ImportedName::Named("get".to_string()),
+                    local_name: "get".to_string(),
+                    is_type_only: false,
+                    span: oxc_span::Span::new(0, 10),
+                },
+                target: ResolveResult::NpmPackage("lodash".to_string()),
+            }],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+        }];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let root = Path::new("/project");
+
+        let trace = trace_dependency(&graph, root, "lodash");
+        assert!(trace.is_used);
+        assert_eq!(trace.import_count, 1);
+        assert_eq!(trace.imported_by[0], PathBuf::from("src/app.ts"));
+    }
+
+    #[test]
+    fn trace_dependency_unused() {
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/src/app.ts"),
+            size_bytes: 100,
+        }];
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/src/app.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/src/app.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+        }];
+
+        let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+        let root = Path::new("/project");
+
+        let trace = trace_dependency(&graph, root, "nonexistent-pkg");
+        assert!(!trace.is_used);
+        assert_eq!(trace.import_count, 0);
+        assert!(trace.imported_by.is_empty());
+    }
+}

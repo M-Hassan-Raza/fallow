@@ -75,6 +75,10 @@ struct Cli {
     /// the specified package are reported.
     #[arg(short, long, global = true)]
     workspace: Option<String>,
+
+    /// Show pipeline performance timing breakdown
+    #[arg(long, global = true)]
+    performance: bool,
 }
 
 #[derive(Subcommand)]
@@ -128,6 +132,18 @@ enum Command {
         /// Also run duplication analysis and cross-reference with dead code
         #[arg(long)]
         include_dupes: bool,
+
+        /// Trace why an export is used/unused (format: FILE:EXPORT_NAME)
+        #[arg(long, value_name = "FILE:EXPORT")]
+        trace: Option<String>,
+
+        /// Trace all edges for a file (imports, exports, importers)
+        #[arg(long, value_name = "PATH")]
+        trace_file: Option<String>,
+
+        /// Trace where a dependency is used
+        #[arg(long, value_name = "PACKAGE")]
+        trace_dependency: Option<String>,
     },
 
     /// Watch for changes and re-run analysis
@@ -224,6 +240,22 @@ impl From<Format> for OutputFormat {
 }
 
 // ── Issue type filters ──────────────────────────────────────────
+
+struct TraceOptions {
+    trace_export: Option<String>,
+    trace_file: Option<String>,
+    trace_dependency: Option<String>,
+    performance: bool,
+}
+
+impl TraceOptions {
+    fn any_active(&self) -> bool {
+        self.trace_export.is_some()
+            || self.trace_file.is_some()
+            || self.trace_dependency.is_some()
+            || self.performance
+    }
+}
 
 struct IssueFilters {
     unused_files: bool,
@@ -509,6 +541,9 @@ fn main() -> ExitCode {
         unlisted_deps: false,
         duplicate_exports: false,
         include_dupes: false,
+        trace: None,
+        trace_file: None,
+        trace_dependency: None,
     }) {
         Command::Check {
             fail_on_issues,
@@ -523,6 +558,9 @@ fn main() -> ExitCode {
             unlisted_deps,
             duplicate_exports,
             include_dupes,
+            trace,
+            trace_file,
+            trace_dependency,
         } => {
             let filters = IssueFilters {
                 unused_files,
@@ -534,6 +572,12 @@ fn main() -> ExitCode {
                 unresolved_imports,
                 unlisted_deps,
                 duplicate_exports,
+            };
+            let trace_opts = TraceOptions {
+                trace_export: trace,
+                trace_file,
+                trace_dependency,
+                performance: cli.performance,
             };
             run_check(
                 &root,
@@ -551,6 +595,7 @@ fn main() -> ExitCode {
                 cli.production,
                 cli.workspace.as_deref(),
                 include_dupes,
+                &trace_opts,
             )
         }
         Command::Watch => run_watch(
@@ -635,6 +680,7 @@ fn run_check(
     production: bool,
     workspace: Option<&str>,
     include_dupes: bool,
+    trace_opts: &TraceOptions,
 ) -> ExitCode {
     let start = Instant::now();
 
@@ -657,14 +703,77 @@ fn run_check(
     let changed_files: Option<std::collections::HashSet<std::path::PathBuf>> =
         changed_since.and_then(|git_ref| get_changed_files(root, git_ref));
 
-    let mut results = match fallow_core::analyze(&config) {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("Analysis error: {e}");
-            return ExitCode::from(2);
+    // Use analyze_with_trace when any trace option is active (retains graph + timings)
+    let use_trace = trace_opts.any_active();
+    let (mut results, trace_graph, trace_timings) = if use_trace {
+        match fallow_core::analyze_with_trace(&config) {
+            Ok(output) => (output.results, output.graph, output.timings),
+            Err(e) => {
+                eprintln!("Analysis error: {e}");
+                return ExitCode::from(2);
+            }
+        }
+    } else {
+        match fallow_core::analyze(&config) {
+            Ok(r) => (r, None, None),
+            Err(e) => {
+                eprintln!("Analysis error: {e}");
+                return ExitCode::from(2);
+            }
         }
     };
     let elapsed = start.elapsed();
+
+    // Print performance timings first — they should always appear, even combined with --trace*
+    if let Some(ref timings) = trace_timings
+        && trace_opts.performance
+    {
+        report::print_performance(timings, &config.output);
+    }
+
+    // Handle trace output (trace is a diagnostic mode — early return after output)
+    if let Some(ref graph) = trace_graph {
+        if let Some(ref trace_spec) = trace_opts.trace_export {
+            let (file_path, export_name) = match trace_spec.rsplit_once(':') {
+                Some((f, e)) => (f, e),
+                None => {
+                    eprintln!(
+                        "Error: --trace requires FILE:EXPORT_NAME format (e.g., src/utils.ts:foo)"
+                    );
+                    return ExitCode::from(2);
+                }
+            };
+            match fallow_core::trace::trace_export(graph, &config.root, file_path, export_name) {
+                Some(trace) => {
+                    report::print_export_trace(&trace, &config.output);
+                    return ExitCode::SUCCESS;
+                }
+                None => {
+                    eprintln!("Error: export '{export_name}' not found in '{file_path}'");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+
+        if let Some(ref file_path) = trace_opts.trace_file {
+            match fallow_core::trace::trace_file(graph, &config.root, file_path) {
+                Some(trace) => {
+                    report::print_file_trace(&trace, &config.output);
+                    return ExitCode::SUCCESS;
+                }
+                None => {
+                    eprintln!("Error: file '{file_path}' not found in module graph");
+                    return ExitCode::from(2);
+                }
+            }
+        }
+
+        if let Some(ref pkg_name) = trace_opts.trace_dependency {
+            let trace = fallow_core::trace::trace_dependency(graph, &config.root, pkg_name);
+            report::print_dependency_trace(&trace, &config.output);
+            return ExitCode::SUCCESS;
+        }
+    }
 
     // Scope to workspace package if requested (full graph is built, only output is filtered)
     if let Some(ref ws_root) = ws_root {
