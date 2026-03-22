@@ -135,6 +135,21 @@ pub fn build_diagnostics(
             });
         }
     }
+    for dep in &results.unused_optional_dependencies {
+        if let Ok(dep_uri) = Url::from_file_path(&dep.path) {
+            let entry = diagnostics_by_file.entry(dep_uri).or_default();
+            entry.push(Diagnostic {
+                range: ZERO_RANGE,
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String(
+                    "unused-optional-dependency".to_string(),
+                )),
+                message: format!("Unused optionalDependency: {}", dep.package_name),
+                ..Default::default()
+            });
+        }
+    }
     // Unlisted deps still use root package.json
     if let Some(ref uri) = package_json_uri {
         for dep in &results.unlisted_dependencies {

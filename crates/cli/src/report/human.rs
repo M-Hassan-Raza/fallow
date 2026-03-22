@@ -90,6 +90,13 @@ pub(super) fn print_human(
         |dep| vec![format!("  {}", format_dep(dep))],
     );
 
+    print_human_section(
+        &results.unused_optional_dependencies,
+        "Unused optionalDependencies",
+        severity_to_level(rules.unused_optional_dependencies),
+        |dep| vec![format!("  {}", format_dep(dep))],
+    );
+
     print_human_grouped_section(
         &results.unused_enum_members,
         "Unused enum members",

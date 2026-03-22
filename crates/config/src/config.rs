@@ -300,6 +300,8 @@ pub struct PartialRulesConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unused_dev_dependencies: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unused_optional_dependencies: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unused_enum_members: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unused_class_members: Option<Severity>,
@@ -590,10 +592,11 @@ impl FallowConfig {
 
         let mut rules = self.rules;
 
-        // In production mode, force unused_dev_dependencies off
+        // In production mode, force unused_dev_dependencies and unused_optional_dependencies off
         let production = self.production;
         if production {
             rules.unused_dev_dependencies = Severity::Off;
+            rules.unused_optional_dependencies = Severity::Off;
         }
 
         let mut external_plugins = discover_external_plugins(&root, &self.plugins);
@@ -736,6 +739,8 @@ pub struct RulesConfig {
     #[serde(default)]
     pub unused_dev_dependencies: Severity,
     #[serde(default)]
+    pub unused_optional_dependencies: Severity,
+    #[serde(default)]
     pub unused_enum_members: Severity,
     #[serde(default)]
     pub unused_class_members: Severity,
@@ -757,6 +762,7 @@ impl Default for RulesConfig {
             unused_types: Severity::Error,
             unused_dependencies: Severity::Error,
             unused_dev_dependencies: Severity::Error,
+            unused_optional_dependencies: Severity::Error,
             unused_enum_members: Severity::Error,
             unused_class_members: Severity::Error,
             unresolved_imports: Severity::Error,
@@ -784,6 +790,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unused_dev_dependencies {
             self.unused_dev_dependencies = s;
+        }
+        if let Some(s) = partial.unused_optional_dependencies {
+            self.unused_optional_dependencies = s;
         }
         if let Some(s) = partial.unused_enum_members {
             self.unused_enum_members = s;

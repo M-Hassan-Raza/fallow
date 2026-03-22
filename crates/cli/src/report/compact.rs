@@ -59,6 +59,9 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
     for dep in &results.unused_dev_dependencies {
         lines.push(format!("unused-devdep:{}", dep.package_name));
     }
+    for dep in &results.unused_optional_dependencies {
+        lines.push(format!("unused-optionaldep:{}", dep.package_name));
+    }
     for member in &results.unused_enum_members {
         lines.push(compact_member(member, "unused-enum-member"));
     }

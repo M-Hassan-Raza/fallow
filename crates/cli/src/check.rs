@@ -53,6 +53,7 @@ impl IssueFilters {
         if !self.unused_deps {
             results.unused_dependencies.clear();
             results.unused_dev_dependencies.clear();
+            results.unused_optional_dependencies.clear();
         }
         if !self.unused_enum_members {
             results.unused_enum_members.clear();
@@ -152,6 +153,9 @@ fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: &Res
     if rules.unused_dev_dependencies == Severity::Off {
         results.unused_dev_dependencies.clear();
     }
+    if rules.unused_optional_dependencies == Severity::Off {
+        results.unused_optional_dependencies.clear();
+    }
     if rules.unlisted_dependencies == Severity::Off {
         results.unlisted_dependencies.clear();
     }
@@ -215,6 +219,8 @@ fn has_error_severity_issues(
         || (rules.unused_dependencies == Severity::Error && !results.unused_dependencies.is_empty())
         || (rules.unused_dev_dependencies == Severity::Error
             && !results.unused_dev_dependencies.is_empty())
+        || (rules.unused_optional_dependencies == Severity::Error
+            && !results.unused_optional_dependencies.is_empty())
         || (rules.unlisted_dependencies == Severity::Error
             && !results.unlisted_dependencies.is_empty())
         || (rules.duplicate_exports == Severity::Error && !results.duplicate_exports.is_empty())
@@ -252,6 +258,9 @@ fn filter_to_workspace(
     let ws_pkg = ws_root.join("package.json");
     results.unused_dependencies.retain(|d| d.path == ws_pkg);
     results.unused_dev_dependencies.retain(|d| d.path == ws_pkg);
+    results
+        .unused_optional_dependencies
+        .retain(|d| d.path == ws_pkg);
     results.type_only_dependencies.retain(|d| d.path == ws_pkg);
 
     // Unlisted deps: keep only if any importing file is in this workspace
@@ -583,6 +592,9 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
         }
         if r.unused_dev_dependencies == Severity::Warn {
             r.unused_dev_dependencies = Severity::Error;
+        }
+        if r.unused_optional_dependencies == Severity::Warn {
+            r.unused_optional_dependencies = Severity::Error;
         }
         if r.unused_enum_members == Severity::Warn {
             r.unused_enum_members = Severity::Error;
@@ -946,6 +958,7 @@ mod tests {
             unused_types: Severity::Off,
             unused_dependencies: Severity::Off,
             unused_dev_dependencies: Severity::Off,
+            unused_optional_dependencies: Severity::Off,
             unused_enum_members: Severity::Off,
             unused_class_members: Severity::Off,
             unresolved_imports: Severity::Off,
@@ -1042,6 +1055,7 @@ mod tests {
             unused_types: Severity::Warn,
             unused_dependencies: Severity::Warn,
             unused_dev_dependencies: Severity::Warn,
+            unused_optional_dependencies: Severity::Warn,
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
             unresolved_imports: Severity::Warn,
@@ -1064,6 +1078,7 @@ mod tests {
             unused_types: Severity::Warn,
             unused_dependencies: Severity::Warn,
             unused_dev_dependencies: Severity::Warn,
+            unused_optional_dependencies: Severity::Warn,
             unused_enum_members: Severity::Warn,
             unused_class_members: Severity::Warn,
             unresolved_imports: Severity::Warn,

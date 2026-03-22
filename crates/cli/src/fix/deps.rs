@@ -15,7 +15,10 @@ pub(super) fn apply_dependency_fixes(
 ) -> bool {
     let mut had_write_error = false;
 
-    if results.unused_dependencies.is_empty() && results.unused_dev_dependencies.is_empty() {
+    if results.unused_dependencies.is_empty()
+        && results.unused_dev_dependencies.is_empty()
+        && results.unused_optional_dependencies.is_empty()
+    {
         return had_write_error;
     }
 
@@ -32,6 +35,12 @@ pub(super) fn apply_dependency_fixes(
             .entry(&dep.path)
             .or_default()
             .push((&dep.package_name, "devDependencies"));
+    }
+    for dep in &results.unused_optional_dependencies {
+        deps_by_pkg
+            .entry(&dep.path)
+            .or_default()
+            .push((&dep.package_name, "optionalDependencies"));
     }
 
     let _ = root; // root was previously used to construct the path; now deps carry their own path

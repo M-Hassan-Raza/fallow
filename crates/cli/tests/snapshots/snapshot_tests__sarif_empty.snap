@@ -59,6 +59,15 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               }
             },
             {
+              "id": "fallow/unused-optional-dependency",
+              "shortDescription": {
+                "text": "Optional dependency listed but never imported"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
               "id": "fallow/unused-enum-member",
               "shortDescription": {
                 "text": "Enum member is never referenced"

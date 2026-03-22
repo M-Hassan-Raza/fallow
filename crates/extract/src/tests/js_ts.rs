@@ -720,3 +720,19 @@ fn mixed_used_and_unused_imports() {
         "'unused' is not referenced"
     );
 }
+
+// -- Function overload deduplication --
+
+#[test]
+fn function_overloads_deduplicated_to_single_export() {
+    let info = parse_source(
+        "export function parse(): void;\nexport function parse(input: string): void;\nexport function parse(input?: string): void {}",
+    );
+    assert_eq!(
+        info.exports.len(),
+        1,
+        "Function overloads should produce exactly 1 export, got {}",
+        info.exports.len()
+    );
+    assert_eq!(info.exports[0].name, ExportName::Named("parse".to_string()));
+}

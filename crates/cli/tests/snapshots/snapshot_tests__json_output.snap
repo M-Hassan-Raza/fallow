@@ -48,6 +48,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
       "path": "/project/package.json"
     }
   ],
+  "unused_optional_dependencies": [],
   "unused_enum_members": [
     {
       "path": "/project/src/enums.ts",

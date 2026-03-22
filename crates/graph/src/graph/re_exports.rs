@@ -153,7 +153,7 @@ impl ModuleGraph {
                         barrel
                             .exports
                             .iter()
-                            .filter(|e| e.name.to_string() == *exported_name)
+                            .filter(|e| e.name.matches_str(exported_name))
                             .flat_map(|e| e.references.clone())
                             .collect()
                     };
@@ -168,7 +168,7 @@ impl ModuleGraph {
                         .exports
                         .iter()
                         .enumerate()
-                        .filter(|(_, e)| e.name.to_string() == *imported_name)
+                        .filter(|(_, e)| e.name.matches_str(imported_name))
                         .map(|(i, _)| i)
                         .collect();
 

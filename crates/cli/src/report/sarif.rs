@@ -176,6 +176,19 @@ pub fn build_sarif(
         },
     );
 
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_optional_dependencies,
+        |dep| {
+            sarif_dep(
+                dep,
+                "fallow/unused-optional-dependency",
+                severity_to_sarif_level(rules.unused_optional_dependencies),
+                "optionalDependencies",
+            )
+        },
+    );
+
     let sarif_member = |member: &UnusedMember,
                         rule_id: &'static str,
                         level: &'static str,
@@ -309,6 +322,11 @@ pub fn build_sarif(
                             "id": "fallow/unused-dev-dependency",
                             "shortDescription": { "text": "Dev dependency listed but never imported" },
                             "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_dev_dependencies) }
+                        },
+                        {
+                            "id": "fallow/unused-optional-dependency",
+                            "shortDescription": { "text": "Optional dependency listed but never imported" },
+                            "defaultConfiguration": { "level": severity_to_sarif_level(rules.unused_optional_dependencies) }
                         },
                         {
                             "id": "fallow/unused-enum-member",
@@ -532,7 +550,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 11);
+        assert_eq!(rules.len(), 12);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -540,6 +558,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unused-type"));
         assert!(rule_ids.contains(&"fallow/unused-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-dev-dependency"));
+        assert!(rule_ids.contains(&"fallow/unused-optional-dependency"));
         assert!(rule_ids.contains(&"fallow/unused-enum-member"));
         assert!(rule_ids.contains(&"fallow/unused-class-member"));
         assert!(rule_ids.contains(&"fallow/unresolved-import"));

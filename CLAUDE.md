@@ -2,7 +2,7 @@
 
 ## What is this?
 
-Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, and circular dependencies in JS/TS projects. It also detects code duplication. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 3-36x faster than knip v5 (2-14x faster than knip v6) depending on project size by leveraging the Oxc parser ecosystem.
+Fallow finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, and circular dependencies in JS/TS projects. It also detects code duplication. It's a Rust alternative to [knip](https://github.com/webpro-nl/knip) that is 6-46x faster than knip v5 (3-18x faster than knip v6) depending on project size by leveraging the Oxc parser ecosystem.
 
 ## Project structure
 
@@ -172,6 +172,8 @@ Comprehensive clippy and compiler lint configuration inspired by the Oxc ecosyst
 28. TypeScript project references: workspace discovery from `tsconfig.json` `references` field. Referenced directories are discovered as workspaces (additive with npm/pnpm workspaces), supporting TypeScript composite projects. `oxc_resolver`'s `TsconfigDiscovery::Auto` resolves path aliases through referenced project tsconfigs.
 29. Namespace member detection: `import * as ns from './x'` tracks `ns.foo`, `ns.bar` member accesses to narrow which exports are actually used. Also detects namespace destructuring patterns (`const { foo, bar } = ns`) and rest patterns (`const { foo, ...rest } = ns` → conservative whole-object use). Works with static imports, dynamic imports (`const mod = await import(...)`), and require (`const mod = require(...)`).
 30. Unused import binding detection via `oxc_semantic`: imports where the binding is never read in the importing file (e.g., `import { foo } from './utils'` with `foo` never referenced) are detected via scope-aware symbol analysis. These dead imports don't count as references to the exported symbol, improving unused-export detection precision. Also detects unused namespace imports and unused default imports.
+31. `optionalDependencies` detection: packages listed in `optionalDependencies` are tracked for unused detection (separate from `dependencies`/`devDependencies`). The `unused-optional-dependencies` rule defaults to `error` and is suppressed in production mode.
+32. TypeScript function overload deduplication: `export function foo(): void; export function foo(x: string): string; export function foo(x?: string) {}` is treated as a single export (the implementation), not 3 separate exports. Overload signatures are deduplicated during extraction.
 
 ## Framework support (84 plugins)
 

@@ -429,6 +429,7 @@ fn sarif_mixed_severity_snapshot() {
         unused_types: fallow_config::Severity::Warn,
         unused_dependencies: fallow_config::Severity::Error,
         unused_dev_dependencies: fallow_config::Severity::Warn,
+        unused_optional_dependencies: fallow_config::Severity::Warn,
         unused_enum_members: fallow_config::Severity::Warn,
         unused_class_members: fallow_config::Severity::Warn,
         unresolved_imports: fallow_config::Severity::Error,

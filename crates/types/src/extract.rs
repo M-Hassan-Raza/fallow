@@ -157,6 +157,16 @@ pub enum ExportName {
     Default,
 }
 
+impl ExportName {
+    /// Compare against a string without allocating (avoids `to_string()`).
+    pub fn matches_str(&self, s: &str) -> bool {
+        match self {
+            Self::Named(n) => n == s,
+            Self::Default => s == "default",
+        }
+    }
+}
+
 impl std::fmt::Display for ExportName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

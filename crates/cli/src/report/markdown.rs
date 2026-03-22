@@ -96,6 +96,23 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         },
     );
 
+    // ── Unused optionalDependencies ──
+    markdown_section(
+        &mut out,
+        &results.unused_optional_dependencies,
+        "Unused optionalDependencies",
+        |dep| {
+            let name = escape_backticks(&dep.package_name);
+            let pkg_label = relative_path(&dep.path, root).display().to_string();
+            if pkg_label == "package.json" {
+                vec![format!("- `{name}`")]
+            } else {
+                let label = escape_backticks(&pkg_label);
+                vec![format!("- `{name}` ({label})")]
+            }
+        },
+    );
+
     // ── Unused enum members ──
     markdown_grouped_section(
         &mut out,

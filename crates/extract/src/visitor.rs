@@ -156,13 +156,21 @@ impl ModuleInfoExtractor {
             }
             Declaration::FunctionDeclaration(func) => {
                 if let Some(id) = func.id.as_ref() {
-                    self.exports.push(ExportInfo {
-                        name: ExportName::Named(id.name.to_string()),
-                        local_name: Some(id.name.to_string()),
-                        is_type_only,
-                        span: id.span,
-                        members: vec![],
-                    });
+                    let name = ExportName::Named(id.name.to_string());
+                    // Check if this is an overload — same-named export already exists
+                    if let Some(existing) = self.exports.iter_mut().find(|e| e.name == name) {
+                        // Update to the implementation (last declaration wins)
+                        existing.span = id.span;
+                        existing.is_type_only = is_type_only;
+                    } else {
+                        self.exports.push(ExportInfo {
+                            name,
+                            local_name: Some(id.name.to_string()),
+                            is_type_only,
+                            span: id.span,
+                            members: vec![],
+                        });
+                    }
                 }
             }
             Declaration::ClassDeclaration(class) => {

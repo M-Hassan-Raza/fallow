@@ -20,6 +20,8 @@ pub struct AnalysisResults {
     pub unused_dependencies: Vec<UnusedDependency>,
     /// Dev dependencies listed in package.json but never imported.
     pub unused_dev_dependencies: Vec<UnusedDependency>,
+    /// Optional dependencies listed in package.json but never imported.
+    pub unused_optional_dependencies: Vec<UnusedDependency>,
     /// Enum members never accessed.
     pub unused_enum_members: Vec<UnusedMember>,
     /// Class members never accessed.
@@ -50,6 +52,7 @@ impl AnalysisResults {
             + self.unused_types.len()
             + self.unused_dependencies.len()
             + self.unused_dev_dependencies.len()
+            + self.unused_optional_dependencies.len()
             + self.unused_enum_members.len()
             + self.unused_class_members.len()
             + self.unresolved_imports.len()
@@ -98,7 +101,7 @@ pub struct UnusedExport {
 pub struct UnusedDependency {
     /// npm package name.
     pub package_name: String,
-    /// Whether this is in `dependencies` or `devDependencies`.
+    /// Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.
     pub location: DependencyLocation,
     /// Path to the package.json where this dependency is listed.
     /// For root deps this is `<root>/package.json`, for workspace deps it is `<ws>/package.json`.
@@ -114,6 +117,8 @@ pub enum DependencyLocation {
     Dependencies,
     /// Listed in `devDependencies`.
     DevDependencies,
+    /// Listed in `optionalDependencies`.
+    OptionalDependencies,
 }
 
 /// An unused enum or class member.

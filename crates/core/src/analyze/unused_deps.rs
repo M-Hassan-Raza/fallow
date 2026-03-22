@@ -24,7 +24,11 @@ pub fn find_unused_dependencies(
     config: &ResolvedConfig,
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
     workspaces: &[fallow_config::WorkspaceInfo],
-) -> (Vec<UnusedDependency>, Vec<UnusedDependency>) {
+) -> (
+    Vec<UnusedDependency>,
+    Vec<UnusedDependency>,
+    Vec<UnusedDependency>,
+) {
     // Collect deps referenced in config files (discovered by plugins)
     let plugin_referenced: FxHashSet<&str> = plugin_result
         .map(|pr| {
@@ -94,11 +98,28 @@ pub fn find_unused_dependencies(
         })
         .collect();
 
+    let mut unused_optional_deps: Vec<UnusedDependency> = pkg
+        .optional_dependency_names()
+        .into_iter()
+        .filter(|dep| !used_packages.contains(dep.as_str()))
+        .filter(|dep| !script_used.contains(dep.as_str()))
+        .filter(|dep| !is_implicit_dependency(dep))
+        .filter(|dep| !plugin_referenced.contains(dep.as_str()))
+        .filter(|dep| !ignore_deps.contains(dep.as_str()))
+        .filter(|dep| !workspace_names.contains(dep.as_str()))
+        .map(|dep| UnusedDependency {
+            package_name: dep,
+            location: DependencyLocation::OptionalDependencies,
+            path: root_pkg_path.clone(),
+        })
+        .collect();
+
     // --- Workspace package.json checks: scope usage to files within each workspace ---
     // Track which deps are already flagged from root to avoid double-reporting
     let root_flagged: FxHashSet<String> = unused_deps
         .iter()
         .chain(unused_dev_deps.iter())
+        .chain(unused_optional_deps.iter())
         .map(|d| d.package_name.clone())
         .collect();
 
@@ -165,9 +186,30 @@ pub fn find_unused_dependencies(
                 path: ws_pkg_path.clone(),
             });
         }
+
+        // Check workspace optional dependencies
+        for dep in ws_pkg.optional_dependency_names() {
+            if should_skip_dependency(
+                &dep,
+                &root_flagged,
+                &script_used,
+                &plugin_referenced,
+                &ignore_deps,
+                &workspace_names,
+                is_used_in_workspace,
+            ) || is_implicit_dependency(&dep)
+            {
+                continue;
+            }
+            unused_optional_deps.push(UnusedDependency {
+                package_name: dep,
+                location: DependencyLocation::OptionalDependencies,
+                path: ws_pkg_path.clone(),
+            });
+        }
     }
 
-    (unused_deps, unused_dev_deps)
+    (unused_deps, unused_dev_deps, unused_optional_deps)
 }
 
 /// Check if a dependency should be skipped during unused dependency analysis.

@@ -81,12 +81,13 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
                 (*pattern).clone()
             };
 
-            // Walk directories matching the glob
+            // Walk directories matching the glob.
+            // expand_workspace_glob already filters to dirs with package.json
+            // and returns (original_path, canonical_path) — no redundant canonicalize().
             let matched_dirs = expand_workspace_glob(root, &glob_pattern, &canonical_root);
-            for dir in matched_dirs {
+            for (dir, canonical_dir) in matched_dirs {
                 // Skip workspace entries that point to the project root itself
                 // (e.g. pnpm-workspace.yaml listing `.` as a workspace)
-                let canonical_dir = dir.canonicalize().unwrap_or_else(|_| dir.clone());
                 if canonical_dir == canonical_root {
                     continue;
                 }
@@ -101,10 +102,9 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
                     continue;
                 }
 
+                // package.json existence already checked in expand_workspace_glob
                 let ws_pkg_path = dir.join("package.json");
-                if ws_pkg_path.exists()
-                    && let Ok(pkg) = PackageJson::load(&ws_pkg_path)
-                {
+                if let Ok(pkg) = PackageJson::load(&ws_pkg_path) {
                     // Collect dependency names during initial load to avoid
                     // re-reading package.json in step 5.
                     let dep_names = pkg.all_dependency_names();
@@ -302,20 +302,33 @@ fn strip_trailing_commas(input: &str) -> String {
 
 /// Expand a workspace glob pattern to matching directories.
 ///
-/// Uses the `glob` crate for full glob support including `**` (deep matching).
+/// Returns `(original_path, canonical_path)` tuples so callers can skip redundant
+/// `canonicalize()` calls. Only directories containing a `package.json` are
+/// canonicalized — this avoids expensive syscalls on the many non-workspace
+/// directories that globs like `packages/*` or `**` can match.
+///
 /// `canonical_root` is pre-computed to avoid repeated `canonicalize()` syscalls.
 #[expect(clippy::print_stderr)]
-fn expand_workspace_glob(root: &Path, pattern: &str, canonical_root: &Path) -> Vec<PathBuf> {
+fn expand_workspace_glob(
+    root: &Path,
+    pattern: &str,
+    canonical_root: &Path,
+) -> Vec<(PathBuf, PathBuf)> {
     let full_pattern = root.join(pattern).to_string_lossy().to_string();
     match glob::glob(&full_pattern) {
         Ok(paths) => paths
             .filter_map(Result::ok)
             .filter(|p| p.is_dir())
-            .filter(|p| {
+            // Fast pre-filter: skip directories without package.json before
+            // paying the cost of canonicalize() (the P0 perf fix — avoids
+            // canonicalizing 759+ non-workspace dirs in large monorepos).
+            .filter(|p| p.join("package.json").exists())
+            .filter_map(|p| {
                 // Security: ensure workspace directory is within project root
                 p.canonicalize()
                     .ok()
-                    .is_some_and(|cp| cp.starts_with(canonical_root))
+                    .filter(|cp| cp.starts_with(canonical_root))
+                    .map(|cp| (p, cp))
             })
             .collect(),
         Err(e) => {
@@ -390,6 +403,8 @@ pub struct PackageJson {
     pub dev_dependencies: Option<StdHashMap<String, String>>,
     #[serde(default, rename = "peerDependencies")]
     pub peer_dependencies: Option<StdHashMap<String, String>>,
+    #[serde(default, rename = "optionalDependencies")]
+    pub optional_dependencies: Option<StdHashMap<String, String>>,
     #[serde(default)]
     pub scripts: Option<StdHashMap<String, String>>,
     #[serde(default)]
@@ -405,7 +420,7 @@ impl PackageJson {
             .map_err(|e| format!("Failed to parse {}: {}", path.display(), e))
     }
 
-    /// Get all dependency names (production + dev + peer).
+    /// Get all dependency names (production + dev + peer + optional).
     pub fn all_dependency_names(&self) -> Vec<String> {
         let mut deps = Vec::new();
         if let Some(d) = &self.dependencies {
@@ -415,6 +430,9 @@ impl PackageJson {
             deps.extend(d.keys().cloned());
         }
         if let Some(d) = &self.peer_dependencies {
+            deps.extend(d.keys().cloned());
+        }
+        if let Some(d) = &self.optional_dependencies {
             deps.extend(d.keys().cloned());
         }
         deps
@@ -431,6 +449,14 @@ impl PackageJson {
     /// Get dev dependency names only.
     pub fn dev_dependency_names(&self) -> Vec<String> {
         self.dev_dependencies
+            .as_ref()
+            .map(|d| d.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    /// Get optional dependency names only.
+    pub fn optional_dependency_names(&self) -> Vec<String> {
+        self.optional_dependencies
             .as_ref()
             .map(|d| d.keys().cloned().collect())
             .unwrap_or_default()

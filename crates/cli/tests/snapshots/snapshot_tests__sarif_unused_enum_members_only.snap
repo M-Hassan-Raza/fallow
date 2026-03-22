@@ -59,6 +59,15 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/unused-optional-dependency",
+              "shortDescription": {
+                "text": "Optional dependency listed but never imported"
+              },
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
               "id": "fallow/unused-enum-member",
               "shortDescription": {
                 "text": "Enum member is never referenced"

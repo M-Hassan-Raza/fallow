@@ -144,14 +144,18 @@ pub fn find_dead_code_full(
     if let Some(ref pkg) = pkg {
         if config.rules.unused_dependencies != Severity::Off
             || config.rules.unused_dev_dependencies != Severity::Off
+            || config.rules.unused_optional_dependencies != Severity::Off
         {
-            let (deps, dev_deps) =
+            let (deps, dev_deps, optional_deps) =
                 find_unused_dependencies(graph, pkg, config, plugin_result, workspaces);
             if config.rules.unused_dependencies != Severity::Off {
                 results.unused_dependencies = deps;
             }
             if config.rules.unused_dev_dependencies != Severity::Off {
                 results.unused_dev_dependencies = dev_deps;
+            }
+            if config.rules.unused_optional_dependencies != Severity::Off {
+                results.unused_optional_dependencies = optional_deps;
             }
         }
 
