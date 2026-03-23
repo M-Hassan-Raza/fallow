@@ -214,12 +214,13 @@ This reads your knip.json/knip.jsonc/.knip.json/.knip.jsonc and/or .jscpd.json (
 | **Frameworks** | Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, React Router, TanStack Router, React Native, Expo, NestJS, Docusaurus, Nitro, Capacitor, Sanity, VitePress, next-intl, Relay, Electron, i18next |
 | **Bundlers** | Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel |
 | **Testing** | Vitest, Jest, Playwright, Cypress, Mocha, Ava, Storybook, Karma, Cucumber, WebdriverIO |
-| **Linting & Formatting** | ESLint, Biome, Stylelint, Commitlint, Prettier, Oxlint, markdownlint, cspell, remark |
-| **Transpilation & Runtime** | TypeScript, Babel, SWC, Bun |
+| **Linting & Formatting** | ESLint, Biome, Stylelint, Prettier, Oxlint, markdownlint, cspell, remark |
+| **Transpilation & Language** | TypeScript, Babel, SWC |
 | **CSS** | Tailwind, PostCSS |
 | **Databases** | Prisma, Drizzle, Knex, TypeORM, Kysely |
 | **Monorepos** | Turborepo, Nx, Changesets, Syncpack |
-| **CI/CD** | semantic-release, Commitizen |
+| **CI/CD & Release** | Commitlint, Commitizen, semantic-release |
+| **Runtime** | Bun |
 | **Deployment** | Wrangler, Sentry |
 | **Git Hooks** | husky, lint-staged, lefthook, simple-git-hooks |
 | **Code Generation & Docs** | GraphQL Codegen, TypeDoc, openapi-ts, Plop |
