@@ -11,6 +11,8 @@ concurrency:
   group: cross-arch-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions: {}
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -22,6 +24,8 @@ jobs:
   cross-compile:
     name: Compile (${{ matrix.target }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:

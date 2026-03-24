@@ -20,10 +20,7 @@ concurrency:
   group: bloat-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
-  pull-requests: write
-  deployments: write
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
@@ -36,6 +33,10 @@ jobs:
     name: Binary size tracking
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+      deployments: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 

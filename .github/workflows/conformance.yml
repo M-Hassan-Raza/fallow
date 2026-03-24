@@ -6,9 +6,7 @@ on:
     - cron: '0 6 * * 1'
   workflow_dispatch:
 
-permissions:
-  contents: write
-  deployments: write
+permissions: {}
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,6 +15,9 @@ jobs:
   conformance:
     name: Fallow vs Knip
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      deployments: write
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 

@@ -20,6 +20,8 @@ concurrency:
   group: ecosystem-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+permissions: {}
+
 env:
   CARGO_TERM_COLOR: always
   FALLOW_QUIET: "1"
@@ -28,6 +30,8 @@ jobs:
   ecosystem:
     name: Ecosystem (${{ matrix.project.name }})
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
