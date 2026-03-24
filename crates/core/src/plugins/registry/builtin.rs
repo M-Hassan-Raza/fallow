@@ -3,7 +3,7 @@
 //! Contains the canonical list of all built-in plugins, categorized by domain.
 
 use super::super::{
-    angular::AngularPlugin, astro::AstroPlugin, ava::AvaPlugin, babel::BabelPlugin,
+    Plugin, angular::AngularPlugin, astro::AstroPlugin, ava::AvaPlugin, babel::BabelPlugin,
     biome::BiomePlugin, bun::BunPlugin, c8::C8Plugin, capacitor::CapacitorPlugin,
     changesets::ChangesetsPlugin, commitizen::CommitizenPlugin, commitlint::CommitlintPlugin,
     cspell::CspellPlugin, cucumber::CucumberPlugin, cypress::CypressPlugin,
@@ -21,14 +21,13 @@ use super::super::{
     remark::RemarkPlugin, remix::RemixPlugin, rolldown::RolldownPlugin, rollup::RollupPlugin,
     rsbuild::RsbuildPlugin, rspack::RspackPlugin, sanity::SanityPlugin,
     semantic_release::SemanticReleasePlugin, sentry::SentryPlugin,
-    simple_git_hooks::SimpleGitHooksPlugin, storybook::StorybookPlugin,
-    stylelint::StylelintPlugin, sveltekit::SvelteKitPlugin, svgo::SvgoPlugin, svgr::SvgrPlugin,
-    swc::SwcPlugin, syncpack::SyncpackPlugin, tailwind::TailwindPlugin,
-    tanstack_router::TanstackRouterPlugin, tsdown::TsdownPlugin, tsup::TsupPlugin,
-    turborepo::TurborepoPlugin, typedoc::TypedocPlugin, typeorm::TypeormPlugin,
-    typescript::TypeScriptPlugin, vite::VitePlugin, vitepress::VitePressPlugin,
-    vitest::VitestPlugin, webdriverio::WebdriverioPlugin, webpack::WebpackPlugin,
-    wrangler::WranglerPlugin, Plugin,
+    simple_git_hooks::SimpleGitHooksPlugin, storybook::StorybookPlugin, stylelint::StylelintPlugin,
+    sveltekit::SvelteKitPlugin, svgo::SvgoPlugin, svgr::SvgrPlugin, swc::SwcPlugin,
+    syncpack::SyncpackPlugin, tailwind::TailwindPlugin, tanstack_router::TanstackRouterPlugin,
+    tsdown::TsdownPlugin, tsup::TsupPlugin, turborepo::TurborepoPlugin, typedoc::TypedocPlugin,
+    typeorm::TypeormPlugin, typescript::TypeScriptPlugin, vite::VitePlugin,
+    vitepress::VitePressPlugin, vitest::VitestPlugin, webdriverio::WebdriverioPlugin,
+    webpack::WebpackPlugin, wrangler::WranglerPlugin,
 };
 
 /// Create all built-in plugin instances, categorized by domain.

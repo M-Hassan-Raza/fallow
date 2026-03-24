@@ -1643,13 +1643,7 @@ mod tests {
         };
         let mut result = AggregatedPluginResult::default();
         let deps = vec!["@organism".to_string()];
-        helpers::process_external_plugins(
-            &[ext],
-            &deps,
-            Path::new("/project"),
-            &[],
-            &mut result,
-        );
+        helpers::process_external_plugins(&[ext], &deps, Path::new("/project"), &[], &mut result);
         assert!(
             !result.active_plugins.contains(&"prefix-strict".to_string()),
             "@org/ prefix should not match @organism"
@@ -1671,13 +1665,7 @@ mod tests {
         };
         let mut result = AggregatedPluginResult::default();
         let deps = vec!["@org/core".to_string()];
-        helpers::process_external_plugins(
-            &[ext],
-            &deps,
-            Path::new("/project"),
-            &[],
-            &mut result,
-        );
+        helpers::process_external_plugins(&[ext], &deps, Path::new("/project"), &[], &mut result);
         assert!(
             result.active_plugins.contains(&"prefix-match".to_string()),
             "@org/ prefix should match @org/core"
