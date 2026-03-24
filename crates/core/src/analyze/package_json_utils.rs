@@ -213,7 +213,10 @@ mod tests {
     #[test]
     fn find_dep_line_malformed_content() {
         // Non-JSON content should not panic and should return 1 (fallback)
-        assert_eq!(find_dep_line_in_json("this is not json at all", "lodash"), 1);
+        assert_eq!(
+            find_dep_line_in_json("this is not json at all", "lodash"),
+            1
+        );
         assert_eq!(find_dep_line_in_json("{{{", "lodash"), 1);
         assert_eq!(find_dep_line_in_json("null", "lodash"), 1);
     }

@@ -389,11 +389,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp_dir);
         std::fs::create_dir_all(&temp_dir).unwrap();
 
-        std::fs::write(
-            temp_dir.join("tsconfig.json"),
-            r#"{"references": []}"#,
-        )
-        .unwrap();
+        std::fs::write(temp_dir.join("tsconfig.json"), r#"{"references": []}"#).unwrap();
 
         let refs = parse_tsconfig_references(&temp_dir);
         assert!(refs.is_empty());
@@ -441,16 +437,8 @@ mod tests {
         std::fs::create_dir_all(temp_dir.join("packages/a")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/b")).unwrap();
         std::fs::create_dir_all(temp_dir.join("packages/c")).unwrap();
-        std::fs::write(
-            temp_dir.join("packages/a/package.json"),
-            r#"{"name": "a"}"#,
-        )
-        .unwrap();
-        std::fs::write(
-            temp_dir.join("packages/b/package.json"),
-            r#"{"name": "b"}"#,
-        )
-        .unwrap();
+        std::fs::write(temp_dir.join("packages/a/package.json"), r#"{"name": "a"}"#).unwrap();
+        std::fs::write(temp_dir.join("packages/b/package.json"), r#"{"name": "b"}"#).unwrap();
         // c has no package.json — should be excluded
 
         let canonical_root = temp_dir.canonicalize().unwrap();

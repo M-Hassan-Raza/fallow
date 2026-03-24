@@ -139,7 +139,10 @@ mod tests {
     #[test]
     fn bin_path_simple_package() {
         let path = std::path::Path::new("../eslint/bin/eslint.js");
-        assert_eq!(extract_package_from_bin_path(path), Some("eslint".to_string()));
+        assert_eq!(
+            extract_package_from_bin_path(path),
+            Some("eslint".to_string())
+        );
     }
 
     #[test]

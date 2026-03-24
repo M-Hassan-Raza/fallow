@@ -356,8 +356,8 @@ mod tests {
     use fallow_types::extract::{ExportName, ImportInfo, ImportedName};
 
     use super::{
-        SuccessorMap, canonical_cycle, dfs_find_cycles_from, enumerate_elementary_cycles,
-        try_record_cycle, ModuleGraph,
+        ModuleGraph, SuccessorMap, canonical_cycle, dfs_find_cycles_from,
+        enumerate_elementary_cycles, try_record_cycle,
     };
 
     /// Helper: build a graph from files+edges, no entry points needed for cycle detection.
@@ -673,7 +673,11 @@ mod tests {
         try_record_cycle(&[1, 2, 0], &modules, &mut seen, &mut cycles);
         try_record_cycle(&[2, 0, 1], &modules, &mut seen, &mut cycles);
 
-        assert_eq!(cycles.len(), 1, "rotations of the same cycle should be deduped");
+        assert_eq!(
+            cycles.len(),
+            1,
+            "rotations of the same cycle should be deduped"
+        );
     }
 
     #[test]
@@ -740,7 +744,11 @@ mod tests {
             modules: &modules,
         };
         let range = &succs.succ_ranges[0];
-        assert_eq!(range.end - range.start, 1, "duplicate edges should be deduped");
+        assert_eq!(
+            range.end - range.start,
+            1,
+            "duplicate edges should be deduped"
+        );
     }
 
     #[test]
@@ -859,7 +867,11 @@ mod tests {
         let mut cycles = Vec::new();
 
         dfs_find_cycles_from(0, 4, &scc_set, &succs, 10, &mut seen, &mut cycles);
-        assert_eq!(cycles.len(), 1, "depth_limit=4 should find the 4-node cycle");
+        assert_eq!(
+            cycles.len(),
+            1,
+            "depth_limit=4 should find the 4-node cycle"
+        );
         assert_eq!(cycles[0].len(), 4);
     }
 
@@ -891,8 +903,7 @@ mod tests {
     #[test]
     fn dfs_find_cycles_from_ignores_nodes_outside_scc() {
         // 0->1->2->0 but only {0, 1} in SCC set — node 2 should be ignored
-        let (modules, all_succs, succ_ranges) =
-            build_test_succs(3, &[(0, 1), (1, 2), (2, 0)]);
+        let (modules, all_succs, succ_ranges) = build_test_succs(3, &[(0, 1), (1, 2), (2, 0)]);
         let succs = SuccessorMap {
             all_succs: &all_succs,
             succ_ranges: &succ_ranges,
@@ -952,8 +963,7 @@ mod tests {
     #[test]
     fn enumerate_elementary_cycles_finds_all_in_triangle() {
         // 0->1->2->0 — single elementary cycle
-        let (modules, all_succs, succ_ranges) =
-            build_test_succs(3, &[(0, 1), (1, 2), (2, 0)]);
+        let (modules, all_succs, succ_ranges) = build_test_succs(3, &[(0, 1), (1, 2), (2, 0)]);
         let succs = SuccessorMap {
             all_succs: &all_succs,
             succ_ranges: &succ_ranges,

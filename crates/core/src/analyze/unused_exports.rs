@@ -132,11 +132,8 @@ pub fn find_unused_exports(
                 continue;
             }
 
-            let (line, col) = byte_offset_to_line_col(
-                line_offsets_by_file,
-                module.file_id,
-                export.span.start,
-            );
+            let (line, col) =
+                byte_offset_to_line_col(line_offsets_by_file, module.file_id, export.span.start);
 
             // Barrel re-exports are synthesized in graph.rs with Span::new(0, 0) as a sentinel.
             let is_re_export = export.span.start == 0 && export.span.end == 0;
@@ -681,7 +678,9 @@ mod tests {
     //       should_skip_module, is_export_ignored) ----
 
     /// Helper: build a config with ignore_exports rules.
-    fn test_config_with_ignore_exports(rules: Vec<fallow_config::IgnoreExportRule>) -> ResolvedConfig {
+    fn test_config_with_ignore_exports(
+        rules: Vec<fallow_config::IgnoreExportRule>,
+    ) -> ResolvedConfig {
         fallow_config::FallowConfig {
             schema: None,
             extends: vec![],
@@ -708,7 +707,9 @@ mod tests {
     }
 
     /// Helper: build a minimal AggregatedPluginResult with used_exports.
-    fn make_plugin_result(used_exports: Vec<(String, Vec<String>)>) -> crate::plugins::AggregatedPluginResult {
+    fn make_plugin_result(
+        used_exports: Vec<(String, Vec<String>)>,
+    ) -> crate::plugins::AggregatedPluginResult {
         crate::plugins::AggregatedPluginResult {
             entry_patterns: vec![],
             config_patterns: vec![],
@@ -946,7 +947,11 @@ mod tests {
         let suppressions = FxHashMap::default();
         let (exports, _) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
-        assert_eq!(exports.len(), 1, "no ignore rules, export should be reported");
+        assert_eq!(
+            exports.len(),
+            1,
+            "no ignore rules, export should be reported"
+        );
     }
 
     // -- compile_ignore_matchers: multiple patterns --
@@ -976,7 +981,10 @@ mod tests {
         let suppressions = FxHashMap::default();
         let (exports, _) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
-        assert!(exports.is_empty(), "both exports should be ignored by config rules");
+        assert!(
+            exports.is_empty(),
+            "both exports should be ignored by config rules"
+        );
     }
 
     // -- compile_ignore_matchers: invalid glob handled gracefully --
@@ -991,17 +999,19 @@ mod tests {
         graph.modules[1].exports = vec![make_export("foo", 10, 20)];
 
         // Invalid glob pattern with unclosed bracket
-        let config = test_config_with_ignore_exports(vec![
-            fallow_config::IgnoreExportRule {
-                file: "[invalid".to_string(),
-                exports: vec!["*".to_string()],
-            },
-        ]);
+        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+            file: "[invalid".to_string(),
+            exports: vec!["*".to_string()],
+        }]);
         let suppressions = FxHashMap::default();
         // Should not panic — invalid globs are silently skipped
         let (exports, _) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
-        assert_eq!(exports.len(), 1, "invalid glob should be skipped, export still reported");
+        assert_eq!(
+            exports.len(),
+            1,
+            "invalid glob should be skipped, export still reported"
+        );
     }
 
     // -- is_export_ignored: config wildcard match --
@@ -1013,21 +1023,19 @@ mod tests {
             ("/tmp/test/src/types.ts", false),
         ]);
         graph.modules[1].is_reachable = true;
-        graph.modules[1].exports = vec![
-            make_export("TypeA", 10, 20),
-            make_export("TypeB", 30, 40),
-        ];
+        graph.modules[1].exports = vec![make_export("TypeA", 10, 20), make_export("TypeB", 30, 40)];
 
-        let config = test_config_with_ignore_exports(vec![
-            fallow_config::IgnoreExportRule {
-                file: "src/types.ts".to_string(),
-                exports: vec!["*".to_string()],
-            },
-        ]);
+        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+            file: "src/types.ts".to_string(),
+            exports: vec!["*".to_string()],
+        }]);
         let suppressions = FxHashMap::default();
         let (exports, _) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
-        assert!(exports.is_empty(), "wildcard * should ignore all exports in matching file");
+        assert!(
+            exports.is_empty(),
+            "wildcard * should ignore all exports in matching file"
+        );
     }
 
     // -- is_export_ignored: config specific name match --
@@ -1044,12 +1052,10 @@ mod tests {
             make_export("reported", 30, 40),
         ];
 
-        let config = test_config_with_ignore_exports(vec![
-            fallow_config::IgnoreExportRule {
-                file: "src/utils.ts".to_string(),
-                exports: vec!["ignored".to_string()],
-            },
-        ]);
+        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+            file: "src/utils.ts".to_string(),
+            exports: vec!["ignored".to_string()],
+        }]);
         let suppressions = FxHashMap::default();
         let (exports, _) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
@@ -1068,16 +1074,18 @@ mod tests {
         graph.modules[1].is_reachable = true;
         graph.modules[1].exports = vec![make_export("foo", 10, 20)];
 
-        let config = test_config_with_ignore_exports(vec![
-            fallow_config::IgnoreExportRule {
-                file: "src/other.ts".to_string(),
-                exports: vec!["*".to_string()],
-            },
-        ]);
+        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+            file: "src/other.ts".to_string(),
+            exports: vec!["*".to_string()],
+        }]);
         let suppressions = FxHashMap::default();
         let (exports, _) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
-        assert_eq!(exports.len(), 1, "ignore rule for different file should not suppress");
+        assert_eq!(
+            exports.len(),
+            1,
+            "ignore rule for different file should not suppress"
+        );
     }
 
     // -- compile_plugin_matchers: no plugin result --
@@ -1094,7 +1102,11 @@ mod tests {
         let suppressions = FxHashMap::default();
         let (exports, _) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
-        assert_eq!(exports.len(), 1, "None plugin_result means no plugin matchers");
+        assert_eq!(
+            exports.len(),
+            1,
+            "None plugin_result means no plugin matchers"
+        );
     }
 
     // -- compile_plugin_matchers: plugin with empty used_exports --
@@ -1110,9 +1122,18 @@ mod tests {
         let config = test_config();
         let suppressions = FxHashMap::default();
         let pr = make_plugin_result(vec![]);
-        let (exports, _) =
-            find_unused_exports(&graph, &config, Some(&pr), &suppressions, &FxHashMap::default());
-        assert_eq!(exports.len(), 1, "plugin with no used_exports should not suppress");
+        let (exports, _) = find_unused_exports(
+            &graph,
+            &config,
+            Some(&pr),
+            &suppressions,
+            &FxHashMap::default(),
+        );
+        assert_eq!(
+            exports.len(),
+            1,
+            "plugin with no used_exports should not suppress"
+        );
     }
 
     // -- compile_plugin_matchers / is_export_ignored: plugin used_exports match --
@@ -1134,8 +1155,13 @@ mod tests {
             "src/pages/**".to_string(),
             vec!["getStaticProps".to_string()],
         )]);
-        let (exports, _) =
-            find_unused_exports(&graph, &config, Some(&pr), &suppressions, &FxHashMap::default());
+        let (exports, _) = find_unused_exports(
+            &graph,
+            &config,
+            Some(&pr),
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].export_name, "unusedHelper");
     }
@@ -1151,20 +1177,26 @@ mod tests {
         graph.modules[1].is_reachable = true;
         graph.modules[1].exports = vec![make_export("handler", 10, 20)];
 
-        let config = test_config_with_ignore_exports(vec![
-            fallow_config::IgnoreExportRule {
-                file: "src/api/*.ts".to_string(),
-                exports: vec!["handler".to_string()],
-            },
-        ]);
+        let config = test_config_with_ignore_exports(vec![fallow_config::IgnoreExportRule {
+            file: "src/api/*.ts".to_string(),
+            exports: vec!["handler".to_string()],
+        }]);
         let suppressions = FxHashMap::default();
         let pr = make_plugin_result(vec![(
             "src/api/**".to_string(),
             vec!["handler".to_string()],
         )]);
-        let (exports, _) =
-            find_unused_exports(&graph, &config, Some(&pr), &suppressions, &FxHashMap::default());
-        assert!(exports.is_empty(), "export matching both config and plugin should be ignored");
+        let (exports, _) = find_unused_exports(
+            &graph,
+            &config,
+            Some(&pr),
+            &suppressions,
+            &FxHashMap::default(),
+        );
+        assert!(
+            exports.is_empty(),
+            "export matching both config and plugin should be ignored"
+        );
     }
 
     // -- compile_plugin_matchers: invalid plugin glob handled gracefully --
@@ -1179,13 +1211,15 @@ mod tests {
         graph.modules[1].exports = vec![make_export("foo", 10, 20)];
         let config = test_config();
         let suppressions = FxHashMap::default();
-        let pr = make_plugin_result(vec![(
-            "[invalid".to_string(),
-            vec!["foo".to_string()],
-        )]);
+        let pr = make_plugin_result(vec![("[invalid".to_string(), vec!["foo".to_string()])]);
         // Should not panic
-        let (exports, _) =
-            find_unused_exports(&graph, &config, Some(&pr), &suppressions, &FxHashMap::default());
+        let (exports, _) = find_unused_exports(
+            &graph,
+            &config,
+            Some(&pr),
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(exports.len(), 1, "invalid plugin glob should be skipped");
     }
 
@@ -1205,7 +1239,10 @@ mod tests {
         let (exports, _) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
         assert_eq!(exports.len(), 1);
-        assert!(exports[0].is_re_export, "span 0..0 should be flagged as re-export");
+        assert!(
+            exports[0].is_re_export,
+            "span 0..0 should be flagged as re-export"
+        );
     }
 
     // ---- collect_export_usages tests ----

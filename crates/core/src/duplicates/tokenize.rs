@@ -2118,10 +2118,7 @@ const count: Ref<number> = ref(0);
             kind: TokenKind::Keyword(KeywordType::Const),
             span: Span::new(10, 15),
         };
-        assert!(matches!(
-            token.kind,
-            TokenKind::Keyword(KeywordType::Const)
-        ));
+        assert!(matches!(token.kind, TokenKind::Keyword(KeywordType::Const)));
         assert_eq!(token.span.start, 10);
         assert_eq!(token.span.end, 15);
     }
@@ -2201,7 +2198,11 @@ const count: Ref<number> = ref(0);
         set.insert(TokenKind::Keyword(KeywordType::Let));
         set.insert(TokenKind::Keyword(KeywordType::Const)); // duplicate
 
-        assert_eq!(set.len(), 2, "HashSet should deduplicate identical TokenKinds");
+        assert_eq!(
+            set.len(),
+            2,
+            "HashSet should deduplicate identical TokenKinds"
+        );
 
         assert_eq!(
             TokenKind::NullLiteral,
@@ -2327,11 +2328,17 @@ const count: Ref<number> = ref(0);
             })
             .collect();
         // Should see Assign, Add, Mul (and the semicolon-related tokens)
-        let assign_pos = ops.iter().position(|o| **o == OperatorType::Assign).unwrap();
+        let assign_pos = ops
+            .iter()
+            .position(|o| **o == OperatorType::Assign)
+            .unwrap();
         let add_pos = ops.iter().position(|o| **o == OperatorType::Add).unwrap();
         let mul_pos = ops.iter().position(|o| **o == OperatorType::Mul).unwrap();
         assert!(assign_pos < add_pos, "Assign before Add");
-        assert!(add_pos < mul_pos, "Add before Mul (left-to-right, depth-first)");
+        assert!(
+            add_pos < mul_pos,
+            "Add before Mul (left-to-right, depth-first)"
+        );
     }
 
     // ── token_visitor: deeply nested expressions ─────────────────

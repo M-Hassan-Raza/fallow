@@ -206,8 +206,8 @@ mod tests {
 
     #[test]
     fn simple_field_present_array() {
-        let obj: JsonMap = serde_json::from_str(r#"{"entry": ["src/index.ts", "src/main.ts"]}"#)
-            .unwrap();
+        let obj: JsonMap =
+            serde_json::from_str(r#"{"entry": ["src/index.ts", "src/main.ts"]}"#).unwrap();
         let mut config = empty_config();
         migrate_simple_field(&obj, "entry", "entry", &mut config);
 

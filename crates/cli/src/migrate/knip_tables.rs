@@ -305,8 +305,7 @@ mod tests {
 
     #[test]
     fn plugin_keys_do_not_overlap_with_unmappable_fields() {
-        let unmappable: HashSet<&str> =
-            KNIP_UNMAPPABLE_FIELDS.iter().map(|(f, _, _)| *f).collect();
+        let unmappable: HashSet<&str> = KNIP_UNMAPPABLE_FIELDS.iter().map(|(f, _, _)| *f).collect();
         for key in KNIP_PLUGIN_KEYS {
             assert!(
                 !unmappable.contains(key),

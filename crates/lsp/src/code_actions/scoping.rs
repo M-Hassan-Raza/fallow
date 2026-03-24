@@ -75,13 +75,13 @@ mod tests {
     #[test]
     fn find_insert_line_walks_past_nested_function() {
         let lines = vec![
-            "const top = 1;",        // 0 - module scope
-            "",                       // 1 - empty line
-            "function outer() {",     // 2 - module scope
-            "  function inner() {",   // 3 - indented
-            "    return 42;",         // 4 - indented
-            "  }",                    // 5 - indented
-            "  const x = inner();",   // 6 - indented (target)
+            "const top = 1;",       // 0 - module scope
+            "",                     // 1 - empty line
+            "function outer() {",   // 2 - module scope
+            "  function inner() {", // 3 - indented
+            "    return 42;",       // 4 - indented
+            "  }",                  // 5 - indented
+            "  const x = inner();", // 6 - indented (target)
         ];
         // From line 6, walk back: 5 (indented), 4 (indented), 3 (indented),
         // 2 ("function outer" at col 0) => stop
@@ -91,15 +91,15 @@ mod tests {
     #[test]
     fn find_insert_line_multiple_nesting_levels() {
         let lines = vec![
-            "class Foo {",                 // 0 - module scope
-            "  method() {",                // 1 - indented
-            "    if (true) {",             // 2 - indented
-            "      for (;;) {",            // 3 - indented
-            "        doSomething();",       // 4 - indented
-            "      }",                     // 5 - indented
-            "    }",                       // 6 - indented
-            "  }",                         // 7 - indented
-            "}",                           // 8 - module scope
+            "class Foo {",            // 0 - module scope
+            "  method() {",           // 1 - indented
+            "    if (true) {",        // 2 - indented
+            "      for (;;) {",       // 3 - indented
+            "        doSomething();", // 4 - indented
+            "      }",                // 5 - indented
+            "    }",                  // 6 - indented
+            "  }",                    // 7 - indented
+            "}",                      // 8 - module scope
         ];
         // From line 4, walk back: 3 (indented), 2 (indented), 1 (indented),
         // 0 ("class Foo" at col 0) => stop
@@ -110,12 +110,12 @@ mod tests {
     fn find_insert_line_at_end_of_file() {
         let lines = vec![
             "import { a } from 'a';",  // 0 - module scope
-            "",                         // 1 - empty
-            "export function run() {",  // 2 - module scope
-            "  return a();",            // 3 - indented
-            "}",                        // 4 - module scope
-            "",                         // 5 - empty
-            "  orphanedCode();",        // 6 - indented (last line)
+            "",                        // 1 - empty
+            "export function run() {", // 2 - module scope
+            "  return a();",           // 3 - indented
+            "}",                       // 4 - module scope
+            "",                        // 5 - empty
+            "  orphanedCode();",       // 6 - indented (last line)
         ];
         // From line 6, walk back: 5 (empty) => stop
         assert_eq!(find_insert_line(6, &lines), 5);

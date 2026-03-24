@@ -102,7 +102,11 @@ pub fn resolve_all_imports(
             };
 
             let mut all_imports = resolve_static_imports(&ctx, file_path, &module.imports);
-            all_imports.extend(resolve_require_imports(&ctx, file_path, &module.require_calls));
+            all_imports.extend(resolve_require_imports(
+                &ctx,
+                file_path,
+                &module.require_calls,
+            ));
 
             let from_dir = canonical_paths
                 .get(module.file_id.0 as usize)
@@ -534,7 +538,10 @@ mod tests {
             let result = resolve_static_imports(ctx, file, &imports);
 
             assert_eq!(result.len(), 1);
-            assert!(matches!(result[0].info.imported_name, ImportedName::Default));
+            assert!(matches!(
+                result[0].info.imported_name,
+                ImportedName::Default
+            ));
             assert_eq!(result[0].info.local_name, "React");
         });
     }
@@ -558,11 +565,7 @@ mod tests {
     #[test]
     fn static_imports_side_effect() {
         with_empty_ctx(|ctx| {
-            let imports = vec![make_import(
-                "./styles.css",
-                ImportedName::SideEffect,
-                "",
-            )];
+            let imports = vec![make_import("./styles.css", ImportedName::SideEffect, "")];
             let file = Path::new("/project/src/app.ts");
             let result = resolve_static_imports(ctx, file, &imports);
 
@@ -589,11 +592,7 @@ mod tests {
         with_empty_ctx(|ctx| {
             let imports = vec![
                 make_import("react", ImportedName::Default, "React"),
-                make_import(
-                    "react",
-                    ImportedName::Named("useState".into()),
-                    "useState",
-                ),
+                make_import("react", ImportedName::Named("useState".into()), "useState"),
                 make_import("lodash", ImportedName::Namespace, "_"),
             ];
             let file = Path::new("/project/src/app.ts");
@@ -1337,10 +1336,7 @@ mod tests {
             let result = resolve_static_imports(ctx, file, &imports);
 
             assert_eq!(result.len(), 1);
-            assert!(matches!(
-                result[0].target,
-                ResolveResult::Unresolvable(_)
-            ));
+            assert!(matches!(result[0].target, ResolveResult::Unresolvable(_)));
         });
     }
 
@@ -1382,10 +1378,7 @@ mod tests {
             let result = resolve_single_dynamic_import(ctx, file, &imp);
 
             assert_eq!(result.len(), 1);
-            assert!(matches!(
-                result[0].target,
-                ResolveResult::Unresolvable(_)
-            ));
+            assert!(matches!(result[0].target, ResolveResult::Unresolvable(_)));
         });
     }
 
@@ -1397,10 +1390,7 @@ mod tests {
             let result = resolve_re_exports(ctx, file, &re_exports);
 
             assert_eq!(result.len(), 1);
-            assert!(matches!(
-                result[0].target,
-                ResolveResult::Unresolvable(_)
-            ));
+            assert!(matches!(result[0].target, ResolveResult::Unresolvable(_)));
         });
     }
 }

@@ -1251,13 +1251,7 @@ mod tests {
             },
         ];
         let map = count_unused_exports_by_path(&exports);
-        assert_eq!(
-            map.get(std::path::Path::new("/src/a.ts")).copied(),
-            Some(2)
-        );
-        assert_eq!(
-            map.get(std::path::Path::new("/src/b.ts")).copied(),
-            Some(1)
-        );
+        assert_eq!(map.get(std::path::Path::new("/src/a.ts")).copied(), Some(2));
+        assert_eq!(map.get(std::path::Path::new("/src/b.ts")).copied(), Some(1));
     }
 }

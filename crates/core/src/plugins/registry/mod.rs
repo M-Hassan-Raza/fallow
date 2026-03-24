@@ -1969,10 +1969,7 @@ export default defineConfig({
         let mut seen = FxHashSet::default();
         for plugin in &plugins {
             let name = plugin.name();
-            assert!(
-                seen.insert(name),
-                "duplicate plugin name found: {name}"
-            );
+            assert!(seen.insert(name), "duplicate plugin name found: {name}");
         }
     }
 
@@ -1982,8 +1979,18 @@ export default defineConfig({
         let names: Vec<&str> = plugins.iter().map(|p| p.name()).collect();
 
         let critical = [
-            "typescript", "eslint", "jest", "vitest", "webpack", "nextjs",
-            "vite", "prettier", "tailwind", "storybook", "prisma", "babel",
+            "typescript",
+            "eslint",
+            "jest",
+            "vitest",
+            "webpack",
+            "nextjs",
+            "vite",
+            "prettier",
+            "tailwind",
+            "storybook",
+            "prisma",
+            "babel",
         ];
         for expected in &critical {
             assert!(
@@ -2179,7 +2186,12 @@ export default defineConfig({
         let deps = vec!["my-dep".to_string()];
         helpers::process_external_plugins(&[ext], &deps, Path::new("/project"), &[], &mut result);
         assert!(result.active_plugins.contains(&"detect-dep".to_string()));
-        assert!(result.entry_patterns.iter().any(|(p, _)| p == "src/**/*.ts"));
+        assert!(
+            result
+                .entry_patterns
+                .iter()
+                .any(|(p, _)| p == "src/**/*.ts")
+        );
     }
 
     #[test]

@@ -881,7 +881,10 @@ fn require_destructured_empty_object() {
 fn require_destructured_multiple_properties() {
     let info = parse_source("const { a, b, c } = require('./mod');");
     assert_eq!(info.require_calls.len(), 1);
-    assert_eq!(info.require_calls[0].destructured_names, vec!["a", "b", "c"]);
+    assert_eq!(
+        info.require_calls[0].destructured_names,
+        vec!["a", "b", "c"]
+    );
 }
 
 #[test]
@@ -940,9 +943,8 @@ fn dynamic_import_destructured_computed_property_skipped() {
 
 #[test]
 fn dynamic_import_destructured_aliased_properties() {
-    let info = parse_source(
-        "async function f() { const { foo: f1, bar: b1 } = await import('./mod'); }",
-    );
+    let info =
+        parse_source("async function f() { const { foo: f1, bar: b1 } = await import('./mod'); }");
     assert_eq!(info.dynamic_imports.len(), 1);
     assert_eq!(
         info.dynamic_imports[0].destructured_names,

@@ -702,10 +702,7 @@ mod tests {
 
     // ── remove_line_subsets ──────────────────────────────────────
 
-    fn make_clone_group(
-        instances: Vec<(&str, usize, usize)>,
-        token_count: usize,
-    ) -> CloneGroup {
+    fn make_clone_group(instances: Vec<(&str, usize, usize)>, token_count: usize) -> CloneGroup {
         CloneGroup {
             instances: instances
                 .into_iter()
@@ -731,10 +728,7 @@ mod tests {
 
     #[test]
     fn remove_line_subsets_single_group_survives() {
-        let groups = vec![make_clone_group(
-            vec![("a.ts", 1, 10), ("b.ts", 1, 10)],
-            20,
-        )];
+        let groups = vec![make_clone_group(vec![("a.ts", 1, 10), ("b.ts", 1, 10)], 20)];
         let result = remove_line_subsets(groups);
         assert_eq!(result.len(), 1);
     }

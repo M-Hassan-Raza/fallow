@@ -31,7 +31,12 @@ fn record_namespace_import(
 }
 
 /// Track that a file uses an npm package, and optionally record type-only usage.
-fn record_package_usage(acc: &mut EdgeAccumulator, name: &str, file_id: FileId, is_type_only: bool) {
+fn record_package_usage(
+    acc: &mut EdgeAccumulator,
+    name: &str,
+    file_id: FileId,
+    is_type_only: bool,
+) {
     acc.package_usage
         .entry(name.to_owned())
         .or_default()
@@ -775,7 +780,9 @@ mod tests {
 
     #[test]
     fn css_module_path_ts() {
-        assert!(!is_css_module_path(std::path::Path::new("Button.module.ts")));
+        assert!(!is_css_module_path(std::path::Path::new(
+            "Button.module.ts"
+        )));
     }
 
     // ── record_namespace_import ─────────────────────────────────────────
@@ -1395,10 +1402,7 @@ mod tests {
         );
 
         assert_eq!(exports.len(), 2);
-        assert_eq!(
-            exports[1].name,
-            ExportName::Named("missing".to_string())
-        );
+        assert_eq!(exports[1].name, ExportName::Named("missing".to_string()));
         assert_eq!(exports[1].references.len(), 1);
     }
 
@@ -1887,7 +1891,10 @@ mod tests {
             .find(|e| matches!(e.name, ExportName::Default))
             .unwrap();
         assert_eq!(default_export.references.len(), 1);
-        assert_eq!(default_export.references[0].kind, ReferenceKind::DefaultImport);
+        assert_eq!(
+            default_export.references[0].kind,
+            ReferenceKind::DefaultImport
+        );
     }
 
     #[test]

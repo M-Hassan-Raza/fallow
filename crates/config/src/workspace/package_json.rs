@@ -365,8 +365,7 @@ mod tests {
 
     #[test]
     fn package_json_exports_string() {
-        let pkg: PackageJson =
-            serde_json::from_str(r#"{"exports": "./dist/index.js"}"#).unwrap();
+        let pkg: PackageJson = serde_json::from_str(r#"{"exports": "./dist/index.js"}"#).unwrap();
         let entries = pkg.entry_points();
         assert_eq!(entries, vec!["./dist/index.js"]);
     }
@@ -446,8 +445,7 @@ mod tests {
 
     #[test]
     fn package_json_bin_field_string() {
-        let pkg: PackageJson =
-            serde_json::from_str(r#"{"bin": "./cli.js"}"#).unwrap();
+        let pkg: PackageJson = serde_json::from_str(r#"{"bin": "./cli.js"}"#).unwrap();
         let entries = pkg.entry_points();
         assert!(entries.contains(&"./cli.js".to_string()));
     }
