@@ -33,7 +33,10 @@ npm/linux-arm64-musl/fallow
 npm/win32-x64-msvc/fallow.exe
 
 # Internal planning docs
-.internal-*
+.internal/
+
+# VS Code extension build artifacts
+*.vsix
 
 # IDE
 .vscode/

@@ -6,6 +6,15 @@ use tower_lsp::lsp_types::*;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
+/// Base URL for diagnostic documentation links.
+const DOCS_BASE: &str = "https://docs.fallow.tools/explanations/dead-code#";
+
+/// Build a `CodeDescription` with a documentation URL for the given anchor.
+fn doc_link(anchor: &str) -> Option<CodeDescription> {
+    let url = format!("{DOCS_BASE}{anchor}");
+    Url::parse(&url).ok().map(|href| CodeDescription { href })
+}
+
 /// LSP range at position (0,0) used for file-level and package.json diagnostics.
 /// LSP range covering the entire first line — used for file-level diagnostics.
 pub const FIRST_LINE_RANGE: Range = Range {
@@ -32,9 +41,19 @@ pub fn build_diagnostics(
     let package_json_uri = Url::from_file_path(&package_json_path).ok();
 
     // Export-like issues: unused exports and unused types
-    for (exports, code, msg_prefix) in [
-        (&results.unused_exports, "unused-export", "Export" as &str),
-        (&results.unused_types, "unused-type", "Type export"),
+    for (exports, code, anchor, msg_prefix) in [
+        (
+            &results.unused_exports,
+            "unused-export",
+            "unused-exports",
+            "Export" as &str,
+        ),
+        (
+            &results.unused_types,
+            "unused-type",
+            "unused-types",
+            "Type export",
+        ),
     ] {
         for export in exports {
             if let Ok(uri) = Url::from_file_path(&export.path) {
@@ -56,6 +75,7 @@ pub fn build_diagnostics(
                         severity: Some(DiagnosticSeverity::HINT),
                         source: Some("fallow".to_string()),
                         code: Some(NumberOrString::String(code.to_string())),
+                        code_description: doc_link(anchor),
                         message: format!("{msg_prefix} '{}' is unused", export.export_name),
                         tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                         ..Default::default()
@@ -75,6 +95,7 @@ pub fn build_diagnostics(
                     severity: Some(DiagnosticSeverity::WARNING),
                     source: Some("fallow".to_string()),
                     code: Some(NumberOrString::String("unused-file".to_string())),
+                    code_description: doc_link("unused-files"),
                     message: "File is not reachable from any entry point".to_string(),
                     tags: Some(vec![DiagnosticTag::UNNECESSARY]),
                     ..Default::default()
@@ -104,6 +125,7 @@ pub fn build_diagnostics(
                     severity: Some(DiagnosticSeverity::ERROR),
                     source: Some("fallow".to_string()),
                     code: Some(NumberOrString::String("unresolved-import".to_string())),
+                    code_description: doc_link("unresolved-imports"),
                     message: format!("Cannot find module '{}'", import.specifier),
                     ..Default::default()
                 });
@@ -127,6 +149,7 @@ pub fn build_diagnostics(
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-dependency".to_string())),
+                code_description: doc_link("unused-dependencies"),
                 message: format!("Unused dependency: {}", dep.package_name),
                 ..Default::default()
             });
@@ -147,6 +170,7 @@ pub fn build_diagnostics(
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unused-dev-dependency".to_string())),
+                code_description: doc_link("unused-devdependencies"),
                 message: format!("Unused devDependency: {}", dep.package_name),
                 ..Default::default()
             });
@@ -166,9 +190,8 @@ pub fn build_diagnostics(
                 },
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
-                code: Some(NumberOrString::String(
-                    "unused-optional-dependency".to_string(),
-                )),
+                code: Some(NumberOrString::String("unused-optional-dependency".to_string())),
+                code_description: doc_link("unused-optionaldependencies"),
                 message: format!("Unused optionalDependency: {}", dep.package_name),
                 ..Default::default()
             });
@@ -183,6 +206,7 @@ pub fn build_diagnostics(
                 severity: Some(DiagnosticSeverity::WARNING),
                 source: Some("fallow".to_string()),
                 code: Some(NumberOrString::String("unlisted-dependency".to_string())),
+                code_description: doc_link("unlisted-dependencies"),
                 message: format!(
                     "Unlisted dependency: {} (used but not in package.json)",
                     dep.package_name
@@ -193,15 +217,17 @@ pub fn build_diagnostics(
     }
 
     // Member issues: unused enum members and unused class members
-    for (members, code, kind_label) in [
+    for (members, code, anchor, kind_label) in [
         (
             &results.unused_enum_members,
             "unused-enum-member",
+            "unused-enum-members",
             "Enum member" as &str,
         ),
         (
             &results.unused_class_members,
             "unused-class-member",
+            "unused-class-members",
             "Class member",
         ),
     ] {
@@ -225,6 +251,7 @@ pub fn build_diagnostics(
                         severity: Some(DiagnosticSeverity::HINT),
                         source: Some("fallow".to_string()),
                         code: Some(NumberOrString::String(code.to_string())),
+                        code_description: doc_link(anchor),
                         message: format!(
                             "{kind_label} '{}.{}' is unused",
                             member.parent_name, member.member_name
@@ -283,6 +310,7 @@ pub fn build_diagnostics(
                         severity: Some(DiagnosticSeverity::WARNING),
                         source: Some("fallow".to_string()),
                         code: Some(NumberOrString::String("duplicate-export".to_string())),
+                        code_description: doc_link("duplicate-exports"),
                         message: format!("Duplicate export '{}'", dup.export_name,),
                         related_information: if related_info.is_empty() {
                             None
@@ -351,6 +379,9 @@ pub fn build_diagnostics(
                     severity: Some(DiagnosticSeverity::INFORMATION),
                     source: Some("fallow".to_string()),
                     code: Some(NumberOrString::String("code-duplication".to_string())),
+                    code_description: Url::parse("https://docs.fallow.tools/explanations/duplication")
+                        .ok()
+                        .map(|href| CodeDescription { href }),
                     message: format!(
                         "Duplicated code block ({} lines, {} instances)",
                         group.line_count,
@@ -423,6 +454,7 @@ pub fn build_diagnostics(
                     severity: Some(DiagnosticSeverity::WARNING),
                     source: Some("fallow".to_string()),
                     code: Some(NumberOrString::String("circular-dependency".to_string())),
+                    code_description: doc_link("circular-dependencies"),
                     message,
                     related_information: if related_info.is_empty() {
                         None
