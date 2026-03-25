@@ -1,5 +1,5 @@
-name: 'Fallow'
-description: 'Analyze TypeScript/JavaScript projects for unused code, circular dependencies, code duplication, and auto-fixable issues. Supports SARIF upload, PR comments, and job summaries.'
+name: 'Fallow - Dead Code Analysis'
+description: 'Find unused files, exports, dependencies, code duplication, and complexity hotspots in TypeScript/JavaScript projects.'
 author: 'Bart Waardenburg'
 
 branding:
