@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-03-25
+
+### Added
+
+- **MCP server: all global CLI flags exposed** — `--baseline`, `--save-baseline`, `--no-cache`, `--threads` now available on all MCP tools; `--config` gap-filled on `find_dupes`/`check_health`; `--workspace` gap-filled on `find_dupes`/`fix_preview`/`fix_apply`
+- **GitHub Action: 13 new inputs** — `no-cache`, `threads`, `only`, `skip`, `cross-language`, `file-scores`, `hotspots`, `targets`, `complexity`, `since`, `min-commits`, `save-snapshot`, `issue-types`
+- **GitHub Action: `dead-code` alias support** — all case statements now handle both `dead-code` and legacy `check` command names
+- **GitHub Action: bare invocation support** — combined issue count extraction, job summary, and PR comments work when no command is specified
+
+### Fixed
+
+- **GitHub Action: `fix` without `--dry-run` now adds `--yes`** — previously would hang in CI waiting for TTY input
+
 ## [2.0.0] - 2026-03-25
 
 ### Breaking
@@ -399,7 +412,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/fallow-rs/fallow/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/fallow-rs/fallow/compare/v1.9.0...v2.0.0
 [1.9.0]: https://github.com/fallow-rs/fallow/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/fallow-rs/fallow/compare/v1.8.0...v1.8.1
