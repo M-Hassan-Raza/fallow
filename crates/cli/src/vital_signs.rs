@@ -230,7 +230,7 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
 
 /// Save a snapshot to disk.
 ///
-/// If `path` is `None`, writes to `.fallow/snapshots/<timestamp>.json`.
+/// If `path` is `None`, writes to `.fallow/snapshots/{timestamp}.json`.
 /// Creates parent directories as needed.
 pub fn save_snapshot(
     snapshot: &VitalSignsSnapshot,

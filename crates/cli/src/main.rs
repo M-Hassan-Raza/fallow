@@ -322,7 +322,7 @@ enum Command {
         min_commits: Option<u32>,
 
         /// Save a vital signs snapshot for trend tracking.
-        /// Defaults to .fallow/snapshots/<timestamp>.json if no path is given.
+        /// Defaults to `.fallow/snapshots/{timestamp}.json` if no path is given.
         /// Forces file-scores and hotspot computation for complete metrics.
         #[expect(
             clippy::option_option,
