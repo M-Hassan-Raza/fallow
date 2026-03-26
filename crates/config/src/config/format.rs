@@ -14,6 +14,8 @@ pub enum OutputFormat {
     Compact,
     /// Markdown for PR comments.
     Markdown,
+    /// CodeClimate JSON for GitLab Code Quality.
+    CodeClimate,
 }
 
 #[cfg(test)]

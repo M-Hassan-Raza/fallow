@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-type",
+    "description": "Type export 'OldType' is never imported by other modules",
+    "severity": "major",
+    "fingerprint": "fallow/unused-type:src/types.ts:5",
+    "location": {
+      "path": "src/types.ts",
+      "lines": {
+        "begin": 5
+      }
+    }
+  }
+]

@@ -12,7 +12,7 @@ Key modules:
 - `health/` — Complexity analysis: `mod.rs` (orchestration), `scoring.rs`, `hotspots.rs`, `targets.rs`
 - `watch.rs` — File watcher with debounced re-analysis
 - `fix/` — Auto-fix: `exports.rs`, `enum_members.rs`, `deps.rs`, `io.rs` (atomic writes)
-- `report/` — Output formatting: `mod.rs` (dispatch), `human/` (check, dupes, health, perf, traces), `json.rs`, `sarif.rs`, `compact.rs`, `markdown.rs`
+- `report/` — Output formatting: `mod.rs` (dispatch), `human/` (check, dupes, health, perf, traces), `json.rs`, `sarif.rs`, `compact.rs`, `markdown.rs`, `codeclimate.rs`
 - `migrate/` — Config migration from knip/jscpd
 - `init.rs` — Generate config files (`.fallowrc.json` or `fallow.toml`)
 - `list.rs` — Show active plugins, entry points, files

@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-export",
+    "description": "Export 'helperFn' is never imported by other modules",
+    "severity": "major",
+    "fingerprint": "fallow/unused-export:src/utils.ts:10",
+    "location": {
+      "path": "src/utils.ts",
+      "lines": {
+        "begin": 10
+      }
+    }
+  }
+]

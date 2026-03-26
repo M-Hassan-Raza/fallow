@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-dev-dependency",
+    "description": "Package 'jest' is in devDependencies but never imported",
+    "severity": "major",
+    "fingerprint": "fallow/unused-dev-dependency:package.json:12",
+    "location": {
+      "path": "package.json",
+      "lines": {
+        "begin": 12
+      }
+    }
+  }
+]

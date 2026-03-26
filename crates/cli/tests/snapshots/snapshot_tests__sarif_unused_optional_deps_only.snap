@@ -1,0 +1,212 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: redact_sarif_version(&json_str)
+---
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "fallow",
+          "version": "[VERSION]",
+          "informationUri": "https://github.com/fallow-rs/fallow",
+          "rules": [
+            {
+              "id": "fallow/unused-file",
+              "shortDescription": {
+                "text": "File is not reachable from any entry point"
+              },
+              "fullDescription": {
+                "text": "Source files that are not imported by any other module and are not entry points (scripts, tests, configs). These files can safely be deleted. Detection uses graph reachability from configured entry points."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-files",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-export",
+              "shortDescription": {
+                "text": "Export is never imported"
+              },
+              "fullDescription": {
+                "text": "Named exports that are never imported by any other module in the project. Includes both direct exports and re-exports through barrel files. The export may still be used locally within the same file."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-exports",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-type",
+              "shortDescription": {
+                "text": "Type export is never imported"
+              },
+              "fullDescription": {
+                "text": "Type-only exports (interfaces, type aliases, enums used only as types) that are never imported. These do not generate runtime code but add maintenance burden."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-types",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-dependency",
+              "shortDescription": {
+                "text": "Dependency listed but never imported"
+              },
+              "fullDescription": {
+                "text": "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives — use the ignore_dependencies config to suppress."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-dev-dependency",
+              "shortDescription": {
+                "text": "Dev dependency listed but never imported"
+              },
+              "fullDescription": {
+                "text": "Packages listed in devDependencies that are never imported by test files, config files, or scripts. Build tools and jest presets that are referenced only in config may appear as false positives."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-devdependencies",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-optional-dependency",
+              "shortDescription": {
+                "text": "Optional dependency listed but never imported"
+              },
+              "fullDescription": {
+                "text": "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific — verify they are not needed on any supported platform before removing."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-optionaldependencies",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/type-only-dependency",
+              "shortDescription": {
+                "text": "Production dependency only used via type-only imports"
+              },
+              "fullDescription": {
+                "text": "Production dependencies that are only imported via `import type` statements. These can be moved to devDependencies since they generate no runtime code and are stripped during compilation."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#type-only-dependencies",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/unused-enum-member",
+              "shortDescription": {
+                "text": "Enum member is never referenced"
+              },
+              "fullDescription": {
+                "text": "Enum members that are never referenced in the codebase. Uses scope-aware binding analysis to track all references including computed access patterns."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-enum-members",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-class-member",
+              "shortDescription": {
+                "text": "Class member is never referenced"
+              },
+              "fullDescription": {
+                "text": "Class methods and properties that are never referenced outside the class. Private members are checked within the class scope; public members are checked project-wide."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-class-members",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unresolved-import",
+              "shortDescription": {
+                "text": "Import could not be resolved"
+              },
+              "fullDescription": {
+                "text": "Import specifiers that could not be resolved to a file on disk. Common causes: deleted files, typos in paths, missing path aliases in tsconfig, or uninstalled packages."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unresolved-imports",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unlisted-dependency",
+              "shortDescription": {
+                "text": "Dependency used but not in package.json"
+              },
+              "fullDescription": {
+                "text": "Packages that are imported in source code but not listed in package.json. These work by accident (hoisted from another workspace package or transitive dep) and will break in strict package managers."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/duplicate-export",
+              "shortDescription": {
+                "text": "Export name appears in multiple modules"
+              },
+              "fullDescription": {
+                "text": "The same export name is defined in multiple modules. Consumers may import from the wrong module, leading to subtle bugs. Consider renaming or consolidating."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#duplicate-exports",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            },
+            {
+              "id": "fallow/circular-dependency",
+              "shortDescription": {
+                "text": "Circular dependency chain detected"
+              },
+              "fullDescription": {
+                "text": "A cycle in the module import graph. Circular dependencies cause undefined behavior with CommonJS (partial modules) and initialization ordering issues with ESM. Break cycles by extracting shared code."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#circular-dependencies",
+              "defaultConfiguration": {
+                "level": "error"
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "fallow/unused-optional-dependency",
+          "level": "error",
+          "message": {
+            "text": "Package 'fsevents' is in optionalDependencies but never imported"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "package.json"
+                },
+                "region": {
+                  "startLine": 5,
+                  "startColumn": 1
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

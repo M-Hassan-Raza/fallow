@@ -40,7 +40,7 @@ This allows agents to parse errors the same way they parse normal output.
 
 | Variable | Description |
 |----------|-------------|
-| `FALLOW_FORMAT` | Default output format (`json`, `human`, `sarif`, `compact`, `markdown`). CLI `--format` flag overrides this. |
+| `FALLOW_FORMAT` | Default output format (`json`, `human`, `sarif`, `compact`, `markdown`, `codeclimate`). CLI `--format` flag overrides this. |
 | `FALLOW_QUIET` | Set to `1` or `true` to suppress progress output. CLI `--quiet` flag overrides this. |
 | `FALLOW_BIN` | Path to fallow binary (used by the `fallow-mcp` server). |
 
@@ -54,7 +54,7 @@ These flags work with any subcommand:
 |------|-------------|
 | `--root <PATH>` / `-r` | Project root directory (default: cwd) |
 | `--config <PATH>` / `-c` | Path to config file (.fallowrc.json / fallow.toml) |
-| `--format <FMT>` / `-f` | Output format: human, json, sarif, compact, markdown |
+| `--format <FMT>` / `-f` | Output format: human, json, sarif, compact, markdown, codeclimate |
 | `--quiet` / `-q` | Suppress progress and timing on stderr |
 | `--production` | Exclude test/story/dev files |
 | `--workspace <NAME>` / `-w` | Scope to a workspace package |

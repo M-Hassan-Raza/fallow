@@ -1,0 +1,32 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/duplicate-export",
+    "description": "Export 'Config' appears in multiple modules",
+    "severity": "major",
+    "fingerprint": "fallow/duplicate-export:src/config.ts:15",
+    "location": {
+      "path": "src/config.ts",
+      "lines": {
+        "begin": 15
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/duplicate-export",
+    "description": "Export 'Config' appears in multiple modules",
+    "severity": "major",
+    "fingerprint": "fallow/duplicate-export:src/types.ts:30",
+    "location": {
+      "path": "src/types.ts",
+      "lines": {
+        "begin": 30
+      }
+    }
+  }
+]

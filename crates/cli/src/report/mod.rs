@@ -1,3 +1,4 @@
+mod codeclimate;
 mod compact;
 mod human;
 mod json;
@@ -106,6 +107,9 @@ pub fn print_results(
             markdown::print_markdown(results, &config.root);
             ExitCode::SUCCESS
         }
+        OutputFormat::CodeClimate => {
+            codeclimate::print_codeclimate(results, &config.root, &config.rules)
+        }
     }
 }
 
@@ -134,6 +138,9 @@ pub fn print_duplication_report(
         OutputFormat::Markdown => {
             markdown::print_duplication_markdown(report, &config.root);
             ExitCode::SUCCESS
+        }
+        OutputFormat::CodeClimate => {
+            codeclimate::print_duplication_codeclimate(report, &config.root)
         }
     }
 }
@@ -164,6 +171,7 @@ pub fn print_health_report(
         }
         OutputFormat::Sarif => sarif::print_health_sarif(report, &config.root),
         OutputFormat::Json => json::print_health_json(report, &config.root, elapsed, explain),
+        OutputFormat::CodeClimate => codeclimate::print_health_codeclimate(report, &config.root),
     }
 }
 
@@ -228,6 +236,12 @@ pub fn print_performance(timings: &PipelineTimings, format: &OutputFormat) {
 // Re-exported for snapshot testing via the lib target.
 // Uses #[allow] instead of #[expect] because unused_imports is target-dependent
 // (used in lib target, unused in bin target — #[expect] would be unfulfilled in one).
+#[allow(unused_imports)]
+pub use codeclimate::build_codeclimate;
+#[allow(unused_imports)]
+pub use codeclimate::build_duplication_codeclimate;
+#[allow(unused_imports)]
+pub use codeclimate::build_health_codeclimate;
 #[allow(unused_imports)]
 pub use compact::build_compact_lines;
 #[allow(unused_imports)]

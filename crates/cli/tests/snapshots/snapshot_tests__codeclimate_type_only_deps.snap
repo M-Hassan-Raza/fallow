@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/type-only-dependency",
+    "description": "Package 'zod' is only imported via type-only imports (consider moving to devDependencies)",
+    "severity": "minor",
+    "fingerprint": "fallow/type-only-dependency:package.json:8",
+    "location": {
+      "path": "package.json",
+      "lines": {
+        "begin": 8
+      }
+    }
+  }
+]

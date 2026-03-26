@@ -358,6 +358,8 @@ enum Format {
     Sarif,
     Compact,
     Markdown,
+    #[value(name = "codeclimate")]
+    CodeClimate,
 }
 
 impl From<Format> for fallow_config::OutputFormat {
@@ -368,6 +370,7 @@ impl From<Format> for fallow_config::OutputFormat {
             Format::Sarif => Self::Sarif,
             Format::Compact => Self::Compact,
             Format::Markdown => Self::Markdown,
+            Format::CodeClimate => Self::CodeClimate,
         }
     }
 }
@@ -412,6 +415,7 @@ fn format_from_env() -> Option<Format> {
         "sarif" => Some(Format::Sarif),
         "compact" => Some(Format::Compact),
         "markdown" | "md" => Some(Format::Markdown),
+        "codeclimate" => Some(Format::CodeClimate),
         _ => None,
     }
 }
@@ -955,6 +959,7 @@ mod tests {
                 "sarif" => Some(Format::Sarif),
                 "compact" => Some(Format::Compact),
                 "markdown" | "md" => Some(Format::Markdown),
+                "codeclimate" => Some(Format::CodeClimate),
                 _ => None,
             }
         };
@@ -965,6 +970,7 @@ mod tests {
         assert!(matches!(parse("compact"), Some(Format::Compact)));
         assert!(matches!(parse("markdown"), Some(Format::Markdown)));
         assert!(matches!(parse("md"), Some(Format::Markdown)));
+        assert!(matches!(parse("codeclimate"), Some(Format::CodeClimate)));
         assert!(parse("xml").is_none());
         assert!(parse("").is_none());
     }

@@ -164,6 +164,17 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
                 return code;
             }
         }
+        OutputFormat::CodeClimate => {
+            // CodeClimate: single JSON array merging all analyses
+            let code = print_combined_codeclimate(
+                check_result.as_ref(),
+                dupes_result.as_ref(),
+                health_result.as_ref(),
+            );
+            if code != ExitCode::SUCCESS {
+                return code;
+            }
+        }
         _ => {
             // Human/Compact/Markdown: print each section sequentially
             let show_headers = matches!(opts.output, OutputFormat::Human) && !opts.quiet;
@@ -356,6 +367,48 @@ fn print_combined_sarif(
             &format!("SARIF serialization error: {e}"),
             2,
             &OutputFormat::Sarif,
+        ),
+    }
+}
+
+/// Print combined CodeClimate output merging all analyses into one JSON array.
+fn print_combined_codeclimate(
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+) -> ExitCode {
+    let mut all_issues = Vec::new();
+
+    if let Some(result) = check
+        && let serde_json::Value::Array(items) =
+            report::build_codeclimate(&result.results, &result.config.root, &result.config.rules)
+    {
+        all_issues.extend(items);
+    }
+
+    if let Some(result) = dupes
+        && let serde_json::Value::Array(items) =
+            report::build_duplication_codeclimate(&result.report, &result.config.root)
+    {
+        all_issues.extend(items);
+    }
+
+    if let Some(result) = health
+        && let serde_json::Value::Array(items) =
+            report::build_health_codeclimate(&result.report, &result.config.root)
+    {
+        all_issues.extend(items);
+    }
+
+    match serde_json::to_string_pretty(&serde_json::Value::Array(all_issues)) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => emit_error(
+            &format!("CodeClimate serialization error: {e}"),
+            2,
+            &OutputFormat::CodeClimate,
         ),
     }
 }

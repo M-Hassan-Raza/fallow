@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-optional-dependency",
+    "description": "Package 'fsevents' is in optionalDependencies but never imported",
+    "severity": "major",
+    "fingerprint": "fallow/unused-optional-dependency:package.json:5",
+    "location": {
+      "path": "package.json",
+      "lines": {
+        "begin": 5
+      }
+    }
+  }
+]

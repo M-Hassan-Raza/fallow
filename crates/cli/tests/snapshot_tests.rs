@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use fallow_cli::report::{build_compact_lines, build_json, build_sarif};
+use fallow_cli::report::{build_codeclimate, build_compact_lines, build_json, build_sarif};
 use fallow_config::RulesConfig;
 use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
@@ -994,4 +994,506 @@ fn sarif_workspace_dep_snapshot() {
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!("sarif_workspace_deps", redact_sarif_version(&json_str));
+}
+
+// ── CodeClimate format ──────────────────────────────────────────
+
+#[test]
+fn codeclimate_output_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let rules = RulesConfig::default();
+    let cc = build_codeclimate(&results, &root, &rules);
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_output", json_str);
+}
+
+#[test]
+fn codeclimate_empty_results_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = AnalysisResults::default();
+    let rules = RulesConfig::default();
+    let cc = build_codeclimate(&results, &root, &rules);
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_empty", json_str);
+}
+
+// ── Per-issue-type CodeClimate snapshots ────────────────────────
+
+#[test]
+fn codeclimate_unused_files_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_files.push(UnusedFile {
+        path: root.join("src/dead.ts"),
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unused_files_only", json_str);
+}
+
+#[test]
+fn codeclimate_unused_exports_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_exports.push(UnusedExport {
+        path: root.join("src/utils.ts"),
+        export_name: "helperFn".to_string(),
+        is_type_only: false,
+        line: 10,
+        col: 4,
+        span_start: 120,
+        is_re_export: false,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unused_exports_only", json_str);
+}
+
+#[test]
+fn codeclimate_unused_types_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_types.push(UnusedExport {
+        path: root.join("src/types.ts"),
+        export_name: "OldType".to_string(),
+        is_type_only: true,
+        line: 5,
+        col: 0,
+        span_start: 60,
+        is_re_export: false,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unused_types_only", json_str);
+}
+
+#[test]
+fn codeclimate_unused_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_dependencies.push(UnusedDependency {
+        package_name: "lodash".to_string(),
+        location: DependencyLocation::Dependencies,
+        path: root.join("package.json"),
+        line: 5,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unused_deps_only", json_str);
+}
+
+#[test]
+fn codeclimate_unresolved_imports_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unresolved_imports.push(UnresolvedImport {
+        path: root.join("src/index.ts"),
+        specifier: "./missing".to_string(),
+        line: 3,
+        col: 0,
+        specifier_col: 0,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unresolved_imports_only", json_str);
+}
+
+#[test]
+fn codeclimate_unlisted_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unlisted_dependencies.push(UnlistedDependency {
+        package_name: "chalk".to_string(),
+        imported_from: vec![ImportSite {
+            path: root.join("src/logger.ts"),
+            line: 1,
+            col: 0,
+        }],
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unlisted_deps_only", json_str);
+}
+
+#[test]
+fn codeclimate_unused_enum_members_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_enum_members.push(UnusedMember {
+        path: root.join("src/enums.ts"),
+        parent_name: "Status".to_string(),
+        member_name: "Deprecated".to_string(),
+        kind: MemberKind::EnumMember,
+        line: 8,
+        col: 2,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unused_enum_members_only", json_str);
+}
+
+#[test]
+fn codeclimate_unused_class_members_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_class_members.push(UnusedMember {
+        path: root.join("src/service.ts"),
+        parent_name: "UserService".to_string(),
+        member_name: "legacyMethod".to_string(),
+        kind: MemberKind::ClassMethod,
+        line: 42,
+        col: 4,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unused_class_members_only", json_str);
+}
+
+#[test]
+fn codeclimate_duplicate_exports_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.duplicate_exports.push(DuplicateExport {
+        export_name: "Config".to_string(),
+        locations: vec![
+            DuplicateLocation {
+                path: root.join("src/config.ts"),
+                line: 15,
+                col: 0,
+            },
+            DuplicateLocation {
+                path: root.join("src/types.ts"),
+                line: 30,
+                col: 0,
+            },
+        ],
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_duplicate_exports_only", json_str);
+}
+
+#[test]
+fn codeclimate_re_export_variant_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_exports.push(UnusedExport {
+        path: root.join("src/index.ts"),
+        export_name: "reExported".to_string(),
+        is_type_only: false,
+        line: 1,
+        col: 0,
+        span_start: 0,
+        is_re_export: true,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_re_export_variant", json_str);
+}
+
+#[test]
+fn codeclimate_mixed_severity_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let rules = RulesConfig {
+        unused_files: fallow_config::Severity::Error,
+        unused_exports: fallow_config::Severity::Warn,
+        unused_types: fallow_config::Severity::Warn,
+        unused_dependencies: fallow_config::Severity::Error,
+        unused_dev_dependencies: fallow_config::Severity::Warn,
+        unused_optional_dependencies: fallow_config::Severity::Warn,
+        unused_enum_members: fallow_config::Severity::Warn,
+        unused_class_members: fallow_config::Severity::Warn,
+        unresolved_imports: fallow_config::Severity::Error,
+        unlisted_dependencies: fallow_config::Severity::Error,
+        duplicate_exports: fallow_config::Severity::Warn,
+        type_only_dependencies: fallow_config::Severity::Warn,
+        circular_dependencies: fallow_config::Severity::Warn,
+    };
+    let cc = build_codeclimate(&results, &root, &rules);
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_mixed_severity", json_str);
+}
+
+#[test]
+fn codeclimate_type_only_deps_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.type_only_dependencies.push(TypeOnlyDependency {
+        package_name: "zod".to_string(),
+        path: root.join("package.json"),
+        line: 8,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_type_only_deps", json_str);
+}
+
+#[test]
+fn codeclimate_unused_dev_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_dev_dependencies.push(UnusedDependency {
+        package_name: "jest".to_string(),
+        location: DependencyLocation::DevDependencies,
+        path: root.join("package.json"),
+        line: 12,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unused_dev_deps_only", json_str);
+}
+
+#[test]
+fn codeclimate_unused_optional_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_optional_dependencies.push(UnusedDependency {
+        package_name: "fsevents".to_string(),
+        location: DependencyLocation::OptionalDependencies,
+        path: root.join("package.json"),
+        line: 5,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_unused_optional_deps_only", json_str);
+}
+
+#[test]
+fn codeclimate_circular_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.circular_dependencies.push(CircularDependency {
+        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+        length: 2,
+        line: 3,
+        col: 0,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_circular_deps_only", json_str);
+}
+
+#[test]
+fn codeclimate_multiple_exports_same_file_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_exports.push(UnusedExport {
+        path: root.join("src/utils.ts"),
+        export_name: "helperFn".to_string(),
+        is_type_only: false,
+        line: 10,
+        col: 4,
+        span_start: 120,
+        is_re_export: false,
+    });
+    results.unused_exports.push(UnusedExport {
+        path: root.join("src/utils.ts"),
+        export_name: "formatDate".to_string(),
+        is_type_only: false,
+        line: 25,
+        col: 0,
+        span_start: 300,
+        is_re_export: false,
+    });
+    results.unused_exports.push(UnusedExport {
+        path: root.join("src/helpers.ts"),
+        export_name: "capitalize".to_string(),
+        is_type_only: false,
+        line: 1,
+        col: 0,
+        span_start: 0,
+        is_re_export: false,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_multiple_exports_same_file", json_str);
+}
+
+#[test]
+fn codeclimate_workspace_dep_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_dependencies.push(UnusedDependency {
+        package_name: "lodash".to_string(),
+        location: DependencyLocation::Dependencies,
+        path: root.join("packages/ui/package.json"),
+        line: 5,
+    });
+    let cc = build_codeclimate(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
+    insta::assert_snapshot!("codeclimate_workspace_deps", json_str);
+}
+
+// ── Cross-format parity: circular deps ──────────────────────────
+
+#[test]
+fn json_circular_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.circular_dependencies.push(CircularDependency {
+        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+        length: 2,
+        line: 3,
+        col: 0,
+    });
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("json_circular_deps_only", redact_version(&json_str));
+}
+
+#[test]
+fn sarif_circular_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.circular_dependencies.push(CircularDependency {
+        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+        length: 2,
+        line: 3,
+        col: 0,
+    });
+    let sarif = build_sarif(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
+    insta::assert_snapshot!("sarif_circular_deps_only", redact_sarif_version(&json_str));
+}
+
+#[test]
+fn compact_circular_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.circular_dependencies.push(CircularDependency {
+        files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
+        length: 2,
+        line: 3,
+        col: 0,
+    });
+    let lines = build_compact_lines(&results, &root);
+    insta::assert_snapshot!("compact_circular_deps_only", lines.join("\n"));
+}
+
+// ── Cross-format parity: type-only deps ─────────────────────────
+
+#[test]
+fn sarif_type_only_deps_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.type_only_dependencies.push(TypeOnlyDependency {
+        package_name: "zod".to_string(),
+        path: root.join("package.json"),
+        line: 8,
+    });
+    let sarif = build_sarif(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
+    insta::assert_snapshot!("sarif_type_only_deps", redact_sarif_version(&json_str));
+}
+
+#[test]
+fn compact_type_only_deps_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.type_only_dependencies.push(TypeOnlyDependency {
+        package_name: "zod".to_string(),
+        path: root.join("package.json"),
+        line: 8,
+    });
+    let lines = build_compact_lines(&results, &root);
+    insta::assert_snapshot!("compact_type_only_deps", lines.join("\n"));
+}
+
+// ── Cross-format parity: unused dev/optional deps ───────────────
+
+#[test]
+fn json_unused_dev_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_dev_dependencies.push(UnusedDependency {
+        package_name: "jest".to_string(),
+        location: DependencyLocation::DevDependencies,
+        path: root.join("package.json"),
+        line: 12,
+    });
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("json_unused_dev_deps_only", redact_version(&json_str));
+}
+
+#[test]
+fn sarif_unused_dev_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_dev_dependencies.push(UnusedDependency {
+        package_name: "jest".to_string(),
+        location: DependencyLocation::DevDependencies,
+        path: root.join("package.json"),
+        line: 12,
+    });
+    let sarif = build_sarif(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
+    insta::assert_snapshot!(
+        "sarif_unused_dev_deps_only",
+        redact_sarif_version(&json_str)
+    );
+}
+
+#[test]
+fn json_unused_optional_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_optional_dependencies.push(UnusedDependency {
+        package_name: "fsevents".to_string(),
+        location: DependencyLocation::OptionalDependencies,
+        path: root.join("package.json"),
+        line: 5,
+    });
+    let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("json_unused_optional_deps_only", redact_version(&json_str));
+}
+
+#[test]
+fn sarif_unused_optional_deps_only_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_optional_dependencies.push(UnusedDependency {
+        package_name: "fsevents".to_string(),
+        location: DependencyLocation::OptionalDependencies,
+        path: root.join("package.json"),
+        line: 5,
+    });
+    let sarif = build_sarif(&results, &root, &RulesConfig::default());
+    let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
+    insta::assert_snapshot!(
+        "sarif_unused_optional_deps_only",
+        redact_sarif_version(&json_str)
+    );
+}
+
+// ── Cross-format parity: multiple exports, workspace, mixed ─────
+
+#[test]
+fn compact_workspace_dep_snapshot() {
+    let root = PathBuf::from("/project");
+    let mut results = AnalysisResults::default();
+    results.unused_dependencies.push(UnusedDependency {
+        package_name: "lodash".to_string(),
+        location: DependencyLocation::Dependencies,
+        path: root.join("packages/ui/package.json"),
+        line: 5,
+    });
+    let lines = build_compact_lines(&results, &root);
+    insta::assert_snapshot!("compact_workspace_deps", lines.join("\n"));
+}
+
+#[test]
+fn json_mixed_severity_snapshot() {
+    let root = PathBuf::from("/project");
+    let results = sample_results(&root);
+    let elapsed = Duration::from_millis(42);
+    // JSON includes severity metadata via _meta when explain is true,
+    // but the raw format doesn't encode severity — this test verifies
+    // the output is stable regardless of rules config.
+    let value = build_json(&results, &root, elapsed).expect("JSON build should succeed");
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("json_mixed_severity", redact_version(&json_str));
 }

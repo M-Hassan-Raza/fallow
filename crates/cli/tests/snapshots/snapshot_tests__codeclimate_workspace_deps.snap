@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-dependency",
+    "description": "Package 'lodash' is in dependencies but never imported",
+    "severity": "major",
+    "fingerprint": "fallow/unused-dependency:packages/ui/package.json:5",
+    "location": {
+      "path": "packages/ui/package.json",
+      "lines": {
+        "begin": 5
+      }
+    }
+  }
+]

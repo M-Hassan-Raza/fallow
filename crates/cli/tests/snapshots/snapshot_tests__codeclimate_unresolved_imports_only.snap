@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/unresolved-import",
+    "description": "Import './missing' could not be resolved",
+    "severity": "major",
+    "fingerprint": "fallow/unresolved-import:src/index.ts:3",
+    "location": {
+      "path": "src/index.ts",
+      "lines": {
+        "begin": 3
+      }
+    }
+  }
+]

@@ -1,0 +1,19 @@
+---
+source: crates/cli/tests/snapshot_tests.rs
+expression: json_str
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-enum-member",
+    "description": "Enum member 'Status.Deprecated' is never referenced",
+    "severity": "major",
+    "fingerprint": "fallow/unused-enum-member:src/enums.ts:8",
+    "location": {
+      "path": "src/enums.ts",
+      "lines": {
+        "begin": 8
+      }
+    }
+  }
+]

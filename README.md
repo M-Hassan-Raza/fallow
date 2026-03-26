@@ -113,7 +113,7 @@ fallow:
 - `--changed-since main` -- analyze only files touched in a PR
 - `--baseline` / `--save-baseline` -- fail only on **new** issues
 - `--format sarif` -- upload to GitHub Code Scanning
-- GitLab Code Quality reports (inline MR annotations) via `ci/gitlab-ci.yml`
+- `--format codeclimate` -- GitLab Code Quality inline MR annotations
 - `--format json` / `--format markdown` -- for custom workflows
 Adopt incrementally -- surface issues without blocking CI, then promote when ready:
 
