@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 # Emit inline PR annotations via workflow commands
 # Required env: FALLOW_COMMAND, MAX_ANNOTATIONS, ACTION_JQ_DIR

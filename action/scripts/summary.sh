@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 # Write job summary using the appropriate jq script
 # Required env: FALLOW_COMMAND, ACTION_JQ_DIR

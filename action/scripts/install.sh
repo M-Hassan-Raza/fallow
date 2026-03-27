@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 # Install fallow binary via npm
 # Required env: FALLOW_VERSION

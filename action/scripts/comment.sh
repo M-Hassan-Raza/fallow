@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -eo pipefail
 
 # Post or update a PR comment with analysis results
 # Required env: GH_TOKEN, PR_NUMBER, GH_REPO, FALLOW_COMMAND, ACTION_JQ_DIR
