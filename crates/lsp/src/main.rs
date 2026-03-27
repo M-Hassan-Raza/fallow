@@ -812,7 +812,7 @@ mod tests {
         assert_eq!(target.stats.total_files, 10);
         assert_eq!(target.stats.total_lines, 100);
         assert_eq!(target.stats.duplicated_lines, 10);
-        assert_eq!(target.stats.duplication_percentage, 10.0);
+        assert!((target.stats.duplication_percentage - 10.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -871,7 +871,7 @@ mod tests {
         merge_duplication(&mut target, source);
 
         assert_eq!(target.stats.total_lines, 0);
-        assert_eq!(target.stats.duplication_percentage, 0.0);
+        assert!((target.stats.duplication_percentage - 0.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -902,7 +902,7 @@ mod tests {
         // Target stats should remain the same (merged with zeros)
         assert_eq!(target.clone_groups.len(), 1);
         assert_eq!(target.stats.total_files, 5);
-        assert_eq!(target.stats.duplication_percentage, 10.0);
+        assert!((target.stats.duplication_percentage - 10.0).abs() < f64::EPSILON);
     }
 
     // -----------------------------------------------------------------------
