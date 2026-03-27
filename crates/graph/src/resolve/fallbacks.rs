@@ -694,4 +694,364 @@ mod tests {
         };
         assert_eq!(make_glob_from_pattern(&pattern), "*.ts");
     }
+
+    // ── make_glob_from_pattern: template literal patterns ──────────
+
+    #[test]
+    fn make_glob_template_literal_prefix_only() {
+        // `./pages/${page}` extracts prefix="./pages/", suffix=None
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./pages/".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./pages/*");
+    }
+
+    #[test]
+    fn make_glob_template_literal_with_extension_suffix() {
+        // `./locales/${lang}.json` extracts prefix="./locales/", suffix=".json"
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./locales/".to_string(),
+            suffix: Some(".json".to_string()),
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./locales/*.json");
+    }
+
+    #[test]
+    fn make_glob_template_literal_deep_prefix() {
+        // `./modules/${area}/components/${name}.tsx`
+        // Extractor captures prefix="./modules/", suffix=None (only first dynamic part)
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./modules/".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./modules/*");
+    }
+
+    #[test]
+    fn make_glob_string_concat_prefix() {
+        // `'./pages/' + name` extracts prefix="./pages/", suffix=None
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./pages/".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./pages/*");
+    }
+
+    #[test]
+    fn make_glob_string_concat_with_extension() {
+        // `'./views/' + name + '.vue'` extracts prefix="./views/", suffix=".vue"
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./views/".to_string(),
+            suffix: Some(".vue".to_string()),
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./views/*.vue");
+    }
+
+    // ── make_glob_from_pattern: import.meta.glob ──────────────────
+
+    #[test]
+    fn make_glob_import_meta_glob_recursive() {
+        // import.meta.glob('./components/**/*.vue')
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./components/**/*.vue".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(
+            make_glob_from_pattern(&pattern),
+            "./components/**/*.vue",
+            "import.meta.glob patterns with * should pass through as-is"
+        );
+    }
+
+    #[test]
+    fn make_glob_import_meta_glob_brace_expansion() {
+        // import.meta.glob('./plugins/{auth,analytics}.ts')
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./plugins/{auth,analytics}.ts".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(
+            make_glob_from_pattern(&pattern),
+            "./plugins/{auth,analytics}.ts",
+            "import.meta.glob patterns with braces should pass through as-is"
+        );
+    }
+
+    #[test]
+    fn make_glob_import_meta_glob_star_with_brace() {
+        // import.meta.glob('./routes/**/*.{ts,tsx}')
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./routes/**/*.{ts,tsx}".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(
+            make_glob_from_pattern(&pattern),
+            "./routes/**/*.{ts,tsx}",
+            "combined * and brace patterns should pass through"
+        );
+    }
+
+    #[test]
+    fn make_glob_import_meta_glob_ignores_suffix_when_star_present() {
+        // Edge case: prefix contains *, suffix is provided (unlikely but defensive)
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./*.ts".to_string(),
+            suffix: Some(".extra".to_string()),
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(
+            make_glob_from_pattern(&pattern),
+            "./*.ts",
+            "when prefix has glob chars, suffix is ignored (prefix used as-is)"
+        );
+    }
+
+    // ── make_glob_from_pattern: edge cases ────────────────────────
+
+    #[test]
+    fn make_glob_single_dot_prefix() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./*");
+    }
+
+    #[test]
+    fn make_glob_prefix_without_trailing_slash() {
+        // `'./config' + ext` -> prefix="./config", suffix might be extension
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "./config".to_string(),
+            suffix: None,
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "./config*");
+    }
+
+    #[test]
+    fn make_glob_prefix_with_dotdot() {
+        let pattern = fallow_types::extract::DynamicImportPattern {
+            prefix: "../shared/".to_string(),
+            suffix: Some(".ts".to_string()),
+            span: oxc_span::Span::default(),
+        };
+        assert_eq!(make_glob_from_pattern(&pattern), "../shared/*.ts");
+    }
+
+    // ── extract_package_name: additional edge cases ───────────────
+
+    #[test]
+    fn test_extract_package_name_with_pnpm_plus_encoded_scope() {
+        // pnpm encodes @scope/pkg as @scope+pkg in store path
+        // but the inner node_modules still uses the real scope
+        let path = PathBuf::from(
+            "/project/node_modules/.pnpm/@mui+material@5.15.0/node_modules/@mui/material/index.js",
+        );
+        assert_eq!(
+            extract_package_name_from_node_modules_path(&path),
+            Some("@mui/material".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_package_name_windows_style_path() {
+        // Windows-style paths should still work since we filter for Normal components
+        let path = PathBuf::from("/project/node_modules/typescript/lib/tsc.js");
+        assert_eq!(
+            extract_package_name_from_node_modules_path(&path),
+            Some("typescript".to_string())
+        );
+    }
+
+    // ── try_source_fallback: additional output dir patterns ───────
+
+    #[test]
+    fn test_try_source_fallback_out_dir() {
+        let src_path = PathBuf::from("/project/packages/api/src/handler.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(5));
+
+        let out_path = PathBuf::from("/project/packages/api/out/handler.js");
+        assert_eq!(
+            try_source_fallback(&out_path, &path_to_id),
+            Some(FileId(5)),
+            "out/handler.js should fall back to src/handler.ts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_mts_extension() {
+        let src_path = PathBuf::from("/project/packages/lib/src/utils.mts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(6));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/utils.mjs");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(6)),
+            "dist/utils.mjs should fall back to src/utils.mts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_cts_extension() {
+        let src_path = PathBuf::from("/project/packages/lib/src/config.cts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(7));
+
+        let dist_path = PathBuf::from("/project/packages/lib/dist/config.cjs");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(7)),
+            "dist/config.cjs should fall back to src/config.cts"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_jsx_extension() {
+        let src_path = PathBuf::from("/project/packages/ui/src/App.jsx");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(8));
+
+        let build_path = PathBuf::from("/project/packages/ui/build/App.js");
+        assert_eq!(
+            try_source_fallback(&build_path, &path_to_id),
+            Some(FileId(8)),
+            "build/App.js should fall back to src/App.jsx"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_no_file_stem() {
+        // Path with no filename at all should return None gracefully
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let dist_path = PathBuf::from("/project/packages/ui/dist/");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            None,
+            "directory path with no file should return None"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_esm_subdir() {
+        // esm is an output directory, so dist/esm -> src
+        let src_path = PathBuf::from("/project/lib/src/index.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(10));
+
+        let dist_path = PathBuf::from("/project/lib/esm/index.mjs");
+        assert_eq!(
+            try_source_fallback(&dist_path, &path_to_id),
+            Some(FileId(10)),
+            "standalone esm/ directory should fall back to src/"
+        );
+    }
+
+    #[test]
+    fn test_try_source_fallback_cjs_subdir() {
+        let src_path = PathBuf::from("/project/lib/src/index.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(11));
+
+        let cjs_path = PathBuf::from("/project/lib/cjs/index.cjs");
+        assert_eq!(
+            try_source_fallback(&cjs_path, &path_to_id),
+            Some(FileId(11)),
+            "standalone cjs/ directory should fall back to src/"
+        );
+    }
+
+    // ── try_pnpm_workspace_fallback: edge cases ──────────────────
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_empty_after_pnpm() {
+        // Path that has .pnpm but nothing after the inner node_modules
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+
+        let pnpm_path = PathBuf::from("/project/node_modules/.pnpm/pkg@1.0.0/node_modules");
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            None,
+            "path ending at node_modules with nothing after should return None"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_scoped_package_only_scope() {
+        // Path has .pnpm/inner-node_modules/@scope but no package name after scope
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+
+        let pnpm_path =
+            PathBuf::from("/project/node_modules/.pnpm/@scope+pkg@1.0.0/node_modules/@scope");
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            None,
+            "scoped package without full name and no matching workspace should return None"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_no_inner_node_modules() {
+        // Path has .pnpm but no inner node_modules
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+
+        let pnpm_path = PathBuf::from("/project/node_modules/.pnpm/pkg@1.0.0/dist/index.js");
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            None,
+            "path without inner node_modules after .pnpm should return None"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_package_without_relative_path() {
+        // Path ends right at the package name, no file path after it
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let mut workspace_roots = FxHashMap::default();
+        let ws_root = PathBuf::from("/project/packages/ui");
+        workspace_roots.insert("@myorg/ui", ws_root.as_path());
+
+        let pnpm_path =
+            PathBuf::from("/project/node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui");
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            None,
+            "path ending at package name with no relative file should return None"
+        );
+    }
+
+    #[test]
+    fn test_try_pnpm_workspace_fallback_nested_dist_esm() {
+        let src_path = PathBuf::from("/project/packages/ui/src/Button.ts");
+        let mut path_to_id = FxHashMap::default();
+        path_to_id.insert(src_path.as_path(), FileId(10));
+
+        let mut workspace_roots = FxHashMap::default();
+        let ws_root = PathBuf::from("/project/packages/ui");
+        workspace_roots.insert("@myorg/ui", ws_root.as_path());
+
+        // Nested output dirs within pnpm workspace path
+        let pnpm_path = PathBuf::from(
+            "/project/node_modules/.pnpm/@myorg+ui@1.0.0/node_modules/@myorg/ui/dist/esm/Button.mjs",
+        );
+        assert_eq!(
+            try_pnpm_workspace_fallback(&pnpm_path, &path_to_id, &workspace_roots),
+            Some(FileId(10)),
+            "pnpm path with nested dist/esm should resolve through source fallback"
+        );
+    }
 }

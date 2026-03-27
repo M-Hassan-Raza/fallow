@@ -295,4 +295,24 @@ mod tests {
         let rules = RulesConfig::default();
         assert_eq!(rules.unused_optional_dependencies, Severity::Error);
     }
+
+    #[test]
+    fn severity_from_str_case_insensitive() {
+        assert_eq!("ERROR".parse::<Severity>().unwrap(), Severity::Error);
+        assert_eq!("Warn".parse::<Severity>().unwrap(), Severity::Warn);
+        assert_eq!("OFF".parse::<Severity>().unwrap(), Severity::Off);
+        assert_eq!("Warning".parse::<Severity>().unwrap(), Severity::Warn);
+        assert_eq!("NONE".parse::<Severity>().unwrap(), Severity::Off);
+    }
+
+    #[test]
+    fn severity_from_str_invalid_returns_error() {
+        let result = "critical".parse::<Severity>();
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(
+            err.contains("unknown severity"),
+            "Expected descriptive error, got: {err}"
+        );
+    }
 }

@@ -452,7 +452,9 @@ mod tests {
 
     #[test]
     fn find_cycles_self_import_ignored() {
-        // A -> A (self-import, should NOT be reported)
+        // A -> A (self-import, should NOT be reported as a cycle).
+        // Reason: Tarjan's SCC only reports components with >= 2 nodes,
+        // so a single-node self-edge never forms a reportable cycle.
         let graph = build_cycle_graph(1, &[(0, 0)]);
         let cycles = graph.find_cycles();
         assert!(
@@ -1049,5 +1051,325 @@ mod tests {
         );
         // Shortest cycles should be length 3 (A->B->D->A and A->C->D->A)
         assert_eq!(cycles[0].len(), 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Additional canonical_cycle tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn canonical_cycle_non_sequential_indices() {
+        // Cycle with non-sequential node indices [3, 1, 4] — file1 has smallest path
+        let (modules, _, _) = build_test_succs(5, &[]);
+        let result = canonical_cycle(&[3, 1, 4], &modules);
+        // file1 has path "/project/file1.ts" which is smallest, so rotation starts there
+        assert_eq!(result, vec![1, 4, 3]);
+    }
+
+    #[test]
+    fn canonical_cycle_different_starting_points_same_result() {
+        // The same logical cycle [0, 1, 2, 3] presented from four different starting points
+        // should always canonicalize to [0, 1, 2, 3] since file0 has the smallest path.
+        let (modules, _, _) = build_test_succs(4, &[]);
+        let r1 = canonical_cycle(&[0, 1, 2, 3], &modules);
+        let r2 = canonical_cycle(&[1, 2, 3, 0], &modules);
+        let r3 = canonical_cycle(&[2, 3, 0, 1], &modules);
+        let r4 = canonical_cycle(&[3, 0, 1, 2], &modules);
+        assert_eq!(r1, r2);
+        assert_eq!(r2, r3);
+        assert_eq!(r3, r4);
+        assert_eq!(r1, vec![0, 1, 2, 3]);
+    }
+
+    #[test]
+    fn canonical_cycle_two_node_both_rotations() {
+        // Two-node cycle: [0, 1] and [1, 0] should both canonicalize to [0, 1]
+        let (modules, _, _) = build_test_succs(2, &[]);
+        assert_eq!(canonical_cycle(&[0, 1], &modules), vec![0, 1]);
+        assert_eq!(canonical_cycle(&[1, 0], &modules), vec![0, 1]);
+    }
+
+    // -----------------------------------------------------------------------
+    // Self-loop unit-level tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dfs_find_cycles_from_self_loop_not_found() {
+        // Node 0 has a self-edge (0->0). The DFS requires path.len() >= 2 for a cycle,
+        // so a self-loop should not be detected as a cycle.
+        let (modules, all_succs, succ_ranges) = build_test_succs(1, &[(0, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_set: FxHashSet<usize> = [0].into_iter().collect();
+        let mut seen = FxHashSet::default();
+        let mut cycles = Vec::new();
+
+        for depth in 1..=3 {
+            dfs_find_cycles_from(0, depth, &scc_set, &succs, 10, &mut seen, &mut cycles);
+        }
+        assert!(
+            cycles.is_empty(),
+            "self-loop should not be detected as a cycle by dfs_find_cycles_from"
+        );
+    }
+
+    #[test]
+    fn enumerate_elementary_cycles_self_loop_not_found() {
+        // Single node with self-edge — enumerate should find no elementary cycles
+        let (modules, all_succs, succ_ranges) = build_test_succs(1, &[(0, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let cycles = enumerate_elementary_cycles(&[0], &succs, 20);
+        assert!(
+            cycles.is_empty(),
+            "self-loop should not produce elementary cycles"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Two overlapping cycles sharing an edge
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn find_cycles_two_cycles_sharing_edge() {
+        // A->B->C->A and A->B->D->A share edge A->B
+        // Should find exactly 2 elementary cycles, both of length 3
+        let graph = build_cycle_graph(4, &[(0, 1), (1, 2), (2, 0), (1, 3), (3, 0)]);
+        let cycles = graph.find_cycles();
+        assert_eq!(
+            cycles.len(),
+            2,
+            "two cycles sharing edge A->B should both be found, got {}",
+            cycles.len()
+        );
+        assert!(
+            cycles.iter().all(|c| c.len() == 3),
+            "both cycles should have length 3"
+        );
+    }
+
+    #[test]
+    fn enumerate_elementary_cycles_shared_edge() {
+        // Same topology at the unit level: 0->1->2->0 and 0->1->3->0 share edge 0->1
+        let (modules, all_succs, succ_ranges) =
+            build_test_succs(4, &[(0, 1), (1, 2), (2, 0), (1, 3), (3, 0)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_nodes: Vec<usize> = vec![0, 1, 2, 3];
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        assert_eq!(
+            cycles.len(),
+            2,
+            "should find exactly 2 elementary cycles sharing edge 0->1, got {}",
+            cycles.len()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Large SCC with multiple elementary cycles — verify all found
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn enumerate_elementary_cycles_pentagon_with_chords() {
+        // Pentagon 0->1->2->3->4->0 plus chords 0->2 and 0->3
+        // Elementary cycles include:
+        //   len 3: 0->2->3->4->... no, let's enumerate:
+        //   0->1->2->3->4->0 (len 5)
+        //   0->2->3->4->0 (len 4, via chord 0->2)
+        //   0->3->4->0 (len 3, via chord 0->3)
+        //   0->1->2->... subsets through chords
+        let (modules, all_succs, succ_ranges) =
+            build_test_succs(5, &[(0, 1), (1, 2), (2, 3), (3, 4), (4, 0), (0, 2), (0, 3)]);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_nodes: Vec<usize> = vec![0, 1, 2, 3, 4];
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+
+        // Should find at least 3 distinct elementary cycles (the pentagon + two chord-shortened)
+        assert!(
+            cycles.len() >= 3,
+            "pentagon with chords should have at least 3 elementary cycles, got {}",
+            cycles.len()
+        );
+        // All cycles should be unique (no duplicates)
+        let unique: FxHashSet<Vec<usize>> = cycles.iter().cloned().collect();
+        assert_eq!(
+            unique.len(),
+            cycles.len(),
+            "all enumerated cycles should be unique"
+        );
+        // Shortest cycle should be length 3 (0->3->4->0)
+        assert_eq!(
+            cycles[0].len(),
+            3,
+            "shortest cycle in pentagon with chords should be length 3"
+        );
+    }
+
+    #[test]
+    fn find_cycles_large_scc_complete_graph_k6() {
+        // Complete graph K6: every node connects to every other node
+        // This creates a dense SCC with many elementary cycles
+        let edges: Vec<(u32, u32)> = (0..6)
+            .flat_map(|i| (0..6).filter(move |&j| i != j).map(move |j| (i, j)))
+            .collect();
+        let graph = build_cycle_graph(6, &edges);
+        let cycles = graph.find_cycles();
+
+        // K6 has a huge number of elementary cycles; we should find many but cap at 20
+        assert!(
+            cycles.len() <= 20,
+            "should cap at MAX_CYCLES_PER_SCC (20), got {}",
+            cycles.len()
+        );
+        assert_eq!(
+            cycles.len(),
+            20,
+            "K6 has far more than 20 elementary cycles, so we should hit the cap"
+        );
+        // Shortest cycles should be 2-node cycles (since every pair has bidirectional edges)
+        assert_eq!(cycles[0].len(), 2, "shortest cycles in K6 should be 2-node");
+    }
+
+    // -----------------------------------------------------------------------
+    // Depth limit enforcement in enumerate_elementary_cycles
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn enumerate_elementary_cycles_respects_depth_cap_of_12() {
+        // Build a single long cycle of 15 nodes: 0->1->2->...->14->0
+        // enumerate_elementary_cycles caps depth at min(scc.len(), 12) = 12
+        // So the 15-node cycle should NOT be found.
+        let edges: Vec<(usize, usize)> = (0..15).map(|i| (i, (i + 1) % 15)).collect();
+        let (modules, all_succs, succ_ranges) = build_test_succs(15, &edges);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_nodes: Vec<usize> = (0..15).collect();
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+
+        assert!(
+            cycles.is_empty(),
+            "a pure 15-node cycle should not be found with depth cap of 12, got {} cycles",
+            cycles.len()
+        );
+    }
+
+    #[test]
+    fn enumerate_elementary_cycles_finds_cycle_at_depth_cap_boundary() {
+        // Build a single cycle of exactly 12 nodes: 0->1->...->11->0
+        // depth cap = min(12, 12) = 12, so this cycle should be found.
+        let edges: Vec<(usize, usize)> = (0..12).map(|i| (i, (i + 1) % 12)).collect();
+        let (modules, all_succs, succ_ranges) = build_test_succs(12, &edges);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_nodes: Vec<usize> = (0..12).collect();
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+
+        assert_eq!(
+            cycles.len(),
+            1,
+            "a pure 12-node cycle should be found at the depth cap boundary"
+        );
+        assert_eq!(cycles[0].len(), 12);
+    }
+
+    #[test]
+    fn enumerate_elementary_cycles_13_node_pure_cycle_not_found() {
+        // 13-node pure cycle: depth cap = min(13, 12) = 12, so the 13-node cycle is skipped
+        let edges: Vec<(usize, usize)> = (0..13).map(|i| (i, (i + 1) % 13)).collect();
+        let (modules, all_succs, succ_ranges) = build_test_succs(13, &edges);
+        let succs = SuccessorMap {
+            all_succs: &all_succs,
+            succ_ranges: &succ_ranges,
+            modules: &modules,
+        };
+        let scc_nodes: Vec<usize> = (0..13).collect();
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+
+        assert!(
+            cycles.is_empty(),
+            "13-node pure cycle exceeds depth cap of 12"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // MAX_CYCLES_PER_SCC enforcement at integration level
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn find_cycles_max_cycles_per_scc_enforced_on_k7() {
+        // K7 complete graph: enormous number of elementary cycles
+        // Should still be capped at 20 per SCC
+        let edges: Vec<(u32, u32)> = (0..7)
+            .flat_map(|i| (0..7).filter(move |&j| i != j).map(move |j| (i, j)))
+            .collect();
+        let graph = build_cycle_graph(7, &edges);
+        let cycles = graph.find_cycles();
+
+        assert!(
+            cycles.len() <= 20,
+            "K7 should cap at MAX_CYCLES_PER_SCC (20), got {}",
+            cycles.len()
+        );
+        assert_eq!(
+            cycles.len(),
+            20,
+            "K7 has far more than 20 elementary cycles, should hit the cap exactly"
+        );
+    }
+
+    #[test]
+    fn find_cycles_two_dense_sccs_each_capped() {
+        // Two separate complete subgraphs K4 (nodes 0-3) and K4 (nodes 4-7)
+        // Each has many elementary cycles; total should be capped at 20 per SCC
+        let mut edges: Vec<(u32, u32)> = Vec::new();
+        // First K4: nodes 0-3
+        for i in 0..4 {
+            for j in 0..4 {
+                if i != j {
+                    edges.push((i, j));
+                }
+            }
+        }
+        // Second K4: nodes 4-7
+        for i in 4..8 {
+            for j in 4..8 {
+                if i != j {
+                    edges.push((i, j));
+                }
+            }
+        }
+        let graph = build_cycle_graph(8, &edges);
+        let cycles = graph.find_cycles();
+
+        // Each K4 has 2-cycles: C(4,2)=6, plus 3-cycles and 4-cycles
+        // Both SCCs contribute cycles, but each is independently capped at 20
+        assert!(!cycles.is_empty(), "two dense SCCs should produce cycles");
+        // Total can be up to 40 (20 per SCC), but K4 has fewer than 20 elementary cycles
+        // K4 elementary cycles: 6 two-cycles + 8 three-cycles + 3 four-cycles = 17
+        // So we should get all from both SCCs
+        assert!(
+            cycles.len() > 2,
+            "should find multiple cycles across both SCCs, got {}",
+            cycles.len()
+        );
     }
 }

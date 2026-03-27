@@ -217,3 +217,144 @@ pub(super) fn is_builtin_constructor(name: &str) -> bool {
             | "Buffer"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── regex_pattern_to_suffix ──────────────────────────────
+
+    #[test]
+    fn regex_suffix_with_caret_anchor() {
+        // Leading `^` should be stripped — result matches bare pattern
+        assert_eq!(
+            regex_pattern_to_suffix(r"^\.vue$"),
+            Some(".vue".to_string())
+        );
+        assert_eq!(
+            regex_pattern_to_suffix(r"^\.json$"),
+            Some(".json".to_string())
+        );
+    }
+
+    #[test]
+    fn regex_suffix_with_dotstar_anchor() {
+        // Leading `.*` should be stripped
+        assert_eq!(
+            regex_pattern_to_suffix(r".*\.css$"),
+            Some(".css".to_string())
+        );
+    }
+
+    #[test]
+    fn regex_suffix_with_both_anchors() {
+        // Both `^` and `.*` as prefix
+        assert_eq!(
+            regex_pattern_to_suffix(r"^.*\.ts$"),
+            Some(".ts".to_string())
+        );
+    }
+
+    #[test]
+    fn regex_suffix_single_char_optional_returns_none() {
+        // `\.x?$` — single char base "x" minus last char = "" which is too ambiguous
+        assert_eq!(regex_pattern_to_suffix(r"\.x?$"), None);
+    }
+
+    #[test]
+    fn regex_suffix_two_char_optional() {
+        // `\.ts?$` — base "ts" minus last = "t", result: .{t,ts}
+        assert_eq!(
+            regex_pattern_to_suffix(r"\.ts?$"),
+            Some(".{t,ts}".to_string())
+        );
+    }
+
+    #[test]
+    fn regex_suffix_no_dollar_sign_returns_none() {
+        // Missing trailing `$` should return None
+        assert_eq!(regex_pattern_to_suffix(r"\.vue"), None);
+    }
+
+    #[test]
+    fn regex_suffix_no_escaped_dot_returns_none() {
+        // Missing `\.` prefix should return None
+        assert_eq!(regex_pattern_to_suffix(r"vue$"), None);
+    }
+
+    #[test]
+    fn regex_suffix_empty_alternation_returns_none() {
+        // Empty group `()` should return None (no extensions)
+        assert_eq!(regex_pattern_to_suffix(r"\.()$"), None);
+    }
+
+    #[test]
+    fn regex_suffix_alternation_with_special_chars_returns_none() {
+        // Special characters in alternation group
+        assert_eq!(regex_pattern_to_suffix(r"\.(j.s|ts)$"), None);
+    }
+
+    #[test]
+    fn regex_suffix_complex_wildcard_returns_none() {
+        assert_eq!(regex_pattern_to_suffix(r"\..+$"), None);
+        assert_eq!(regex_pattern_to_suffix(r"\.[a-z]+$"), None);
+    }
+
+    // ── is_builtin_constructor ───────────────────────────────
+
+    #[test]
+    fn builtin_constructors_recognized() {
+        assert!(is_builtin_constructor("Array"));
+        assert!(is_builtin_constructor("Map"));
+        assert!(is_builtin_constructor("Set"));
+        assert!(is_builtin_constructor("WeakMap"));
+        assert!(is_builtin_constructor("WeakSet"));
+        assert!(is_builtin_constructor("Promise"));
+        assert!(is_builtin_constructor("URL"));
+        assert!(is_builtin_constructor("URLSearchParams"));
+        assert!(is_builtin_constructor("RegExp"));
+        assert!(is_builtin_constructor("Date"));
+        assert!(is_builtin_constructor("Error"));
+        assert!(is_builtin_constructor("TypeError"));
+        assert!(is_builtin_constructor("Request"));
+        assert!(is_builtin_constructor("Response"));
+        assert!(is_builtin_constructor("Headers"));
+        assert!(is_builtin_constructor("FormData"));
+        assert!(is_builtin_constructor("Blob"));
+        assert!(is_builtin_constructor("AbortController"));
+        assert!(is_builtin_constructor("ReadableStream"));
+        assert!(is_builtin_constructor("WritableStream"));
+        assert!(is_builtin_constructor("TransformStream"));
+        assert!(is_builtin_constructor("TextEncoder"));
+        assert!(is_builtin_constructor("TextDecoder"));
+        assert!(is_builtin_constructor("Worker"));
+        assert!(is_builtin_constructor("WebSocket"));
+        assert!(is_builtin_constructor("EventEmitter"));
+        assert!(is_builtin_constructor("Buffer"));
+        assert!(is_builtin_constructor("MutationObserver"));
+        assert!(is_builtin_constructor("IntersectionObserver"));
+        assert!(is_builtin_constructor("ResizeObserver"));
+        assert!(is_builtin_constructor("MessageChannel"));
+        assert!(is_builtin_constructor("BroadcastChannel"));
+    }
+
+    #[test]
+    fn user_defined_classes_not_builtin() {
+        assert!(!is_builtin_constructor("MyService"));
+        assert!(!is_builtin_constructor("UserRepository"));
+        assert!(!is_builtin_constructor("AppController"));
+        assert!(!is_builtin_constructor("DatabaseConnection"));
+        assert!(!is_builtin_constructor("Logger"));
+        assert!(!is_builtin_constructor("Config"));
+        assert!(!is_builtin_constructor(""));
+    }
+
+    #[test]
+    fn builtin_names_are_case_sensitive() {
+        assert!(!is_builtin_constructor("array"));
+        assert!(!is_builtin_constructor("map"));
+        assert!(!is_builtin_constructor("url"));
+        assert!(!is_builtin_constructor("MAP"));
+        assert!(!is_builtin_constructor("ARRAY"));
+    }
+}

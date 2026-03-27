@@ -227,15 +227,9 @@ mod tests {
     use crate::config::health::HealthConfig;
     use crate::config::rules::{RulesConfig, Severity};
 
-    /// Create a unique temp directory for this test to avoid parallel test races.
-    fn test_dir(name: &str) -> PathBuf {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static COUNTER: AtomicU64 = AtomicU64::new(0);
-        let id = COUNTER.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("fallow-{name}-{id}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+    /// Create a panic-safe temp directory (RAII cleanup via `tempfile::TempDir`).
+    fn test_dir(_name: &str) -> tempfile::TempDir {
+        tempfile::tempdir().expect("create temp dir")
     }
 
     #[test]
@@ -564,7 +558,7 @@ unknown_field = true
     #[test]
     fn load_json_config_file() {
         let dir = test_dir("json-config");
-        let config_path = dir.join(".fallowrc.json");
+        let config_path = dir.path().join(".fallowrc.json");
         std::fs::write(
             &config_path,
             r#"{"entry": ["src/index.ts"], "rules": {"unused-exports": "warn"}}"#,
@@ -574,14 +568,12 @@ unknown_field = true
         let config = FallowConfig::load(&config_path).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn load_jsonc_config_file() {
         let dir = test_dir("jsonc-config");
-        let config_path = dir.join(".fallowrc.json");
+        let config_path = dir.path().join(".fallowrc.json");
         std::fs::write(
             &config_path,
             r#"{
@@ -598,8 +590,6 @@ unknown_field = true
         let config = FallowConfig::load(&config_path).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert_eq!(config.rules.unused_exports, Severity::Warn);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -649,23 +639,21 @@ unknown_field = true
         let dir = test_dir("extends-single");
 
         std::fs::write(
-            dir.join("base.json"),
+            dir.path().join("base.json"),
             r#"{"rules": {"unused-files": "warn"}}"#,
         )
         .unwrap();
         std::fs::write(
-            dir.join(".fallowrc.json"),
+            dir.path().join(".fallowrc.json"),
             r#"{"extends": ["base.json"], "entry": ["src/index.ts"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
         assert_eq!(config.rules.unused_files, Severity::Warn);
         assert_eq!(config.entry, vec!["src/index.ts"]);
         // Unset fields from base still default
         assert_eq!(config.rules.unused_exports, Severity::Error);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -673,23 +661,21 @@ unknown_field = true
         let dir = test_dir("extends-overlay");
 
         std::fs::write(
-            dir.join("base.json"),
+            dir.path().join("base.json"),
             r#"{"rules": {"unused-files": "warn", "unused-exports": "off"}}"#,
         )
         .unwrap();
         std::fs::write(
-            dir.join(".fallowrc.json"),
+            dir.path().join(".fallowrc.json"),
             r#"{"extends": ["base.json"], "rules": {"unused-files": "error"}}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
         // Overlay overrides base
         assert_eq!(config.rules.unused_files, Severity::Error);
         // Base value preserved when not overridden
         assert_eq!(config.rules.unused_exports, Severity::Off);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -697,46 +683,42 @@ unknown_field = true
         let dir = test_dir("extends-chained");
 
         std::fs::write(
-            dir.join("grandparent.json"),
+            dir.path().join("grandparent.json"),
             r#"{"rules": {"unused-files": "off", "unused-exports": "warn"}}"#,
         )
         .unwrap();
         std::fs::write(
-            dir.join("parent.json"),
+            dir.path().join("parent.json"),
             r#"{"extends": ["grandparent.json"], "rules": {"unused-files": "warn"}}"#,
         )
         .unwrap();
         std::fs::write(
-            dir.join(".fallowrc.json"),
+            dir.path().join(".fallowrc.json"),
             r#"{"extends": ["parent.json"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
         // grandparent: off -> parent: warn -> child: inherits warn
         assert_eq!(config.rules.unused_files, Severity::Warn);
         // grandparent: warn, not overridden
         assert_eq!(config.rules.unused_exports, Severity::Warn);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn extends_circular_detected() {
         let dir = test_dir("extends-circular");
 
-        std::fs::write(dir.join("a.json"), r#"{"extends": ["b.json"]}"#).unwrap();
-        std::fs::write(dir.join("b.json"), r#"{"extends": ["a.json"]}"#).unwrap();
+        std::fs::write(dir.path().join("a.json"), r#"{"extends": ["b.json"]}"#).unwrap();
+        std::fs::write(dir.path().join("b.json"), r#"{"extends": ["a.json"]}"#).unwrap();
 
-        let result = FallowConfig::load(&dir.join("a.json"));
+        let result = FallowConfig::load(&dir.path().join("a.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
             err_msg.contains("Circular extends"),
             "Expected circular error, got: {err_msg}"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -744,51 +726,155 @@ unknown_field = true
         let dir = test_dir("extends-missing");
 
         std::fs::write(
-            dir.join(".fallowrc.json"),
+            dir.path().join(".fallowrc.json"),
             r#"{"extends": ["nonexistent.json"]}"#,
         )
         .unwrap();
 
-        let result = FallowConfig::load(&dir.join(".fallowrc.json"));
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
         assert!(result.is_err());
         let err_msg = format!("{}", result.unwrap_err());
         assert!(
             err_msg.contains("not found"),
             "Expected not found error, got: {err_msg}"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn extends_string_sugar() {
         let dir = test_dir("extends-string");
 
-        std::fs::write(dir.join("base.json"), r#"{"ignorePatterns": ["gen/**"]}"#).unwrap();
+        std::fs::write(
+            dir.path().join("base.json"),
+            r#"{"ignorePatterns": ["gen/**"]}"#,
+        )
+        .unwrap();
         // String form instead of array
-        std::fs::write(dir.join(".fallowrc.json"), r#"{"extends": "base.json"}"#).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": "base.json"}"#,
+        )
+        .unwrap();
 
-        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
         assert_eq!(config.ignore_patterns, vec!["gen/**"]);
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn extends_deep_merge_preserves_arrays() {
         let dir = test_dir("extends-array");
 
-        std::fs::write(dir.join("base.json"), r#"{"entry": ["src/a.ts"]}"#).unwrap();
+        std::fs::write(dir.path().join("base.json"), r#"{"entry": ["src/a.ts"]}"#).unwrap();
         std::fs::write(
-            dir.join(".fallowrc.json"),
+            dir.path().join(".fallowrc.json"),
             r#"{"extends": ["base.json"], "entry": ["src/b.ts"]}"#,
         )
         .unwrap();
 
-        let config = FallowConfig::load(&dir.join(".fallowrc.json")).unwrap();
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
         // Arrays are replaced, not merged (overlay replaces base)
         assert_eq!(config.entry, vec!["src/b.ts"]);
+    }
 
-        let _ = std::fs::remove_dir_all(&dir);
+    // ── deep_merge_json unit tests ───────────────────────────────────
+
+    #[test]
+    fn deep_merge_scalar_overlay_replaces_base() {
+        let mut base = serde_json::json!("hello");
+        deep_merge_json(&mut base, serde_json::json!("world"));
+        assert_eq!(base, serde_json::json!("world"));
+    }
+
+    #[test]
+    fn deep_merge_array_overlay_replaces_base() {
+        let mut base = serde_json::json!(["a", "b"]);
+        deep_merge_json(&mut base, serde_json::json!(["c"]));
+        assert_eq!(base, serde_json::json!(["c"]));
+    }
+
+    #[test]
+    fn deep_merge_nested_object_merge() {
+        let mut base = serde_json::json!({
+            "level1": {
+                "level2": {
+                    "a": 1,
+                    "b": 2
+                }
+            }
+        });
+        let overlay = serde_json::json!({
+            "level1": {
+                "level2": {
+                    "b": 99,
+                    "c": 3
+                }
+            }
+        });
+        deep_merge_json(&mut base, overlay);
+        assert_eq!(base["level1"]["level2"]["a"], 1);
+        assert_eq!(base["level1"]["level2"]["b"], 99);
+        assert_eq!(base["level1"]["level2"]["c"], 3);
+    }
+
+    #[test]
+    fn deep_merge_overlay_adds_new_fields() {
+        let mut base = serde_json::json!({"existing": true});
+        let overlay = serde_json::json!({"new_field": "added", "another": 42});
+        deep_merge_json(&mut base, overlay);
+        assert_eq!(base["existing"], true);
+        assert_eq!(base["new_field"], "added");
+        assert_eq!(base["another"], 42);
+    }
+
+    #[test]
+    fn deep_merge_null_overlay_replaces_object() {
+        let mut base = serde_json::json!({"key": "value"});
+        deep_merge_json(&mut base, serde_json::json!(null));
+        assert_eq!(base, serde_json::json!(null));
+    }
+
+    #[test]
+    fn deep_merge_empty_object_overlay_preserves_base() {
+        let mut base = serde_json::json!({"a": 1, "b": 2});
+        deep_merge_json(&mut base, serde_json::json!({}));
+        assert_eq!(base, serde_json::json!({"a": 1, "b": 2}));
+    }
+
+    // ── rule severity parsing via JSON config ────────────────────────
+
+    #[test]
+    fn rules_severity_error_warn_off_from_json() {
+        let json_str = r#"{
+            "rules": {
+                "unused-files": "error",
+                "unused-exports": "warn",
+                "unused-types": "off"
+            }
+        }"#;
+        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(config.rules.unused_files, Severity::Error);
+        assert_eq!(config.rules.unused_exports, Severity::Warn);
+        assert_eq!(config.rules.unused_types, Severity::Off);
+    }
+
+    #[test]
+    fn rules_omitted_default_to_error() {
+        let json_str = r#"{
+            "rules": {
+                "unused-files": "warn"
+            }
+        }"#;
+        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        // All other rules default to error
+        assert_eq!(config.rules.unused_exports, Severity::Error);
+        assert_eq!(config.rules.unused_types, Severity::Error);
+        assert_eq!(config.rules.unused_dependencies, Severity::Error);
+        assert_eq!(config.rules.unresolved_imports, Severity::Error);
+        assert_eq!(config.rules.unlisted_dependencies, Severity::Error);
+        assert_eq!(config.rules.duplicate_exports, Severity::Error);
+        assert_eq!(config.rules.circular_dependencies, Severity::Error);
+        // type_only_dependencies defaults to warn, not error
+        assert_eq!(config.rules.type_only_dependencies, Severity::Warn);
     }
 }

@@ -1456,4 +1456,509 @@ mod tests {
             assert!(matches!(result[0].target, ResolveResult::Unresolvable(_)));
         });
     }
+
+    // -----------------------------------------------------------------------
+    // Dynamic import pattern resolution (template literals & concat)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dynamic_patterns_template_literal_prefix_suffix() {
+        // Simulates `import(`./locales/${lang}.json`)` -> prefix="./locales/", suffix=".json"
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: "./locales/".into(),
+            suffix: Some(".json".into()),
+            span: dummy_span(),
+        }];
+        let canonical_paths = vec![
+            PathBuf::from("/project/src/locales/en.json"),
+            PathBuf::from("/project/src/locales/de.json"),
+            PathBuf::from("/project/src/locales/README.md"),
+            PathBuf::from("/project/src/config.ts"),
+        ];
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/locales/en.json"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/locales/de.json"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/locales/README.md"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(3),
+                path: PathBuf::from("/project/src/config.ts"),
+                size_bytes: 100,
+            },
+        ];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        assert_eq!(result.len(), 1, "should produce exactly one pattern match");
+        let matched_ids = &result[0].1;
+        assert_eq!(
+            matched_ids.len(),
+            2,
+            "should match en.json and de.json only"
+        );
+        assert!(matched_ids.contains(&FileId(0)));
+        assert!(matched_ids.contains(&FileId(1)));
+        assert!(
+            !matched_ids.contains(&FileId(2)),
+            "README.md should not match .json suffix"
+        );
+        assert!(
+            !matched_ids.contains(&FileId(3)),
+            "config.ts should not match locales/ prefix"
+        );
+    }
+
+    #[test]
+    fn dynamic_patterns_string_concat_prefix_only() {
+        // Simulates `import('./pages/' + name)` -> prefix="./pages/", suffix=None
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: "./pages/".into(),
+            suffix: None,
+            span: dummy_span(),
+        }];
+        let canonical_paths = vec![
+            PathBuf::from("/project/src/pages/home.ts"),
+            PathBuf::from("/project/src/pages/about.ts"),
+            PathBuf::from("/project/src/pages/nested/deep.ts"),
+            PathBuf::from("/project/src/utils.ts"),
+        ];
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/pages/home.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/pages/about.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/pages/nested/deep.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(3),
+                path: PathBuf::from("/project/src/utils.ts"),
+                size_bytes: 100,
+            },
+        ];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        assert_eq!(result.len(), 1);
+        let matched_ids = &result[0].1;
+        // ./pages/* matches files directly in pages/ (globset * does not cross /)
+        assert!(matched_ids.contains(&FileId(0)), "home.ts should match");
+        assert!(matched_ids.contains(&FileId(1)), "about.ts should match");
+        assert!(
+            !matched_ids.contains(&FileId(3)),
+            "utils.ts should not match pages/ prefix"
+        );
+    }
+
+    #[test]
+    fn dynamic_patterns_import_meta_glob_recursive() {
+        // Simulates `import.meta.glob('./components/**/*.ts')` -> prefix has glob chars
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: "./components/**/*.ts".into(),
+            suffix: None,
+            span: dummy_span(),
+        }];
+        let canonical_paths = vec![
+            PathBuf::from("/project/src/components/Button.ts"),
+            PathBuf::from("/project/src/components/forms/Input.ts"),
+            PathBuf::from("/project/src/components/Button.css"),
+            PathBuf::from("/project/src/utils.ts"),
+        ];
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/components/Button.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/components/forms/Input.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/components/Button.css"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(3),
+                path: PathBuf::from("/project/src/utils.ts"),
+                size_bytes: 100,
+            },
+        ];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        assert_eq!(result.len(), 1);
+        let matched_ids = &result[0].1;
+        assert!(
+            matched_ids.contains(&FileId(0)),
+            "Button.ts should match **/*.ts"
+        );
+        assert!(
+            matched_ids.contains(&FileId(1)),
+            "forms/Input.ts should match **/*.ts recursively"
+        );
+        assert!(
+            !matched_ids.contains(&FileId(2)),
+            "Button.css should not match *.ts pattern"
+        );
+        assert!(
+            !matched_ids.contains(&FileId(3)),
+            "utils.ts outside components/ should not match"
+        );
+    }
+
+    #[test]
+    fn dynamic_patterns_import_meta_glob_brace_expansion() {
+        // Simulates `import.meta.glob('./routes/**/*.{ts,tsx}')`
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: "./routes/**/*.{ts,tsx}".into(),
+            suffix: None,
+            span: dummy_span(),
+        }];
+        let canonical_paths = vec![
+            PathBuf::from("/project/src/routes/home.ts"),
+            PathBuf::from("/project/src/routes/about.tsx"),
+            PathBuf::from("/project/src/routes/layout.css"),
+        ];
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/routes/home.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/routes/about.tsx"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/routes/layout.css"),
+                size_bytes: 100,
+            },
+        ];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        assert_eq!(result.len(), 1);
+        let matched_ids = &result[0].1;
+        assert!(matched_ids.contains(&FileId(0)), "home.ts should match");
+        assert!(matched_ids.contains(&FileId(1)), "about.tsx should match");
+        assert!(
+            !matched_ids.contains(&FileId(2)),
+            "layout.css should not match ts/tsx brace expansion"
+        );
+    }
+
+    #[test]
+    fn dynamic_patterns_no_static_part_matches_everything() {
+        // Simulates `import(variable)` where there is no static prefix at all.
+        // In practice, the extractor would not emit a DynamicImportPattern for
+        // a fully dynamic import, but if it did with prefix="" and suffix=None,
+        // the glob would be "*" which matches everything in the directory.
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: String::new(),
+            suffix: None,
+            span: dummy_span(),
+        }];
+        let canonical_paths = vec![
+            PathBuf::from("/project/src/a.ts"),
+            PathBuf::from("/project/src/b.ts"),
+        ];
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/a.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/b.ts"),
+                size_bytes: 100,
+            },
+        ];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        // "*" matches all files directly in from_dir
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].1.len(), 2);
+    }
+
+    #[test]
+    fn dynamic_patterns_multiple_patterns_independent() {
+        // Multiple patterns should be matched independently
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![
+            DynamicImportPattern {
+                prefix: "./locales/".into(),
+                suffix: Some(".json".into()),
+                span: dummy_span(),
+            },
+            DynamicImportPattern {
+                prefix: "./pages/".into(),
+                suffix: Some(".ts".into()),
+                span: dummy_span(),
+            },
+        ];
+        let canonical_paths = vec![
+            PathBuf::from("/project/src/locales/en.json"),
+            PathBuf::from("/project/src/pages/home.ts"),
+            PathBuf::from("/project/src/utils.ts"),
+        ];
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/locales/en.json"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/pages/home.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/utils.ts"),
+                size_bytes: 100,
+            },
+        ];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        assert_eq!(result.len(), 2, "both patterns should produce matches");
+        // First pattern matches locales
+        assert!(result[0].1.contains(&FileId(0)));
+        assert_eq!(result[0].1.len(), 1);
+        // Second pattern matches pages
+        assert!(result[1].1.contains(&FileId(1)));
+        assert_eq!(result[1].1.len(), 1);
+    }
+
+    #[test]
+    fn dynamic_patterns_files_outside_from_dir_not_matched() {
+        // Files not under from_dir should never match
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: "./utils/".into(),
+            suffix: None,
+            span: dummy_span(),
+        }];
+        let canonical_paths = vec![
+            PathBuf::from("/project/other/utils/helper.ts"),
+            PathBuf::from("/project/src/utils/helper.ts"),
+        ];
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/other/utils/helper.ts"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/utils/helper.ts"),
+                size_bytes: 100,
+            },
+        ];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        assert_eq!(result.len(), 1);
+        let matched_ids = &result[0].1;
+        assert!(
+            !matched_ids.contains(&FileId(0)),
+            "file outside from_dir should not match"
+        );
+        assert!(
+            matched_ids.contains(&FileId(1)),
+            "file inside from_dir should match"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Dynamic patterns with empty canonical paths (root-is-canonical path)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dynamic_patterns_raw_paths_when_canonical_empty() {
+        // When canonical_paths is empty, resolve_dynamic_patterns uses raw file paths
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: "./locales/".into(),
+            suffix: Some(".json".into()),
+            span: dummy_span(),
+        }];
+        let canonical_paths: Vec<PathBuf> = vec![]; // empty = root is canonical
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: PathBuf::from("/project/src/locales/en.json"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: PathBuf::from("/project/src/locales/fr.json"),
+                size_bytes: 100,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: PathBuf::from("/project/src/main.ts"),
+                size_bytes: 100,
+            },
+        ];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].1.len(), 2);
+        assert!(result[0].1.contains(&FileId(0)));
+        assert!(result[0].1.contains(&FileId(1)));
+    }
+
+    #[test]
+    fn dynamic_patterns_raw_paths_no_match() {
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: "./missing-dir/".into(),
+            suffix: None,
+            span: dummy_span(),
+        }];
+        let canonical_paths: Vec<PathBuf> = vec![];
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/src/utils.ts"),
+            size_bytes: 100,
+        }];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        assert!(
+            result.is_empty(),
+            "no files match the pattern, should return empty"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // Dynamic import: destructured names preserve source across all entries
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dynamic_import_destructured_all_share_same_target() {
+        with_empty_ctx(|ctx| {
+            let imp = make_dynamic("react", vec!["useState", "useEffect", "useRef"], None);
+            let file = Path::new("/project/src/app.ts");
+            let result = resolve_single_dynamic_import(ctx, file, &imp);
+
+            assert_eq!(result.len(), 3);
+            // All three should resolve to the same target (same source)
+            for resolved in &result {
+                assert_eq!(resolved.info.source, "react");
+                assert!(!resolved.info.is_type_only);
+                assert!(matches!(
+                    resolved.info.imported_name,
+                    ImportedName::Named(_)
+                ));
+            }
+            // Verify specific names
+            let names: Vec<&str> = result
+                .iter()
+                .filter_map(|r| match &r.info.imported_name {
+                    ImportedName::Named(n) => Some(n.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(names, vec!["useState", "useEffect", "useRef"]);
+        });
+    }
+
+    #[test]
+    fn dynamic_import_empty_destructured_with_no_local_is_side_effect() {
+        // Empty destructured + no local_name = side-effect import
+        with_empty_ctx(|ctx| {
+            let imp = make_dynamic("./setup", vec![], None);
+            let file = Path::new("/project/src/main.ts");
+            let result = resolve_single_dynamic_import(ctx, file, &imp);
+
+            assert_eq!(result.len(), 1);
+            assert!(matches!(
+                result[0].info.imported_name,
+                ImportedName::SideEffect
+            ));
+            assert_eq!(result[0].info.local_name, "");
+        });
+    }
+
+    #[test]
+    fn dynamic_import_bare_specifier_becomes_npm_package() {
+        with_empty_ctx(|ctx| {
+            let imp = make_dynamic("lodash", vec![], Some("_"));
+            let file = Path::new("/project/src/app.ts");
+            let result = resolve_single_dynamic_import(ctx, file, &imp);
+
+            assert_eq!(result.len(), 1);
+            assert!(matches!(
+                result[0].target,
+                ResolveResult::NpmPackage(ref pkg) if pkg == "lodash"
+            ));
+            assert!(matches!(
+                result[0].info.imported_name,
+                ImportedName::Namespace
+            ));
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Dynamic patterns: invalid glob pattern handling
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn dynamic_patterns_invalid_glob_skipped() {
+        // If a pattern produces an invalid glob, it should be silently skipped
+        let from_dir = Path::new("/project/src");
+        let patterns = vec![DynamicImportPattern {
+            prefix: "./[invalid".into(), // unclosed bracket = invalid glob
+            suffix: None,
+            span: dummy_span(),
+        }];
+        let canonical_paths = vec![PathBuf::from("/project/src/test.ts")];
+        let files = vec![DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/src/test.ts"),
+            size_bytes: 100,
+        }];
+
+        let result = resolve_dynamic_patterns(from_dir, &patterns, &canonical_paths, &files);
+
+        // Invalid glob should be silently dropped (filter_map returns None)
+        assert!(
+            result.is_empty(),
+            "invalid glob pattern should be skipped gracefully"
+        );
+    }
 }

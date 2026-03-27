@@ -477,6 +477,7 @@ pub fn compile_glob_set(patterns: &[String]) -> Option<globset::GlobSet> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_types::discover::FileId;
     use proptest::prelude::*;
 
     proptest! {
@@ -510,6 +511,303 @@ mod tests {
         ) {
             // Should not panic regardless of input
             let _ = compile_glob_set(&patterns);
+        }
+    }
+
+    // compile_glob_set unit tests
+    #[test]
+    fn compile_glob_set_empty_input() {
+        assert!(
+            compile_glob_set(&[]).is_none(),
+            "empty patterns should return None"
+        );
+    }
+
+    #[test]
+    fn compile_glob_set_valid_patterns() {
+        let patterns = vec!["**/*.ts".to_string(), "src/**/*.js".to_string()];
+        let set = compile_glob_set(&patterns);
+        assert!(set.is_some(), "valid patterns should compile");
+        let set = set.unwrap();
+        assert!(set.is_match("src/foo.ts"));
+        assert!(set.is_match("src/bar.js"));
+        assert!(!set.is_match("src/bar.py"));
+    }
+
+    // resolve_entry_path unit tests
+    mod resolve_entry_path_tests {
+        use super::*;
+
+        #[test]
+        fn resolves_existing_file() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("index.ts"), "export const a = 1;").unwrap();
+
+            let canonical = dir.path().canonicalize().unwrap();
+            let result = resolve_entry_path(
+                dir.path(),
+                "src/index.ts",
+                &canonical,
+                EntryPointSource::PackageJsonMain,
+            );
+            assert!(result.is_some(), "should resolve an existing file");
+            assert!(result.unwrap().path.ends_with("src/index.ts"));
+        }
+
+        #[test]
+        fn resolves_with_extension_fallback() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            // Use canonical base to avoid macOS /var → /private/var symlink mismatch
+            let canonical = dir.path().canonicalize().unwrap();
+            let src = canonical.join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("index.ts"), "export const a = 1;").unwrap();
+
+            // Provide path without extension — should try adding .ts, .tsx, etc.
+            let result = resolve_entry_path(
+                &canonical,
+                "src/index",
+                &canonical,
+                EntryPointSource::PackageJsonMain,
+            );
+            assert!(
+                result.is_some(),
+                "should resolve via extension fallback when exact path doesn't exist"
+            );
+            let ep = result.unwrap();
+            assert!(
+                ep.path.to_string_lossy().contains("index.ts"),
+                "should find index.ts via extension fallback"
+            );
+        }
+
+        #[test]
+        fn returns_none_for_nonexistent_file() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let canonical = dir.path().canonicalize().unwrap();
+            let result = resolve_entry_path(
+                dir.path(),
+                "does/not/exist.ts",
+                &canonical,
+                EntryPointSource::PackageJsonMain,
+            );
+            assert!(result.is_none(), "should return None for nonexistent files");
+        }
+
+        #[test]
+        fn maps_dist_output_to_src() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("utils.ts"), "export const u = 1;").unwrap();
+
+            // Also create the dist/ file to make sure it prefers src/
+            let dist = dir.path().join("dist");
+            std::fs::create_dir_all(&dist).unwrap();
+            std::fs::write(dist.join("utils.js"), "// compiled").unwrap();
+
+            let canonical = dir.path().canonicalize().unwrap();
+            let result = resolve_entry_path(
+                dir.path(),
+                "./dist/utils.js",
+                &canonical,
+                EntryPointSource::PackageJsonExports,
+            );
+            assert!(result.is_some(), "should resolve dist/ path to src/");
+            let ep = result.unwrap();
+            assert!(
+                ep.path.to_string_lossy().contains("src/utils.ts"),
+                "should map ./dist/utils.js to src/utils.ts"
+            );
+        }
+
+        #[test]
+        fn maps_build_output_to_src() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            // Use canonical base to avoid macOS /var → /private/var symlink mismatch
+            let canonical = dir.path().canonicalize().unwrap();
+            let src = canonical.join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("index.tsx"), "export default () => {};").unwrap();
+
+            let result = resolve_entry_path(
+                &canonical,
+                "./build/index.js",
+                &canonical,
+                EntryPointSource::PackageJsonExports,
+            );
+            assert!(result.is_some(), "should map build/ output to src/");
+            let ep = result.unwrap();
+            assert!(
+                ep.path.to_string_lossy().contains("src/index.tsx"),
+                "should map ./build/index.js to src/index.tsx"
+            );
+        }
+
+        #[test]
+        fn preserves_entry_point_source() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::write(dir.path().join("index.ts"), "export const a = 1;").unwrap();
+
+            let canonical = dir.path().canonicalize().unwrap();
+            let result = resolve_entry_path(
+                dir.path(),
+                "index.ts",
+                &canonical,
+                EntryPointSource::PackageJsonScript,
+            );
+            assert!(result.is_some());
+            assert!(
+                matches!(result.unwrap().source, EntryPointSource::PackageJsonScript),
+                "should preserve the source kind"
+            );
+        }
+    }
+
+    // try_output_to_source_path unit tests
+    mod output_to_source_tests {
+        use super::*;
+
+        #[test]
+        fn maps_dist_to_src_with_ts_extension() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("utils.ts"), "export const u = 1;").unwrap();
+
+            let result = try_output_to_source_path(dir.path(), "./dist/utils.js");
+            assert!(result.is_some());
+            assert!(result.unwrap().to_string_lossy().contains("src/utils.ts"));
+        }
+
+        #[test]
+        fn returns_none_when_no_source_file_exists() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            // No src/ directory at all
+            let result = try_output_to_source_path(dir.path(), "./dist/missing.js");
+            assert!(result.is_none());
+        }
+
+        #[test]
+        fn ignores_non_output_directories() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("foo.ts"), "export const f = 1;").unwrap();
+
+            // "lib" is not in OUTPUT_DIRS, so no mapping should occur
+            let result = try_output_to_source_path(dir.path(), "./lib/foo.js");
+            assert!(result.is_none());
+        }
+
+        #[test]
+        fn maps_nested_output_path_preserving_prefix() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let modules_src = dir.path().join("modules").join("src");
+            std::fs::create_dir_all(&modules_src).unwrap();
+            std::fs::write(modules_src.join("helper.ts"), "export const h = 1;").unwrap();
+
+            let result = try_output_to_source_path(dir.path(), "./modules/dist/helper.js");
+            assert!(result.is_some());
+            assert!(
+                result
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains("modules/src/helper.ts")
+            );
+        }
+    }
+
+    // apply_default_fallback unit tests
+    mod default_fallback_tests {
+        use super::*;
+
+        #[test]
+        fn finds_src_index_ts_as_fallback() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            let index_path = src.join("index.ts");
+            std::fs::write(&index_path, "export const a = 1;").unwrap();
+
+            let files = vec![DiscoveredFile {
+                id: FileId(0),
+                path: index_path.clone(),
+                size_bytes: 20,
+            }];
+
+            let entries = apply_default_fallback(&files, dir.path(), None);
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].path, index_path);
+            assert!(matches!(entries[0].source, EntryPointSource::DefaultIndex));
+        }
+
+        #[test]
+        fn finds_root_index_js_as_fallback() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let index_path = dir.path().join("index.js");
+            std::fs::write(&index_path, "module.exports = {};").unwrap();
+
+            let files = vec![DiscoveredFile {
+                id: FileId(0),
+                path: index_path.clone(),
+                size_bytes: 21,
+            }];
+
+            let entries = apply_default_fallback(&files, dir.path(), None);
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].path, index_path);
+        }
+
+        #[test]
+        fn returns_empty_when_no_index_file() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let other_path = dir.path().join("src").join("utils.ts");
+
+            let files = vec![DiscoveredFile {
+                id: FileId(0),
+                path: other_path,
+                size_bytes: 10,
+            }];
+
+            let entries = apply_default_fallback(&files, dir.path(), None);
+            assert!(
+                entries.is_empty(),
+                "non-index files should not match default fallback"
+            );
+        }
+
+        #[test]
+        fn workspace_filter_restricts_scope() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let ws_a = dir.path().join("packages").join("a").join("src");
+            std::fs::create_dir_all(&ws_a).unwrap();
+            let ws_b = dir.path().join("packages").join("b").join("src");
+            std::fs::create_dir_all(&ws_b).unwrap();
+
+            let index_a = ws_a.join("index.ts");
+            let index_b = ws_b.join("index.ts");
+
+            let files = vec![
+                DiscoveredFile {
+                    id: FileId(0),
+                    path: index_a.clone(),
+                    size_bytes: 10,
+                },
+                DiscoveredFile {
+                    id: FileId(1),
+                    path: index_b.clone(),
+                    size_bytes: 10,
+                },
+            ];
+
+            // Filter to workspace A only
+            let ws_root = dir.path().join("packages").join("a");
+            let entries = apply_default_fallback(&files, &ws_root, Some(&ws_root));
+            assert_eq!(entries.len(), 1);
+            assert_eq!(entries[0].path, index_a);
         }
     }
 }

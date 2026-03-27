@@ -447,4 +447,181 @@ mod tests {
         let refs = extract_fly_toml_file_refs(content);
         assert_eq!(refs, vec!["src/worker.ts"]);
     }
+
+    // strip_dockerfile_instruction tests
+    #[test]
+    fn strip_instruction_run() {
+        assert_eq!(
+            strip_dockerfile_instruction("RUN node server.js"),
+            Some("node server.js")
+        );
+    }
+
+    #[test]
+    fn strip_instruction_cmd() {
+        assert_eq!(
+            strip_dockerfile_instruction("CMD node server.js"),
+            Some("node server.js")
+        );
+    }
+
+    #[test]
+    fn strip_instruction_entrypoint() {
+        assert_eq!(
+            strip_dockerfile_instruction("ENTRYPOINT node server.js"),
+            Some("node server.js")
+        );
+    }
+
+    #[test]
+    fn strip_instruction_case_insensitive() {
+        assert_eq!(
+            strip_dockerfile_instruction("run node server.js"),
+            Some("node server.js")
+        );
+        assert_eq!(
+            strip_dockerfile_instruction("cmd node server.js"),
+            Some("node server.js")
+        );
+    }
+
+    #[test]
+    fn strip_instruction_non_matching() {
+        assert_eq!(strip_dockerfile_instruction("FROM node:20"), None);
+        assert_eq!(strip_dockerfile_instruction("COPY . ."), None);
+        assert_eq!(strip_dockerfile_instruction("EXPOSE 3000"), None);
+        assert_eq!(strip_dockerfile_instruction("ENV FOO=bar"), None);
+    }
+
+    // extract_flag_value_file_refs tests
+    #[test]
+    fn flag_value_file_refs_esbuild_outfile() {
+        let refs = extract_flag_value_file_refs("npx esbuild src/entry.ts --outfile=dist/out.js");
+        assert_eq!(refs, vec!["dist/out.js"]);
+    }
+
+    #[test]
+    fn flag_value_file_refs_alias() {
+        let refs = extract_flag_value_file_refs("node --alias:helper=./src/helper.ts app.js");
+        assert_eq!(refs, vec!["./src/helper.ts"]);
+    }
+
+    #[test]
+    fn flag_value_file_refs_no_flags() {
+        let refs = extract_flag_value_file_refs("node src/server.js");
+        assert!(refs.is_empty(), "non-flag tokens should not match");
+    }
+
+    #[test]
+    fn flag_value_file_refs_flag_without_file() {
+        let refs = extract_flag_value_file_refs("node --max-old-space-size=4096 server.js");
+        assert!(
+            refs.is_empty(),
+            "flag values that are not file paths should not match"
+        );
+    }
+
+    // parse_exec_form edge cases
+    #[test]
+    fn exec_form_single_element() {
+        assert_eq!(parse_exec_form(r#"["node"]"#), "node");
+    }
+
+    #[test]
+    fn exec_form_empty() {
+        assert_eq!(parse_exec_form("[]"), "");
+    }
+
+    #[test]
+    fn exec_form_single_quotes() {
+        assert_eq!(parse_exec_form("['node', 'server.js']"), "node server.js");
+    }
+
+    // discover_infrastructure_entry_points integration tests
+    mod integration {
+        use super::*;
+
+        #[test]
+        fn discovers_dockerfile_cmd_entry_point() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src = dir.path().join("src");
+            std::fs::create_dir_all(&src).unwrap();
+            std::fs::write(src.join("server.ts"), "export const s = 1;").unwrap();
+
+            let dockerfile = "FROM node:20\nCOPY . .\nCMD node src/server.ts";
+            std::fs::write(dir.path().join("Dockerfile"), dockerfile).unwrap();
+
+            let entries = discover_infrastructure_entry_points(dir.path());
+            assert_eq!(entries.len(), 1);
+            assert!(entries[0].path.ends_with("src/server.ts"));
+            assert!(matches!(
+                entries[0].source,
+                EntryPointSource::InfrastructureConfig
+            ));
+        }
+
+        #[test]
+        fn discovers_procfile_entry_points() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::write(dir.path().join("server.js"), "// server").unwrap();
+            std::fs::write(dir.path().join("worker.js"), "// worker").unwrap();
+
+            let procfile = "web: node server.js\nworker: node worker.js";
+            std::fs::write(dir.path().join("Procfile"), procfile).unwrap();
+
+            let entries = discover_infrastructure_entry_points(dir.path());
+            assert_eq!(entries.len(), 2);
+
+            let paths: Vec<String> = entries
+                .iter()
+                .map(|e| e.path.file_name().unwrap().to_string_lossy().into_owned())
+                .collect();
+            assert!(paths.contains(&"server.js".to_string()));
+            assert!(paths.contains(&"worker.js".to_string()));
+        }
+
+        #[test]
+        fn no_infrastructure_files_returns_empty() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let entries = discover_infrastructure_entry_points(dir.path());
+            assert!(entries.is_empty());
+        }
+
+        #[test]
+        fn discovers_variant_dockerfile_names() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let scripts = dir.path().join("scripts");
+            std::fs::create_dir_all(&scripts).unwrap();
+            std::fs::write(scripts.join("migrate.ts"), "// migrate").unwrap();
+
+            // Dockerfile.worker variant
+            let dockerfile = "FROM node:20\nRUN node scripts/migrate.ts";
+            std::fs::write(dir.path().join("Dockerfile.worker"), dockerfile).unwrap();
+
+            let entries = discover_infrastructure_entry_points(dir.path());
+            assert_eq!(entries.len(), 1);
+            assert!(entries[0].path.ends_with("scripts/migrate.ts"));
+        }
+
+        #[test]
+        fn deduplicates_entry_points() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            std::fs::write(dir.path().join("server.js"), "// server").unwrap();
+
+            // Both Dockerfile and Procfile reference the same file
+            std::fs::write(
+                dir.path().join("Dockerfile"),
+                "FROM node:20\nCMD node server.js",
+            )
+            .unwrap();
+            std::fs::write(dir.path().join("Procfile"), "web: node server.js").unwrap();
+
+            let entries = discover_infrastructure_entry_points(dir.path());
+            assert_eq!(
+                entries.len(),
+                1,
+                "duplicate entry points should be deduplicated"
+            );
+        }
+    }
 }
