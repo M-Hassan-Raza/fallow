@@ -886,4 +886,295 @@ unknown_field = true
         // type_only_dependencies defaults to warn, not error
         assert_eq!(config.rules.type_only_dependencies, Severity::Warn);
     }
+
+    // ── find_and_load tests ───────────────────────────────────────
+
+    #[test]
+    fn find_and_load_returns_none_when_no_config() {
+        let dir = test_dir("find-none");
+        // Create a .git dir so it stops searching
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+
+        let result = FallowConfig::find_and_load(dir.path()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_and_load_finds_fallowrc_json() {
+        let dir = test_dir("find-json");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["src/main.ts"]}"#,
+        )
+        .unwrap();
+
+        let (config, path) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
+        assert_eq!(config.entry, vec!["src/main.ts"]);
+        assert!(path.ends_with(".fallowrc.json"));
+    }
+
+    #[test]
+    fn find_and_load_prefers_fallowrc_json_over_toml() {
+        let dir = test_dir("find-priority");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["from-json.ts"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("fallow.toml"),
+            "entry = [\"from-toml.ts\"]\n",
+        )
+        .unwrap();
+
+        let (config, path) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
+        assert_eq!(config.entry, vec!["from-json.ts"]);
+        assert!(path.ends_with(".fallowrc.json"));
+    }
+
+    #[test]
+    fn find_and_load_finds_fallow_toml() {
+        let dir = test_dir("find-toml");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join("fallow.toml"),
+            "entry = [\"src/index.ts\"]\n",
+        )
+        .unwrap();
+
+        let (config, _) = FallowConfig::find_and_load(dir.path()).unwrap().unwrap();
+        assert_eq!(config.entry, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn find_and_load_stops_at_git_dir() {
+        let dir = test_dir("find-git-stop");
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        // .git marker in root stops search
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        // Config file above .git should not be found from sub
+        // (sub has no .git or package.json, so it keeps searching up to parent)
+        // But parent has .git, so it stops there without finding config
+        let result = FallowConfig::find_and_load(&sub).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_and_load_stops_at_package_json() {
+        let dir = test_dir("find-pkg-stop");
+        std::fs::write(dir.path().join("package.json"), r#"{"name":"test"}"#).unwrap();
+
+        let result = FallowConfig::find_and_load(dir.path()).unwrap();
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn find_and_load_returns_error_for_invalid_config() {
+        let dir = test_dir("find-invalid");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r"{ this is not valid json }",
+        )
+        .unwrap();
+
+        let result = FallowConfig::find_and_load(dir.path());
+        assert!(result.is_err());
+    }
+
+    // ── load TOML config file ────────────────────────────────────
+
+    #[test]
+    fn load_toml_config_file() {
+        let dir = test_dir("toml-config");
+        let config_path = dir.path().join("fallow.toml");
+        std::fs::write(
+            &config_path,
+            r#"
+entry = ["src/index.ts"]
+ignorePatterns = ["dist/**"]
+
+[rules]
+unused-files = "warn"
+
+[duplicates]
+minTokens = 100
+"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&config_path).unwrap();
+        assert_eq!(config.entry, vec!["src/index.ts"]);
+        assert_eq!(config.ignore_patterns, vec!["dist/**"]);
+        assert_eq!(config.rules.unused_files, Severity::Warn);
+        assert_eq!(config.duplicates.min_tokens, 100);
+    }
+
+    // ── extends absolute path rejection ──────────────────────────
+
+    #[test]
+    fn extends_absolute_path_rejected() {
+        let dir = test_dir("extends-absolute");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": ["/absolute/path/config.json"]}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("must be relative"),
+            "Expected 'must be relative' error, got: {err_msg}"
+        );
+    }
+
+    // ── resolve production mode ─────────────────────────────────
+
+    #[test]
+    fn resolve_production_mode_disables_dev_deps() {
+        let config = FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: DuplicatesConfig::default(),
+            health: HealthConfig::default(),
+            rules: RulesConfig::default(),
+            production: true,
+            plugins: vec![],
+            overrides: vec![],
+        };
+        let resolved = config.resolve(
+            PathBuf::from("/tmp/test"),
+            OutputFormat::Human,
+            4,
+            false,
+            true,
+        );
+        assert!(resolved.production);
+        assert_eq!(resolved.rules.unused_dev_dependencies, Severity::Off);
+        assert_eq!(resolved.rules.unused_optional_dependencies, Severity::Off);
+        // Other rules should remain at default (Error)
+        assert_eq!(resolved.rules.unused_files, Severity::Error);
+        assert_eq!(resolved.rules.unused_exports, Severity::Error);
+    }
+
+    // ── config format fallback to TOML for unknown extensions ───
+
+    #[test]
+    fn config_format_defaults_to_toml_for_unknown() {
+        assert!(matches!(
+            ConfigFormat::from_path(Path::new("config.yaml")),
+            ConfigFormat::Toml
+        ));
+        assert!(matches!(
+            ConfigFormat::from_path(Path::new("config")),
+            ConfigFormat::Toml
+        ));
+    }
+
+    // ── deep_merge type coercion ─────────────────────────────────
+
+    #[test]
+    fn deep_merge_object_over_scalar_replaces() {
+        let mut base = serde_json::json!("just a string");
+        let overlay = serde_json::json!({"key": "value"});
+        deep_merge_json(&mut base, overlay);
+        assert_eq!(base, serde_json::json!({"key": "value"}));
+    }
+
+    #[test]
+    fn deep_merge_scalar_over_object_replaces() {
+        let mut base = serde_json::json!({"key": "value"});
+        let overlay = serde_json::json!(42);
+        deep_merge_json(&mut base, overlay);
+        assert_eq!(base, serde_json::json!(42));
+    }
+
+    // ── extends with non-string/array extends field ──────────────
+
+    #[test]
+    fn extends_non_string_non_array_ignored() {
+        let dir = test_dir("extends-numeric");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": 42, "entry": ["src/index.ts"]}"#,
+        )
+        .unwrap();
+
+        // extends=42 is neither string nor array, so it's treated as no extends
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert_eq!(config.entry, vec!["src/index.ts"]);
+    }
+
+    // ── extends with multiple bases (later overrides earlier) ────
+
+    #[test]
+    fn extends_multiple_bases_later_wins() {
+        let dir = test_dir("extends-multi-base");
+
+        std::fs::write(
+            dir.path().join("base-a.json"),
+            r#"{"rules": {"unused-files": "warn"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("base-b.json"),
+            r#"{"rules": {"unused-files": "off"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"extends": ["base-a.json", "base-b.json"]}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        // base-b is later in the array, so its value should win
+        assert_eq!(config.rules.unused_files, Severity::Off);
+    }
+
+    // ── config with production flag ──────────────────────────────
+
+    #[test]
+    fn fallow_config_deserialize_production() {
+        let json_str = r#"{"production": true}"#;
+        let config: FallowConfig = serde_json::from_str(json_str).unwrap();
+        assert!(config.production);
+    }
+
+    #[test]
+    fn fallow_config_production_defaults_false() {
+        let config: FallowConfig = serde_json::from_str("{}").unwrap();
+        assert!(!config.production);
+    }
+
+    // ── optional dependency names ────────────────────────────────
+
+    #[test]
+    fn package_json_optional_dependency_names() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{"optionalDependencies": {"fsevents": "^2", "chokidar": "^3"}}"#,
+        )
+        .unwrap();
+        let opt = pkg.optional_dependency_names();
+        assert_eq!(opt.len(), 2);
+        assert!(opt.contains(&"fsevents".to_string()));
+        assert!(opt.contains(&"chokidar".to_string()));
+    }
+
+    #[test]
+    fn package_json_optional_deps_empty_when_missing() {
+        let pkg: PackageJson = serde_json::from_str(r#"{"name": "test"}"#).unwrap();
+        assert!(pkg.optional_dependency_names().is_empty());
+    }
 }

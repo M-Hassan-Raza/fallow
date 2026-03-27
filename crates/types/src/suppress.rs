@@ -201,4 +201,62 @@ mod tests {
         assert_eq!(IssueKind::from_discriminant(0), None);
         assert_eq!(IssueKind::from_discriminant(13), None);
     }
+
+    // ── Discriminant uniqueness ─────────────────────────────────
+
+    #[test]
+    fn discriminant_values_are_unique() {
+        let all_kinds = [
+            IssueKind::UnusedFile,
+            IssueKind::UnusedExport,
+            IssueKind::UnusedType,
+            IssueKind::UnusedDependency,
+            IssueKind::UnusedDevDependency,
+            IssueKind::UnusedEnumMember,
+            IssueKind::UnusedClassMember,
+            IssueKind::UnresolvedImport,
+            IssueKind::UnlistedDependency,
+            IssueKind::DuplicateExport,
+            IssueKind::CodeDuplication,
+            IssueKind::CircularDependency,
+        ];
+        let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
+        let mut sorted = discriminants.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(
+            discriminants.len(),
+            sorted.len(),
+            "discriminant values must be unique"
+        );
+    }
+
+    // ── Discriminant starts at 1 ────────────────────────────────
+
+    #[test]
+    fn discriminant_starts_at_one() {
+        assert_eq!(IssueKind::UnusedFile.to_discriminant(), 1);
+    }
+
+    // ── Suppression struct ──────────────────────────────────────
+
+    #[test]
+    fn suppression_line_zero_is_file_wide() {
+        let s = Suppression {
+            line: 0,
+            kind: None,
+        };
+        assert_eq!(s.line, 0);
+        assert!(s.kind.is_none());
+    }
+
+    #[test]
+    fn suppression_with_specific_kind_and_line() {
+        let s = Suppression {
+            line: 42,
+            kind: Some(IssueKind::UnusedExport),
+        };
+        assert_eq!(s.line, 42);
+        assert_eq!(s.kind, Some(IssueKind::UnusedExport));
+    }
 }

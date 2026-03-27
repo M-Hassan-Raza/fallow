@@ -674,4 +674,176 @@ mod tests {
         assert_eq!(parsed["value"], 15.0);
         assert_eq!(parsed["threshold"], 10.0);
     }
+
+    // --- RecommendationCategory compact_labels ---
+
+    #[test]
+    fn category_compact_labels_are_non_empty() {
+        let categories = [
+            RecommendationCategory::UrgentChurnComplexity,
+            RecommendationCategory::BreakCircularDependency,
+            RecommendationCategory::SplitHighImpact,
+            RecommendationCategory::RemoveDeadCode,
+            RecommendationCategory::ExtractComplexFunctions,
+            RecommendationCategory::ExtractDependencies,
+        ];
+        for cat in &categories {
+            assert!(
+                !cat.compact_label().is_empty(),
+                "{cat:?} should have a compact_label"
+            );
+        }
+    }
+
+    #[test]
+    fn category_compact_labels_are_unique() {
+        let categories = [
+            RecommendationCategory::UrgentChurnComplexity,
+            RecommendationCategory::BreakCircularDependency,
+            RecommendationCategory::SplitHighImpact,
+            RecommendationCategory::RemoveDeadCode,
+            RecommendationCategory::ExtractComplexFunctions,
+            RecommendationCategory::ExtractDependencies,
+        ];
+        let labels: Vec<&str> = categories.iter().map(|c| c.compact_label()).collect();
+        let unique: rustc_hash::FxHashSet<&&str> = labels.iter().collect();
+        assert_eq!(labels.len(), unique.len(), "compact labels must be unique");
+    }
+
+    #[test]
+    fn category_compact_labels_have_no_spaces() {
+        let categories = [
+            RecommendationCategory::UrgentChurnComplexity,
+            RecommendationCategory::BreakCircularDependency,
+            RecommendationCategory::SplitHighImpact,
+            RecommendationCategory::RemoveDeadCode,
+            RecommendationCategory::ExtractComplexFunctions,
+            RecommendationCategory::ExtractDependencies,
+        ];
+        for cat in &categories {
+            assert!(
+                !cat.compact_label().contains(' '),
+                "compact_label for {:?} should not contain spaces: '{}'",
+                cat,
+                cat.compact_label()
+            );
+        }
+    }
+
+    // --- EffortEstimate ---
+
+    #[test]
+    fn effort_labels_are_non_empty() {
+        let efforts = [
+            EffortEstimate::Low,
+            EffortEstimate::Medium,
+            EffortEstimate::High,
+        ];
+        for effort in &efforts {
+            assert!(!effort.label().is_empty(), "{effort:?} should have a label");
+        }
+    }
+
+    #[test]
+    fn effort_serializes_as_snake_case() {
+        assert_eq!(
+            serde_json::to_string(&EffortEstimate::Low).unwrap(),
+            r#""low""#
+        );
+        assert_eq!(
+            serde_json::to_string(&EffortEstimate::Medium).unwrap(),
+            r#""medium""#
+        );
+        assert_eq!(
+            serde_json::to_string(&EffortEstimate::High).unwrap(),
+            r#""high""#
+        );
+    }
+
+    // --- VitalSigns omits None fields ---
+
+    #[test]
+    fn vital_signs_all_none_optional_fields_omitted() {
+        let vs = VitalSigns {
+            dead_file_pct: None,
+            dead_export_pct: None,
+            avg_cyclomatic: 5.0,
+            p90_cyclomatic: 10,
+            duplication_pct: None,
+            hotspot_count: None,
+            maintainability_avg: None,
+            unused_dep_count: None,
+            circular_dep_count: None,
+        };
+        let json = serde_json::to_string(&vs).unwrap();
+        assert!(!json.contains("dead_file_pct"));
+        assert!(!json.contains("dead_export_pct"));
+        assert!(!json.contains("duplication_pct"));
+        assert!(!json.contains("hotspot_count"));
+        assert!(!json.contains("maintainability_avg"));
+        assert!(!json.contains("unused_dep_count"));
+        assert!(!json.contains("circular_dep_count"));
+        // Required fields always present
+        assert!(json.contains("avg_cyclomatic"));
+        assert!(json.contains("p90_cyclomatic"));
+    }
+
+    // --- ExceededThreshold ---
+
+    #[test]
+    fn exceeded_threshold_all_variants_serialize() {
+        for variant in [
+            ExceededThreshold::Cyclomatic,
+            ExceededThreshold::Cognitive,
+            ExceededThreshold::Both,
+        ] {
+            let json = serde_json::to_string(&variant).unwrap();
+            assert!(!json.is_empty());
+        }
+    }
+
+    // --- TargetEvidence ---
+
+    #[test]
+    fn target_evidence_skips_empty_fields() {
+        let evidence = TargetEvidence {
+            unused_exports: vec![],
+            complex_functions: vec![],
+            cycle_path: vec![],
+        };
+        let json = serde_json::to_string(&evidence).unwrap();
+        assert!(!json.contains("unused_exports"));
+        assert!(!json.contains("complex_functions"));
+        assert!(!json.contains("cycle_path"));
+    }
+
+    #[test]
+    fn target_evidence_with_data() {
+        let evidence = TargetEvidence {
+            unused_exports: vec!["foo".to_string(), "bar".to_string()],
+            complex_functions: vec![EvidenceFunction {
+                name: "processData".into(),
+                line: 42,
+                cognitive: 30,
+            }],
+            cycle_path: vec![],
+        };
+        let json = serde_json::to_string(&evidence).unwrap();
+        assert!(json.contains("unused_exports"));
+        assert!(json.contains("complex_functions"));
+        assert!(json.contains("processData"));
+        assert!(!json.contains("cycle_path"));
+    }
+
+    // --- VitalSignsSnapshot schema version ---
+
+    #[test]
+    fn snapshot_schema_version_is_one() {
+        assert_eq!(SNAPSHOT_SCHEMA_VERSION, 1);
+    }
+
+    #[test]
+    fn hotspot_score_threshold_is_50() {
+        assert!((HOTSPOT_SCORE_THRESHOLD - 50.0).abs() < f64::EPSILON);
+    }
 }

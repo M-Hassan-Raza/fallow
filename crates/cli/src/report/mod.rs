@@ -550,4 +550,98 @@ mod tests {
             "SearchSelectItem.tsx"
         );
     }
+
+    // ── split_dir_filename ───────────────────────────────────────
+
+    #[test]
+    fn split_dir_filename_with_dir() {
+        let (dir, file) = split_dir_filename("src/utils/index.ts");
+        assert_eq!(dir, "src/utils/");
+        assert_eq!(file, "index.ts");
+    }
+
+    #[test]
+    fn split_dir_filename_no_dir() {
+        let (dir, file) = split_dir_filename("file.ts");
+        assert_eq!(dir, "");
+        assert_eq!(file, "file.ts");
+    }
+
+    #[test]
+    fn split_dir_filename_deeply_nested() {
+        let (dir, file) = split_dir_filename("a/b/c/d/e.ts");
+        assert_eq!(dir, "a/b/c/d/");
+        assert_eq!(file, "e.ts");
+    }
+
+    #[test]
+    fn split_dir_filename_trailing_slash() {
+        let (dir, file) = split_dir_filename("src/");
+        assert_eq!(dir, "src/");
+        assert_eq!(file, "");
+    }
+
+    #[test]
+    fn split_dir_filename_empty() {
+        let (dir, file) = split_dir_filename("");
+        assert_eq!(dir, "");
+        assert_eq!(file, "");
+    }
+
+    // ── plural ──────────────────────────────────────────────────
+
+    #[test]
+    fn plural_zero_is_plural() {
+        assert_eq!(plural(0), "s");
+    }
+
+    #[test]
+    fn plural_one_is_singular() {
+        assert_eq!(plural(1), "");
+    }
+
+    #[test]
+    fn plural_two_is_plural() {
+        assert_eq!(plural(2), "s");
+    }
+
+    #[test]
+    fn plural_large_number() {
+        assert_eq!(plural(999), "s");
+    }
+
+    // ── elide_common_prefix edge cases ──────────────────────────
+
+    #[test]
+    fn elide_common_prefix_empty_base() {
+        assert_eq!(elide_common_prefix("", "src/foo.ts"), "src/foo.ts");
+    }
+
+    #[test]
+    fn elide_common_prefix_empty_target() {
+        assert_eq!(elide_common_prefix("src/foo.ts", ""), "");
+    }
+
+    #[test]
+    fn elide_common_prefix_both_empty() {
+        assert_eq!(elide_common_prefix("", ""), "");
+    }
+
+    #[test]
+    fn elide_common_prefix_same_file_different_extension() {
+        // "src/utils.ts" vs "src/utils.js" — common prefix is "src/"
+        assert_eq!(
+            elide_common_prefix("src/utils.ts", "src/utils.js"),
+            "utils.js"
+        );
+    }
+
+    #[test]
+    fn elide_common_prefix_partial_filename_match_not_stripped() {
+        // "src/App.tsx" vs "src/AppUtils.tsx" — both in src/, but file names differ
+        assert_eq!(
+            elide_common_prefix("src/App.tsx", "src/AppUtils.tsx"),
+            "AppUtils.tsx"
+        );
+    }
 }

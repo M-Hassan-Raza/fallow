@@ -405,4 +405,60 @@ mod tests {
         assert_eq!(results.total_issues(), 13);
         assert!(results.has_issues());
     }
+
+    // ── total_issues / has_issues consistency ──────────────────
+
+    #[test]
+    fn total_issues_and_has_issues_are_consistent() {
+        let results = AnalysisResults::default();
+        assert_eq!(results.total_issues(), 0);
+        assert!(!results.has_issues());
+        assert_eq!(results.total_issues() > 0, results.has_issues());
+    }
+
+    // ── total_issues counts each category independently ─────────
+
+    #[test]
+    fn total_issues_sums_all_categories_independently() {
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("a.ts"),
+        });
+        assert_eq!(results.total_issues(), 1);
+
+        results.unused_files.push(UnusedFile {
+            path: PathBuf::from("b.ts"),
+        });
+        assert_eq!(results.total_issues(), 2);
+
+        results.unresolved_imports.push(UnresolvedImport {
+            path: PathBuf::from("c.ts"),
+            specifier: "./missing".to_string(),
+            line: 1,
+            col: 0,
+            specifier_col: 0,
+        });
+        assert_eq!(results.total_issues(), 3);
+    }
+
+    // ── default is truly empty ──────────────────────────────────
+
+    #[test]
+    fn default_results_all_fields_empty() {
+        let r = AnalysisResults::default();
+        assert!(r.unused_files.is_empty());
+        assert!(r.unused_exports.is_empty());
+        assert!(r.unused_types.is_empty());
+        assert!(r.unused_dependencies.is_empty());
+        assert!(r.unused_dev_dependencies.is_empty());
+        assert!(r.unused_optional_dependencies.is_empty());
+        assert!(r.unused_enum_members.is_empty());
+        assert!(r.unused_class_members.is_empty());
+        assert!(r.unresolved_imports.is_empty());
+        assert!(r.unlisted_dependencies.is_empty());
+        assert!(r.duplicate_exports.is_empty());
+        assert!(r.type_only_dependencies.is_empty());
+        assert!(r.circular_dependencies.is_empty());
+        assert!(r.export_usages.is_empty());
+    }
 }

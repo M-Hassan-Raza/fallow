@@ -242,4 +242,79 @@ mod tests {
         let result = validate_git_ref("main$HOME");
         assert!(result.is_err());
     }
+
+    // ── validate_git_ref additional injection tests ──────────────
+
+    #[test]
+    fn git_ref_rejects_pipe() {
+        let result = validate_git_ref("main|cat /etc/passwd");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn git_ref_rejects_ampersand() {
+        let result = validate_git_ref("main&&echo pwned");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn git_ref_rejects_parentheses() {
+        let result = validate_git_ref("$(whoami)");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn git_ref_allows_dots_in_branch() {
+        assert_eq!(validate_git_ref("v1.2.3").unwrap(), "v1.2.3");
+    }
+
+    #[test]
+    fn git_ref_allows_underscores() {
+        assert_eq!(
+            validate_git_ref("feature_branch").unwrap(),
+            "feature_branch"
+        );
+    }
+
+    // ── validate_root ────────────────────────────────────────────
+
+    #[test]
+    fn validate_root_nonexistent_path() {
+        let result = validate_root(std::path::Path::new(
+            "/nonexistent/path/that/does/not/exist",
+        ));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_root_valid_dir() {
+        let temp = std::env::temp_dir();
+        let result = validate_root(&temp);
+        assert!(result.is_ok());
+    }
+
+    // ── validate_no_control_chars boundary tests ────────────────
+
+    #[test]
+    fn control_chars_rejects_form_feed() {
+        assert!(validate_no_control_chars("abc\x0cdef", "--arg").is_err());
+    }
+
+    #[test]
+    fn control_chars_rejects_backspace() {
+        assert!(validate_no_control_chars("abc\x08def", "--arg").is_err());
+    }
+
+    #[test]
+    fn control_chars_allows_space() {
+        assert!(validate_no_control_chars("hello world", "--arg").is_ok());
+    }
+
+    #[test]
+    fn control_chars_error_includes_position() {
+        let result = validate_no_control_chars("ab\x01cd", "--test");
+        let err = result.unwrap_err();
+        assert!(err.contains("position 2"), "got: {err}");
+        assert!(err.contains("--test"), "got: {err}");
+    }
 }

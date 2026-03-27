@@ -449,4 +449,165 @@ mod tests {
         let name = ExportName::Default;
         assert_eq!(name.to_string(), "default");
     }
+
+    // ── ExportName equality & hashing ────────────────────────────
+
+    #[test]
+    fn export_name_equality_named() {
+        let a = ExportName::Named("foo".to_string());
+        let b = ExportName::Named("foo".to_string());
+        let c = ExportName::Named("bar".to_string());
+        assert_eq!(a, b);
+        assert_ne!(a, c);
+    }
+
+    #[test]
+    fn export_name_equality_default() {
+        let a = ExportName::Default;
+        let b = ExportName::Default;
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn export_name_named_not_equal_to_default() {
+        let named = ExportName::Named("default".to_string());
+        let default = ExportName::Default;
+        assert_ne!(named, default);
+    }
+
+    #[test]
+    fn export_name_hash_consistency() {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut h1 = DefaultHasher::new();
+        let mut h2 = DefaultHasher::new();
+        ExportName::Named("foo".to_string()).hash(&mut h1);
+        ExportName::Named("foo".to_string()).hash(&mut h2);
+        assert_eq!(h1.finish(), h2.finish());
+    }
+
+    // ── ExportName::matches_str edge cases ───────────────────────
+
+    #[test]
+    fn export_name_matches_str_empty_string() {
+        let name = ExportName::Named(String::new());
+        assert!(name.matches_str(""));
+        assert!(!name.matches_str("foo"));
+    }
+
+    #[test]
+    fn export_name_default_does_not_match_empty() {
+        let name = ExportName::Default;
+        assert!(!name.matches_str(""));
+    }
+
+    // ── ImportedName equality ────────────────────────────────────
+
+    #[test]
+    fn imported_name_equality() {
+        assert_eq!(
+            ImportedName::Named("foo".to_string()),
+            ImportedName::Named("foo".to_string())
+        );
+        assert_ne!(
+            ImportedName::Named("foo".to_string()),
+            ImportedName::Named("bar".to_string())
+        );
+        assert_eq!(ImportedName::Default, ImportedName::Default);
+        assert_eq!(ImportedName::Namespace, ImportedName::Namespace);
+        assert_eq!(ImportedName::SideEffect, ImportedName::SideEffect);
+        assert_ne!(ImportedName::Default, ImportedName::Namespace);
+        assert_ne!(
+            ImportedName::Named("default".to_string()),
+            ImportedName::Default
+        );
+    }
+
+    // ── MemberKind equality ────────────────────────────────────
+
+    #[test]
+    fn member_kind_equality() {
+        assert_eq!(MemberKind::EnumMember, MemberKind::EnumMember);
+        assert_eq!(MemberKind::ClassMethod, MemberKind::ClassMethod);
+        assert_eq!(MemberKind::ClassProperty, MemberKind::ClassProperty);
+        assert_ne!(MemberKind::EnumMember, MemberKind::ClassMethod);
+        assert_ne!(MemberKind::ClassMethod, MemberKind::ClassProperty);
+    }
+
+    // ── MemberKind bincode roundtrip ────────────────────────────
+
+    #[test]
+    fn member_kind_bincode_roundtrip() {
+        let kinds = [
+            MemberKind::EnumMember,
+            MemberKind::ClassMethod,
+            MemberKind::ClassProperty,
+        ];
+        let config = bincode::config::standard();
+        for kind in &kinds {
+            let bytes = bincode::encode_to_vec(kind, config).unwrap();
+            let (decoded, _): (MemberKind, _) = bincode::decode_from_slice(&bytes, config).unwrap();
+            assert_eq!(&decoded, kind);
+        }
+    }
+
+    // ── MemberAccess bincode roundtrip ──────────────────────────
+
+    #[test]
+    fn member_access_bincode_roundtrip() {
+        let access = MemberAccess {
+            object: "Status".to_string(),
+            member: "Active".to_string(),
+        };
+        let config = bincode::config::standard();
+        let bytes = bincode::encode_to_vec(&access, config).unwrap();
+        let (decoded, _): (MemberAccess, _) = bincode::decode_from_slice(&bytes, config).unwrap();
+        assert_eq!(decoded.object, "Status");
+        assert_eq!(decoded.member, "Active");
+    }
+
+    // ── compute_line_offsets with Windows line endings ───────────
+
+    #[test]
+    fn line_offsets_crlf_only_counts_lf() {
+        // \r\n should produce offsets at the \n boundary
+        // "ab\r\ncd" => bytes: a(0) b(1) \r(2) \n(3) c(4) d(5)
+        // Line 0: offset 0, line 1: offset 4
+        let offsets = compute_line_offsets("ab\r\ncd");
+        assert_eq!(offsets, vec![0, 4]);
+    }
+
+    // ── byte_offset_to_line_col edge cases ──────────────────────
+
+    #[test]
+    fn line_col_empty_file_offset_zero() {
+        let offsets = compute_line_offsets("");
+        let (line, col) = byte_offset_to_line_col(&offsets, 0);
+        assert_eq!((line, col), (1, 0));
+    }
+
+    // ── FunctionComplexity bincode roundtrip ─────────────────────
+
+    #[test]
+    fn function_complexity_bincode_roundtrip() {
+        let fc = FunctionComplexity {
+            name: "processData".to_string(),
+            line: 42,
+            col: 4,
+            cyclomatic: 15,
+            cognitive: 25,
+            line_count: 80,
+        };
+        let config = bincode::config::standard();
+        let bytes = bincode::encode_to_vec(&fc, config).unwrap();
+        let (decoded, _): (FunctionComplexity, _) =
+            bincode::decode_from_slice(&bytes, config).unwrap();
+        assert_eq!(decoded.name, "processData");
+        assert_eq!(decoded.line, 42);
+        assert_eq!(decoded.col, 4);
+        assert_eq!(decoded.cyclomatic, 15);
+        assert_eq!(decoded.cognitive, 25);
+        assert_eq!(decoded.line_count, 80);
+    }
 }
