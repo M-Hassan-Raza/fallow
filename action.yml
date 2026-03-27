@@ -371,57 +371,65 @@ runs:
         # --- Annotation scripts (workflow commands for inline PR annotations) ---
         cat > "$FALLOW_TMP/annotations-check.jq" << 'JQEOF'
         def san: gsub("\n"; " ") | gsub("\r"; " ") | gsub("%"; "%25");
+        def nl: "%0A";
         [
           (.unused_files[]? |
-            "::warning file=\(.path | san),title=Unused file::File is not reachable from any entry point"),
+            "::warning file=\(.path | san),title=Unused file::This file is not imported by any other module and unreachable from entry points.\(nl)Consider removing it or importing it where needed."),
           (.unused_exports[]? |
-            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused export::\(if .is_re_export then "Re-export" else "Export" end) '\(.export_name | san)' is never imported by other modules"),
+            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused export::\(if .is_re_export then "Re-exported" else "Exported" end) \(if .is_type_only then "type" else "value" end) '\(.export_name | san)' is never imported by other modules.\(nl)\(nl)If this export is part of a public API, consider adding it to the entry configuration.\(nl)Otherwise, remove the export keyword or delete the declaration."),
           (.unused_types[]? |
-            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused type::\(if .is_re_export then "Type re-export" else "Type export" end) '\(.export_name | san)' is never imported by other modules"),
+            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused type::\(if .is_re_export then "Re-exported" else "Exported" end) type '\(.export_name | san)' is never imported by other modules.\(nl)\(nl)If only used internally, remove the export keyword."),
           (.unused_dependencies[]? |
-            "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused dependency::Package '\(.package_name | san)' is in dependencies but never imported"),
+            "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused dependency::Package '\(.package_name | san)' is listed in dependencies but never imported anywhere in the project.\(nl)\(nl)Run: npm uninstall \(.package_name | san)"),
           (.unused_dev_dependencies[]? |
-            "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused devDependency::Package '\(.package_name | san)' is in devDependencies but never imported"),
+            "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused devDependency::Package '\(.package_name | san)' is listed in devDependencies but never imported.\(nl)\(nl)Run: npm uninstall \(.package_name | san)"),
           (.unused_optional_dependencies[]? |
-            "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused optionalDependency::Package '\(.package_name | san)' is in optionalDependencies but never imported"),
+            "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused optionalDependency::Package '\(.package_name | san)' is listed in optionalDependencies but never imported.\(nl)\(nl)Run: npm uninstall \(.package_name | san)"),
           (.unused_enum_members[]? |
-            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused enum member::Enum member '\(.parent_name | san).\(.member_name | san)' is never referenced"),
+            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused enum member::Enum member '\(.parent_name | san).\(.member_name | san)' is never referenced in the codebase.\(nl)\(nl)Consider removing it to keep the enum minimal."),
           (.unused_class_members[]? |
-            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused class member::Class member '\(.parent_name | san).\(.member_name | san)' is never referenced"),
+            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused class member::Class member '\(.parent_name | san).\(.member_name | san)' is never referenced.\(nl)\(nl)Consider removing it or marking it as private."),
           (.unresolved_imports[]? |
-            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unresolved import::Import '\(.specifier | san)' could not be resolved"),
+            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unresolved import::Import '\(.specifier | san)' could not be resolved to a file or package.\(nl)\(nl)Check for typos, missing dependencies, or incorrect path aliases."),
           (.unlisted_dependencies[]? | (.package_name | san) as $pkg | .imported_from[]? |
-            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unlisted dependency::Package '\($pkg)' is imported but not listed in package.json"),
-          (.duplicate_exports[]? | (.export_name | san) as $name | .locations[]? |
-            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Duplicate export::Export '\($name)' appears in multiple modules"),
+            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unlisted dependency::Package '\($pkg)' is imported here but not listed in package.json.\(nl)\(nl)Run: npm install \($pkg)"),
+          (.duplicate_exports[]? | (.export_name | san) as $name | .locations as $locs | .locations[]? |
+            "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Duplicate export::Export '\($name)' is defined in \($locs | length) modules:\(nl)\($locs | map("  \u2022 " + (.path | san) + ":" + (.line | tostring)) | join(nl))\(nl)\(nl)This causes ambiguity for consumers. Keep one canonical location."),
           (.circular_dependencies[]? |
-            "::warning file=\(.files[0] | san)\(if .line > 0 then ",line=\(.line),col=\(.col + 1)" else "" end),title=Circular dependency::Circular dependency: \(.files | map(san) | join(" \u2192 "))"),
+            "::warning file=\(.files[0] | san)\(if .line > 0 then ",line=\(.line),col=\(.col + 1)" else "" end),title=Circular dependency::Circular import chain detected:\(nl)\(.files | map(san) | join(" \u2192 ")) \u2192 \(.files[0] | san)\(nl)\(nl)Circular dependencies can cause initialization bugs and make code harder to reason about.\(nl)Consider extracting shared logic into a separate module."),
           (.type_only_dependencies[]? |
-            "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports")
+            "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Type-only dependency::Package '\(.package_name | san)' is only used via type imports.\(nl)\(nl)Move it from dependencies to devDependencies to reduce production bundle size.")
         ] | .[]
         JQEOF
 
         cat > "$FALLOW_TMP/annotations-health.jq" << 'JQEOF'
         def san: gsub("\n"; " ") | gsub("\r"; " ") | gsub("%"; "%25");
+        def nl: "%0A";
         (.summary.max_cyclomatic_threshold // 20) as $cyc_t |
         (.summary.max_cognitive_threshold // 15) as $cog_t |
         [
           (.findings[]? |
             if .exceeded == "both" then
-              "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=High complexity::'\(.name | san)' has cyclomatic complexity \(.cyclomatic) (threshold: \($cyc_t)) and cognitive complexity \(.cognitive) (threshold: \($cog_t))"
+              "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=High complexity::Function '\(.name | san)' exceeds both complexity thresholds:\(nl)\(nl)  \u2022 Cyclomatic: \(.cyclomatic) (threshold: \($cyc_t))\(nl)  \u2022 Cognitive: \(.cognitive) (threshold: \($cog_t))\(nl)  \u2022 Lines: \(.line_count)\(nl)\(nl)Consider splitting this function into smaller, focused functions."
             elif .exceeded == "cyclomatic" then
-              "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=High cyclomatic complexity::'\(.name | san)' has cyclomatic complexity \(.cyclomatic) (threshold: \($cyc_t))"
+              "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=High cyclomatic complexity::Function '\(.name | san)' has \(.cyclomatic) code paths (threshold: \($cyc_t)).\(nl)\(nl)  \u2022 Cyclomatic: \(.cyclomatic)\(nl)  \u2022 Cognitive: \(.cognitive)\(nl)  \u2022 Lines: \(.line_count)\(nl)\(nl)High cyclomatic complexity means many branches to test.\(nl)Consider extracting conditionals or using early returns."
             else
-              "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=High cognitive complexity::'\(.name | san)' has cognitive complexity \(.cognitive) (threshold: \($cog_t))"
-            end)
+              "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=High cognitive complexity::Function '\(.name | san)' is hard to understand (cognitive: \(.cognitive), threshold: \($cog_t)).\(nl)\(nl)  \u2022 Cyclomatic: \(.cyclomatic)\(nl)  \u2022 Cognitive: \(.cognitive)\(nl)  \u2022 Lines: \(.line_count)\(nl)\(nl)High cognitive complexity means deeply nested or interleaved logic.\(nl)Consider flattening control flow or extracting helper functions."
+            end),
+          (.refactoring_targets[:5]? // empty |
+            "::notice file=\(.path | san),title=Refactoring target (\(.effort) effort)::Priority: \(.priority) | Confidence: \(.confidence)\(nl)\(nl)\(.recommendation | san)\(nl)\(nl)\(if .factors then (.factors | map("  \u2022 \(.metric): \(.detail // (.value | tostring))") | join(nl)) else "" end)")
         ] | .[]
         JQEOF
 
         cat > "$FALLOW_TMP/annotations-dupes.jq" << 'JQEOF'
         def san: gsub("\n"; " ") | gsub("\r"; " ") | gsub("%"; "%25");
+        def nl: "%0A";
         [
-          (.clone_groups // [])[] | . as $group | .instances[]? |
-            "::warning file=\(.file | san),line=\(.start_line),col=\(.start_col + 1),title=Code duplication::Duplicated code (\($group.line_count) lines, \($group.instances | length) instances)"
+          (.clone_groups // [])[] | . as $group |
+            ($group.instances | length) as $count |
+            .instances[]? |
+              ($group.instances | map(select(.file != ($group.instances[0].file) or .start_line != ($group.instances[0].start_line))) | if length == 0 then $group.instances[1:] else . end) as $others |
+              "::warning file=\(.file | san),line=\(.start_line),endLine=\(.end_line),col=\(.start_col + 1),title=Code duplication::Duplicated code block (\($group.line_count) lines, \($group.token_count) tokens, \($count) instances)\(nl)\(nl)Also found in:\($others | map(nl + "  \u2022 " + (.file | san) + ":" + (.start_line | tostring) + "-" + (.end_line | tostring)) | join(""))\(nl)\(nl)Consider extracting a shared function to eliminate duplication.\(if .fragment then nl + nl + "Fragment: " + (.fragment | san)[:200] else "" end)"
         ] | .[]
         JQEOF
 
