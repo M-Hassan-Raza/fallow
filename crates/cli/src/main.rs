@@ -959,12 +959,14 @@ fn main() -> ExitCode {
                 );
                 // --min-score implies --score
                 let score = score || min_score.is_some();
-                // --save-snapshot and --score force file_scores + hotspots for accuracy
+                // --save-snapshot forces file_scores + hotspots for accuracy
                 let snapshot_requested = save_snapshot.is_some();
-                let force_full = snapshot_requested || score;
-                // No section flags = show all. Any flag set = show only those.
+                // No section flags = show all (including score). Any flag set = show only those.
                 // --save-snapshot is orthogonal (not a section flag).
                 let any_section = complexity || file_scores || hotspots || targets || score;
+                let eff_score = if any_section { score } else { true };
+                // Score needs full pipeline for accuracy
+                let force_full = snapshot_requested || eff_score;
                 let eff_file_scores = if any_section { file_scores } else { true } || force_full;
                 let eff_hotspots = if any_section { hotspots } else { true } || force_full;
                 let eff_complexity = if any_section { complexity } else { true };
@@ -989,7 +991,7 @@ fn main() -> ExitCode {
                     file_scores: eff_file_scores,
                     hotspots: eff_hotspots,
                     targets: eff_targets,
-                    score,
+                    score: eff_score,
                     min_score,
                     since: since.as_deref(),
                     min_commits,
