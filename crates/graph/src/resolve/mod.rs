@@ -164,7 +164,7 @@ pub fn resolve_all_imports(
                 member_accesses: module.member_accesses.clone(),
                 whole_object_uses: module.whole_object_uses.clone(),
                 has_cjs_exports: module.has_cjs_exports,
-                unused_import_bindings: module.unused_import_bindings.clone(),
+                unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
             })
         })
         .collect();
@@ -444,6 +444,8 @@ fn apply_specifier_upgrades(resolved: &mut [ResolvedModule]) {
 
 #[cfg(test)]
 mod tests {
+    use rustc_hash::FxHashSet;
+
     use super::*;
     use oxc_span::Span;
 
@@ -550,7 +552,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         }
     }
 

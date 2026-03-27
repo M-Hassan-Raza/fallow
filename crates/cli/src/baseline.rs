@@ -169,20 +169,20 @@ pub fn filter_new_issues(
     baseline: &BaselineData,
 ) -> fallow_core::results::AnalysisResults {
     let baseline_files: FxHashSet<&str> =
-        baseline.unused_files.iter().map(|s| s.as_str()).collect();
+        baseline.unused_files.iter().map(String::as_str).collect();
     let baseline_exports: FxHashSet<&str> =
-        baseline.unused_exports.iter().map(|s| s.as_str()).collect();
+        baseline.unused_exports.iter().map(String::as_str).collect();
     let baseline_types: FxHashSet<&str> =
-        baseline.unused_types.iter().map(|s| s.as_str()).collect();
+        baseline.unused_types.iter().map(String::as_str).collect();
     let baseline_deps: FxHashSet<&str> = baseline
         .unused_dependencies
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     let baseline_dev_deps: FxHashSet<&str> = baseline
         .unused_dev_dependencies
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
 
     results
@@ -214,7 +214,7 @@ pub fn filter_new_issues(
     let baseline_circular: FxHashSet<&str> = baseline
         .circular_dependencies
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     results.circular_dependencies.retain(|c| {
         let key = circular_dep_key(c);
@@ -224,7 +224,7 @@ pub fn filter_new_issues(
     let baseline_optional_deps: FxHashSet<&str> = baseline
         .unused_optional_dependencies
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     results
         .unused_optional_dependencies
@@ -233,7 +233,7 @@ pub fn filter_new_issues(
     let baseline_enum_members: FxHashSet<&str> = baseline
         .unused_enum_members
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     results.unused_enum_members.retain(|m| {
         let key = format!(
@@ -248,7 +248,7 @@ pub fn filter_new_issues(
     let baseline_class_members: FxHashSet<&str> = baseline
         .unused_class_members
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     results.unused_class_members.retain(|m| {
         let key = format!(
@@ -263,7 +263,7 @@ pub fn filter_new_issues(
     let baseline_unresolved: FxHashSet<&str> = baseline
         .unresolved_imports
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     results.unresolved_imports.retain(|i| {
         let key = format!(
@@ -277,7 +277,7 @@ pub fn filter_new_issues(
     let baseline_unlisted: FxHashSet<&str> = baseline
         .unlisted_dependencies
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     results
         .unlisted_dependencies
@@ -286,7 +286,7 @@ pub fn filter_new_issues(
     let baseline_dup_exports: FxHashSet<&str> = baseline
         .duplicate_exports
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     results.duplicate_exports.retain(|d| {
         let key = duplicate_export_key(d);
@@ -296,7 +296,7 @@ pub fn filter_new_issues(
     let baseline_type_only: FxHashSet<&str> = baseline
         .type_only_dependencies
         .iter()
-        .map(|s| s.as_str())
+        .map(String::as_str)
         .collect();
     results
         .type_only_dependencies
@@ -354,7 +354,7 @@ pub fn filter_new_clone_groups(
     baseline: &DuplicationBaselineData,
     root: &Path,
 ) -> DuplicationReport {
-    let baseline_keys: FxHashSet<&str> = baseline.clone_groups.iter().map(|s| s.as_str()).collect();
+    let baseline_keys: FxHashSet<&str> = baseline.clone_groups.iter().map(String::as_str).collect();
 
     report.clone_groups.retain(|g| {
         let key = clone_group_key(g, root);
@@ -474,7 +474,7 @@ pub fn filter_new_health_findings(
     baseline: &HealthBaselineData,
     root: &Path,
 ) -> Vec<crate::health_types::HealthFinding> {
-    let baseline_keys: FxHashSet<&str> = baseline.findings.iter().map(|s| s.as_str()).collect();
+    let baseline_keys: FxHashSet<&str> = baseline.findings.iter().map(String::as_str).collect();
     findings.retain(|f| {
         let key = health_finding_key(f, root);
         !baseline_keys.contains(key.as_str())
@@ -488,7 +488,7 @@ pub fn filter_new_health_targets(
     baseline: &HealthBaselineData,
     root: &Path,
 ) -> Vec<crate::health_types::RefactoringTarget> {
-    let baseline_keys: FxHashSet<&str> = baseline.target_keys.iter().map(|s| s.as_str()).collect();
+    let baseline_keys: FxHashSet<&str> = baseline.target_keys.iter().map(String::as_str).collect();
     targets.retain(|t| {
         let key = target_baseline_key(t, root);
         !baseline_keys.contains(key.as_str())

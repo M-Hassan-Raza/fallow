@@ -256,7 +256,7 @@ fn is_unused_import_binding(
 ) -> bool {
     !sym_local_name.is_empty()
         && !matches!(sym_imported_name, ImportedName::SideEffect)
-        && source_mod.is_some_and(|m| m.unused_import_bindings.iter().any(|n| n == sym_local_name))
+        && source_mod.is_some_and(|m| m.unused_import_bindings.contains(sym_local_name))
 }
 
 /// Extract member access names for a given local variable from a resolved module.
@@ -302,11 +302,15 @@ fn mark_member_exports_referenced(
     import_span: oxc_span::Span,
     kind: &ReferenceKind,
 ) -> FxHashSet<String> {
+    let member_set: FxHashSet<&str> = accessed_members.iter().map(String::as_str).collect();
     let mut found_members: FxHashSet<String> = FxHashSet::default();
     for export in exports {
-        let name_str = export.name.to_string();
-        if accessed_members.contains(&name_str) {
-            found_members.insert(name_str);
+        let name_str = match &export.name {
+            ExportName::Named(n) => n.as_str(),
+            ExportName::Default => "default",
+        };
+        if member_set.contains(name_str) {
+            found_members.insert(name_str.to_owned());
             if export.references.iter().all(|r| r.from_file != source_id) {
                 export.references.push(SymbolReference {
                     from_file: source_id,
@@ -370,14 +374,13 @@ fn narrow_namespace_references(
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     entry_point_ids: &FxHashSet<FileId>,
 ) {
-    let local_name = sym_local_name;
     let source_mod = module_by_id.get(&source_id);
-    let accessed_members = extract_accessed_members(source_mod, local_name);
+    let accessed_members = extract_accessed_members(source_mod, sym_local_name);
 
     // Check if the namespace is consumed as a whole object
     // (Object.values, for..in, spread, destructuring with rest, etc.)
     let is_whole_object =
-        source_mod.is_some_and(|m| m.whole_object_uses.iter().any(|n| n == local_name));
+        source_mod.is_some_and(|m| m.whole_object_uses.iter().any(|n| n == sym_local_name));
 
     // Check if the namespace variable is re-exported (export { ns } or export default ns)
     // from a NON-entry-point file. If the importing file IS an entry point,
@@ -385,7 +388,7 @@ fn narrow_namespace_references(
     let is_re_exported_from_non_entry = source_mod.is_some_and(|m| {
         m.exports
             .iter()
-            .any(|e| e.local_name.as_deref() == Some(local_name))
+            .any(|e| e.local_name.as_deref() == Some(sym_local_name))
     }) && !entry_point_ids.contains(&source_id);
 
     // For entry point files with no member accesses, the namespace
@@ -443,11 +446,10 @@ fn narrow_css_module_references(
     sym_import_span: oxc_span::Span,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
 ) {
-    let local_name = sym_local_name;
     let source_mod = module_by_id.get(&source_id);
     let is_whole_object =
-        source_mod.is_some_and(|m| m.whole_object_uses.iter().any(|n| n == local_name));
-    let accessed_members = extract_accessed_members(source_mod, local_name);
+        source_mod.is_some_and(|m| m.whole_object_uses.iter().any(|n| n == sym_local_name));
+    let accessed_members = extract_accessed_members(source_mod, sym_local_name);
 
     if is_whole_object || accessed_members.is_empty() {
         mark_all_exports_referenced(
@@ -1038,7 +1040,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         };
         let mut acc = make_acc(4);
         let sorted = collect_edges_for_module(&resolved, FileId(0), &mut acc);
@@ -1070,7 +1072,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         };
         let mut acc = make_acc(4);
         let sorted = collect_edges_for_module(&resolved, FileId(0), &mut acc);
@@ -1104,7 +1106,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         };
         let mut acc = make_acc(4);
         let sorted = collect_edges_for_module(&resolved, FileId(0), &mut acc);
@@ -1131,7 +1133,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         };
         let mut acc = make_acc(4);
         let sorted = collect_edges_for_module(&resolved, FileId(0), &mut acc);
@@ -1156,7 +1158,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec!["unusedVar".to_string()],
+            unused_import_bindings: FxHashSet::from_iter(["unusedVar".to_string()]),
         };
         assert!(is_unused_import_binding(
             "unusedVar",
@@ -1178,7 +1180,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec!["otherVar".to_string()],
+            unused_import_bindings: FxHashSet::from_iter(["otherVar".to_string()]),
         };
         assert!(!is_unused_import_binding(
             "usedVar",
@@ -1200,7 +1202,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec!["x".to_string()],
+            unused_import_bindings: FxHashSet::from_iter(["x".to_string()]),
         };
         // SideEffect imports are never "unused bindings"
         assert!(!is_unused_import_binding(
@@ -1223,7 +1225,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         };
         assert!(!is_unused_import_binding(
             "",
@@ -1269,7 +1271,7 @@ mod tests {
             ],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         };
         let members = extract_accessed_members(Some(&&resolved), "ns");
         assert_eq!(members, vec!["foo".to_string(), "bar".to_string()]);
@@ -1508,7 +1510,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec!["foo".to_string()],
+                unused_import_bindings: FxHashSet::from_iter(["foo".to_string()]),
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1528,7 +1530,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -1587,7 +1589,7 @@ mod tests {
                 }],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1617,7 +1619,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -1684,7 +1686,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec!["utils".to_string()],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1714,7 +1716,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -1773,7 +1775,7 @@ mod tests {
                 }],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1803,7 +1805,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -1869,7 +1871,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1889,7 +1891,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -1938,7 +1940,7 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         }];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

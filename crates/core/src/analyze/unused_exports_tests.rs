@@ -109,9 +109,8 @@ fn make_referenced_export(
 #[test]
 fn duplicate_exports_empty_graph() {
     let graph = build_graph(&[]);
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 
@@ -120,9 +119,8 @@ fn duplicate_exports_no_duplicates_single_module() {
     let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
     graph.modules[1].is_reachable = true;
     graph.modules[1].exports = vec![make_export("foo", 10, 20), make_export("bar", 30, 40)];
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 
@@ -137,9 +135,8 @@ fn duplicate_exports_detects_same_name_in_two_modules() {
     graph.modules[1].exports = vec![make_export("helper", 10, 20)];
     graph.modules[2].is_reachable = true;
     graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].export_name, "helper");
     assert_eq!(result[0].locations.len(), 2);
@@ -170,9 +167,8 @@ fn duplicate_exports_skips_default_exports() {
         references: vec![],
         members: vec![],
     }];
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 
@@ -187,9 +183,8 @@ fn duplicate_exports_skips_synthetic_re_export_entries() {
     graph.modules[1].exports = vec![make_export("helper", 0, 0)]; // synthetic
     graph.modules[2].is_reachable = true;
     graph.modules[2].exports = vec![make_export("helper", 10, 20)]; // real
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 
@@ -204,9 +199,8 @@ fn duplicate_exports_skips_unreachable_modules() {
     graph.modules[1].exports = vec![make_export("helper", 10, 20)];
     // Module 2 stays unreachable
     graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 
@@ -216,9 +210,8 @@ fn duplicate_exports_skips_entry_points() {
     graph.modules[0].exports = vec![make_export("helper", 10, 20)];
     graph.modules[1].is_reachable = true;
     graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 
@@ -239,9 +232,8 @@ fn duplicate_exports_filters_re_export_chains() {
     }];
     graph.modules[2].is_reachable = true;
     graph.modules[2].exports = vec![make_export("helper", 5, 15)];
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 
@@ -256,7 +248,6 @@ fn duplicate_exports_suppressed_file_wide() {
     graph.modules[1].exports = vec![make_export("helper", 10, 20)];
     graph.modules[2].is_reachable = true;
     graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-    let config = test_config();
 
     let supp = vec![Suppression {
         line: 0,
@@ -265,7 +256,7 @@ fn duplicate_exports_suppressed_file_wide() {
     let mut suppressions: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
     suppressions.insert(FileId(2), &supp);
 
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 
@@ -281,9 +272,8 @@ fn duplicate_exports_three_modules_same_name() {
         graph.modules[i].is_reachable = true;
         graph.modules[i].exports = vec![make_export("sharedFn", 10, 20)];
     }
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].export_name, "sharedFn");
     assert_eq!(result[0].locations.len(), 3);
@@ -300,9 +290,8 @@ fn duplicate_exports_different_names_not_duplicated() {
     graph.modules[1].exports = vec![make_export("foo", 10, 20)];
     graph.modules[2].is_reachable = true;
     graph.modules[2].exports = vec![make_export("bar", 10, 20)];
-    let config = test_config();
     let suppressions = FxHashMap::default();
-    let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+    let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
     assert!(result.is_empty());
 }
 

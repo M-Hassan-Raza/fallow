@@ -198,101 +198,10 @@ pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path)
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
     use std::path::PathBuf;
-
-    /// Helper: build an `AnalysisResults` populated with one issue of every type.
-    fn sample_results(root: &Path) -> AnalysisResults {
-        let mut r = AnalysisResults::default();
-
-        r.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
-        r.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
-        r.unused_types.push(UnusedExport {
-            path: root.join("src/types.ts"),
-            export_name: "OldType".to_string(),
-            is_type_only: true,
-            line: 5,
-            col: 0,
-            span_start: 60,
-            is_re_export: false,
-        });
-        r.unused_dependencies.push(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-        });
-        r.unused_dev_dependencies.push(UnusedDependency {
-            package_name: "jest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: root.join("package.json"),
-            line: 5,
-        });
-        r.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Deprecated".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 8,
-            col: 2,
-        });
-        r.unused_class_members.push(UnusedMember {
-            path: root.join("src/service.ts"),
-            parent_name: "UserService".to_string(),
-            member_name: "legacyMethod".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 42,
-            col: 4,
-        });
-        r.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "./missing-module".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 0,
-        });
-        r.unlisted_dependencies.push(UnlistedDependency {
-            package_name: "chalk".to_string(),
-            imported_from: vec![ImportSite {
-                path: root.join("src/cli.ts"),
-                line: 2,
-                col: 0,
-            }],
-        });
-        r.duplicate_exports.push(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/config.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/types.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
-        r.type_only_dependencies.push(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 8,
-        });
-
-        r
-    }
 
     #[test]
     fn compact_empty_results_no_lines() {
@@ -480,8 +389,8 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        // 11 issue types, one of each
-        assert_eq!(lines.len(), 11);
+        // 12 issue types, one of each
+        assert_eq!(lines.len(), 12);
 
         // Verify ordering matches output order
         assert!(lines[0].starts_with("unused-file:"));
@@ -495,6 +404,7 @@ mod tests {
         assert!(lines[8].starts_with("unlisted-dep:"));
         assert!(lines[9].starts_with("duplicate-export:"));
         assert!(lines[10].starts_with("type-only-dep:"));
+        assert!(lines[11].starts_with("circular-dependency:"));
     }
 
     #[test]

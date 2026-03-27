@@ -219,14 +219,14 @@ pub fn execute_dupes(opts: &DupesOptions<'_>) -> Result<DupesResult, ExitCode> {
 
 /// Print duplication results and return appropriate exit code.
 pub fn print_dupes_result(result: &DupesResult, quiet: bool, explain: bool) -> ExitCode {
-    let report_code = report::print_duplication_report(
-        &result.report,
-        &result.config,
-        result.elapsed,
+    let ctx = report::ReportContext {
+        root: &result.config.root,
+        rules: &result.config.rules,
+        elapsed: result.elapsed,
         quiet,
-        &result.config.output,
         explain,
-    );
+    };
+    let report_code = report::print_duplication_report(&result.report, &ctx, &result.config.output);
     if report_code != ExitCode::SUCCESS {
         return report_code;
     }

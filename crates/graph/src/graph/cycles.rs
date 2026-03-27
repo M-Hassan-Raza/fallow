@@ -406,7 +406,7 @@ mod tests {
                     member_accesses: vec![],
                     whole_object_uses: vec![],
                     has_cjs_exports: false,
-                    unused_import_bindings: vec![],
+                    unused_import_bindings: FxHashSet::default(),
                 }
             })
             .collect();

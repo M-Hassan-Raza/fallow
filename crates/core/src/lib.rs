@@ -89,6 +89,220 @@ pub fn analyze_with_trace(config: &ResolvedConfig) -> Result<AnalysisOutput, Fal
     analyze_full(config, true, false)
 }
 
+/// Run the analysis pipeline using pre-parsed modules, skipping the parsing stage.
+///
+/// This avoids re-parsing files when the caller already has a `ParseResult` (e.g., from
+/// `fallow_core::extract::parse_all_files`). Discovery, plugins, scripts, entry points,
+/// import resolution, graph construction, and dead code detection still run normally.
+/// The graph is always retained (needed for file scores).
+pub fn analyze_with_parse_result(
+    config: &ResolvedConfig,
+    modules: &[extract::ModuleInfo],
+) -> Result<AnalysisOutput, FallowError> {
+    let _span = tracing::info_span!("fallow_analyze_with_parse_result").entered();
+    let pipeline_start = Instant::now();
+
+    let show_progress = !config.quiet
+        && std::io::IsTerminal::is_terminal(&std::io::stderr())
+        && matches!(
+            config.output,
+            fallow_config::OutputFormat::Human
+                | fallow_config::OutputFormat::Compact
+                | fallow_config::OutputFormat::Markdown
+        );
+    let progress = progress::AnalysisProgress::new(show_progress);
+
+    if !config.root.join("node_modules").is_dir() {
+        tracing::warn!(
+            "node_modules directory not found. Run `npm install` / `pnpm install` first for accurate results."
+        );
+    }
+
+    // Discover workspaces
+    let t = Instant::now();
+    let workspaces_vec = discover_workspaces(&config.root);
+    let workspaces_ms = t.elapsed().as_secs_f64() * 1000.0;
+    if !workspaces_vec.is_empty() {
+        tracing::info!(count = workspaces_vec.len(), "workspaces discovered");
+    }
+
+    // Stage 1: Discover files (cheap — needed for file registry and resolution)
+    let t = Instant::now();
+    let pb = progress.stage_spinner("Discovering files...");
+    let discovered_files = discover::discover_files(config);
+    let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
+
+    let project = project::ProjectState::new(discovered_files, workspaces_vec);
+    let files = project.files();
+    let workspaces = project.workspaces();
+
+    // Stage 1.5: Run plugin system
+    let t = Instant::now();
+    let pb = progress.stage_spinner("Detecting plugins...");
+    let mut plugin_result = run_plugins(config, files, workspaces);
+    let plugins_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
+
+    // Stage 1.6: Analyze package.json scripts
+    let t = Instant::now();
+    let pkg_path = config.root.join("package.json");
+    if let Ok(pkg) = PackageJson::load(&pkg_path)
+        && let Some(ref pkg_scripts) = pkg.scripts
+    {
+        let scripts_to_analyze = if config.production {
+            scripts::filter_production_scripts(pkg_scripts)
+        } else {
+            pkg_scripts.clone()
+        };
+        let script_analysis = scripts::analyze_scripts(&scripts_to_analyze, &config.root);
+        plugin_result.script_used_packages = script_analysis.used_packages;
+
+        for config_file in &script_analysis.config_files {
+            plugin_result
+                .entry_patterns
+                .push((config_file.clone(), "scripts".to_string()));
+        }
+    }
+    for ws in workspaces {
+        let ws_pkg_path = ws.root.join("package.json");
+        if let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path)
+            && let Some(ref ws_scripts) = ws_pkg.scripts
+        {
+            let scripts_to_analyze = if config.production {
+                scripts::filter_production_scripts(ws_scripts)
+            } else {
+                ws_scripts.clone()
+            };
+            let ws_analysis = scripts::analyze_scripts(&scripts_to_analyze, &ws.root);
+            plugin_result
+                .script_used_packages
+                .extend(ws_analysis.used_packages);
+
+            let ws_prefix = ws
+                .root
+                .strip_prefix(&config.root)
+                .unwrap_or(&ws.root)
+                .to_string_lossy();
+            for config_file in &ws_analysis.config_files {
+                plugin_result
+                    .entry_patterns
+                    .push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
+            }
+        }
+    }
+    let scripts_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    // Stage 2: SKIPPED — using pre-parsed modules from caller
+
+    // Stage 3: Discover entry points
+    let t = Instant::now();
+    let mut entry_points = discover::discover_entry_points(config, files);
+    let ws_entries: Vec<_> = workspaces
+        .par_iter()
+        .flat_map(|ws| discover::discover_workspace_entry_points(&ws.root, config, files))
+        .collect();
+    entry_points.extend(ws_entries);
+    let plugin_entries = discover::discover_plugin_entry_points(&plugin_result, config, files);
+    entry_points.extend(plugin_entries);
+    let infra_entries = discover::discover_infrastructure_entry_points(&config.root);
+    entry_points.extend(infra_entries);
+    let entry_points_ms = t.elapsed().as_secs_f64() * 1000.0;
+
+    // Stage 4: Resolve imports to file IDs
+    let t = Instant::now();
+    let pb = progress.stage_spinner("Resolving imports...");
+    let resolved = resolve::resolve_all_imports(
+        modules,
+        files,
+        workspaces,
+        &plugin_result.active_plugins,
+        &plugin_result.path_aliases,
+        &config.root,
+    );
+    let resolve_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
+
+    // Stage 5: Build module graph
+    let t = Instant::now();
+    let pb = progress.stage_spinner("Building module graph...");
+    let graph = graph::ModuleGraph::build(&resolved, &entry_points, files);
+    let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
+
+    // Stage 6: Analyze for dead code
+    let t = Instant::now();
+    let pb = progress.stage_spinner("Analyzing...");
+    let result = analyze::find_dead_code_full(
+        &graph,
+        config,
+        &resolved,
+        Some(&plugin_result),
+        workspaces,
+        modules,
+        false,
+    );
+    let analyze_ms = t.elapsed().as_secs_f64() * 1000.0;
+    pb.finish_and_clear();
+    progress.finish();
+
+    let total_ms = pipeline_start.elapsed().as_secs_f64() * 1000.0;
+
+    tracing::debug!(
+        "\n┌─ Pipeline Profile (reuse) ─────────────────────\n\
+         │  discover files:   {:>8.1}ms  ({} files)\n\
+         │  workspaces:       {:>8.1}ms\n\
+         │  plugins:          {:>8.1}ms\n\
+         │  script analysis:  {:>8.1}ms\n\
+         │  parse/extract:    SKIPPED (reused {} modules)\n\
+         │  entry points:     {:>8.1}ms  ({} entries)\n\
+         │  resolve imports:  {:>8.1}ms\n\
+         │  build graph:      {:>8.1}ms\n\
+         │  analyze:          {:>8.1}ms\n\
+         │  ────────────────────────────────────────────\n\
+         │  TOTAL:            {:>8.1}ms\n\
+         └─────────────────────────────────────────────────",
+        discover_ms,
+        files.len(),
+        workspaces_ms,
+        plugins_ms,
+        scripts_ms,
+        modules.len(),
+        entry_points_ms,
+        entry_points.len(),
+        resolve_ms,
+        graph_ms,
+        analyze_ms,
+        total_ms,
+    );
+
+    let timings = Some(PipelineTimings {
+        discover_files_ms: discover_ms,
+        file_count: files.len(),
+        workspaces_ms,
+        workspace_count: workspaces.len(),
+        plugins_ms,
+        script_analysis_ms: scripts_ms,
+        parse_extract_ms: 0.0, // Skipped — modules were reused
+        module_count: modules.len(),
+        cache_hits: 0,
+        cache_misses: 0,
+        cache_update_ms: 0.0,
+        entry_points_ms,
+        entry_point_count: entry_points.len(),
+        resolve_imports_ms: resolve_ms,
+        build_graph_ms: graph_ms,
+        analyze_ms,
+        total_ms,
+    });
+
+    Ok(AnalysisOutput {
+        results: result,
+        timings,
+        graph: Some(graph),
+    })
+}
+
 #[expect(clippy::unnecessary_wraps)] // Result kept for future error handling
 fn analyze_full(
     config: &ResolvedConfig,
@@ -495,23 +709,7 @@ pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
             false,
             true, // quiet: LSP/programmatic callers don't need progress bars
         ),
-        None => fallow_config::FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
-            rules: fallow_config::RulesConfig::default(),
-            production: false,
-            plugins: vec![],
-            overrides: vec![],
-        }
-        .resolve(
+        None => fallow_config::FallowConfig::default().resolve(
             root.to_path_buf(),
             fallow_config::OutputFormat::Human,
             num_cpus(),

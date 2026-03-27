@@ -1,7 +1,5 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::ResolvedConfig;
-
 use crate::discover::FileId;
 use crate::extract::MemberKind;
 use crate::graph::ModuleGraph;
@@ -18,7 +16,6 @@ use super::{LineOffsetsMap, byte_offset_to_line_col};
 /// maps them to their imported names, and filters out members that are accessed.
 pub fn find_unused_members(
     graph: &ModuleGraph,
-    _config: &ResolvedConfig,
     resolved_modules: &[ResolvedModule],
     suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
@@ -237,37 +234,11 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             })
             .collect();
 
         ModuleGraph::build(&resolved_modules, &entry_points, &files)
-    }
-
-    fn test_config() -> ResolvedConfig {
-        fallow_config::FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
-            rules: fallow_config::RulesConfig::default(),
-            production: false,
-            plugins: vec![],
-            overrides: vec![],
-        }
-        .resolve(
-            PathBuf::from("/tmp/test"),
-            fallow_config::OutputFormat::Human,
-            1,
-            true,
-            true,
-        )
     }
 
     fn make_member(name: &str, kind: MemberKind) -> MemberInfo {
@@ -306,14 +277,9 @@ mod tests {
     #[test]
     fn unused_members_empty_graph() {
         let graph = build_graph(&[]);
-        let config = test_config();
-        let (enum_members, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
     }
@@ -330,16 +296,10 @@ mod tests {
             ],
             Some(0), // referenced from entry
         )];
-        let config = test_config();
 
         // No member accesses at all — both should be unused
-        let (enum_members, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         assert_eq!(enum_members.len(), 2);
         assert!(class_members.is_empty());
         let names: FxHashSet<&str> = enum_members
@@ -362,7 +322,6 @@ mod tests {
             ],
             Some(0),
         )];
-        let config = test_config();
 
         // Consumer accesses Status.Active
         let resolved_modules = vec![ResolvedModule {
@@ -389,12 +348,11 @@ mod tests {
             }],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         }];
 
         let (enum_members, _) = find_unused_members(
             &graph,
-            &config,
             &resolved_modules,
             &FxHashMap::default(),
             &FxHashMap::default(),
@@ -416,7 +374,6 @@ mod tests {
             ],
             Some(0),
         )];
-        let config = test_config();
 
         // Consumer uses Object.values(Status) — whole object use
         let resolved_modules = vec![ResolvedModule {
@@ -440,12 +397,11 @@ mod tests {
             member_accesses: vec![],
             whole_object_uses: vec!["Status".to_string()],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         }];
 
         let (enum_members, class_members) = find_unused_members(
             &graph,
-            &config,
             &resolved_modules,
             &FxHashMap::default(),
             &FxHashMap::default(),
@@ -468,15 +424,9 @@ mod tests {
             }],
             Some(0),
         )];
-        let config = test_config();
 
-        let (_, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (_, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         assert!(class_members.is_empty());
     }
 
@@ -493,15 +443,9 @@ mod tests {
             ],
             Some(0),
         )];
-        let config = test_config();
 
-        let (_, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (_, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         // Only customMethod should be flagged
         assert_eq!(class_members.len(), 1);
         assert_eq!(class_members[0].member_name, "customMethod");
@@ -520,15 +464,9 @@ mod tests {
             ],
             Some(0),
         )];
-        let config = test_config();
 
-        let (_, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (_, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         assert_eq!(class_members.len(), 1);
         assert_eq!(class_members[0].member_name, "myHelper");
     }
@@ -545,7 +483,6 @@ mod tests {
             ],
             Some(0),
         )];
-        let config = test_config();
 
         // The service file itself accesses this.label
         let resolved_modules = vec![ResolvedModule {
@@ -562,12 +499,11 @@ mod tests {
             }],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         }];
 
         let (_, class_members) = find_unused_members(
             &graph,
-            &config,
             &resolved_modules,
             &FxHashMap::default(),
             &FxHashMap::default(),
@@ -587,15 +523,9 @@ mod tests {
             vec![make_member("Active", MemberKind::EnumMember)],
             None, // no references
         )];
-        let config = test_config();
 
-        let (enum_members, _) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (enum_members, _) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         // Member analysis skipped because export itself is unreferenced
         assert!(enum_members.is_empty());
     }
@@ -609,15 +539,9 @@ mod tests {
             vec![make_member("X", MemberKind::EnumMember)],
             Some(0),
         )];
-        let config = test_config();
 
-        let (enum_members, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
     }
@@ -630,15 +554,9 @@ mod tests {
             vec![make_member("X", MemberKind::EnumMember)],
             None,
         )];
-        let config = test_config();
 
-        let (enum_members, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert!(class_members.is_empty());
     }
@@ -652,15 +570,9 @@ mod tests {
             vec![make_member("Active", MemberKind::EnumMember)],
             Some(0),
         )];
-        let config = test_config();
 
-        let (enum_members, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         assert_eq!(enum_members.len(), 1);
         assert_eq!(enum_members[0].kind, MemberKind::EnumMember);
         assert!(class_members.is_empty());
@@ -678,15 +590,9 @@ mod tests {
             ],
             Some(0),
         )];
-        let config = test_config();
 
-        let (enum_members, class_members) = find_unused_members(
-            &graph,
-            &config,
-            &[],
-            &FxHashMap::default(),
-            &FxHashMap::default(),
-        );
+        let (enum_members, class_members) =
+            find_unused_members(&graph, &[], &FxHashMap::default(), &FxHashMap::default());
         assert!(enum_members.is_empty());
         assert_eq!(class_members.len(), 2);
         assert!(
@@ -713,7 +619,6 @@ mod tests {
             ],
             Some(0),
         )];
-        let config = test_config();
 
         // Consumer imports MyService and accesses greet via instance.
         // The visitor maps `svc.greet()` → `MyService.greet` at extraction time,
@@ -743,12 +648,11 @@ mod tests {
             }],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         }];
 
         let (_, class_members) = find_unused_members(
             &graph,
-            &config,
             &resolved_modules,
             &FxHashMap::default(),
             &FxHashMap::default(),

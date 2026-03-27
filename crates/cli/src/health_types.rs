@@ -299,7 +299,7 @@ pub enum RecommendationCategory {
 
 impl RecommendationCategory {
     /// Human-readable label for terminal output.
-    pub fn label(&self) -> &'static str {
+    pub const fn label(&self) -> &'static str {
         match self {
             Self::UrgentChurnComplexity => "churn+complexity",
             Self::BreakCircularDependency => "circular dep",
@@ -311,7 +311,7 @@ impl RecommendationCategory {
     }
 
     /// Machine-parseable label for compact output (no spaces).
-    pub fn compact_label(&self) -> &'static str {
+    pub const fn compact_label(&self) -> &'static str {
         match self {
             Self::UrgentChurnComplexity => "churn_complexity",
             Self::BreakCircularDependency => "circular_dep",
@@ -368,7 +368,7 @@ pub enum EffortEstimate {
 
 impl EffortEstimate {
     /// Human-readable label for terminal output.
-    pub fn label(&self) -> &'static str {
+    pub const fn label(&self) -> &'static str {
         match self {
             Self::Low => "low",
             Self::Medium => "medium",
@@ -377,7 +377,7 @@ impl EffortEstimate {
     }
 
     /// Numeric value for arithmetic (efficiency = priority / effort).
-    pub fn numeric(&self) -> f64 {
+    pub const fn numeric(&self) -> f64 {
         match self {
             Self::Low => 1.0,
             Self::Medium => 2.0,
@@ -405,7 +405,7 @@ pub enum Confidence {
 
 impl Confidence {
     /// Human-readable label for terminal output.
-    pub fn label(&self) -> &'static str {
+    pub const fn label(&self) -> &'static str {
         match self {
             Self::High => "high",
             Self::Medium => "medium",

@@ -178,7 +178,6 @@ pub fn find_unused_exports(
 /// barrel file pattern, not a true duplicate.
 pub fn find_duplicate_exports(
     graph: &ModuleGraph,
-    config: &ResolvedConfig,
     suppressions_by_file: &FxHashMap<FileId, &[Suppression]>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<DuplicateExport> {
@@ -229,7 +228,6 @@ pub fn find_duplicate_exports(
     }
 
     // Filter: only keep truly independent duplicates (not re-export chains)
-    let _ = config; // used for consistency
     // Sort by export name for deterministic output order
     let mut sorted_locations: Vec<_> = export_locations.into_iter().collect();
     sorted_locations.sort_by(|a, b| a.0.cmp(&b.0));
@@ -293,9 +291,10 @@ pub fn collect_export_usages(
         .map(|m| (m.file_id, m.path.as_path()))
         .collect();
 
-    // Fallback source cache for reference locations not in the line offsets map.
+    // Fallback source + line-offset cache for reference locations not in the line offsets map.
     // Only populated when a referencing file's line offsets are unavailable.
-    let mut source_cache: FxHashMap<FileId, String> = FxHashMap::default();
+    // Caches both source and computed offsets to avoid redundant recomputation.
+    let mut source_cache: FxHashMap<FileId, (String, Vec<u32>)> = FxHashMap::default();
 
     for module in &graph.modules {
         // Skip unreachable modules — no point showing Code Lens for files
@@ -332,14 +331,12 @@ pub fn collect_export_usages(
                             r.import_span.start,
                         )
                     } else {
-                        let ref_source = source_cache
-                            .entry(r.from_file)
-                            .or_insert_with(|| read_source(ref_path));
-                        let offsets = fallow_types::extract::compute_line_offsets(ref_source);
-                        fallow_types::extract::byte_offset_to_line_col(
-                            &offsets,
-                            r.import_span.start,
-                        )
+                        let (_, offsets) = source_cache.entry(r.from_file).or_insert_with(|| {
+                            let src = read_source(ref_path);
+                            let ofs = fallow_types::extract::compute_line_offsets(&src);
+                            (src, ofs)
+                        });
+                        fallow_types::extract::byte_offset_to_line_col(offsets, r.import_span.start)
                     };
                     Some(ReferenceLocation {
                         path: ref_path.to_path_buf(),
@@ -407,7 +404,7 @@ mod tests {
                 member_accesses: vec![],
                 whole_object_uses: vec![],
                 has_cjs_exports: false,
-                unused_import_bindings: vec![],
+                unused_import_bindings: FxHashSet::default(),
             })
             .collect();
 
@@ -477,9 +474,8 @@ mod tests {
     #[test]
     fn duplicate_exports_empty_graph() {
         let graph = build_graph(&[]);
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -488,9 +484,8 @@ mod tests {
         let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
         graph.modules[1].is_reachable = true;
         graph.modules[1].exports = vec![make_export("foo", 10, 20), make_export("bar", 30, 40)];
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -505,9 +500,8 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         graph.modules[2].is_reachable = true;
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].export_name, "helper");
         assert_eq!(result[0].locations.len(), 2);
@@ -538,9 +532,8 @@ mod tests {
             references: vec![],
             members: vec![],
         }];
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -555,9 +548,8 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 0, 0)]; // synthetic
         graph.modules[2].is_reachable = true;
         graph.modules[2].exports = vec![make_export("helper", 10, 20)]; // real
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -572,9 +564,8 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         // Module 2 stays unreachable
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -584,9 +575,8 @@ mod tests {
         graph.modules[0].exports = vec![make_export("helper", 10, 20)];
         graph.modules[1].is_reachable = true;
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -607,9 +597,8 @@ mod tests {
         }];
         graph.modules[2].is_reachable = true;
         graph.modules[2].exports = vec![make_export("helper", 5, 15)];
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -624,7 +613,6 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         graph.modules[2].is_reachable = true;
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
-        let config = test_config();
 
         let supp = vec![Suppression {
             line: 0,
@@ -633,7 +621,7 @@ mod tests {
         let mut suppressions: FxHashMap<FileId, &[Suppression]> = FxHashMap::default();
         suppressions.insert(FileId(2), &supp);
 
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 
@@ -649,9 +637,8 @@ mod tests {
             graph.modules[i].is_reachable = true;
             graph.modules[i].exports = vec![make_export("sharedFn", 10, 20)];
         }
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].export_name, "sharedFn");
         assert_eq!(result[0].locations.len(), 3);
@@ -668,9 +655,8 @@ mod tests {
         graph.modules[1].exports = vec![make_export("foo", 10, 20)];
         graph.modules[2].is_reachable = true;
         graph.modules[2].exports = vec![make_export("bar", 10, 20)];
-        let config = test_config();
         let suppressions = FxHashMap::default();
-        let result = find_duplicate_exports(&graph, &config, &suppressions, &FxHashMap::default());
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert!(result.is_empty());
     }
 

@@ -5,7 +5,7 @@ use fallow_config::{RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
-use super::{normalize_uri, relative_path};
+use super::{emit_json, normalize_uri, relative_path};
 use crate::health_types::{ExceededThreshold, HealthReport};
 
 /// Map fallow severity to CodeClimate severity.
@@ -379,16 +379,7 @@ pub(super) fn print_codeclimate(
     rules: &RulesConfig,
 ) -> ExitCode {
     let value = build_codeclimate(results, root, rules);
-    match serde_json::to_string_pretty(&value) {
-        Ok(json) => {
-            println!("{json}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("Error: failed to serialize CodeClimate output: {e}");
-            ExitCode::from(2)
-        }
-    }
+    emit_json(&value, "CodeClimate")
 }
 
 /// Compute graduated severity for health findings based on threshold ratio.
@@ -472,16 +463,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
 /// Print health analysis results in CodeClimate format.
 pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> ExitCode {
     let value = build_health_codeclimate(report, root);
-    match serde_json::to_string_pretty(&value) {
-        Ok(json) => {
-            println!("{json}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("Error: failed to serialize CodeClimate output: {e}");
-            ExitCode::from(2)
-        }
-    }
+    emit_json(&value, "CodeClimate")
 }
 
 /// Build CodeClimate JSON array from duplication analysis results.
@@ -533,14 +515,5 @@ pub fn build_duplication_codeclimate(report: &DuplicationReport, root: &Path) ->
 /// Print duplication analysis results in CodeClimate format.
 pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &Path) -> ExitCode {
     let value = build_duplication_codeclimate(report, root);
-    match serde_json::to_string_pretty(&value) {
-        Ok(json) => {
-            println!("{json}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("Error: failed to serialize CodeClimate output: {e}");
-            ExitCode::from(2)
-        }
-    }
+    emit_json(&value, "CodeClimate")
 }

@@ -1,3 +1,5 @@
+use rustc_hash::FxHashSet;
+
 use crate::graph::ModuleGraph;
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
@@ -53,7 +55,7 @@ fn graph_re_export_chain_propagates_references() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // barrel re-exports "foo" from source
         ResolvedModule {
@@ -82,7 +84,7 @@ fn graph_re_export_chain_propagates_references() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // source has the actual export
         ResolvedModule {
@@ -103,7 +105,7 @@ fn graph_re_export_chain_propagates_references() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -169,7 +171,7 @@ fn barrel_re_export_creates_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -190,7 +192,7 @@ fn barrel_re_export_creates_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(2),
@@ -210,7 +212,7 @@ fn barrel_re_export_creates_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -288,7 +290,7 @@ fn barrel_unused_re_export_has_no_references() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -320,7 +322,7 @@ fn barrel_unused_re_export_has_no_references() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(2),
@@ -350,7 +352,7 @@ fn barrel_unused_re_export_has_no_references() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -422,7 +424,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -454,7 +456,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(2),
@@ -484,7 +486,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -562,7 +564,7 @@ fn default_re_export_creates_default_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -583,7 +585,7 @@ fn default_re_export_creates_default_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(2),
@@ -603,7 +605,7 @@ fn default_re_export_creates_default_export_symbol() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -684,7 +686,7 @@ fn multi_level_re_export_chain_propagation() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -705,7 +707,7 @@ fn multi_level_re_export_chain_propagation() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(2),
@@ -726,7 +728,7 @@ fn multi_level_re_export_chain_propagation() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(3),
@@ -746,7 +748,7 @@ fn multi_level_re_export_chain_propagation() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -841,7 +843,7 @@ fn entry_point_named_re_export_propagates_to_source() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // render.js exports render and hydrate (no one imports them directly)
         ResolvedModule {
@@ -872,7 +874,7 @@ fn entry_point_named_re_export_propagates_to_source() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -945,7 +947,7 @@ fn entry_point_star_re_export_propagates_to_source() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -975,7 +977,7 @@ fn entry_point_star_re_export_propagates_to_source() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -1044,7 +1046,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -1074,7 +1076,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -1150,7 +1152,7 @@ fn entry_point_multi_level_named_re_export_chain() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // barrel.ts re-exports foo from source.ts (not an entry point)
         ResolvedModule {
@@ -1172,7 +1174,7 @@ fn entry_point_multi_level_named_re_export_chain() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // source.ts has the actual export
         ResolvedModule {
@@ -1193,7 +1195,7 @@ fn entry_point_multi_level_named_re_export_chain() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -1281,7 +1283,7 @@ fn star_re_export_through_multiple_barrel_layers() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // barrel_a: export * from './barrel_b'
         ResolvedModule {
@@ -1303,7 +1305,7 @@ fn star_re_export_through_multiple_barrel_layers() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // barrel_b: export * from './source'
         ResolvedModule {
@@ -1325,7 +1327,7 @@ fn star_re_export_through_multiple_barrel_layers() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // source.ts: export const foo, bar
         ResolvedModule {
@@ -1356,7 +1358,7 @@ fn star_re_export_through_multiple_barrel_layers() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -1437,7 +1439,7 @@ fn named_re_export_with_rename() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // barrel: export { foo as bar } from './source'
         ResolvedModule {
@@ -1459,7 +1461,7 @@ fn named_re_export_with_rename() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // source: export const foo
         ResolvedModule {
@@ -1480,7 +1482,7 @@ fn named_re_export_with_rename() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -1553,7 +1555,7 @@ fn entry_point_star_re_export_source_has_only_default() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // source only has a default export
         ResolvedModule {
@@ -1574,7 +1576,7 @@ fn entry_point_star_re_export_source_has_only_default() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -1644,7 +1646,7 @@ fn cycle_detection_does_not_infinite_loop() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // b.ts: export { foo } from './a'
         ResolvedModule {
@@ -1666,7 +1668,7 @@ fn cycle_detection_does_not_infinite_loop() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // consumer imports foo from a
         ResolvedModule {
@@ -1690,7 +1692,7 @@ fn cycle_detection_does_not_infinite_loop() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -1755,7 +1757,7 @@ fn star_re_export_cycle_terminates() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // b.ts: export * from './a'
         ResolvedModule {
@@ -1777,7 +1779,7 @@ fn star_re_export_cycle_terminates() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // consumer imports x from a
         ResolvedModule {
@@ -1801,7 +1803,7 @@ fn star_re_export_cycle_terminates() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -1885,7 +1887,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // barrel: export * from './source' AND export { baz as bar } from './source'
         ResolvedModule {
@@ -1918,7 +1920,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // source: export const foo, baz
         ResolvedModule {
@@ -1949,7 +1951,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 
@@ -2035,7 +2037,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
         // lib.ts: export create, destroy, internal_helper
         ResolvedModule {
@@ -2074,7 +2076,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         },
     ];
 

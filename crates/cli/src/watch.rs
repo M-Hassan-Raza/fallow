@@ -101,7 +101,14 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         }
     };
     let elapsed = start.elapsed();
-    let report_code = report::print_results(&results, config, elapsed, opts.quiet, opts.explain);
+    let ctx = report::ReportContext {
+        root: &config.root,
+        rules: &config.rules,
+        elapsed,
+        quiet: opts.quiet,
+        explain: opts.explain,
+    };
+    let report_code = report::print_results(&results, &ctx, &config.output);
     if report_code != ExitCode::SUCCESS {
         eprintln!("Warning: report output failed");
     }

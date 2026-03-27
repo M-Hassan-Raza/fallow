@@ -38,8 +38,8 @@ Pipeline: Config → File Discovery → Incremental Parallel Parsing (rayon + ox
 ```bash
 git config core.hooksPath .githooks  # Enable pre-commit hooks (fmt + clippy)
 cargo build --workspace
-cargo test --workspace
-cargo clippy --workspace -- -D warnings
+cargo test --workspace --all-targets
+cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 cargo run                       # Run all analyses (check + dupes + health)
 cargo run -- watch              # Watch mode
@@ -48,14 +48,13 @@ cargo run -- fix --dry-run      # Auto-fix preview
 
 ## Code conventions
 
-- All clippy suppressions use `#[expect(clippy::...)]` not `#[allow]` — warns when suppression becomes unnecessary
-- Const size assertions on hot-path structs (`ModuleNode`, `ModuleInfo`, `ExportInfo`, `ImportInfo`, `Edge`)
 - Config files: `.fallowrc.json` > `fallow.toml` > `.fallow.toml`
 - No `detect` section in config — use `rules` with `"off"` severity
 - No `output` in config — output format is CLI-only via `--format`
 - Rules severity: `error` (fail CI, default) | `warn` (exit 0) | `off` (skip)
 - Inline suppression: `// fallow-ignore-next-line [issue-type]` and `// fallow-ignore-file [issue-type]`
 - Environment variables: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN` (binary path for MCP)
+- See `.claude/rules/code-quality.md` for clippy, size assertions, and CI hardening details
 
 ## Key design decisions
 
@@ -64,6 +63,7 @@ cargo run -- fix --dry-run      # Auto-fix preview
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.
 - **FileIds are path-sorted** (not insertion order) for stable cross-run identity.
 - **Hidden directory allowlist**: `.storybook`, `.well-known`, `.changeset`, `.github` — other dotdirs are skipped. Only root-level `build/` is ignored.
+- **FxHashMap/FxHashSet required**: Standard `HashMap`/`HashSet` are disallowed (enforced via `.clippy.toml`). Use `rustc_hash` types for deterministic, faster hashing.
 
 ## Git conventions
 

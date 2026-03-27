@@ -123,6 +123,13 @@ const GENERAL_TOOLING_EXACT: &[&str] = &[
     "electron-vite",
 ];
 
+/// Lazily-built set for O(1) exact-match lookups.
+fn tooling_exact_set() -> &'static rustc_hash::FxHashSet<&'static str> {
+    static SET: std::sync::OnceLock<rustc_hash::FxHashSet<&'static str>> =
+        std::sync::OnceLock::new();
+    SET.get_or_init(|| GENERAL_TOOLING_EXACT.iter().copied().collect())
+}
+
 /// Check whether a package is a known tooling/dev dependency by name.
 ///
 /// This is the single source of truth for general tooling detection.
@@ -130,7 +137,7 @@ const GENERAL_TOOLING_EXACT: &[&str] = &[
 /// and aggregated separately in `AggregatedPluginResult`.
 pub fn is_known_tooling_dependency(name: &str) -> bool {
     GENERAL_TOOLING_PREFIXES.iter().any(|p| name.starts_with(p))
-        || GENERAL_TOOLING_EXACT.contains(&name)
+        || tooling_exact_set().contains(name)
 }
 
 #[cfg(test)]

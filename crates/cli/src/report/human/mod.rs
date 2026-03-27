@@ -16,7 +16,7 @@ use std::path::Path;
 
 use colored::Colorize;
 
-use super::{Level, relative_path, split_dir_filename};
+use super::{Level, plural, relative_path, split_dir_filename};
 
 /// Maximum items shown per flat section (unused files, deps, etc.).
 pub(super) const MAX_FLAT_ITEMS: usize = 10;
@@ -170,7 +170,7 @@ pub(super) fn build_grouped_by_file<'a, T>(
                 "... and {} more in {} file{}",
                 hidden_items,
                 hidden_files,
-                if hidden_files == 1 { "" } else { "s" }
+                plural(hidden_files)
             )
             .dimmed()
         ));

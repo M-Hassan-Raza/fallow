@@ -466,20 +466,8 @@ fn load_config(
             config.resolve(root.to_path_buf(), output, threads, no_cache, quiet)
         }
         None => FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
-            rules: fallow_config::RulesConfig::default(),
             production,
-            plugins: vec![],
-            overrides: vec![],
+            ..FallowConfig::default()
         }
         .resolve(root.to_path_buf(), output, threads, no_cache, quiet),
     })

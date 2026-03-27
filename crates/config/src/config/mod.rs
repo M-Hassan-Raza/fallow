@@ -20,7 +20,7 @@ use crate::external_plugin::ExternalPluginDef;
 use crate::workspace::WorkspaceConfig;
 
 /// User-facing configuration loaded from `.fallowrc.json` or `fallow.toml`.
-#[derive(Debug, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct FallowConfig {
     /// JSON Schema reference (ignored during deserialization).

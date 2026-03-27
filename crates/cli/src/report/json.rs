@@ -5,6 +5,7 @@ use std::time::Duration;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
+use super::emit_json;
 use crate::explain;
 
 pub(super) fn print_json(
@@ -18,16 +19,7 @@ pub(super) fn print_json(
             if explain {
                 insert_meta(&mut output, explain::check_meta());
             }
-            match serde_json::to_string_pretty(&output) {
-                Ok(json) => {
-                    println!("{json}");
-                    ExitCode::SUCCESS
-                }
-                Err(e) => {
-                    eprintln!("Error: failed to serialize JSON output: {e}");
-                    ExitCode::from(2)
-                }
-            }
+            emit_json(&output, "JSON")
         }
         Err(e) => {
             eprintln!("Error: failed to serialize results: {e}");
@@ -42,6 +34,33 @@ pub(super) fn print_json(
 /// backwards-incompatible way (removing/renaming fields, changing types).
 /// Adding new fields is always backwards-compatible and does not require a bump.
 const SCHEMA_VERSION: u32 = 3;
+
+/// Build a JSON envelope with standard metadata fields at the top.
+///
+/// Creates a JSON object with `schema_version`, `version`, and `elapsed_ms`,
+/// then merges all fields from `report_value` into the envelope.
+/// Fields from `report_value` appear after the metadata header.
+fn build_json_envelope(report_value: serde_json::Value, elapsed: Duration) -> serde_json::Value {
+    let mut map = serde_json::Map::new();
+    map.insert(
+        "schema_version".to_string(),
+        serde_json::json!(SCHEMA_VERSION),
+    );
+    map.insert(
+        "version".to_string(),
+        serde_json::json!(env!("CARGO_PKG_VERSION")),
+    );
+    map.insert(
+        "elapsed_ms".to_string(),
+        serde_json::json!(elapsed.as_millis()),
+    );
+    if let serde_json::Value::Object(report_map) = report_value {
+        for (key, value) in report_map {
+            map.insert(key, value);
+        }
+    }
+    serde_json::Value::Object(map)
+}
 
 /// Build the JSON output value for analysis results.
 ///
@@ -130,25 +149,7 @@ pub(super) fn print_health_json(
         }
     };
 
-    let mut map = serde_json::Map::new();
-    map.insert(
-        "schema_version".to_string(),
-        serde_json::json!(SCHEMA_VERSION),
-    );
-    map.insert(
-        "version".to_string(),
-        serde_json::json!(env!("CARGO_PKG_VERSION")),
-    );
-    map.insert(
-        "elapsed_ms".to_string(),
-        serde_json::json!(elapsed.as_millis()),
-    );
-    if let serde_json::Value::Object(report_map) = report_value {
-        for (key, value) in report_map {
-            map.insert(key, value);
-        }
-    }
-    let mut output = serde_json::Value::Object(map);
+    let mut output = build_json_envelope(report_value, elapsed);
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
 
@@ -156,16 +157,7 @@ pub(super) fn print_health_json(
         insert_meta(&mut output, explain::health_meta());
     }
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{json}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("Error: failed to serialize JSON output: {e}");
-            ExitCode::from(2)
-        }
-    }
+    emit_json(&output, "JSON")
 }
 
 pub(super) fn print_duplication_json(
@@ -181,41 +173,13 @@ pub(super) fn print_duplication_json(
         }
     };
 
-    // Metadata fields first, then report data
-    let mut map = serde_json::Map::new();
-    map.insert(
-        "schema_version".to_string(),
-        serde_json::json!(SCHEMA_VERSION),
-    );
-    map.insert(
-        "version".to_string(),
-        serde_json::json!(env!("CARGO_PKG_VERSION")),
-    );
-    map.insert(
-        "elapsed_ms".to_string(),
-        serde_json::json!(elapsed.as_millis()),
-    );
-    if let serde_json::Value::Object(report_map) = report_value {
-        for (key, value) in report_map {
-            map.insert(key, value);
-        }
-    }
-    let mut output = serde_json::Value::Object(map);
+    let mut output = build_json_envelope(report_value, elapsed);
 
     if explain {
         insert_meta(&mut output, explain::dupes_meta());
     }
 
-    match serde_json::to_string_pretty(&output) {
-        Ok(json) => {
-            println!("{json}");
-            ExitCode::SUCCESS
-        }
-        Err(e) => {
-            eprintln!("Error: failed to serialize JSON output: {e}");
-            ExitCode::from(2)
-        }
-    }
+    emit_json(&output, "JSON")
 }
 
 pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
@@ -232,108 +196,11 @@ pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
-    use std::path::{Path, PathBuf};
+    use std::path::PathBuf;
     use std::time::Duration;
-
-    /// Helper: build an `AnalysisResults` populated with one issue of every type.
-    fn sample_results(root: &Path) -> AnalysisResults {
-        let mut r = AnalysisResults::default();
-
-        r.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
-        r.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
-        r.unused_types.push(UnusedExport {
-            path: root.join("src/types.ts"),
-            export_name: "OldType".to_string(),
-            is_type_only: true,
-            line: 5,
-            col: 0,
-            span_start: 60,
-            is_re_export: false,
-        });
-        r.unused_dependencies.push(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-        });
-        r.unused_dev_dependencies.push(UnusedDependency {
-            package_name: "jest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: root.join("package.json"),
-            line: 5,
-        });
-        r.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Deprecated".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 8,
-            col: 2,
-        });
-        r.unused_class_members.push(UnusedMember {
-            path: root.join("src/service.ts"),
-            parent_name: "UserService".to_string(),
-            member_name: "legacyMethod".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 42,
-            col: 4,
-        });
-        r.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "./missing-module".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 0,
-        });
-        r.unlisted_dependencies.push(UnlistedDependency {
-            package_name: "chalk".to_string(),
-            imported_from: vec![ImportSite {
-                path: root.join("src/cli.ts"),
-                line: 2,
-                col: 0,
-            }],
-        });
-        r.duplicate_exports.push(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/config.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/types.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
-        r.type_only_dependencies.push(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 12,
-        });
-        r.circular_dependencies.push(CircularDependency {
-            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-            length: 2,
-            line: 3,
-            col: 0,
-        });
-
-        r
-    }
 
     #[test]
     fn json_output_has_metadata_fields() {

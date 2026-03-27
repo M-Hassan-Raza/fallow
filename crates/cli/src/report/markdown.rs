@@ -4,7 +4,7 @@ use std::path::Path;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
 
-use super::{normalize_uri, relative_path};
+use super::{normalize_uri, plural, relative_path};
 
 /// Escape backticks in user-controlled strings to prevent breaking markdown code spans.
 fn escape_backticks(s: &str) -> String {
@@ -31,11 +31,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         return out;
     }
 
-    let _ = write!(
-        out,
-        "## Fallow: {total} issue{} found\n\n",
-        if total == 1 { "" } else { "s" }
-    );
+    let _ = write!(out, "## Fallow: {total} issue{} found\n\n", plural(total));
 
     // ── Unused files ──
     markdown_section(&mut out, &results.unused_files, "Unused files", |file| {
@@ -274,7 +270,7 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
         out,
         "## Fallow: {} clone group{} found ({:.1}% duplication)\n\n",
         stats.clone_groups,
-        if stats.clone_groups == 1 { "" } else { "s" },
+        plural(stats.clone_groups),
         stats.duplication_percentage,
     );
 
@@ -286,7 +282,7 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
             "**Clone group {}** ({} lines, {instance_count} instance{})\n\n",
             i + 1,
             group.line_count,
-            if instance_count == 1 { "" } else { "s" }
+            plural(instance_count)
         );
         for instance in &group.instances {
             let relative = rel(&instance.file);
@@ -309,7 +305,7 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
                 "**Family {}** ({} group{}, {} lines across {})\n\n",
                 i + 1,
                 family.groups.len(),
-                if family.groups.len() == 1 { "" } else { "s" },
+                plural(family.groups.len()),
                 family.total_duplicated_lines,
                 file_names
                     .iter()
@@ -336,11 +332,7 @@ pub fn build_duplication_markdown(report: &DuplicationReport, root: &Path) -> St
         stats.duplicated_lines,
         stats.duplication_percentage,
         stats.files_with_clones,
-        if stats.files_with_clones == 1 {
-            ""
-        } else {
-            "s"
-        },
+        plural(stats.files_with_clones),
     );
 
     out
@@ -415,13 +407,13 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
             let _ = write!(
                 out,
                 "## Fallow: {count} high complexity function{} ({shown} shown)\n\n",
-                if count == 1 { "" } else { "s" },
+                plural(count),
             );
         } else {
             let _ = write!(
                 out,
                 "## Fallow: {count} high complexity function{}\n\n",
-                if count == 1 { "" } else { "s" },
+                plural(count),
             );
         }
 
@@ -529,7 +521,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
                 out,
                 "\n*{} file{} excluded (< {} commits)*\n",
                 summary.files_excluded,
-                if summary.files_excluded == 1 { "" } else { "s" },
+                plural(summary.files_excluded),
                 summary.min_commits,
             );
         }
@@ -593,111 +585,13 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::report::test_helpers::sample_results;
     use fallow_core::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats,
         RefactoringKind, RefactoringSuggestion,
     };
-    use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
     use std::path::PathBuf;
-
-    /// Helper: build an `AnalysisResults` populated with one issue of every type.
-    fn sample_results(root: &Path) -> AnalysisResults {
-        let mut r = AnalysisResults::default();
-
-        r.unused_files.push(UnusedFile {
-            path: root.join("src/dead.ts"),
-        });
-        r.unused_exports.push(UnusedExport {
-            path: root.join("src/utils.ts"),
-            export_name: "helperFn".to_string(),
-            is_type_only: false,
-            line: 10,
-            col: 4,
-            span_start: 120,
-            is_re_export: false,
-        });
-        r.unused_types.push(UnusedExport {
-            path: root.join("src/types.ts"),
-            export_name: "OldType".to_string(),
-            is_type_only: true,
-            line: 5,
-            col: 0,
-            span_start: 60,
-            is_re_export: false,
-        });
-        r.unused_dependencies.push(UnusedDependency {
-            package_name: "lodash".to_string(),
-            location: DependencyLocation::Dependencies,
-            path: root.join("package.json"),
-            line: 5,
-        });
-        r.unused_dev_dependencies.push(UnusedDependency {
-            package_name: "jest".to_string(),
-            location: DependencyLocation::DevDependencies,
-            path: root.join("package.json"),
-            line: 5,
-        });
-        r.unused_enum_members.push(UnusedMember {
-            path: root.join("src/enums.ts"),
-            parent_name: "Status".to_string(),
-            member_name: "Deprecated".to_string(),
-            kind: MemberKind::EnumMember,
-            line: 8,
-            col: 2,
-        });
-        r.unused_class_members.push(UnusedMember {
-            path: root.join("src/service.ts"),
-            parent_name: "UserService".to_string(),
-            member_name: "legacyMethod".to_string(),
-            kind: MemberKind::ClassMethod,
-            line: 42,
-            col: 4,
-        });
-        r.unresolved_imports.push(UnresolvedImport {
-            path: root.join("src/app.ts"),
-            specifier: "./missing-module".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 0,
-        });
-        r.unlisted_dependencies.push(UnlistedDependency {
-            package_name: "chalk".to_string(),
-            imported_from: vec![ImportSite {
-                path: root.join("src/cli.ts"),
-                line: 2,
-                col: 0,
-            }],
-        });
-        r.duplicate_exports.push(DuplicateExport {
-            export_name: "Config".to_string(),
-            locations: vec![
-                DuplicateLocation {
-                    path: root.join("src/config.ts"),
-                    line: 15,
-                    col: 0,
-                },
-                DuplicateLocation {
-                    path: root.join("src/types.ts"),
-                    line: 30,
-                    col: 0,
-                },
-            ],
-        });
-        r.type_only_dependencies.push(TypeOnlyDependency {
-            package_name: "zod".to_string(),
-            path: root.join("package.json"),
-            line: 8,
-        });
-        r.circular_dependencies.push(CircularDependency {
-            files: vec![root.join("src/a.ts"), root.join("src/b.ts")],
-            length: 2,
-            line: 3,
-            col: 0,
-        });
-
-        r
-    }
 
     #[test]
     fn markdown_empty_results_no_issues() {

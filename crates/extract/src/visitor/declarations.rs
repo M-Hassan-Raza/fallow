@@ -5,13 +5,10 @@
 
 use oxc_ast::ast::*;
 
-use crate::{
-    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, MemberKind, MemberInfo,
-    RequireCallInfo,
-};
+use crate::{DynamicImportInfo, ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo};
 
 use super::helpers::extract_class_members;
-use super::{extract_destructured_names, ModuleInfoExtractor, MemberAccess};
+use super::{MemberAccess, ModuleInfoExtractor, extract_destructured_names};
 
 impl ModuleInfoExtractor {
     pub(crate) fn extract_declaration_exports(
@@ -59,24 +56,10 @@ impl ModuleInfoExtractor {
                 }
             }
             Declaration::TSTypeAliasDeclaration(alias) => {
-                self.exports.push(ExportInfo {
-                    name: ExportName::Named(alias.id.name.to_string()),
-                    local_name: Some(alias.id.name.to_string()),
-                    is_type_only: true,
-                    is_public: false,
-                    span: alias.id.span,
-                    members: vec![],
-                });
+                self.push_type_export(&alias.id.name, alias.id.span);
             }
             Declaration::TSInterfaceDeclaration(iface) => {
-                self.exports.push(ExportInfo {
-                    name: ExportName::Named(iface.id.name.to_string()),
-                    local_name: Some(iface.id.name.to_string()),
-                    is_type_only: true,
-                    is_public: false,
-                    span: iface.id.span,
-                    members: vec![],
-                });
+                self.push_type_export(&iface.id.name, iface.id.span);
             }
             Declaration::TSEnumDeclaration(enumd) => {
                 let members: Vec<MemberInfo> = enumd
@@ -110,24 +93,10 @@ impl ModuleInfoExtractor {
             }
             Declaration::TSModuleDeclaration(module) => match &module.id {
                 TSModuleDeclarationName::Identifier(id) => {
-                    self.exports.push(ExportInfo {
-                        name: ExportName::Named(id.name.to_string()),
-                        local_name: Some(id.name.to_string()),
-                        is_type_only: true,
-                        is_public: false,
-                        span: id.span,
-                        members: vec![],
-                    });
+                    self.push_type_export(&id.name, id.span);
                 }
                 TSModuleDeclarationName::StringLiteral(lit) => {
-                    self.exports.push(ExportInfo {
-                        name: ExportName::Named(lit.value.to_string()),
-                        local_name: Some(lit.value.to_string()),
-                        is_type_only: true,
-                        is_public: false,
-                        span: lit.span,
-                        members: vec![],
-                    });
+                    self.push_type_export(&lit.value, lit.span);
                 }
             },
             _ => {}

@@ -3,7 +3,7 @@ use std::path::Path;
 use colored::Colorize;
 use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace};
 
-use super::relative_path;
+use super::{plural, relative_path};
 
 pub(in crate::report) fn print_export_trace_human(trace: &ExportTrace) {
     eprintln!();
@@ -202,7 +202,7 @@ pub(in crate::report) fn print_clone_trace_human(trace: &CloneTrace, root: &Path
             group.line_count,
             group.token_count,
             group.instances.len(),
-            if group.instances.len() == 1 { "" } else { "s" }
+            plural(group.instances.len())
         );
         for instance in &group.instances {
             let relative = relative_path(&instance.file, root);

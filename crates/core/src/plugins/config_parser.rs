@@ -164,28 +164,9 @@ pub fn extract_config_object_nested_string_or_array(
     object_path: &[&str],
     inner_path: &[&str],
 ) -> Vec<String> {
-    extract_from_source(source, path, |program| {
-        let obj = find_config_object(program)?;
-        let obj_expr = get_nested_expression(obj, object_path)?;
-        let Expression::ObjectExpression(target_obj) = obj_expr else {
-            return None;
-        };
-        let mut results = Vec::new();
-        for prop in &target_obj.properties {
-            if let ObjectPropertyKind::ObjectProperty(p) = prop
-                && let Expression::ObjectExpression(value_obj) = &p.value
-                && let Some(values) = get_nested_string_or_array(value_obj, inner_path)
-            {
-                results.extend(values);
-            }
-        }
-        if results.is_empty() {
-            None
-        } else {
-            Some(results)
-        }
+    extract_config_object_nested(source, path, object_path, |value_obj| {
+        get_nested_string_or_array(value_obj, inner_path)
     })
-    .unwrap_or_default()
 }
 
 /// Extract string values from a property path, searching inside all values of an object.
@@ -198,6 +179,21 @@ pub fn extract_config_object_nested_strings(
     object_path: &[&str],
     inner_path: &[&str],
 ) -> Vec<String> {
+    extract_config_object_nested(source, path, object_path, |value_obj| {
+        get_nested_string_from_object(value_obj, inner_path).map(|s| vec![s])
+    })
+}
+
+/// Shared helper for object-nested extraction.
+///
+/// Navigates `object_path` to find an object expression, then for each property value
+/// that is itself an object, calls `extract_fn` to produce string values.
+fn extract_config_object_nested(
+    source: &str,
+    path: &Path,
+    object_path: &[&str],
+    extract_fn: impl Fn(&ObjectExpression<'_>) -> Option<Vec<String>>,
+) -> Vec<String> {
     extract_from_source(source, path, |program| {
         let obj = find_config_object(program)?;
         let obj_expr = get_nested_expression(obj, object_path)?;
@@ -208,9 +204,9 @@ pub fn extract_config_object_nested_strings(
         for prop in &target_obj.properties {
             if let ObjectPropertyKind::ObjectProperty(p) = prop
                 && let Expression::ObjectExpression(value_obj) = &p.value
-                && let Some(value) = get_nested_string_from_object(value_obj, inner_path)
+                && let Some(values) = extract_fn(value_obj)
             {
-                results.push(value);
+                results.extend(values);
             }
         }
         if results.is_empty() {

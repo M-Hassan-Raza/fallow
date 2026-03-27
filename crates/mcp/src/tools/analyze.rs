@@ -27,16 +27,15 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
     }
     if let Some(ref types) = params.issue_types {
         for t in types {
-            match ISSUE_TYPE_FLAGS.iter().find(|&&(name, _)| name == t) {
-                Some(&(_, flag)) => args.push(flag.to_string()),
-                None => {
-                    let valid = ISSUE_TYPE_FLAGS
-                        .iter()
-                        .map(|&(n, _)| n)
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    return Err(format!("Unknown issue type '{t}'. Valid values: {valid}"));
-                }
+            if let Some(&(_, flag)) = ISSUE_TYPE_FLAGS.iter().find(|&&(name, _)| name == t) {
+                args.push(flag.to_string());
+            } else {
+                let valid = ISSUE_TYPE_FLAGS
+                    .iter()
+                    .map(|&(n, _)| n)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                return Err(format!("Unknown issue type '{t}'. Valid values: {valid}"));
             }
         }
     }

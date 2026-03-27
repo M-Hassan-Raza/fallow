@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use colored::Colorize;
 
-use super::{MAX_FLAT_ITEMS, format_path, relative_path, split_dir_filename};
+use super::{MAX_FLAT_ITEMS, format_path, plural, relative_path, split_dir_filename};
 
 /// Docs base URL for health explanations.
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
@@ -94,20 +94,17 @@ pub(in crate::report) fn build_health_human_lines(
             parts.push(format!("MI {mi:.1}"));
         }
         if let Some(hc) = vs.hotspot_count {
-            parts.push(format!("{hc} hotspot{}", if hc == 1 { "" } else { "s" }));
+            parts.push(format!("{hc} hotspot{}", plural(hc as usize)));
         }
         if let Some(cd) = vs.circular_dep_count
             && cd > 0
         {
-            parts.push(format!(
-                "{cd} circular dep{}",
-                if cd == 1 { "" } else { "s" }
-            ));
+            parts.push(format!("{cd} circular dep{}", plural(cd as usize)));
         }
         if let Some(ud) = vs.unused_dep_count
             && ud > 0
         {
-            parts.push(format!("{ud} unused dep{}", if ud == 1 { "" } else { "s" }));
+            parts.push(format!("{ud} unused dep{}", plural(ud as usize)));
         }
         lines.push(format!(
             "{} {}",
@@ -325,7 +322,7 @@ pub(in crate::report) fn build_health_human_lines(
                 format!(
                     "{} file{} excluded (< {} commits)",
                     summary.files_excluded,
-                    if summary.files_excluded == 1 { "" } else { "s" },
+                    plural(summary.files_excluded),
                     summary.min_commits,
                 )
                 .dimmed()

@@ -165,10 +165,76 @@ pub trait Plugin: Send + Sync {
 ///     tooling_dependencies: TOOLING_DEPENDENCIES,
 ///     used_exports: [("app/routes/**/*.{ts,tsx}", ROUTE_EXPORTS)],
 /// }
+///
+/// // Plugin with imports-only resolve_config (extracts imports from config as deps):
+/// define_plugin! {
+///     struct CypressPlugin => "cypress",
+///     enablers: ENABLERS,
+///     entry_patterns: ENTRY_PATTERNS,
+///     config_patterns: CONFIG_PATTERNS,
+///     always_used: ALWAYS_USED,
+///     tooling_dependencies: TOOLING_DEPENDENCIES,
+///     resolve_config: imports_only,
+/// }
 /// ```
 ///
 /// All fields except `struct` and `enablers` are optional and default to `&[]` / `vec![]`.
 macro_rules! define_plugin {
+    // Variant with `resolve_config: imports_only` — generates a resolve_config method
+    // that extracts imports from config files and registers them as referenced dependencies.
+    (
+        struct $name:ident => $display:expr,
+        enablers: $enablers:expr
+        $(, entry_patterns: $entry:expr)?
+        $(, config_patterns: $config:expr)?
+        $(, always_used: $always:expr)?
+        $(, tooling_dependencies: $tooling:expr)?
+        $(, virtual_module_prefixes: $virtual:expr)?
+        $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
+        , resolve_config: imports_only
+        $(,)?
+    ) => {
+        pub struct $name;
+
+        impl Plugin for $name {
+            fn name(&self) -> &'static str {
+                $display
+            }
+
+            fn enablers(&self) -> &'static [&'static str] {
+                $enablers
+            }
+
+            $( fn entry_patterns(&self) -> &'static [&'static str] { $entry } )?
+            $( fn config_patterns(&self) -> &'static [&'static str] { $config } )?
+            $( fn always_used(&self) -> &'static [&'static str] { $always } )?
+            $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
+            $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
+
+            $(
+                fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
+                    vec![$( ($pat, $exports) ),*]
+                }
+            )?
+
+            fn resolve_config(
+                &self,
+                config_path: &std::path::Path,
+                source: &str,
+                _root: &std::path::Path,
+            ) -> PluginResult {
+                let mut result = PluginResult::default();
+                let imports = crate::plugins::config_parser::extract_imports(source, config_path);
+                for imp in &imports {
+                    let dep = crate::resolve::extract_package_name(imp);
+                    result.referenced_dependencies.push(dep);
+                }
+                result
+            }
+        }
+    };
+
+    // Base variant — no resolve_config.
     (
         struct $name:ident => $display:expr,
         enablers: $enablers:expr

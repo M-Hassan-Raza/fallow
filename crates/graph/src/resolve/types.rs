@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use oxc_resolver::Resolver;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::FileId;
 
@@ -62,7 +62,7 @@ pub struct ResolvedModule {
     /// Whether this module uses `CommonJS` exports.
     pub has_cjs_exports: bool,
     /// Local names of import bindings that are never referenced in this file.
-    pub unused_import_bindings: Vec<String>,
+    pub unused_import_bindings: FxHashSet<String>,
 }
 
 /// Shared context for resolving import specifiers.

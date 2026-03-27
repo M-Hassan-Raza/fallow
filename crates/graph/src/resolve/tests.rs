@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use oxc_span::Span;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
@@ -121,7 +121,7 @@ fn make_resolved_module(
         member_accesses: vec![],
         whole_object_uses: vec![],
         has_cjs_exports: false,
-        unused_import_bindings: vec![],
+        unused_import_bindings: FxHashSet::default(),
     }
 }
 

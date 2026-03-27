@@ -13,6 +13,19 @@ pub(super) struct TargetAuxData<'a> {
     pub cycle_members: &'a rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
 }
 
+impl<'a> From<&'a super::scoring::FileScoreOutput> for TargetAuxData<'a> {
+    fn from(output: &'a super::scoring::FileScoreOutput) -> Self {
+        Self {
+            circular_files: &output.circular_files,
+            top_complex_fns: &output.top_complex_fns,
+            entry_points: &output.entry_points,
+            value_export_counts: &output.value_export_counts,
+            unused_export_names: &output.unused_export_names,
+            cycle_members: &output.cycle_members,
+        }
+    }
+}
+
 /// Adaptive thresholds derived from the project's metric distribution.
 ///
 /// Replaces hardcoded constants (fan_in=20, fan_out=30) with percentile-based
@@ -386,7 +399,7 @@ fn try_match_rules(
 }
 
 /// Map recommendation category to confidence level based on data source reliability.
-fn confidence_for_category(category: &RecommendationCategory) -> Confidence {
+const fn confidence_for_category(category: &RecommendationCategory) -> Confidence {
     match category {
         // Deterministic: graph analysis (dead code, cycles) + AST analysis (complexity)
         RecommendationCategory::RemoveDeadCode

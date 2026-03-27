@@ -1,16 +1,13 @@
 // Visitor tests invoke Oxc parser which is ~1000x slower under Miri.
 #![cfg(all(test, not(miri)))]
 
-use super::*;
-use crate::parse::parse_source_to_module;
-use fallow_types::discover::FileId;
-use helpers::regex_pattern_to_suffix;
 use std::path::Path;
 
-/// Helper: parse TypeScript source and return ModuleInfo.
-fn parse(source: &str) -> crate::ModuleInfo {
-    parse_source_to_module(FileId(0), Path::new("test.ts"), source, 0)
-}
+use super::*;
+use crate::MemberKind;
+use crate::tests::parse_ts as parse;
+use fallow_types::discover::FileId;
+use helpers::regex_pattern_to_suffix;
 
 // ── into_module_info transfers all fields ────────────────────
 
@@ -79,8 +76,7 @@ fn merge_into_extends_imports() {
 
     // Build a second extractor from parsing and merge
     let allocator = oxc_allocator::Allocator::default();
-    let source_type =
-        oxc_span::SourceType::from_path(Path::new("extra.ts")).unwrap_or_default();
+    let source_type = oxc_span::SourceType::from_path(Path::new("extra.ts")).unwrap_or_default();
     let parser_return =
         oxc_parser::Parser::new(&allocator, "import { c } from './c';", source_type).parse();
     let mut extractor = ModuleInfoExtractor::new();
@@ -114,12 +110,12 @@ fn merge_into_ors_cjs_flag() {
 #[test]
 fn extracts_public_class_methods_and_properties() {
     let info = parse(
-        r#"
+        r"
             export class MyService {
                 name: string;
                 getValue() { return 1; }
             }
-            "#,
+            ",
     );
     let class_export = info
         .exports
@@ -144,12 +140,12 @@ fn extracts_public_class_methods_and_properties() {
 #[test]
 fn skips_constructor_in_class_members() {
     let info = parse(
-        r#"
+        r"
             export class Foo {
                 constructor() {}
                 doWork() {}
             }
-            "#,
+            ",
     );
     let class_export = info
         .exports
@@ -166,13 +162,13 @@ fn skips_constructor_in_class_members() {
 #[test]
 fn skips_private_and_protected_members() {
     let info = parse(
-        r#"
+        r"
             export class Foo {
                 private secret: string;
                 protected internal(): void {}
                 public visible: number;
             }
-            "#,
+            ",
     );
     let class_export = info
         .exports
@@ -196,13 +192,13 @@ fn skips_private_and_protected_members() {
 #[test]
 fn class_member_with_decorator_flagged() {
     let info = parse(
-        r#"
+        r"
             function Injectable() { return (target: any) => target; }
             export class Service {
                 @Injectable()
                 handler() {}
             }
-            "#,
+            ",
     );
     let class_export = info
         .exports
@@ -222,14 +218,14 @@ fn class_member_with_decorator_flagged() {
 #[test]
 fn extracts_enum_members() {
     let info = parse(
-        r#"
+        r"
             export enum Direction {
                 Up,
                 Down,
                 Left,
                 Right
             }
-            "#,
+            ",
     );
     let enum_export = info
         .exports
@@ -286,12 +282,12 @@ fn dynamic_computed_access_marks_whole_use() {
 #[test]
 fn this_member_access_tracked() {
     let info = parse(
-        r#"
+        r"
             export class Foo {
                 bar: number;
                 baz() { return this.bar; }
             }
-            "#,
+            ",
     );
     assert!(
         info.member_accesses
@@ -304,12 +300,12 @@ fn this_member_access_tracked() {
 #[test]
 fn this_assignment_tracked() {
     let info = parse(
-        r#"
+        r"
             export class Foo {
                 bar: number;
                 init() { this.bar = 42; }
             }
-            "#,
+            ",
     );
     assert!(
         info.member_accesses
@@ -324,11 +320,11 @@ fn this_assignment_tracked() {
 #[test]
 fn instance_member_access_mapped_to_class() {
     let info = parse(
-        r#"
+        r"
             import { MyService } from './service';
             const svc = new MyService();
             svc.greet();
-            "#,
+            ",
     );
     // svc.greet() should produce a MemberAccess for MyService.greet
     assert!(
@@ -343,11 +339,11 @@ fn instance_member_access_mapped_to_class() {
 #[test]
 fn instance_property_access_mapped_to_class() {
     let info = parse(
-        r#"
+        r"
             import { MyClass } from './class';
             const obj = new MyClass();
             console.log(obj.name);
-            "#,
+            ",
     );
     assert!(
         info.member_accesses
@@ -361,11 +357,11 @@ fn instance_property_access_mapped_to_class() {
 #[test]
 fn instance_whole_object_use_mapped_to_class() {
     let info = parse(
-        r#"
+        r"
             import { MyClass } from './class';
             const obj = new MyClass();
             Object.keys(obj);
-            "#,
+            ",
     );
     assert!(
         info.whole_object_uses.contains(&"MyClass".to_string()),
@@ -377,10 +373,10 @@ fn instance_whole_object_use_mapped_to_class() {
 #[test]
 fn non_instance_binding_not_mapped() {
     let info = parse(
-        r#"
+        r"
             const obj = { greet() {} };
             obj.greet();
-            "#,
+            ",
     );
     // obj is not a `new` binding, so no class mapping should exist.
     assert!(
@@ -396,10 +392,10 @@ fn non_instance_binding_not_mapped() {
 #[test]
 fn instance_binding_with_no_access_produces_nothing() {
     let info = parse(
-        r#"
+        r"
             import { Foo } from './foo';
             const x = new Foo();
-            "#,
+            ",
     );
     // Binding exists but no x.method() calls — no synthetic accesses should be emitted.
     assert!(
@@ -417,12 +413,12 @@ fn instance_binding_with_no_access_produces_nothing() {
 #[test]
 fn builtin_constructor_not_tracked() {
     let info = parse(
-        r#"
+        r"
             const url = new URL('https://example.com');
             url.href;
             const m = new Map();
             m.get('key');
-            "#,
+            ",
     );
     // Built-in constructors should not create instance bindings
     assert!(
@@ -440,13 +436,13 @@ fn builtin_constructor_not_tracked() {
 #[test]
 fn multiple_instances_same_class() {
     let info = parse(
-        r#"
+        r"
             import { Svc } from './svc';
             const a = new Svc();
             const b = new Svc();
             a.foo();
             b.bar();
-            "#,
+            ",
     );
     assert!(
         info.member_accesses
@@ -661,9 +657,8 @@ fn regex_suffix_complex_returns_none() {
 
 #[test]
 fn for_in_loop_marks_enum_as_whole_use() {
-    let info = parse(
-        "import { MyEnum } from './types';\nfor (const key in MyEnum) { console.log(key); }",
-    );
+    let info =
+        parse("import { MyEnum } from './types';\nfor (const key in MyEnum) { console.log(key); }");
     assert!(
         info.whole_object_uses.contains(&"MyEnum".to_string()),
         "for...in should mark MyEnum as whole-object-use"

@@ -126,7 +126,6 @@ pub fn find_dead_code_full(
     {
         let (enum_members, class_members) = find_unused_members(
             graph,
-            config,
             resolved_modules,
             &suppressions_by_file,
             &line_offsets_by_file,
@@ -193,7 +192,7 @@ pub fn find_dead_code_full(
 
     if config.rules.duplicate_exports != Severity::Off {
         results.duplicate_exports =
-            find_duplicate_exports(graph, config, &suppressions_by_file, &line_offsets_by_file);
+            find_duplicate_exports(graph, &suppressions_by_file, &line_offsets_by_file);
     }
 
     // In production mode, detect dependencies that are only used via type-only imports

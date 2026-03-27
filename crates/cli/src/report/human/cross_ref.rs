@@ -3,7 +3,7 @@ use std::path::Path;
 use colored::Colorize;
 use fallow_config::OutputFormat;
 
-use super::relative_path;
+use super::{plural, relative_path};
 
 pub(in crate::report) fn print_cross_reference_findings(
     cross_ref: &fallow_core::cross_reference::CrossReferenceResult,
@@ -35,11 +35,11 @@ pub(in crate::report) fn print_cross_reference_findings(
     eprintln!(
         "  {} combined finding{}: {} in unused file{}, {} overlapping unused export{}",
         total,
-        if total == 1 { "" } else { "s" },
+        plural(total),
         files,
-        if files == 1 { "" } else { "s" },
+        plural(files),
         exports,
-        if exports == 1 { "" } else { "s" },
+        plural(exports),
     );
 }
 

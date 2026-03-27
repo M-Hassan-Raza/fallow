@@ -115,21 +115,19 @@ pub(super) fn compute_maintainability_index(
     score.clamp(0.0, 100.0)
 }
 
-/// Compute per-file health scores by running the full analysis pipeline.
+/// Compute per-file health scores using a pre-computed analysis output.
 ///
-/// This builds the module graph and runs dead code detection to obtain
-/// fan-in, fan-out, and dead code ratio per file. Complexity density is
-/// derived from the already-parsed modules.
+/// The caller provides an `AnalysisOutput` (with graph and dead code results)
+/// so this function does not need to re-run the analysis pipeline. Complexity
+/// density is derived from the already-parsed modules.
 pub(super) fn compute_file_scores(
-    config: &fallow_config::ResolvedConfig,
     modules: &[fallow_core::extract::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    analysis_output: fallow_core::AnalysisOutput,
 ) -> Result<FileScoreOutput, String> {
-    // Run full analysis to get the graph and dead code results
-    let output = fallow_core::analyze_with_trace(config).map_err(|e| format!("{e}"))?;
-    let graph = output.graph.ok_or("graph not available")?;
-    let results = &output.results;
+    let graph = analysis_output.graph.ok_or("graph not available")?;
+    let results = &analysis_output.results;
 
     // Build auxiliary data for refactoring targets
     let circular_files: rustc_hash::FxHashSet<std::path::PathBuf> = results

@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::OutputFormat;
 
-use super::io::atomic_write;
+use super::io::{read_source, write_fixed_content};
 
 pub(super) struct EnumMemberFix {
     line_idx: usize,
@@ -28,18 +28,8 @@ pub(super) fn apply_enum_member_fixes(
     let mut had_write_error = false;
 
     for (path, file_members) in members_by_file {
-        // Security: ensure path is within project root
-        if !path.starts_with(root) {
-            tracing::warn!(path = %path.display(), "Skipping fix for path outside project root");
+        let Some((content, line_ending)) = read_source(root, path) else {
             continue;
-        }
-        let Ok(content) = std::fs::read_to_string(path) else {
-            continue;
-        };
-        let line_ending = if content.contains("\r\n") {
-            "\r\n"
-        } else {
-            "\n"
         };
         let lines: Vec<&str> = content.split(line_ending).collect();
 
@@ -144,12 +134,7 @@ pub(super) fn apply_enum_member_fixes(
                 new_lines.remove(idx);
             }
 
-            let mut new_content = new_lines.join(line_ending);
-            if content.ends_with(line_ending) && !new_content.ends_with(line_ending) {
-                new_content.push_str(line_ending);
-            }
-
-            let success = match atomic_write(path, new_content.as_bytes()) {
+            let success = match write_fixed_content(path, &new_lines, line_ending, &content) {
                 Ok(()) => true,
                 Err(e) => {
                     had_write_error = true;

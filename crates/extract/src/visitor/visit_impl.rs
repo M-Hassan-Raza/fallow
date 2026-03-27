@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::helpers::{extract_concat_parts, is_meta_url_arg, regex_pattern_to_suffix};
-use super::{try_extract_dynamic_import, try_extract_require, ModuleInfoExtractor};
+use super::{ModuleInfoExtractor, try_extract_dynamic_import, try_extract_require};
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {

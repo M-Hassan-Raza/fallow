@@ -4,15 +4,29 @@ mod human;
 mod json;
 mod markdown;
 mod sarif;
+#[cfg(test)]
+mod test_helpers;
 
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use fallow_config::{OutputFormat, ResolvedConfig, Severity};
+use fallow_config::{OutputFormat, RulesConfig, Severity};
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 use fallow_core::trace::{CloneTrace, DependencyTrace, ExportTrace, FileTrace, PipelineTimings};
+
+/// Shared context for all report dispatch functions.
+///
+/// Bundles the common parameters that every format renderer needs,
+/// replacing per-parameter threading through the dispatch match arms.
+pub struct ReportContext<'a> {
+    pub root: &'a Path,
+    pub rules: &'a RulesConfig,
+    pub elapsed: Duration,
+    pub quiet: bool,
+    pub explain: bool,
+}
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
 pub fn relative_path<'a>(path: &'a Path, root: &Path) -> &'a Path {
@@ -25,6 +39,28 @@ pub fn split_dir_filename(path: &str) -> (&str, &str) {
     match path.rfind('/') {
         Some(pos) => (&path[..=pos], &path[pos + 1..]),
         None => ("", path),
+    }
+}
+
+/// Return `"s"` for plural or `""` for singular.
+pub fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
+}
+
+/// Serialize a JSON value to pretty-printed stdout, returning the appropriate exit code.
+///
+/// On success prints the JSON and returns `ExitCode::SUCCESS`.
+/// On serialization failure prints an error to stderr and returns exit code 2.
+pub fn emit_json(value: &serde_json::Value, kind: &str) -> ExitCode {
+    match serde_json::to_string_pretty(value) {
+        Ok(json) => {
+            println!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize {kind} output: {e}");
+            ExitCode::from(2)
+        }
     }
 }
 
@@ -87,29 +123,25 @@ pub const fn severity_to_level(s: Severity) -> Level {
 /// Returns exit code 2 if serialization fails, SUCCESS otherwise.
 pub fn print_results(
     results: &AnalysisResults,
-    config: &ResolvedConfig,
-    elapsed: Duration,
-    quiet: bool,
-    explain: bool,
+    ctx: &ReportContext<'_>,
+    output: &OutputFormat,
 ) -> ExitCode {
-    match config.output {
+    match output {
         OutputFormat::Human => {
-            human::print_human(results, &config.root, &config.rules, elapsed, quiet);
+            human::print_human(results, ctx.root, ctx.rules, ctx.elapsed, ctx.quiet);
             ExitCode::SUCCESS
         }
-        OutputFormat::Json => json::print_json(results, &config.root, elapsed, explain),
+        OutputFormat::Json => json::print_json(results, ctx.root, ctx.elapsed, ctx.explain),
         OutputFormat::Compact => {
-            compact::print_compact(results, &config.root);
+            compact::print_compact(results, ctx.root);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => sarif::print_sarif(results, &config.root, &config.rules),
+        OutputFormat::Sarif => sarif::print_sarif(results, ctx.root, ctx.rules),
         OutputFormat::Markdown => {
-            markdown::print_markdown(results, &config.root);
+            markdown::print_markdown(results, ctx.root);
             ExitCode::SUCCESS
         }
-        OutputFormat::CodeClimate => {
-            codeclimate::print_codeclimate(results, &config.root, &config.rules)
-        }
+        OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
     }
 }
 
@@ -118,30 +150,25 @@ pub fn print_results(
 /// Print duplication analysis results in the configured format.
 pub fn print_duplication_report(
     report: &DuplicationReport,
-    config: &ResolvedConfig,
-    elapsed: Duration,
-    quiet: bool,
+    ctx: &ReportContext<'_>,
     output: &OutputFormat,
-    explain: bool,
 ) -> ExitCode {
     match output {
         OutputFormat::Human => {
-            human::print_duplication_human(report, &config.root, elapsed, quiet);
+            human::print_duplication_human(report, ctx.root, ctx.elapsed, ctx.quiet);
             ExitCode::SUCCESS
         }
-        OutputFormat::Json => json::print_duplication_json(report, elapsed, explain),
+        OutputFormat::Json => json::print_duplication_json(report, ctx.elapsed, ctx.explain),
         OutputFormat::Compact => {
-            compact::print_duplication_compact(report, &config.root);
+            compact::print_duplication_compact(report, ctx.root);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => sarif::print_duplication_sarif(report, &config.root),
+        OutputFormat::Sarif => sarif::print_duplication_sarif(report, ctx.root),
         OutputFormat::Markdown => {
-            markdown::print_duplication_markdown(report, &config.root);
+            markdown::print_duplication_markdown(report, ctx.root);
             ExitCode::SUCCESS
         }
-        OutputFormat::CodeClimate => {
-            codeclimate::print_duplication_codeclimate(report, &config.root)
-        }
+        OutputFormat::CodeClimate => codeclimate::print_duplication_codeclimate(report, ctx.root),
     }
 }
 
@@ -150,28 +177,25 @@ pub fn print_duplication_report(
 /// Print health (complexity) analysis results in the configured format.
 pub fn print_health_report(
     report: &crate::health_types::HealthReport,
-    config: &ResolvedConfig,
-    elapsed: Duration,
-    quiet: bool,
+    ctx: &ReportContext<'_>,
     output: &OutputFormat,
-    explain: bool,
 ) -> ExitCode {
     match output {
         OutputFormat::Human => {
-            human::print_health_human(report, &config.root, elapsed, quiet);
+            human::print_health_human(report, ctx.root, ctx.elapsed, ctx.quiet);
             ExitCode::SUCCESS
         }
         OutputFormat::Compact => {
-            compact::print_health_compact(report, &config.root);
+            compact::print_health_compact(report, ctx.root);
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
-            markdown::print_health_markdown(report, &config.root);
+            markdown::print_health_markdown(report, ctx.root);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => sarif::print_health_sarif(report, &config.root),
-        OutputFormat::Json => json::print_health_json(report, &config.root, elapsed, explain),
-        OutputFormat::CodeClimate => codeclimate::print_health_codeclimate(report, &config.root),
+        OutputFormat::Sarif => sarif::print_health_sarif(report, ctx.root),
+        OutputFormat::Json => json::print_health_json(report, ctx.root, ctx.elapsed, ctx.explain),
+        OutputFormat::CodeClimate => codeclimate::print_health_codeclimate(report, ctx.root),
     }
 }
 

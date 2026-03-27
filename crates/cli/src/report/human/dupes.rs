@@ -4,7 +4,7 @@ use std::time::Duration;
 use colored::Colorize;
 use fallow_core::duplicates::DuplicationReport;
 
-use super::{MAX_FLAT_ITEMS, format_path, relative_path, split_dir_filename, thousands};
+use super::{MAX_FLAT_ITEMS, format_path, plural, relative_path, split_dir_filename, thousands};
 
 /// Docs base URL for duplication explanations.
 const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
@@ -109,7 +109,7 @@ pub(in crate::report) fn build_duplication_human_lines(
             "  {} lines  {} instance{}",
             lc_colored,
             instance_count,
-            if instance_count == 1 { "" } else { "s" }
+            plural(instance_count)
         ));
 
         for instance in &group.instances {

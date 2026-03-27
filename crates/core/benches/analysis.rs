@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use rustc_hash::FxHashSet;
 
 mod helpers;
 
@@ -241,7 +242,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         member_accesses: vec![],
         whole_object_uses: vec![],
         has_cjs_exports: false,
-        unused_import_bindings: vec![],
+        unused_import_bindings: FxHashSet::default(),
     });
 
     // --- Barrel files ---
@@ -312,7 +313,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         });
     }
 
@@ -359,7 +360,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             member_accesses: vec![],
             whole_object_uses: vec![],
             has_cjs_exports: false,
-            unused_import_bindings: vec![],
+            unused_import_bindings: FxHashSet::default(),
         });
     }
 

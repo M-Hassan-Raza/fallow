@@ -107,7 +107,9 @@ impl LanguageServer for FallowLspServer {
         {
             let mut disabled = FxHashSet::default();
             for &(config_key, diag_code) in ISSUE_TYPE_TO_DIAGNOSTIC_CODE {
-                if let Some(enabled) = issue_types.get(config_key).and_then(|v| v.as_bool())
+                if let Some(enabled) = issue_types
+                    .get(config_key)
+                    .and_then(serde_json::Value::as_bool)
                     && !enabled
                 {
                     disabled.insert(diag_code.to_string());
@@ -342,14 +344,9 @@ impl FallowLspServer {
             let mut analysis_roots: Vec<std::path::PathBuf> = Vec::new();
 
             for project_root in &project_roots {
-                match fallow_core::analyze_project(project_root) {
-                    Ok(results) => {
-                        merge_results(&mut merged_results, results);
-                        analysis_roots.push(project_root.clone());
-                    }
-                    Err(_) => {
-                        // Skip projects that fail to analyze (e.g., no source files)
-                    }
+                if let Ok(results) = fallow_core::analyze_project(project_root) {
+                    merge_results(&mut merged_results, results);
+                    analysis_roots.push(project_root.clone());
                 }
 
                 let dupes_config = fallow_config::FallowConfig::find_and_load(project_root)

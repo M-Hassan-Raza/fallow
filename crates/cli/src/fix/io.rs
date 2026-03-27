@@ -3,6 +3,37 @@ use std::path::Path;
 
 use tempfile::NamedTempFile;
 
+/// Read a source file, validate it is within the project root, and detect line endings.
+///
+/// Returns `None` (with a warning) if the path is outside the project root or unreadable.
+pub(super) fn read_source(root: &Path, path: &Path) -> Option<(String, &'static str)> {
+    if !path.starts_with(root) {
+        tracing::warn!(path = %path.display(), "Skipping fix for path outside project root");
+        return None;
+    }
+    let content = std::fs::read_to_string(path).ok()?;
+    let line_ending = if content.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    Some((content, line_ending))
+}
+
+/// Join modified lines, preserve the original trailing newline, and atomically write the result.
+pub(super) fn write_fixed_content(
+    path: &Path,
+    lines: &[String],
+    line_ending: &str,
+    original_content: &str,
+) -> std::io::Result<()> {
+    let mut result = lines.join(line_ending);
+    if original_content.ends_with(line_ending) && !result.ends_with(line_ending) {
+        result.push_str(line_ending);
+    }
+    atomic_write(path, result.as_bytes())
+}
+
 /// Atomically write content to a file via a temporary file and rename.
 pub(super) fn atomic_write(path: &Path, content: &[u8]) -> std::io::Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));

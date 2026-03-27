@@ -5,9 +5,7 @@ use fallow_types::extract::{ExportName, ImportedName, MemberKind, ModuleInfo};
 
 use crate::parse::parse_source_to_module;
 
-fn parse_source(source: &str) -> ModuleInfo {
-    parse_source_to_module(FileId(0), Path::new("test.ts"), source, 0)
-}
+use super::parse_ts as parse_source;
 
 #[test]
 fn extracts_named_exports() {

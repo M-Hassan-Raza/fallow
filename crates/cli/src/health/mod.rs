@@ -81,23 +81,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     };
     let parse_result = fallow_core::extract::parse_all_files(&files, cache.as_ref());
 
-    // Build ignore globs from config (using globset for consistency with the rest of the codebase)
-    let ignore_set = {
-        let mut builder = globset::GlobSetBuilder::new();
-        for pattern in &config.health.ignore {
-            match globset::Glob::new(pattern) {
-                Ok(glob) => {
-                    builder.add(glob);
-                }
-                Err(e) => {
-                    eprintln!("Warning: Invalid health ignore pattern '{pattern}': {e}");
-                }
-            }
-        }
-        builder
-            .build()
-            .unwrap_or_else(|_| globset::GlobSet::empty())
-    };
+    let ignore_set = build_ignore_set(&config.health.ignore);
 
     // Get changed files for --changed-since filtering
     let changed_files = opts
@@ -114,54 +98,15 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     // Build FileId -> path lookup for O(1) access
     let file_paths: rustc_hash::FxHashMap<_, _> = files.iter().map(|f| (f.id, &f.path)).collect();
 
-    // Collect findings
-    let mut files_analyzed = 0usize;
-    let mut total_functions = 0usize;
-    let mut findings: Vec<HealthFinding> = Vec::new();
-
-    for module in &parse_result.modules {
-        let Some(path) = file_paths.get(&module.file_id) else {
-            continue;
-        };
-
-        // Apply ignore patterns
-        let relative = path.strip_prefix(&config.root).unwrap_or(path);
-        if ignore_set.is_match(relative) {
-            continue;
-        }
-
-        // Apply changed-since filter
-        if let Some(ref changed) = changed_files
-            && !changed.contains(*path)
-        {
-            continue;
-        }
-
-        files_analyzed += 1;
-        for fc in &module.complexity {
-            total_functions += 1;
-            let exceeds_cyclomatic = fc.cyclomatic > max_cyclomatic;
-            let exceeds_cognitive = fc.cognitive > max_cognitive;
-            if exceeds_cyclomatic || exceeds_cognitive {
-                let exceeded = match (exceeds_cyclomatic, exceeds_cognitive) {
-                    (true, true) => ExceededThreshold::Both,
-                    (true, false) => ExceededThreshold::Cyclomatic,
-                    (false, true) => ExceededThreshold::Cognitive,
-                    (false, false) => unreachable!(),
-                };
-                findings.push(HealthFinding {
-                    path: (*path).clone(),
-                    name: fc.name.clone(),
-                    line: fc.line,
-                    col: fc.col,
-                    cyclomatic: fc.cyclomatic,
-                    cognitive: fc.cognitive,
-                    line_count: fc.line_count,
-                    exceeded,
-                });
-            }
-        }
-    }
+    let (mut findings, files_analyzed, total_functions) = collect_findings(
+        &parse_result.modules,
+        &file_paths,
+        &config.root,
+        &ignore_set,
+        changed_files.as_ref(),
+        max_cyclomatic,
+        max_cognitive,
+    );
 
     // Apply workspace filter (resolved once above, reused for file scores too)
     if let Some(ref ws) = ws_root {
@@ -207,95 +152,76 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
 
     // Compute file-level health scores when requested, when hotspots need them,
     // or when targets need them.
-    // NOTE: This runs the full analysis pipeline (discovery, parsing, graph, dead code detection)
-    // a second time because there is no API to inject pre-parsed modules into the analysis
-    // pipeline. The cache mitigates re-parsing cost but the discovery and graph construction
-    // are repeated. Future optimization: expose a lower-level API that accepts ParseResult.
+    // Uses analyze_with_parse_result to reuse the already-parsed modules from above,
+    // avoiding re-parsing. Discovery, resolution, and graph construction still run.
     let needs_file_scores = opts.file_scores || opts.hotspots || opts.targets;
-    let (mut file_scores, files_scored, average_maintainability, score_aux, analysis_counts) =
-        if needs_file_scores {
-            match compute_file_scores(
-                &config,
-                &parse_result.modules,
-                &file_paths,
-                changed_files.as_ref(),
-            ) {
-                Ok(mut output) => {
-                    // Apply the same filters that findings get: workspace, ignore globs
-                    if let Some(ref ws) = ws_root {
-                        output.scores.retain(|s| s.path.starts_with(ws));
-                    }
-                    if !ignore_set.is_empty() {
-                        output.scores.retain(|s| {
-                            let relative = s.path.strip_prefix(&config.root).unwrap_or(&s.path);
-                            !ignore_set.is_match(relative)
-                        });
-                    }
-                    // Compute average BEFORE --top truncation so it reflects the full project
-                    let total_scored = output.scores.len();
-                    let avg = if total_scored > 0 {
-                        let sum: f64 = output.scores.iter().map(|s| s.maintainability_index).sum();
-                        Some((sum / total_scored as f64 * 10.0).round() / 10.0)
-                    } else {
-                        None
-                    };
-                    let counts = output.analysis_counts;
-                    let aux = (
-                        output.circular_files,
-                        output.top_complex_fns,
-                        output.entry_points,
-                        output.value_export_counts,
-                        output.unused_export_names,
-                        output.cycle_members,
-                    );
-                    (
-                        output.scores,
-                        Some(total_scored),
-                        avg,
-                        Some(aux),
-                        Some(counts),
-                    )
+    let (score_output, files_scored, average_maintainability) = if needs_file_scores {
+        let analysis_output =
+            fallow_core::analyze_with_parse_result(&config, &parse_result.modules).map_err(
+                |e| {
+                    eprintln!("Error: analysis failed: {e}");
+                    ExitCode::from(2)
+                },
+            )?;
+        match compute_file_scores(
+            &parse_result.modules,
+            &file_paths,
+            changed_files.as_ref(),
+            analysis_output,
+        ) {
+            Ok(mut output) => {
+                // Apply the same filters that findings get: workspace, ignore globs
+                if let Some(ref ws) = ws_root {
+                    output.scores.retain(|s| s.path.starts_with(ws));
                 }
-                Err(e) => {
-                    eprintln!("Warning: failed to compute file scores: {e}");
-                    // Use Some(0) so JSON consumers can distinguish "flag not set" (field absent)
-                    // from "flag set but failed" (files_scored: 0).
-                    (Vec::new(), Some(0), None, None, None)
+                if !ignore_set.is_empty() {
+                    output.scores.retain(|s| {
+                        let relative = s.path.strip_prefix(&config.root).unwrap_or(&s.path);
+                        !ignore_set.is_match(relative)
+                    });
                 }
+                // Compute average BEFORE --top truncation so it reflects the full project
+                let total_scored = output.scores.len();
+                let avg = if total_scored > 0 {
+                    let sum: f64 = output.scores.iter().map(|s| s.maintainability_index).sum();
+                    Some((sum / total_scored as f64 * 10.0).round() / 10.0)
+                } else {
+                    None
+                };
+                (Some(output), Some(total_scored), avg)
             }
-        } else {
-            (Vec::new(), None, None, None, None)
-        };
+            Err(e) => {
+                eprintln!("Warning: failed to compute file scores: {e}");
+                (None, Some(0), None)
+            }
+        }
+    } else {
+        (None, None, None)
+    };
+
+    let file_scores_slice = score_output
+        .as_ref()
+        .map_or(&[] as &[_], |o| o.scores.as_slice());
 
     // Compute hotspot analysis when requested (or when targets need churn data).
     let (hotspots, hotspot_summary) = if opts.hotspots || opts.targets {
-        compute_hotspots(opts, &config, &file_scores, &ignore_set, ws_root.as_deref())
+        compute_hotspots(
+            opts,
+            &config,
+            file_scores_slice,
+            &ignore_set,
+            ws_root.as_deref(),
+        )
     } else {
         (Vec::new(), None)
     };
 
     // Compute refactoring targets when requested.
     let (targets, target_thresholds) = if opts.targets {
-        if let Some((
-            ref circular_files,
-            ref top_complex_fns,
-            ref entry_points,
-            ref value_export_counts,
-            ref unused_export_names,
-            ref cycle_members,
-        )) = score_aux
-        {
-            let target_aux = TargetAuxData {
-                circular_files,
-                top_complex_fns,
-                entry_points,
-                value_export_counts,
-                unused_export_names,
-                cycle_members,
-            };
+        if let Some(ref output) = score_output {
+            let target_aux = TargetAuxData::from(output);
             let (mut tgts, thresholds) =
-                compute_refactoring_targets(&file_scores, &target_aux, &hotspots);
-            // Filter targets against baseline (before --top truncation)
+                compute_refactoring_targets(file_scores_slice, &target_aux, &hotspots);
             if let Some(ref baseline) = loaded_baseline {
                 tgts = filter_new_health_targets(tgts, baseline, &config.root);
             }
@@ -310,31 +236,25 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         (Vec::new(), None)
     };
 
-    // Save baseline (after targets are computed, captures full state)
     if let Some(save_path) = opts.save_baseline {
-        let baseline = HealthBaselineData::from_findings(&findings, &targets, &config.root);
-        match serde_json::to_string_pretty(&baseline) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(save_path, json) {
-                    eprintln!("Error: failed to save health baseline: {e}");
-                    return Err(ExitCode::from(2));
-                }
-                if !opts.quiet {
-                    eprintln!("Saved health baseline to {}", save_path.display());
-                }
-            }
-            Err(e) => {
-                eprintln!("Error: failed to serialize health baseline: {e}");
-                return Err(ExitCode::from(2));
-            }
-        }
+        save_health_baseline(save_path, &findings, &targets, &config.root, opts.quiet)?;
     }
 
     // Compute vital signs from available data (always, for the report summary)
+    let analysis_counts = score_output
+        .as_ref()
+        .map(|o| crate::vital_signs::AnalysisCounts {
+            total_exports: o.analysis_counts.total_exports,
+            dead_files: o.analysis_counts.dead_files,
+            dead_exports: o.analysis_counts.dead_exports,
+            unused_deps: o.analysis_counts.unused_deps,
+            circular_deps: o.analysis_counts.circular_deps,
+            total_deps: o.analysis_counts.total_deps,
+        });
     let vs_input = vital_signs::VitalSignsInput {
         modules: &parse_result.modules,
         file_scores: if needs_file_scores {
-            Some(&file_scores)
+            Some(file_scores_slice)
         } else {
             None
         },
@@ -373,15 +293,16 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         }
     }
 
-    // Apply --top to file scores (after hotspot and target computation which use the full list)
-    if opts.file_scores {
+    // Extract file scores for the report (apply --top after hotspot/target computation)
+    let file_scores = if opts.file_scores {
+        let mut scores = score_output.map(|o| o.scores).unwrap_or_default();
         if let Some(top) = opts.top {
-            file_scores.truncate(top);
+            scores.truncate(top);
         }
+        scores
     } else {
-        // If file_scores was only computed for hotspots/targets, don't include it in the report
-        file_scores.clear();
-    }
+        Vec::new()
+    };
 
     // If hotspots were only computed for targets, don't include them in the report
     let (report_hotspots, report_hotspot_summary) = if opts.hotspots {
@@ -426,6 +347,110 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     })
 }
 
+/// Build a glob set from health ignore patterns.
+fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
+    let mut builder = globset::GlobSetBuilder::new();
+    for pattern in patterns {
+        match globset::Glob::new(pattern) {
+            Ok(glob) => {
+                builder.add(glob);
+            }
+            Err(e) => {
+                eprintln!("Warning: Invalid health ignore pattern '{pattern}': {e}");
+            }
+        }
+    }
+    builder
+        .build()
+        .unwrap_or_else(|_| globset::GlobSet::empty())
+}
+
+/// Collect health findings from parsed modules, applying ignore and changed-since filters.
+fn collect_findings(
+    modules: &[fallow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    config_root: &std::path::Path,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    max_cyclomatic: u16,
+    max_cognitive: u16,
+) -> (Vec<HealthFinding>, usize, usize) {
+    let mut files_analyzed = 0usize;
+    let mut total_functions = 0usize;
+    let mut findings: Vec<HealthFinding> = Vec::new();
+
+    for module in modules {
+        let Some(&path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+
+        let relative = path.strip_prefix(config_root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+
+        if let Some(changed) = changed_files
+            && !changed.contains(path)
+        {
+            continue;
+        }
+
+        files_analyzed += 1;
+        for fc in &module.complexity {
+            total_functions += 1;
+            let exceeds_cyclomatic = fc.cyclomatic > max_cyclomatic;
+            let exceeds_cognitive = fc.cognitive > max_cognitive;
+            if exceeds_cyclomatic || exceeds_cognitive {
+                let exceeded = match (exceeds_cyclomatic, exceeds_cognitive) {
+                    (true, true) => ExceededThreshold::Both,
+                    (true, false) => ExceededThreshold::Cyclomatic,
+                    (false, true) => ExceededThreshold::Cognitive,
+                    (false, false) => unreachable!(),
+                };
+                findings.push(HealthFinding {
+                    path: path.clone(),
+                    name: fc.name.clone(),
+                    line: fc.line,
+                    col: fc.col,
+                    cyclomatic: fc.cyclomatic,
+                    cognitive: fc.cognitive,
+                    line_count: fc.line_count,
+                    exceeded,
+                });
+            }
+        }
+    }
+
+    (findings, files_analyzed, total_functions)
+}
+
+/// Save health baseline to disk.
+fn save_health_baseline(
+    save_path: &std::path::Path,
+    findings: &[HealthFinding],
+    targets: &[RefactoringTarget],
+    config_root: &std::path::Path,
+    quiet: bool,
+) -> Result<(), ExitCode> {
+    let baseline = HealthBaselineData::from_findings(findings, targets, config_root);
+    match serde_json::to_string_pretty(&baseline) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(save_path, json) {
+                eprintln!("Error: failed to save health baseline: {e}");
+                return Err(ExitCode::from(2));
+            }
+            if !quiet {
+                eprintln!("Saved health baseline to {}", save_path.display());
+            }
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Error: failed to serialize health baseline: {e}");
+            Err(ExitCode::from(2))
+        }
+    }
+}
+
 /// Run health analysis, print results, and return exit code.
 pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
     match execute_health(opts) {
@@ -443,14 +468,14 @@ pub struct HealthResult {
 
 /// Print health results and return appropriate exit code.
 pub fn print_health_result(result: &HealthResult, quiet: bool, explain: bool) -> ExitCode {
-    let report_code = report::print_health_report(
-        &result.report,
-        &result.config,
-        result.elapsed,
+    let ctx = report::ReportContext {
+        root: &result.config.root,
+        rules: &result.config.rules,
+        elapsed: result.elapsed,
         quiet,
-        &result.config.output,
         explain,
-    );
+    };
+    let report_code = report::print_health_report(&result.report, &ctx, &result.config.output);
     if report_code != ExitCode::SUCCESS {
         return report_code;
     }

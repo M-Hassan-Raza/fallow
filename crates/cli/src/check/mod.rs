@@ -247,13 +247,14 @@ pub fn print_check_result(result: &CheckResult, quiet: bool, explain: bool) -> E
         result.config.rules.clone()
     };
 
-    let report_code = report::print_results(
-        &result.results,
-        &result.config,
-        result.elapsed,
+    let ctx = report::ReportContext {
+        root: &result.config.root,
+        rules: &result.config.rules,
+        elapsed: result.elapsed,
         quiet,
         explain,
-    );
+    };
+    let report_code = report::print_results(&result.results, &ctx, &result.config.output);
     if report_code != ExitCode::SUCCESS {
         return report_code;
     }
