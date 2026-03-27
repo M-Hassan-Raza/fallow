@@ -413,6 +413,21 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         members: vec![],
                     });
                 }
+            } else if let Expression::StaticMemberExpression(inner) = &member.object
+                && let Expression::Identifier(obj) = &inner.object
+                && obj.name == "module"
+                && inner.property.name == "exports"
+            {
+                // Extract `module.exports.foo = value` as named export
+                self.has_cjs_exports = true;
+                self.exports.push(ExportInfo {
+                    name: ExportName::Named(member.property.name.to_string()),
+                    local_name: None,
+                    is_type_only: false,
+                    is_public: false,
+                    span: expr.span,
+                    members: vec![],
+                });
             }
             // Capture `this.member = ...` assignment patterns within class bodies.
             // This indicates the class uses the member internally.

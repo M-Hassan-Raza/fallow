@@ -109,6 +109,13 @@ fn detects_cjs_exports_property() {
 }
 
 #[test]
+fn detects_cjs_module_exports_dot_property() {
+    let info = parse_source("module.exports.myFunc = function() {};\nmodule.exports.myConst = 42;");
+    assert!(info.has_cjs_exports);
+    assert_eq!(info.exports.len(), 2);
+}
+
+#[test]
 fn extracts_static_member_accesses() {
     let info = parse_source(
         "import { Status, MyClass } from './types';\nconsole.log(Status.Active);\nMyClass.create();",

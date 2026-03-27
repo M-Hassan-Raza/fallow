@@ -27,5 +27,7 @@ mod member_detection;
 mod rules_config;
 #[path = "integration_test/sfc_parsing.rs"]
 mod sfc_parsing;
+#[path = "integration_test/unreachable_exports.rs"]
+mod unreachable_exports;
 #[path = "integration_test/workspaces.rs"]
 mod workspaces;

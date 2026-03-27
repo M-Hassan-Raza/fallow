@@ -1461,6 +1461,30 @@ fn cjs_both_patterns() {
     );
 }
 
+#[test]
+fn cjs_module_exports_dot_property() {
+    let info = parse(
+        "module.exports.foo = function() {};\nmodule.exports.bar = 42;\nmodule.exports.baz = class {};",
+    );
+    assert!(info.has_cjs_exports);
+    assert_eq!(info.exports.len(), 3);
+    assert!(
+        info.exports
+            .iter()
+            .any(|e| matches!(&e.name, ExportName::Named(n) if n == "foo"))
+    );
+    assert!(
+        info.exports
+            .iter()
+            .any(|e| matches!(&e.name, ExportName::Named(n) if n == "bar"))
+    );
+    assert!(
+        info.exports
+            .iter()
+            .any(|e| matches!(&e.name, ExportName::Named(n) if n == "baz"))
+    );
+}
+
 // ── TypeScript enum extraction ───────────────────────────────
 
 #[test]

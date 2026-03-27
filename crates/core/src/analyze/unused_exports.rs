@@ -50,11 +50,18 @@ fn compile_plugin_matchers(
 
 /// Check whether a module should be skipped for unused-export analysis.
 ///
-/// Skips unreachable modules, entry points, CJS-only modules, and Svelte files
-/// (whose `export let` declarations are component props, not unused exports).
+/// Skips entry points, CJS-only modules, Svelte files (whose `export let`
+/// declarations are component props), and fully-unreachable modules where
+/// every export has zero references (those are already caught by `find_unused_files`).
+/// Unreachable modules with *some* referenced exports are NOT skipped — their
+/// individually unused exports would otherwise slip through both detectors.
 fn should_skip_module(module: &ModuleNode) -> bool {
-    if !module.is_reachable || module.is_entry_point {
+    if module.is_entry_point {
         return true;
+    }
+    if !module.is_reachable {
+        // Completely unreachable with no references at all → caught by find_unused_files
+        return module.exports.iter().all(|e| e.references.is_empty());
     }
     // CJS modules with module.exports but no named exports: hard to track individually
     if module.has_cjs_exports && module.exports.is_empty() {
@@ -93,6 +100,15 @@ pub fn find_unused_exports(
     let ignore_matchers = compile_ignore_matchers(config);
     let plugin_matchers = compile_plugin_matchers(plugin_result);
 
+    // Precompute reachable FileIds so we can distinguish meaningful references
+    // (from reachable modules) from unreachable-to-unreachable references.
+    let reachable_files: FxHashSet<u32> = graph
+        .modules
+        .iter()
+        .filter(|m| m.is_reachable)
+        .map(|m| m.file_id.0)
+        .collect();
+
     for module in &graph.modules {
         if should_skip_module(module) {
             continue;
@@ -122,7 +138,17 @@ pub fn find_unused_exports(
             .collect();
 
         for export in &module.exports {
-            if export.is_public || !export.references.is_empty() {
+            // For unreachable modules, only references from reachable files count —
+            // references from other unreachable modules don't save an export.
+            let is_referenced = if module.is_reachable {
+                !export.references.is_empty()
+            } else {
+                export
+                    .references
+                    .iter()
+                    .any(|r| reachable_files.contains(&r.from_file.0))
+            };
+            if export.is_public || is_referenced {
                 continue;
             }
 
@@ -1286,5 +1312,87 @@ mod tests {
         let names: FxHashSet<&str> = result.iter().map(|u| u.export_name.as_str()).collect();
         assert!(names.contains("alpha"));
         assert!(names.contains("beta"));
+    }
+
+    // -- unreachable module with mixed references (blindspot fix) --
+
+    #[test]
+    fn unused_exports_checks_unreachable_module_with_mixed_references() {
+        // Unreachable module with 2 exports:
+        // - "usedByUnreachable" referenced by another unreachable module (should still be flagged)
+        // - "totallyUnused" referenced by nobody (should be flagged)
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/helpers.ts", false),
+            ("/tmp/test/src/setup.ts", false),
+        ]);
+        // helpers.ts is unreachable, has one export referenced by setup.ts (also unreachable)
+        graph.modules[1].exports = vec![
+            ExportSymbol {
+                name: ExportName::Named("usedByUnreachable".to_string()),
+                is_type_only: false,
+                is_public: false,
+                span: Span::new(10, 30),
+                references: vec![SymbolReference {
+                    from_file: FileId(2), // setup.ts — also unreachable
+                    kind: crate::graph::ReferenceKind::NamedImport,
+                    import_span: Span::new(0, 10),
+                }],
+                members: vec![],
+            },
+            make_export("totallyUnused", 40, 55),
+        ];
+        // setup.ts is also unreachable
+        graph.modules[2].exports = vec![];
+
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        // Both exports should be flagged: the unreachable-to-unreachable reference doesn't count
+        let names: FxHashSet<&str> = exports.iter().map(|e| e.export_name.as_str()).collect();
+        assert!(
+            names.contains("usedByUnreachable"),
+            "reference from unreachable module should not save an export"
+        );
+        assert!(
+            names.contains("totallyUnused"),
+            "completely unreferenced export should be flagged"
+        );
+        assert_eq!(exports.len(), 2);
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_skips_export_referenced_by_reachable() {
+        // Unreachable module with 1 export referenced by a REACHABLE module.
+        // The export should NOT be flagged as unused.
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/helpers.ts", false),
+        ]);
+        // helpers.ts is unreachable but has an export referenced by entry.ts (reachable)
+        graph.modules[1].exports = vec![ExportSymbol {
+            name: ExportName::Named("usedByReachable".to_string()),
+            is_type_only: false,
+            is_public: false,
+            span: Span::new(10, 28),
+            references: vec![SymbolReference {
+                from_file: FileId(0), // entry.ts — reachable (entry point)
+                kind: crate::graph::ReferenceKind::NamedImport,
+                import_span: Span::new(0, 10),
+            }],
+            members: vec![],
+        }];
+
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(
+            exports.is_empty(),
+            "export referenced by reachable module should not be flagged"
+        );
+        assert!(types.is_empty());
     }
 }
