@@ -1,88 +1,96 @@
 # Fallow Roadmap
 
-> Last updated: 2026-03-24
+> Last updated: 2026-03-27
 
-Fallow finds and fixes dead code, code duplication, and complexity hotspots in TypeScript/JavaScript projects. Fast, framework-aware, zero-config.
+AI agents write more code than ever. They rarely clean up after themselves. Every generated file, every scaffolded export, every copied utility accumulates until your codebase is half dead weight.
 
-AI-assisted development is accelerating codebase entropy — agents generate code but rarely suggest deletions. Fallow is the cleanup tool that keeps up: sub-second analysis on every commit, one binary, one config, one CI step.
+Fallow is the counterbalance: fast, framework-aware dead code detection that works at the speed AI generates code. One binary, sub-second analysis, 13 issue types, 85 framework plugins, auto-fix, and native integration with the tools agents already use.
 
 ---
 
-## Where we are
+## Where we are (v2.2.3)
 
-Fallow ships dead code analysis (13 issue types), duplication detection (4 modes), and complexity metrics — with 84 framework plugins, 5 output formats, auto-fix, and a severity rules system. Integrations include an LSP server, VS Code extension, MCP server for AI agents, and a GitHub Action with SARIF upload.
+**Dead code analysis** -- 13 issue types: unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted deps, duplicate exports, and circular dependencies. 85 framework plugins with auto-detection. Auto-fix for safe removals. Inline suppression. Severity rules (`error` / `warn` / `off`).
 
-Tested against real-world projects spanning Next.js, Nuxt, NestJS, React Native/Expo, and pnpm monorepos. See the [README](README.md) for full details.
+**Code duplication** -- 4 detection modes (strict, mild, weak, semantic) with cross-language TS/JS matching and cross-directory filtering.
+
+**Health analysis** -- function complexity (cyclomatic + cognitive), per-file maintainability scores, git-churn hotspot analysis, ranked refactoring targets with effort estimation and adaptive thresholds. Vital signs snapshots for trend tracking.
+
+**CI/CD integration** -- GitHub Action with SARIF upload, inline PR annotations, review comments with suggestion blocks, and auto-changed-since for PR scoping. GitLab CI template with Code Quality reports, MR comments, and inline discussions. Baseline support for incremental adoption.
+
+**Agent and editor tooling** -- MCP server so AI agents can query fallow directly. LSP server with multi-root workspace support. VS Code extension with diagnostics, tree views, and status bar. The detect-analyze-fix loop works whether a human or an agent drives it.
+
+**6 output formats** -- human, JSON, SARIF, compact, markdown, CodeClimate.
 
 ---
 
 ## Where we're going
 
-### Smarter health analysis
+### The agent-driven cleanup loop
 
-`fallow health` now ships function complexity, per-file maintainability scores (`--file-scores`), and **hotspot analysis** (`--hotspots`) — combining git churn with complexity to surface the files that are complex, changing frequently, and most likely to cause problems. `fallow health --hotspots` answers "where should my team spend its refactoring budget?" with data, not gut feel.
+Fallow already auto-fixes safe removals (unused exports, enum members, dependencies). The next step: AI agents handle the judgment calls. Fallow provides structured analysis via MCP, the agent decides whether to delete a file, restructure a module, or consolidate duplicates. The human reviews the PR. This is the workflow: detect, delegate, review.
 
-Beyond that: codebase-wide vital signs with trend tracking over time, and regression detection in CI.
+Coming next: unused class member removal, automatic formatter integration, and richer MCP responses that give agents enough context to make confident cleanup decisions.
 
-### Dependency risk
+### Codebase health grade
 
-Fallow already detects unused dependencies. The next step is cross-referencing with vulnerability data: "these 5 unused dependencies have known CVEs — remove them for a free security win." Only fallow can surface this because only fallow knows which deps are actually unused.
+A single letter grade (A-F) for your project, computed from dead code ratio, duplication percentage, complexity density, and dependency hygiene. Visible in CI, in your README via badge, and tracked over time with vital signs snapshots. Managers understand it. Developers trust it. Agents optimize for it.
+
+### Dependency risk scoring
+
+Cross-reference unused dependencies with vulnerability data. "These 3 unused deps have known CVEs -- remove them for a free security win." Only fallow can surface this because only fallow knows which deps are actually unused.
 
 ### Visualization
 
-`fallow viz` — a self-contained interactive HTML report showing your codebase as a treemap with dead code highlighted. No external dependencies, no server, opens in any browser. Dependency graph, cycle visualization, and duplication heatmaps as additional views.
-
-### Smarter auto-fix + AI-assisted cleanup
-
-Auto-fix currently handles safe, reversible changes: removing unused exports, enum members, and dependencies. These are low-risk — worst case you get a compile error and revert.
-
-Riskier cleanups — deleting unused files, removing class members, restructuring modules — are better handled by AI coding agents that can read context, check for dynamic references, and make judgment calls. Fallow's role is to be the **source of truth** for what's unused: structured JSON output and MCP server tools that agents consume to decide what to do. Fallow detects, the agent decides.
-
-For safe auto-fix: unused class member removal and post-fix formatting integration are next.
+`fallow viz` -- a self-contained interactive HTML report. Treemap with dead code highlighted, dependency graph, cycle visualization, duplication heatmaps. No server required, opens in any browser.
 
 ### Architecture boundaries
 
-Define import rules between directory-based layers (`src/ui/` cannot import from `src/db/`). Validated against the module graph at Rust speed — same idea as dependency-cruiser but faster and integrated with dead code analysis.
+Define import rules between directory-based layers (`src/ui/` cannot import from `src/db/`). Validated against the module graph -- like dependency-cruiser but faster and integrated with dead code analysis.
 
 ### Static test coverage gaps
 
-Identify exports and files with no test file dependency — without running tests. Uses the module graph to determine which source files are reachable from test files. The CI use case: "your PR adds 3 untested exports."
+Identify exports and files with no test file dependency -- without running tests. Uses the module graph to find untested code. The CI use case: "your PR adds 3 untested exports."
+
+### Pre-commit hooks
+
+Catch unused exports and unresolved imports before they reach CI. Scoped to changed files for sub-second feedback.
 
 ---
 
 ## Ongoing
 
-- **Incremental analysis** — finer-grained caching beyond file-level, to make watch mode and CI even faster on large monorepos
-- **Plugin ecosystem** — more framework coverage, better external plugin authoring experience, community contributions
-- **Cross-workspace resolution** — custom export conditions, unbuilt workspace fallback for monorepos without build artifacts
+- **Incremental analysis** -- finer-grained caching for faster watch mode and CI on large monorepos
+- **Plugin ecosystem** -- more framework coverage, better external plugin authoring, community-contributed plugins
+- **Health trend tracking** -- regression detection in CI, vital signs diffs between snapshots
+- **Agent integration** -- richer MCP tool responses, Claude Code hooks, Cursor integration, agent skill packages
 
 ---
 
 ## Known limitations
 
-- **Syntactic analysis only** — no TypeScript type information. Projects using `isolatedModules: true` (the modern default) are well-served; legacy tsc-only projects may see false positives.
-- **Config parsing ceiling** — AST-based extraction handles static configs. Computed values and conditionals are out of reach without JS eval.
-- **Svelte export false negatives** — props (`export let`) can't be distinguished from utility exports without Svelte compiler semantics.
-- **NestJS/DI class members** — abstract methods consumed via DI are not tracked. Use `unused_class_members = "off"` for DI-heavy projects.
-
-See the [README](README.md) for the full list.
+- **Syntactic analysis only** -- no TypeScript type information. Projects using `isolatedModules: true` (the modern default) are well-served; legacy tsc-only patterns may produce false positives.
+- **Config parsing ceiling** -- AST-based extraction handles static configs. Computed values and conditionals are out of reach without JS eval.
+- **Svelte export false negatives** -- props (`export let`) can't be distinguished from utility exports without Svelte compiler semantics.
+- **NestJS/DI class members** -- abstract methods consumed via DI are not tracked. Use `unused_class_members = "off"` for DI-heavy projects.
 
 ---
 
 ## Competitive context
 
-- **Knip** — the closest alternative. Fallow is 3-18x faster than Knip v6 due to native Rust compilation. On the largest monorepos (20k+ files), knip errors out entirely.
-- **Biome** — has module graph infrastructure but hasn't shipped cross-file unused export detection. If they do, they cover ~1 of fallow's 13 issue types.
-- **SonarQube** — dominates enterprise code quality but is Java-centric, slow on JS/TS, and lacks framework-aware analysis.
-- **AI tools** — complementary, not competitive. AI generates code faster than humans can review it, accelerating the dead code problem fallow solves.
+- **Knip** -- the closest alternative. Both use the Oxc parser, but fallow runs as a native Rust binary with no Node.js runtime -- 3-18x faster in benchmarks. Knip errors out on the largest monorepos (20k+ files).
+- **Biome** -- has module graph infrastructure but hasn't shipped cross-file unused export detection. If they do, they cover ~1 of fallow's 13 issue types.
+- **SonarQube** -- dominates enterprise code quality but is Java-centric, slow on JS/TS, and lacks framework-aware dead code analysis.
+- **AI code review tools** -- complementary. AI generates code faster than humans review it, accelerating the dead code problem. Fallow is the structural analysis layer that AI reviewers lack: it sees the full module graph, not just the diff.
 
 ---
 
 ```bash
-npx fallow              # Run all analyses — zero config, sub-second
+npx fallow              # All analyses -- zero config, sub-second
 npx fallow dead-code    # Unused code only
-npx fallow dupes        # Duplication — find copy-paste clones
-npx fallow health       # Complexity — find functions that need refactoring
+npx fallow dupes        # Find copy-paste clones
+npx fallow health       # Complexity, hotspots, refactoring targets
+npx fallow fix --dry-run # Preview safe auto-removals
 ```
 
-[Open an issue](https://github.com/fallow-rs/fallow/issues) if your use case isn't covered.
+[Open an issue](https://github.com/fallow-rs/fallow/issues) to request a feature or report a bug. PRs welcome -- check the [contributing guide](CONTRIBUTING.md) and the [issues labeled "good first issue"](https://github.com/fallow-rs/fallow/issues?q=label%3A%22good+first+issue%22).
