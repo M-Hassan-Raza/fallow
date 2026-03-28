@@ -107,3 +107,44 @@ fn enum_whole_object_uses_no_false_positives() {
         "Medium should be unused (only High accessed via computed), found: {unused_enum_member_names:?}"
     );
 }
+
+// ── Type-level enum member usage ──────────────────────────────
+
+#[test]
+fn enum_type_level_usage_no_false_positives() {
+    let root = fixture_path("enum-type-level");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_enum_member_names: Vec<&str> = results
+        .unused_enum_members
+        .iter()
+        .map(|m| m.member_name.as_str())
+        .collect();
+
+    // BreakpointString used as mapped type constraint — all members should be used
+    assert!(
+        !unused_enum_member_names.contains(&"xs"),
+        "xs should not be unused (mapped type constraint), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        !unused_enum_member_names.contains(&"xxl"),
+        "xxl should not be unused (mapped type constraint), found: {unused_enum_member_names:?}"
+    );
+
+    // Status.Active used via qualified type name, Status.Inactive via runtime access
+    assert!(
+        !unused_enum_member_names.contains(&"Active"),
+        "Active should not be unused (type qualified name), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        !unused_enum_member_names.contains(&"Inactive"),
+        "Inactive should not be unused (runtime access), found: {unused_enum_member_names:?}"
+    );
+
+    // Status.Pending is not used in any way — should be unused
+    assert!(
+        unused_enum_member_names.contains(&"Pending"),
+        "Pending should be unused (no type-level or runtime access), found: {unused_enum_member_names:?}"
+    );
+}

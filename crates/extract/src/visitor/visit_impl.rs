@@ -475,6 +475,27 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         walk::walk_computed_member_expression(self, expr);
     }
 
+    fn visit_ts_qualified_name(&mut self, it: &TSQualifiedName<'a>) {
+        // Capture `Enum.Member` in type positions (e.g., `type X = Status.Active`)
+        if let TSTypeName::IdentifierReference(obj) = &it.left {
+            self.member_accesses.push(MemberAccess {
+                object: obj.name.to_string(),
+                member: it.right.name.to_string(),
+            });
+        }
+        walk::walk_ts_qualified_name(self, it);
+    }
+
+    fn visit_ts_mapped_type(&mut self, it: &TSMappedType<'a>) {
+        // `{ [K in SomeEnum]: ... }` — all members of the constraint type are implicitly used
+        if let TSType::TSTypeReference(type_ref) = &it.constraint
+            && let TSTypeName::IdentifierReference(ident) = &type_ref.type_name
+        {
+            self.whole_object_uses.push(ident.name.to_string());
+        }
+        walk::walk_ts_mapped_type(self, it);
+    }
+
     fn visit_for_in_statement(&mut self, stmt: &ForInStatement<'a>) {
         if let Expression::Identifier(ident) = &stmt.right {
             self.whole_object_uses.push(ident.name.to_string());

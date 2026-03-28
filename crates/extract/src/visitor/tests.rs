@@ -1417,6 +1417,40 @@ fn whole_object_spread_in_call_args() {
     assert!(info.whole_object_uses.contains(&"myArr".to_string()));
 }
 
+// ── Type-level member access ────────────────────────────────
+
+#[test]
+fn type_qualified_name_tracks_member_access() {
+    let info = parse("import { Status } from './types';\ntype X = Status.Active;");
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "Status" && a.member == "Active"),
+        "Enum.Member in type position should be tracked as member access"
+    );
+}
+
+#[test]
+fn mapped_type_constraint_marks_whole_object_use() {
+    let info = parse(
+        "import { BreakpointString } from './types';\ntype X = { [K in BreakpointString]: string };",
+    );
+    assert!(
+        info.whole_object_uses
+            .contains(&"BreakpointString".to_string()),
+        "enum used as mapped type constraint should be marked as whole-object use"
+    );
+}
+
+#[test]
+fn mapped_type_with_optional_marks_whole_object_use() {
+    let info = parse("import { Dir } from './types';\ntype X = { [K in Dir]?: number };");
+    assert!(
+        info.whole_object_uses.contains(&"Dir".to_string()),
+        "enum in optional mapped type should be whole-object use"
+    );
+}
+
 // ── CommonJS exports ─────────────────────────────────────────
 
 #[test]
