@@ -147,4 +147,24 @@ fn enum_type_level_usage_no_false_positives() {
         unused_enum_member_names.contains(&"Pending"),
         "Pending should be unused (no type-level or runtime access), found: {unused_enum_member_names:?}"
     );
+
+    // Color used via Record<Color, string> — all members should be used
+    assert!(
+        !unused_enum_member_names.contains(&"Red"),
+        "Red should not be unused (Record<Color, T>), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        !unused_enum_member_names.contains(&"Blue"),
+        "Blue should not be unused (Record<Color, T>), found: {unused_enum_member_names:?}"
+    );
+
+    // Direction used via { [K in keyof typeof Direction]: ... } — all members should be used
+    assert!(
+        !unused_enum_member_names.contains(&"Up"),
+        "Up should not be unused (keyof typeof in mapped type), found: {unused_enum_member_names:?}"
+    );
+    assert!(
+        !unused_enum_member_names.contains(&"Right"),
+        "Right should not be unused (keyof typeof in mapped type), found: {unused_enum_member_names:?}"
+    );
 }

@@ -1451,6 +1451,53 @@ fn mapped_type_with_optional_marks_whole_object_use() {
     );
 }
 
+#[test]
+fn mapped_type_keyof_typeof_marks_whole_object_use() {
+    let info =
+        parse("import { Dir } from './types';\ntype X = { [K in keyof typeof Dir]: string };");
+    assert!(
+        info.whole_object_uses.contains(&"Dir".to_string()),
+        "keyof typeof in mapped type constraint should be whole-object use"
+    );
+}
+
+#[test]
+fn record_utility_type_marks_whole_object_use() {
+    let info = parse("import { Status } from './types';\ntype X = Record<Status, string>;");
+    assert!(
+        info.whole_object_uses.contains(&"Status".to_string()),
+        "Record<Enum, T> should mark enum as whole-object use"
+    );
+}
+
+#[test]
+fn partial_record_marks_whole_object_use() {
+    let info =
+        parse("import { Status } from './types';\ntype X = Partial<Record<Status, number>>;");
+    assert!(
+        info.whole_object_uses.contains(&"Status".to_string()),
+        "Partial<Record<Enum, T>> should mark enum as whole-object use (nested walk)"
+    );
+}
+
+#[test]
+fn record_with_aliased_import_marks_whole_object_use() {
+    let info = parse("import { Status as S } from './types';\ntype X = Record<S, string>;");
+    assert!(
+        info.whole_object_uses.contains(&"S".to_string()),
+        "Record<AliasedEnum, T> should emit the local alias name"
+    );
+}
+
+#[test]
+fn record_with_non_identifier_key_no_whole_object_use() {
+    let info = parse("type X = Record<string, number>;");
+    assert!(
+        info.whole_object_uses.is_empty(),
+        "Record<string, T> should not produce whole-object use"
+    );
+}
+
 // ── CommonJS exports ─────────────────────────────────────────
 
 #[test]

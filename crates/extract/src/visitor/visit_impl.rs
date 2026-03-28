@@ -493,7 +493,31 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         {
             self.whole_object_uses.push(ident.name.to_string());
         }
+        // `{ [K in keyof typeof SomeEnum]: ... }` — whole-object use via keyof typeof
+        if let TSType::TSTypeOperatorType(op) = &it.constraint
+            && op.operator == TSTypeOperatorOperator::Keyof
+            && let TSType::TSTypeQuery(query) = &op.type_annotation
+            && let TSTypeQueryExprName::IdentifierReference(ident) = &query.expr_name
+        {
+            self.whole_object_uses.push(ident.name.to_string());
+        }
         walk::walk_ts_mapped_type(self, it);
+    }
+
+    fn visit_ts_type_reference(&mut self, it: &TSTypeReference<'a>) {
+        // `Record<SomeEnum, T>` — the first type arg is iterated as mapped keys.
+        // Syntactically approximate: also fires for non-enum identifiers (interfaces,
+        // classes), consistent with the conservative approach in other whole-object heuristics.
+        if let TSTypeName::IdentifierReference(name) = &it.type_name
+            && name.name == "Record"
+            && let Some(type_args) = &it.type_arguments
+            && let Some(first_arg) = type_args.params.first()
+            && let TSType::TSTypeReference(key_ref) = first_arg
+            && let TSTypeName::IdentifierReference(key_ident) = &key_ref.type_name
+        {
+            self.whole_object_uses.push(key_ident.name.to_string());
+        }
+        walk::walk_ts_type_reference(self, it);
     }
 
     fn visit_for_in_statement(&mut self, stmt: &ForInStatement<'a>) {
