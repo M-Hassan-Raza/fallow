@@ -209,10 +209,10 @@ pub fn trace_export(
         format!(
             "Used by {} file(s){}",
             export.references.len(),
-            if !re_export_chains.is_empty() {
-                format!(", re-exported through {} barrel(s)", re_export_chains.len())
-            } else {
+            if re_export_chains.is_empty() {
                 String::new()
+            } else {
+                format!(", re-exported through {} barrel(s)", re_export_chains.len())
             }
         )
     } else if module.is_entry_point {

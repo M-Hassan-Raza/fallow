@@ -315,21 +315,7 @@ impl PluginRegistry {
             }
             for pat in plugin.config_patterns() {
                 let has_glob = pat.contains("**") || pat.contains('*') || pat.contains('?');
-                if !has_glob {
-                    // Check both workspace root and project root (deduplicate when equal)
-                    let check_roots: Vec<&Path> = if root == project_root {
-                        vec![root]
-                    } else {
-                        vec![root, project_root]
-                    };
-                    for check_root in check_roots {
-                        let abs_path = check_root.join(pat);
-                        if abs_path.is_file() && ws_seen_paths.insert(abs_path.clone()) {
-                            ws_json_configs.push((abs_path, *plugin));
-                            break; // Found it — don't check other roots for this pattern
-                        }
-                    }
-                } else {
+                if has_glob {
                     // Glob pattern (e.g., "**/project.json") — check directories
                     // that contain discovered source files
                     let filename = std::path::Path::new(pat)
@@ -359,6 +345,20 @@ impl PluginRegistry {
                                     ws_json_configs.push((candidate, *plugin));
                                 }
                             }
+                        }
+                    }
+                } else {
+                    // Check both workspace root and project root (deduplicate when equal)
+                    let check_roots: Vec<&Path> = if root == project_root {
+                        vec![root]
+                    } else {
+                        vec![root, project_root]
+                    };
+                    for check_root in check_roots {
+                        let abs_path = check_root.join(pat);
+                        if abs_path.is_file() && ws_seen_paths.insert(abs_path.clone()) {
+                            ws_json_configs.push((abs_path, *plugin));
+                            break; // Found it — don't check other roots for this pattern
                         }
                     }
                 }

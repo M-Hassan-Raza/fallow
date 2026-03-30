@@ -115,13 +115,7 @@ pub fn discover_json_config_files<'a>(
         }
         for pat in plugin.config_patterns() {
             let has_glob = pat.contains("**") || pat.contains('*') || pat.contains('?');
-            if !has_glob {
-                // Simple pattern (e.g., "angular.json") — check at root
-                let abs_path = root.join(pat);
-                if abs_path.is_file() {
-                    json_configs.push((abs_path, *plugin));
-                }
-            } else {
+            if has_glob {
                 // Glob pattern (e.g., "**/project.json") — check directories
                 // that contain discovered source files
                 let filename = std::path::Path::new(pat)
@@ -149,6 +143,12 @@ pub fn discover_json_config_files<'a>(
                             }
                         }
                     }
+                }
+            } else {
+                // Simple pattern (e.g., "angular.json") — check at root
+                let abs_path = root.join(pat);
+                if abs_path.is_file() {
+                    json_configs.push((abs_path, *plugin));
                 }
             }
         }

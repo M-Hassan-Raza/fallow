@@ -516,7 +516,15 @@ fn attach_symbol_reference(
     // Namespace imports: narrow to specific member accesses when possible,
     // otherwise conservatively mark all exports as used.
     if matches!(sym.imported_name, ImportedName::Namespace) {
-        if !sym.local_name.is_empty() {
+        if sym.local_name.is_empty() {
+            // No local name available — mark all (conservative)
+            mark_all_exports_referenced(
+                &mut target_module.exports,
+                source_id,
+                sym.import_span,
+                &ReferenceKind::NamespaceImport,
+            );
+        } else {
             narrow_namespace_references(
                 target_module,
                 source_id,
@@ -524,14 +532,6 @@ fn attach_symbol_reference(
                 sym.import_span,
                 module_by_id,
                 entry_point_ids,
-            );
-        } else {
-            // No local name available — mark all (conservative)
-            mark_all_exports_referenced(
-                &mut target_module.exports,
-                source_id,
-                sym.import_span,
-                &ReferenceKind::NamespaceImport,
             );
         }
     }

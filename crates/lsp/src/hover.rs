@@ -158,7 +158,9 @@ fn check_used_export(
         );
 
         // List up to 10 reference locations
-        if !usage.reference_locations.is_empty() {
+        if usage.reference_locations.is_empty() {
+            value.push('.');
+        } else {
             value.push_str(":\n");
             for (i, loc) in usage.reference_locations.iter().take(10).enumerate() {
                 let display_path = loc.path.file_name().map_or_else(
@@ -177,8 +179,6 @@ fn check_used_export(
                     usage.reference_locations.len() - 10
                 );
             }
-        } else {
-            value.push('.');
         }
 
         return Some(Hover {
@@ -341,7 +341,9 @@ fn check_duplication(
                 })
                 .collect();
 
-            if !others.is_empty() {
+            if others.is_empty() {
+                value.push('.');
+            } else {
                 value.push_str(":\n");
                 for (i, other) in others.iter().take(10).enumerate() {
                     let display_path = other.file.file_name().map_or_else(
@@ -360,8 +362,6 @@ fn check_duplication(
                 if others.len() > 10 {
                     let _ = write!(value, "\n- ... and {} more", others.len() - 10);
                 }
-            } else {
-                value.push('.');
             }
 
             return Some(Hover {
