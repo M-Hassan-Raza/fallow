@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.7.0] - 2026-03-30
+
+### Added
+
+- **Structured fix suggestions in JSON output** -- every issue in `--format json` output now includes an `actions` array with machine-actionable fix and suppress hints. 14 fix action types (kebab-case), `auto_fixable` flag on every action, optional `note` for non-auto-fixable items. Dependency issues use `add-to-config` suppress with concrete package name. Re-export findings include a warning note about public API surface. `duplicate_exports` suppress includes `scope: "per-location"`. No schema version bump (additive change).
+- **Pre-commit hook setup** (`fallow init --hooks`) -- scaffolds a git pre-commit hook that runs `fallow check --changed-since` on changed files. Auto-detects base branch via git. Supports `--base <ref>` override. Detects husky, lefthook, and bare `.git/hooks`. Includes binary guard and helpful success message with `--no-verify` bypass. Input validated to prevent shell injection.
+
 ## [2.6.0] - 2026-03-30
 
 ### Added
@@ -616,7 +623,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.6.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/fallow-rs/fallow/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/fallow-rs/fallow/compare/v2.5.5...v2.6.0
 [2.5.5]: https://github.com/fallow-rs/fallow/compare/v2.5.4...v2.5.5
 [2.5.4]: https://github.com/fallow-rs/fallow/compare/v2.5.3...v2.5.4
