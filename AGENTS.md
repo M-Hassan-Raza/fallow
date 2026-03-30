@@ -17,6 +17,7 @@ Fallow is a codebase analyzer for JS/TS projects. It detects unused files, expor
 5. **All paths in output are relative** to the project root. Do not join them with an absolute prefix unless you know the working directory.
 6. **Use `--explain`** to include a `_meta` object in JSON output with metric definitions, value ranges, and interpretation hints. The MCP server enables this automatically. This helps you understand what values like `complexity_density: 0.12` or `trend: accelerating` mean without consulting external docs.
 7. **Do not run `watch`** in agent workflows. It is interactive and never exits.
+8. **Use `actions` arrays in JSON output** to determine how to fix each issue. Every issue item includes an `actions` array with machine-actionable fix and suppress hints. Check `auto_fixable: true` to know if `fallow fix` can handle it automatically.
 
 ## Exit codes
 
@@ -212,11 +213,13 @@ fallow list --plugins --format json --quiet
 
 ### `init`
 
-Create a config file in the project root. Defaults to `.fallowrc.json` (JSON with JSONC comment support and `$schema` for IDE autocomplete). Use `--toml` for TOML format.
+Create a config file in the project root. Defaults to `.fallowrc.json` (JSON with JSONC comment support and `$schema` for IDE autocomplete). Use `--toml` for TOML format. Use `--hooks` to scaffold a pre-commit git hook.
 
 ```bash
-fallow init          # creates .fallowrc.json
-fallow init --toml   # creates fallow.toml
+fallow init                  # creates .fallowrc.json
+fallow init --toml           # creates fallow.toml
+fallow init --hooks          # scaffold pre-commit hook (auto-detects base branch)
+fallow init --hooks --base develop  # use custom base branch
 ```
 
 ### `migrate`

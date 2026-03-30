@@ -553,19 +553,138 @@
       }
     },
 
+    "Action": {
+      "description": "A suggested action for resolving an issue. Each issue includes an array of possible actions: a fix action (auto-fixable or manual), suppress-line, suppress-file, and/or add-to-config.",
+      "oneOf": [
+        { "$ref": "#/definitions/FixAction" },
+        { "$ref": "#/definitions/SuppressLineAction" },
+        { "$ref": "#/definitions/SuppressFileAction" },
+        { "$ref": "#/definitions/AddToConfigAction" }
+      ]
+    },
+    "FixAction": {
+      "type": "object",
+      "required": ["type", "auto_fixable", "description"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["remove-export", "delete-file", "remove-dependency", "remove-enum-member", "remove-class-member", "resolve-import", "install-dependency", "remove-duplicate", "move-to-dev", "refactor-cycle"],
+          "description": "Kebab-case identifier for the fix action."
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Whether `fallow fix` can apply this fix automatically."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the fix."
+        },
+        "note": {
+          "type": "string",
+          "description": "Optional context note. Present on non-auto-fixable actions, and on auto-fixable re-export findings to warn about public API surface."
+        }
+      }
+    },
+    "SuppressLineAction": {
+      "type": "object",
+      "required": ["type", "auto_fixable", "description", "comment"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["suppress-line"],
+          "description": "Action type identifier."
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "const": false,
+          "description": "Always false for suppress actions."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the suppression."
+        },
+        "comment": {
+          "type": "string",
+          "description": "The inline comment to place above the line (e.g., '// fallow-ignore-next-line unused-export')."
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["per-location"],
+          "description": "Present on multi-location issue types (e.g., duplicate_exports) to indicate the comment must be applied at each location."
+        }
+      }
+    },
+    "SuppressFileAction": {
+      "type": "object",
+      "required": ["type", "auto_fixable", "description", "comment"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["suppress-file"],
+          "description": "Action type identifier."
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "const": false,
+          "description": "Always false for suppress actions."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the suppression."
+        },
+        "comment": {
+          "type": "string",
+          "description": "The file-level comment to place at the top of the file (e.g., '// fallow-ignore-file unused-file')."
+        }
+      }
+    },
+    "AddToConfigAction": {
+      "type": "object",
+      "required": ["type", "auto_fixable", "description", "config_key", "value"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["add-to-config"],
+          "description": "Action type identifier."
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "const": false,
+          "description": "Always false for config actions."
+        },
+        "description": {
+          "type": "string",
+          "description": "Human-readable description of the config change."
+        },
+        "config_key": {
+          "type": "string",
+          "description": "The fallow config key to add the value to (e.g., 'ignoreDependencies')."
+        },
+        "value": {
+          "type": "string",
+          "description": "The value to add to the config key (e.g., 'lodash')."
+        }
+      }
+    },
+
     "UnusedFile": {
       "type": "object",
-      "required": ["path"],
+      "required": ["path", "actions"],
       "properties": {
         "path": {
           "type": "string",
           "description": "File path (forward slashes, relative to project root)."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
     "UnusedExport": {
       "type": "object",
-      "required": ["path", "export_name", "is_type_only", "line", "col", "span_start", "is_re_export"],
+      "required": ["path", "export_name", "is_type_only", "line", "col", "span_start", "is_re_export", "actions"],
       "properties": {
         "path": {
           "type": "string",
@@ -594,12 +713,17 @@
         "is_re_export": {
           "type": "boolean",
           "description": "Whether this finding comes from a barrel/index re-export rather than the source definition."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
     "UnusedDependency": {
       "type": "object",
-      "required": ["package_name", "location", "path", "line"],
+      "required": ["package_name", "location", "path", "line", "actions"],
       "properties": {
         "package_name": {
           "type": "string",
@@ -617,12 +741,17 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
     "UnusedMember": {
       "type": "object",
-      "required": ["path", "parent_name", "member_name", "kind", "line", "col"],
+      "required": ["path", "parent_name", "member_name", "kind", "line", "col", "actions"],
       "properties": {
         "path": {
           "type": "string",
@@ -647,12 +776,17 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
     "UnresolvedImport": {
       "type": "object",
-      "required": ["path", "specifier", "line", "col"],
+      "required": ["path", "specifier", "line", "col", "actions"],
       "properties": {
         "path": {
           "type": "string",
@@ -669,12 +803,17 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
     "UnlistedDependency": {
       "type": "object",
-      "required": ["package_name", "imported_from"],
+      "required": ["package_name", "imported_from", "actions"],
       "properties": {
         "package_name": {
           "type": "string",
@@ -684,6 +823,11 @@
           "type": "array",
           "items": { "$ref": "#/definitions/ImportSite" },
           "description": "Import sites where this unlisted dependency is used."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
@@ -707,7 +851,7 @@
     },
     "DuplicateExport": {
       "type": "object",
-      "required": ["export_name", "locations"],
+      "required": ["export_name", "locations", "actions"],
       "properties": {
         "export_name": {
           "type": "string",
@@ -717,6 +861,11 @@
           "type": "array",
           "items": { "$ref": "#/definitions/DuplicateLocation" },
           "description": "Locations where this export name is defined."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
@@ -740,7 +889,7 @@
     },
     "TypeOnlyDependency": {
       "type": "object",
-      "required": ["package_name", "path", "line"],
+      "required": ["package_name", "path", "line", "actions"],
       "properties": {
         "package_name": {
           "type": "string",
@@ -753,12 +902,17 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
     "TestOnlyDependency": {
       "type": "object",
-      "required": ["package_name", "path", "line"],
+      "required": ["package_name", "path", "line", "actions"],
       "properties": {
         "package_name": {
           "type": "string",
@@ -771,12 +925,17 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },
     "CircularDependency": {
       "type": "object",
-      "required": ["files", "length", "line", "col"],
+      "required": ["files", "length", "line", "col", "actions"],
       "properties": {
         "files": {
           "type": "array",
@@ -794,6 +953,11 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the import that starts the cycle."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
         }
       }
     },

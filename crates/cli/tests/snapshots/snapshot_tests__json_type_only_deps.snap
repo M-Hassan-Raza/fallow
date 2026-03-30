@@ -22,12 +22,42 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     {
       "package_name": "zod",
       "path": "package.json",
-      "line": 8
+      "line": 8,
+      "actions": [
+        {
+          "type": "move-to-dev",
+          "auto_fixable": false,
+          "description": "Move to devDependencies (only type imports are used)",
+          "note": "Type imports are erased at runtime so this dependency is not needed in production"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"zod\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "zod"
+        }
+      ]
     },
     {
       "package_name": "@types/react",
       "path": "package.json",
-      "line": 8
+      "line": 8,
+      "actions": [
+        {
+          "type": "move-to-dev",
+          "auto_fixable": false,
+          "description": "Move to devDependencies (only type imports are used)",
+          "note": "Type imports are erased at runtime so this dependency is not needed in production"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"@types/react\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "@types/react"
+        }
+      ]
     }
   ],
   "test_only_dependencies": [],

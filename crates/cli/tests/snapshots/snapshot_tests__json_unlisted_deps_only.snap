@@ -25,6 +25,21 @@ expression: redact_version(&json_str)
           "line": 2,
           "col": 0
         }
+      ],
+      "actions": [
+        {
+          "type": "install-dependency",
+          "auto_fixable": false,
+          "description": "Add this package to dependencies in package.json",
+          "note": "Verify this package should be a direct dependency before adding"
+        },
+        {
+          "type": "add-to-config",
+          "auto_fixable": false,
+          "description": "Add \"chalk\" to ignoreDependencies in fallow config",
+          "config_key": "ignoreDependencies",
+          "value": "chalk"
+        }
       ]
     }
   ],

@@ -105,7 +105,11 @@ pub fn build_json(
 
     let mut output = serde_json::Value::Object(map);
     let root_prefix = format!("{}/", root.display());
+    // strip_root_prefix must run before inject_actions so that injected
+    // action fields (static strings and package names) are not processed
+    // by the path stripper.
     strip_root_prefix(&mut output, &root_prefix);
+    inject_actions(&mut output);
     Ok(output)
 }
 
@@ -131,6 +135,253 @@ fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
             }
         }
         _ => {}
+    }
+}
+
+// ── Fix action injection ────────────────────────────────────────
+
+/// Suppress mechanism for an issue type.
+enum SuppressKind {
+    /// `// fallow-ignore-next-line <type>` on the line before.
+    InlineComment,
+    /// `// fallow-ignore-file <type>` at the top of the file.
+    FileComment,
+    /// Add to `ignoreDependencies` in fallow config.
+    ConfigIgnoreDep,
+}
+
+/// Specification for actions to inject per issue type.
+struct ActionSpec {
+    fix_type: &'static str,
+    auto_fixable: bool,
+    description: &'static str,
+    note: Option<&'static str>,
+    suppress: SuppressKind,
+    issue_kind: &'static str,
+}
+
+/// Map an issue array key to its action specification.
+fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
+    match key {
+        "unused_files" => Some(ActionSpec {
+            fix_type: "delete-file",
+            auto_fixable: false,
+            description: "Delete this file",
+            note: Some(
+                "File deletion may remove runtime functionality not visible to static analysis",
+            ),
+            suppress: SuppressKind::FileComment,
+            issue_kind: "unused-file",
+        }),
+        "unused_exports" => Some(ActionSpec {
+            fix_type: "remove-export",
+            auto_fixable: true,
+            description: "Remove the `export` keyword from the declaration",
+            note: None,
+            suppress: SuppressKind::InlineComment,
+            issue_kind: "unused-export",
+        }),
+        "unused_types" => Some(ActionSpec {
+            fix_type: "remove-export",
+            auto_fixable: true,
+            description: "Remove the `export` (or `export type`) keyword from the type declaration",
+            note: None,
+            suppress: SuppressKind::InlineComment,
+            issue_kind: "unused-type",
+        }),
+        "unused_dependencies" => Some(ActionSpec {
+            fix_type: "remove-dependency",
+            auto_fixable: true,
+            description: "Remove from dependencies in package.json",
+            note: None,
+            suppress: SuppressKind::ConfigIgnoreDep,
+            issue_kind: "unused-dependency",
+        }),
+        "unused_dev_dependencies" => Some(ActionSpec {
+            fix_type: "remove-dependency",
+            auto_fixable: true,
+            description: "Remove from devDependencies in package.json",
+            note: None,
+            suppress: SuppressKind::ConfigIgnoreDep,
+            issue_kind: "unused-dev-dependency",
+        }),
+        "unused_optional_dependencies" => Some(ActionSpec {
+            fix_type: "remove-dependency",
+            auto_fixable: true,
+            description: "Remove from optionalDependencies in package.json",
+            note: None,
+            suppress: SuppressKind::ConfigIgnoreDep,
+            // No IssueKind variant exists for optional deps — uses config suppress only.
+            issue_kind: "unused-dependency",
+        }),
+        "unused_enum_members" => Some(ActionSpec {
+            fix_type: "remove-enum-member",
+            auto_fixable: true,
+            description: "Remove this enum member",
+            note: None,
+            suppress: SuppressKind::InlineComment,
+            issue_kind: "unused-enum-member",
+        }),
+        "unused_class_members" => Some(ActionSpec {
+            fix_type: "remove-class-member",
+            auto_fixable: false,
+            description: "Remove this class member",
+            note: Some("Class member may be used via dependency injection or decorators"),
+            suppress: SuppressKind::InlineComment,
+            issue_kind: "unused-class-member",
+        }),
+        "unresolved_imports" => Some(ActionSpec {
+            fix_type: "resolve-import",
+            auto_fixable: false,
+            description: "Fix the import specifier or install the missing module",
+            note: Some("Verify the module path and check tsconfig paths configuration"),
+            suppress: SuppressKind::InlineComment,
+            issue_kind: "unresolved-import",
+        }),
+        "unlisted_dependencies" => Some(ActionSpec {
+            fix_type: "install-dependency",
+            auto_fixable: false,
+            description: "Add this package to dependencies in package.json",
+            note: Some("Verify this package should be a direct dependency before adding"),
+            suppress: SuppressKind::ConfigIgnoreDep,
+            issue_kind: "unlisted-dependency",
+        }),
+        "duplicate_exports" => Some(ActionSpec {
+            fix_type: "remove-duplicate",
+            auto_fixable: false,
+            description: "Keep one canonical export location and remove the others",
+            note: Some("Review all locations to determine which should be the canonical export"),
+            suppress: SuppressKind::InlineComment,
+            issue_kind: "duplicate-export",
+        }),
+        "type_only_dependencies" => Some(ActionSpec {
+            fix_type: "move-to-dev",
+            auto_fixable: false,
+            description: "Move to devDependencies (only type imports are used)",
+            note: Some(
+                "Type imports are erased at runtime so this dependency is not needed in production",
+            ),
+            suppress: SuppressKind::ConfigIgnoreDep,
+            issue_kind: "type-only-dependency",
+        }),
+        "test_only_dependencies" => Some(ActionSpec {
+            fix_type: "move-to-dev",
+            auto_fixable: false,
+            description: "Move to devDependencies (only test files import this)",
+            note: Some(
+                "Only test files import this package so it does not need to be a production dependency",
+            ),
+            suppress: SuppressKind::ConfigIgnoreDep,
+            issue_kind: "test-only-dependency",
+        }),
+        "circular_dependencies" => Some(ActionSpec {
+            fix_type: "refactor-cycle",
+            auto_fixable: false,
+            description: "Extract shared logic into a separate module to break the cycle",
+            note: Some(
+                "Circular imports can cause initialization issues and make code harder to reason about",
+            ),
+            suppress: SuppressKind::InlineComment,
+            issue_kind: "circular-dependency",
+        }),
+        _ => None,
+    }
+}
+
+/// Build the `actions` array for a single issue item.
+fn build_actions(
+    item: &serde_json::Value,
+    issue_key: &str,
+    spec: &ActionSpec,
+) -> serde_json::Value {
+    let mut actions = Vec::with_capacity(2);
+
+    // Primary fix action
+    let mut fix_action = serde_json::json!({
+        "type": spec.fix_type,
+        "auto_fixable": spec.auto_fixable,
+        "description": spec.description,
+    });
+    if let Some(note) = spec.note {
+        fix_action["note"] = serde_json::json!(note);
+    }
+    // Warn about re-exports that may be part of the public API surface.
+    if (issue_key == "unused_exports" || issue_key == "unused_types")
+        && item
+            .get("is_re_export")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+    {
+        fix_action["note"] = serde_json::json!(
+            "This finding originates from a re-export; verify it is not part of your public API before removing"
+        );
+    }
+    actions.push(fix_action);
+
+    // Suppress action — every action carries `auto_fixable` for uniform filtering.
+    match spec.suppress {
+        SuppressKind::InlineComment => {
+            let mut suppress = serde_json::json!({
+                "type": "suppress-line",
+                "auto_fixable": false,
+                "description": "Suppress with an inline comment above the line",
+                "comment": format!("// fallow-ignore-next-line {}", spec.issue_kind),
+            });
+            // duplicate_exports has N locations, not one — flag multi-location scope.
+            if issue_key == "duplicate_exports" {
+                suppress["scope"] = serde_json::json!("per-location");
+            }
+            actions.push(suppress);
+        }
+        SuppressKind::FileComment => {
+            actions.push(serde_json::json!({
+                "type": "suppress-file",
+                "auto_fixable": false,
+                "description": "Suppress with a file-level comment at the top of the file",
+                "comment": format!("// fallow-ignore-file {}", spec.issue_kind),
+            }));
+        }
+        SuppressKind::ConfigIgnoreDep => {
+            // Extract the package name from the item for a concrete suggestion.
+            let pkg = item
+                .get("package_name")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("package-name");
+            actions.push(serde_json::json!({
+                "type": "add-to-config",
+                "auto_fixable": false,
+                "description": format!("Add \"{pkg}\" to ignoreDependencies in fallow config"),
+                "config_key": "ignoreDependencies",
+                "value": pkg,
+            }));
+        }
+    }
+
+    serde_json::Value::Array(actions)
+}
+
+/// Inject `actions` arrays into every issue item in the JSON output.
+///
+/// Walks each known issue-type array and appends an `actions` field
+/// to every item, providing machine-actionable fix and suppress hints.
+fn inject_actions(output: &mut serde_json::Value) {
+    let Some(map) = output.as_object_mut() else {
+        return;
+    };
+
+    for (key, value) in map.iter_mut() {
+        let Some(spec) = actions_for_issue_type(key) else {
+            continue;
+        };
+        let Some(arr) = value.as_array_mut() else {
+            continue;
+        };
+        for item in arr {
+            let actions = build_actions(item, key, &spec);
+            if let serde_json::Value::Object(obj) = item {
+                obj.insert("actions".to_string(), actions);
+            }
+        }
     }
 }
 
@@ -1131,5 +1382,125 @@ mod tests {
         assert!(enum_member["kind"].is_string());
         let class_member = &output["unused_class_members"][0];
         assert!(class_member["kind"].is_string());
+    }
+
+    // ── Actions injection ──────────────────────────────────────────
+
+    #[test]
+    fn json_unused_export_has_actions() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: root.join("src/utils.ts"),
+            export_name: "helperFn".to_string(),
+            is_type_only: false,
+            line: 10,
+            col: 4,
+            span_start: 120,
+            is_re_export: false,
+        });
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+
+        let actions = output["unused_exports"][0]["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 2);
+
+        // Fix action
+        assert_eq!(actions[0]["type"], "remove-export");
+        assert_eq!(actions[0]["auto_fixable"], true);
+        assert!(actions[0].get("note").is_none());
+
+        // Suppress action
+        assert_eq!(actions[1]["type"], "suppress-line");
+        assert_eq!(
+            actions[1]["comment"],
+            "// fallow-ignore-next-line unused-export"
+        );
+    }
+
+    #[test]
+    fn json_unused_file_has_file_suppress_and_note() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_files.push(UnusedFile {
+            path: root.join("src/dead.ts"),
+        });
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+
+        let actions = output["unused_files"][0]["actions"].as_array().unwrap();
+        assert_eq!(actions[0]["type"], "delete-file");
+        assert_eq!(actions[0]["auto_fixable"], false);
+        assert!(actions[0]["note"].is_string());
+        assert_eq!(actions[1]["type"], "suppress-file");
+        assert_eq!(actions[1]["comment"], "// fallow-ignore-file unused-file");
+    }
+
+    #[test]
+    fn json_unused_dependency_has_config_suppress_with_package_name() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+        });
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+
+        let actions = output["unused_dependencies"][0]["actions"]
+            .as_array()
+            .unwrap();
+        assert_eq!(actions[0]["type"], "remove-dependency");
+        assert_eq!(actions[0]["auto_fixable"], true);
+
+        // Config suppress includes actual package name
+        assert_eq!(actions[1]["type"], "add-to-config");
+        assert_eq!(actions[1]["config_key"], "ignoreDependencies");
+        assert_eq!(actions[1]["value"], "lodash");
+    }
+
+    #[test]
+    fn json_empty_results_have_no_actions_in_empty_arrays() {
+        let root = PathBuf::from("/project");
+        let results = AnalysisResults::default();
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+
+        // Empty arrays should remain empty
+        assert!(output["unused_exports"].as_array().unwrap().is_empty());
+        assert!(output["unused_files"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn json_all_issue_types_have_actions() {
+        let root = PathBuf::from("/project");
+        let results = sample_results(&root);
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+
+        let issue_keys = [
+            "unused_files",
+            "unused_exports",
+            "unused_types",
+            "unused_dependencies",
+            "unused_dev_dependencies",
+            "unused_optional_dependencies",
+            "unused_enum_members",
+            "unused_class_members",
+            "unresolved_imports",
+            "unlisted_dependencies",
+            "duplicate_exports",
+            "type_only_dependencies",
+            "test_only_dependencies",
+            "circular_dependencies",
+        ];
+
+        for key in &issue_keys {
+            let arr = output[key].as_array().unwrap();
+            if !arr.is_empty() {
+                let actions = arr[0]["actions"].as_array();
+                assert!(
+                    actions.is_some() && !actions.unwrap().is_empty(),
+                    "missing actions for {key}"
+                );
+            }
+        }
     }
 }

@@ -31,6 +31,21 @@ expression: redact_version(&json_str)
           "line": 30,
           "col": 0
         }
+      ],
+      "actions": [
+        {
+          "type": "remove-duplicate",
+          "auto_fixable": false,
+          "description": "Keep one canonical export location and remove the others",
+          "note": "Review all locations to determine which should be the canonical export"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line duplicate-export",
+          "scope": "per-location"
+        }
       ]
     }
   ],

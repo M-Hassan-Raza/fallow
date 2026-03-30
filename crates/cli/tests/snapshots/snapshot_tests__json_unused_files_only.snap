@@ -9,7 +9,21 @@ expression: redact_version(&json_str)
   "total_issues": 1,
   "unused_files": [
     {
-      "path": "src/dead.ts"
+      "path": "src/dead.ts",
+      "actions": [
+        {
+          "type": "delete-file",
+          "auto_fixable": false,
+          "description": "Delete this file",
+          "note": "File deletion may remove runtime functionality not visible to static analysis"
+        },
+        {
+          "type": "suppress-file",
+          "auto_fixable": false,
+          "description": "Suppress with a file-level comment at the top of the file",
+          "comment": "// fallow-ignore-file unused-file"
+        }
+      ]
     }
   ],
   "unused_exports": [],

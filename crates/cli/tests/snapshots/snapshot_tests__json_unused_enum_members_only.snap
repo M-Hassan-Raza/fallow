@@ -20,7 +20,20 @@ expression: redact_version(&json_str)
       "member_name": "Deprecated",
       "kind": "enum_member",
       "line": 8,
-      "col": 2
+      "col": 2,
+      "actions": [
+        {
+          "type": "remove-enum-member",
+          "auto_fixable": true,
+          "description": "Remove this enum member"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unused-enum-member"
+        }
+      ]
     }
   ],
   "unused_class_members": [],

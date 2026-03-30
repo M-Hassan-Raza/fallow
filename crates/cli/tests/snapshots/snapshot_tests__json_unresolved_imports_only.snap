@@ -21,7 +21,21 @@ expression: redact_version(&json_str)
       "specifier": "./missing-module",
       "line": 3,
       "col": 0,
-      "specifier_col": 0
+      "specifier_col": 0,
+      "actions": [
+        {
+          "type": "resolve-import",
+          "auto_fixable": false,
+          "description": "Fix the import specifier or install the missing module",
+          "note": "Verify the module path and check tsconfig paths configuration"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with an inline comment above the line",
+          "comment": "// fallow-ignore-next-line unresolved-import"
+        }
+      ]
     }
   ],
   "unlisted_dependencies": [],

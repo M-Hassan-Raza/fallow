@@ -239,6 +239,14 @@ enum Command {
         /// Generate TOML instead of JSONC
         #[arg(long)]
         toml: bool,
+
+        /// Scaffold a pre-commit git hook that runs fallow on changed files
+        #[arg(long)]
+        hooks: bool,
+
+        /// Base branch/ref for the pre-commit hook (default: auto-detect or "main")
+        #[arg(long, requires = "hooks")]
+        base: Option<String>,
     },
 
     /// Print the JSON Schema for fallow configuration files
@@ -901,7 +909,12 @@ fn main() -> ExitCode {
                 yes,
                 production: cli.production,
             }),
-            Command::Init { toml } => init::run_init(&root, toml),
+            Command::Init { toml, hooks, base } => init::run_init(&init::InitOptions {
+                root: &root,
+                use_toml: toml,
+                hooks,
+                base: base.as_deref(),
+            }),
             Command::ConfigSchema => init::run_config_schema(),
             Command::PluginSchema => init::run_plugin_schema(),
             Command::List {
