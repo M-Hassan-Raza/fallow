@@ -58,7 +58,7 @@ fn is_allowed_hidden(entry: &ignore::DirEntry) -> bool {
     }
 
     // Hidden files are fine — the type filter (source extensions) will handle them
-    if entry.file_type().is_some_and(|ft| ft.is_file()) {
+    if entry.file_type().is_some_and(|ft| !ft.is_dir()) {
         return true;
     }
 
@@ -114,7 +114,7 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
 
     let mut files: Vec<DiscoveredFile> = walker
         .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_some_and(|ft| ft.is_file()))
+        .filter(|entry| entry.file_type().is_some_and(|ft| !ft.is_dir()))
         .filter(|entry| !config.ignore_patterns.is_match(entry.path()))
         .filter(|entry| {
             // In production mode, exclude test/story/dev files

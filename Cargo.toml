@@ -111,6 +111,12 @@ pathbuf_init_then_push = "warn"         # Use PathBuf::from() directly
 excessive_nesting = "warn"              # Catch deeply nested control flow (threshold in .clippy.toml)
 allow_attributes_without_reason = "warn" # Force reason on #[allow] to catch unjustified suppressions
 unimplemented = "warn"                  # Catch leftover unimplemented!() calls
+filetype_is_file = "warn"               # FileType::is_file() misses symlinks — use !is_dir()
+rest_pat_in_fully_bound_structs = "warn" # Catch `..` in patterns where all fields are already bound
+pub_underscore_fields = "warn"           # Catch accidentally public _-prefixed fields
+non_zero_suggestions = "warn"            # Suggest NonZero types for naturally non-zero values
+precedence_bits = "warn"                 # Catch bitwise operator precedence mistakes
+map_with_unused_argument_over_ranges = "warn" # Use `repeat`/`repeat_with` instead
 
 # Allow common pedantic false positives
 module_name_repetitions = "allow"
