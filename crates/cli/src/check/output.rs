@@ -212,6 +212,7 @@ mod tests {
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
             rules: fallow_config::RulesConfig::default(),
+            boundaries: fallow_config::ResolvedBoundaryConfig::default(),
             production: false,
             quiet: true,
             external_plugins: vec![],

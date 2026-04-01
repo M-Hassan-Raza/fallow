@@ -86,6 +86,8 @@ pub struct RulesConfig {
     pub test_only_dependencies: Severity,
     #[serde(default)]
     pub circular_dependencies: Severity,
+    #[serde(default)]
+    pub boundary_violation: Severity,
 }
 
 impl Default for RulesConfig {
@@ -105,6 +107,7 @@ impl Default for RulesConfig {
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
             circular_dependencies: Severity::Error,
+            boundary_violation: Severity::Error,
         }
     }
 }
@@ -154,6 +157,9 @@ impl RulesConfig {
         if let Some(s) = partial.circular_dependencies {
             self.circular_dependencies = s;
         }
+        if let Some(s) = partial.boundary_violation {
+            self.boundary_violation = s;
+        }
     }
 }
 
@@ -189,6 +195,8 @@ pub struct PartialRulesConfig {
     pub test_only_dependencies: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub circular_dependencies: Option<Severity>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub boundary_violation: Option<Severity>,
 }
 
 #[cfg(test)]
@@ -211,6 +219,7 @@ mod tests {
         assert_eq!(rules.type_only_dependencies, Severity::Warn);
         assert_eq!(rules.test_only_dependencies, Severity::Warn);
         assert_eq!(rules.circular_dependencies, Severity::Error);
+        assert_eq!(rules.boundary_violation, Severity::Error);
     }
 
     #[test]
@@ -293,12 +302,14 @@ mod tests {
             type_only_dependencies: Some(Severity::Off),
             test_only_dependencies: Some(Severity::Off),
             circular_dependencies: Some(Severity::Off),
+            boundary_violation: Some(Severity::Off),
         };
         rules.apply_partial(&partial);
         assert_eq!(rules.unused_files, Severity::Off);
         assert_eq!(rules.circular_dependencies, Severity::Off);
         assert_eq!(rules.type_only_dependencies, Severity::Off);
         assert_eq!(rules.test_only_dependencies, Severity::Off);
+        assert_eq!(rules.boundary_violation, Severity::Off);
     }
 
     #[test]

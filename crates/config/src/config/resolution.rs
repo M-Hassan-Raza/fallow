@@ -4,6 +4,7 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::boundaries::ResolvedBoundaryConfig;
 use super::duplicates_config::DuplicatesConfig;
 use super::format::OutputFormat;
 use super::health::HealthConfig;
@@ -54,6 +55,8 @@ pub struct ResolvedConfig {
     pub duplicates: DuplicatesConfig,
     pub health: HealthConfig,
     pub rules: RulesConfig,
+    /// Resolved architecture boundary configuration with pre-compiled glob matchers.
+    pub boundaries: ResolvedBoundaryConfig,
     /// Whether production mode is active.
     pub production: bool,
     /// Suppress progress output and non-essential stderr messages.
@@ -122,6 +125,16 @@ impl FallowConfig {
         // Merge inline framework definitions into external plugins
         external_plugins.extend(self.framework);
 
+        // Validate and compile architecture boundary config
+        let validation_errors = self.boundaries.validate_zone_references();
+        for (rule_idx, zone_name) in &validation_errors {
+            tracing::error!(
+                "boundary rule {} references undefined zone '{zone_name}'",
+                rule_idx
+            );
+        }
+        let boundaries = self.boundaries.resolve();
+
         // Pre-compile override glob matchers
         let overrides = self
             .overrides
@@ -162,6 +175,7 @@ impl FallowConfig {
             duplicates: self.duplicates,
             health: self.health,
             rules,
+            boundaries,
             production,
             quiet,
             external_plugins,
@@ -200,6 +214,7 @@ impl ResolvedConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::boundaries::BoundaryConfig;
     use crate::config::health::HealthConfig;
 
     #[test]
@@ -236,6 +251,7 @@ mod tests {
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
             production: false,
             plugins: vec![],
             overrides: vec![],
@@ -266,6 +282,7 @@ mod tests {
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
             production: false,
             plugins: vec![],
             overrides: vec![ConfigOverride {
@@ -309,6 +326,7 @@ mod tests {
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
             production: false,
             plugins: vec![],
             overrides: vec![
@@ -360,6 +378,7 @@ mod tests {
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
             production,
             plugins: vec![],
             overrides: vec![],

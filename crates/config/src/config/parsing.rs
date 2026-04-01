@@ -242,6 +242,7 @@ mod tests {
 
     use super::*;
     use crate::PackageJson;
+    use crate::config::boundaries::BoundaryConfig;
     use crate::config::duplicates_config::DuplicatesConfig;
     use crate::config::format::OutputFormat;
     use crate::config::health::HealthConfig;
@@ -303,6 +304,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
             production: false,
             plugins: vec![],
             overrides: vec![],
@@ -340,6 +342,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
             production: false,
             plugins: vec![],
             overrides: vec![],
@@ -373,6 +376,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
             production: false,
             plugins: vec![],
             overrides: vec![],
@@ -1067,6 +1071,7 @@ minTokens = 100
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
             production: true,
             plugins: vec![],
             overrides: vec![],

@@ -105,7 +105,16 @@
         "duplicate-exports": "error",
         "type-only-dependencies": "warn",
         "test-only-dependencies": "warn",
-        "circular-dependencies": "error"
+        "circular-dependencies": "error",
+        "boundary-violation": "error"
+      }
+    },
+    "boundaries": {
+      "description": "Architecture boundary enforcement configuration.",
+      "$ref": "#/$defs/BoundaryConfig",
+      "default": {
+        "zones": [],
+        "rules": []
       }
     },
     "production": {
@@ -551,6 +560,10 @@
         "circular-dependencies": {
           "$ref": "#/$defs/Severity",
           "default": "error"
+        },
+        "boundary-violation": {
+          "$ref": "#/$defs/Severity",
+          "default": "error"
         }
       }
     },
@@ -572,6 +585,77 @@
           "type": "string",
           "const": "off"
         }
+      ]
+    },
+    "BoundaryConfig": {
+      "description": "Architecture boundary configuration.\n\nDefines zones (directory groupings) and rules (which zones may import from which).\n\n# Examples\n\n```\nuse fallow_config::BoundaryConfig;\n\nlet json = r#\"{\n    \"zones\": [\n        { \"name\": \"ui\", \"patterns\": [\"src/components/**\"] },\n        { \"name\": \"db\", \"patterns\": [\"src/db/**\"] }\n    ],\n    \"rules\": [\n        { \"from\": \"ui\", \"allow\": [\"db\"] }\n    ]\n}\"#;\nlet config: BoundaryConfig = serde_json::from_str(json).unwrap();\nassert_eq!(config.zones.len(), 2);\nassert_eq!(config.rules.len(), 1);\n```",
+      "type": "object",
+      "properties": {
+        "zones": {
+          "description": "Named zones mapping directory patterns to architectural layers.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoundaryZone"
+          },
+          "default": []
+        },
+        "rules": {
+          "description": "Import rules between zones. A zone with a rule entry can only import\nfrom the listed zones (plus itself). A zone without a rule entry is unrestricted.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BoundaryRule"
+          },
+          "default": []
+        }
+      }
+    },
+    "BoundaryZone": {
+      "description": "A named zone grouping files by directory pattern.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Zone identifier referenced in rules (e.g., `\"ui\"`, `\"database\"`, `\"shared\"`).",
+          "type": "string"
+        },
+        "patterns": {
+          "description": "Glob patterns (relative to project root) that define zone membership.\nA file belongs to the first zone whose pattern matches.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "root": {
+          "description": "Optional subtree scope. When set, patterns are relative to this directory\ninstead of the project root. Useful for monorepos with per-package boundaries.\nReserved for future use — currently ignored by the detector.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "patterns"
+      ]
+    },
+    "BoundaryRule": {
+      "description": "An import rule between zones.",
+      "type": "object",
+      "properties": {
+        "from": {
+          "description": "The zone this rule applies to (the importing side).",
+          "type": "string"
+        },
+        "allow": {
+          "description": "Zones that `from` is allowed to import from. Self-imports are always allowed.\nAn empty list means the zone may not import from any other zone.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": []
+        }
+      },
+      "required": [
+        "from"
       ]
     },
     "ConfigOverride": {
@@ -738,6 +822,16 @@
               "type": "null"
             }
           ]
+        },
+        "boundary-violation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       }
     },
@@ -847,6 +941,12 @@
           "default": 0
         },
         "testOnlyDependencies": {
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 0
+        },
+        "boundaryViolations": {
           "type": "integer",
           "format": "uint",
           "minimum": 0,

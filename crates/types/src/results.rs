@@ -57,6 +57,9 @@ pub struct AnalysisResults {
     pub test_only_dependencies: Vec<TestOnlyDependency>,
     /// Circular dependency chains detected in the module graph.
     pub circular_dependencies: Vec<CircularDependency>,
+    /// Imports that cross architecture boundary rules.
+    #[serde(default)]
+    pub boundary_violations: Vec<BoundaryViolation>,
     /// Usage counts for all exports across the project. Used by the LSP for Code Lens.
     /// Not included in issue counts -- this is metadata, not an issue type.
     /// Skipped during serialization: this is internal LSP data, not part of the JSON output schema.
@@ -69,7 +72,7 @@ impl AnalysisResults {
     ///
     /// Sums across all issue categories (unused files, exports, types,
     /// dependencies, members, unresolved imports, unlisted deps, duplicates,
-    /// type-only deps, and circular deps).
+    /// type-only deps, circular deps, and boundary violations).
     ///
     /// # Examples
     ///
@@ -104,6 +107,7 @@ impl AnalysisResults {
             + self.type_only_dependencies.len()
             + self.test_only_dependencies.len()
             + self.circular_dependencies.len()
+            + self.boundary_violations.len()
     }
 
     /// Whether any issues were found.
@@ -303,6 +307,27 @@ pub struct CircularDependency {
     pub col: u32,
 }
 
+/// An import that crosses an architecture boundary rule.
+#[derive(Debug, Clone, Serialize)]
+pub struct BoundaryViolation {
+    /// The file making the disallowed import.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub from_path: PathBuf,
+    /// The file being imported that violates the boundary.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub to_path: PathBuf,
+    /// The zone the importing file belongs to.
+    pub from_zone: String,
+    /// The zone the imported file belongs to.
+    pub to_zone: String,
+    /// The raw import specifier from the source file.
+    pub import_specifier: String,
+    /// 1-based line number of the import statement in the source file.
+    pub line: u32,
+    /// 0-based byte column offset of the import statement.
+    pub col: u32,
+}
+
 /// Usage count for an export symbol. Used by the LSP Code Lens to show
 /// reference counts above each export declaration.
 #[derive(Debug, Clone, Serialize)]
@@ -476,9 +501,18 @@ mod tests {
             line: 3,
             col: 0,
         });
+        results.boundary_violations.push(BoundaryViolation {
+            from_path: PathBuf::from("src/ui/Button.tsx"),
+            to_path: PathBuf::from("src/db/queries.ts"),
+            from_zone: "ui".to_string(),
+            to_zone: "database".to_string(),
+            import_specifier: "../db/queries".to_string(),
+            line: 3,
+            col: 0,
+        });
 
-        // 14 categories, one of each
-        assert_eq!(results.total_issues(), 14);
+        // 15 categories, one of each
+        assert_eq!(results.total_issues(), 15);
         assert!(results.has_issues());
     }
 
@@ -536,6 +570,7 @@ mod tests {
         assert!(r.type_only_dependencies.is_empty());
         assert!(r.test_only_dependencies.is_empty());
         assert!(r.circular_dependencies.is_empty());
+        assert!(r.boundary_violations.is_empty());
         assert!(r.export_usages.is_empty());
     }
 }

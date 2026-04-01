@@ -20,5 +20,6 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "duplicate_exports": [],
   "type_only_dependencies": [],
   "test_only_dependencies": [],
-  "circular_dependencies": []
+  "circular_dependencies": [],
+  "boundary_violations": []
 }

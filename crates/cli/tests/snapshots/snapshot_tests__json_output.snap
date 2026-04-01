@@ -337,5 +337,6 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         }
       ]
     }
-  ]
+  ],
+  "boundary_violations": []
 }

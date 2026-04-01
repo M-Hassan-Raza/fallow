@@ -14,6 +14,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
+        boundaries: fallow_config::BoundaryConfig::default(),
         production: true,
         plugins: vec![],
         overrides: vec![],

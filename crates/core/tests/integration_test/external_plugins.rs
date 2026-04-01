@@ -16,6 +16,7 @@ fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConf
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
+        boundaries: fallow_config::BoundaryConfig::default(),
         production: false,
         plugins: vec![],
         overrides: vec![],

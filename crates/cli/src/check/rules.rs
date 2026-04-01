@@ -77,6 +77,9 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.circular_dependencies == Severity::Off {
         results.circular_dependencies.clear();
     }
+    if rules.boundary_violation == Severity::Off {
+        results.boundary_violations.clear();
+    }
 }
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
@@ -142,6 +145,7 @@ pub fn has_error_severity_issues(
             && !results.test_only_dependencies.is_empty())
         || (rules.circular_dependencies == Severity::Error
             && !results.circular_dependencies.is_empty())
+        || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -187,6 +191,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.circular_dependencies == Severity::Warn {
         rules.circular_dependencies = Severity::Error;
+    }
+    if rules.boundary_violation == Severity::Warn {
+        rules.boundary_violation = Severity::Error;
     }
 }
 
@@ -300,6 +307,7 @@ mod tests {
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
             rules,
+            boundaries: fallow_config::BoundaryConfig::default(),
             production: false,
             plugins: vec![],
             overrides: vec![],
@@ -368,6 +376,7 @@ mod tests {
             duplicate_exports: Severity::Off,
             type_only_dependencies: Severity::Off,
             test_only_dependencies: Severity::Off,
+            boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
         };
         let config = config_with_rules(rules);
@@ -467,6 +476,7 @@ mod tests {
             duplicate_exports: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
+            boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
@@ -492,6 +502,7 @@ mod tests {
             duplicate_exports: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
+            boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
         };
         // Only unused_files present, but set to Warn — should not trigger
@@ -536,6 +547,7 @@ mod tests {
             duplicates: fallow_config::DuplicatesConfig::default(),
             health: fallow_config::HealthConfig::default(),
             rules: RulesConfig::default(), // all Error
+            boundaries: fallow_config::BoundaryConfig::default(),
             production: false,
             plugins: vec![],
             regression: None,
@@ -666,6 +678,7 @@ mod tests {
             duplicate_exports: Severity::Warn,
             type_only_dependencies: Severity::Warn,
             test_only_dependencies: Severity::Warn,
+            boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
@@ -702,6 +715,7 @@ mod tests {
             duplicate_exports: Severity::Off,
             type_only_dependencies: Severity::Off,
             test_only_dependencies: Severity::Off,
+            boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
         };
         promote_warns_to_errors(&mut rules);

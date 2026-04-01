@@ -132,6 +132,8 @@ pub struct CheckCounts {
     pub type_only_dependencies: usize,
     #[serde(default)]
     pub test_only_dependencies: usize,
+    #[serde(default)]
+    pub boundary_violations: usize,
 }
 
 impl CheckCounts {
@@ -153,6 +155,7 @@ impl CheckCounts {
             circular_dependencies: results.circular_dependencies.len(),
             type_only_dependencies: results.type_only_dependencies.len(),
             test_only_dependencies: results.test_only_dependencies.len(),
+            boundary_violations: results.boundary_violations.len(),
         }
     }
 
@@ -175,6 +178,7 @@ impl CheckCounts {
             circular_dependencies: b.circular_dependencies,
             type_only_dependencies: b.type_only_dependencies,
             test_only_dependencies: b.test_only_dependencies,
+            boundary_violations: b.boundary_violations,
         }
     }
 
@@ -197,6 +201,7 @@ impl CheckCounts {
             circular_dependencies: self.circular_dependencies,
             type_only_dependencies: self.type_only_dependencies,
             test_only_dependencies: self.test_only_dependencies,
+            boundary_violations: self.boundary_violations,
         }
     }
 
@@ -264,6 +269,11 @@ impl CheckCounts {
                 "test_only_dependencies",
                 self.test_only_dependencies,
                 current.test_only_dependencies,
+            ),
+            (
+                "boundary_violations",
+                self.boundary_violations,
+                current.boundary_violations,
             ),
         ];
         pairs
@@ -1015,6 +1025,7 @@ mod tests {
             circular_dependencies: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            boundary_violations: 0,
         };
         let current = CheckCounts {
             unused_files: 7,   // +2
@@ -1092,6 +1103,7 @@ mod tests {
                 circular_dependencies: 1,
                 type_only_dependencies: 0,
                 test_only_dependencies: 0,
+                boundary_violations: 0,
             }),
             dupes: Some(DupesCounts {
                 clone_groups: 12,
@@ -1360,6 +1372,7 @@ mod tests {
             circular_dependencies: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            boundary_violations: 0,
         };
         let config_baseline = counts.to_config_baseline();
         let roundtripped = CheckCounts::from_config_baseline(&config_baseline);
@@ -1398,6 +1411,7 @@ mod tests {
             circular_dependencies: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            boundary_violations: 0,
         };
         let config_baseline = counts.to_config_baseline();
         let roundtripped = CheckCounts::from_config_baseline(&config_baseline);
@@ -1425,6 +1439,7 @@ mod tests {
             circular_dependencies: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            boundary_violations: 0,
         };
         let deltas = counts.deltas(&counts);
         assert!(deltas.is_empty());
@@ -1448,6 +1463,7 @@ mod tests {
             circular_dependencies: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            boundary_violations: 0,
         };
         let current = CheckCounts {
             total_issues: 14,
@@ -1465,10 +1481,11 @@ mod tests {
             circular_dependencies: 1,
             type_only_dependencies: 1,
             test_only_dependencies: 1,
+            boundary_violations: 1,
         };
         let deltas = baseline.deltas(&current);
         // total_issues is not in deltas — only per-type fields
-        assert_eq!(deltas.len(), 14);
+        assert_eq!(deltas.len(), 15);
         for (_, d) in &deltas {
             assert_eq!(*d, 1);
         }
@@ -1492,6 +1509,7 @@ mod tests {
             circular_dependencies: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            boundary_violations: 0,
         };
         let current = CheckCounts {
             unused_files: 3,       // -2
@@ -1663,6 +1681,7 @@ mod tests {
             circular_dependencies: 0,
             type_only_dependencies: 0,
             test_only_dependencies: 0,
+            boundary_violations: 0,
         };
         let dupes = DupesCounts {
             clone_groups: 4,

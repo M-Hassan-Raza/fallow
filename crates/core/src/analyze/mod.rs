@@ -383,7 +383,8 @@ mod tests {
     mod orchestration {
         use super::super::*;
         use fallow_config::{
-            DuplicatesConfig, FallowConfig, HealthConfig, OutputFormat, RulesConfig, Severity,
+            BoundaryConfig, DuplicatesConfig, FallowConfig, HealthConfig, OutputFormat,
+            RulesConfig, Severity,
         };
         use std::path::PathBuf;
 
@@ -400,6 +401,7 @@ mod tests {
                 duplicates: DuplicatesConfig::default(),
                 health: HealthConfig::default(),
                 rules,
+                boundaries: BoundaryConfig::default(),
                 production: false,
                 plugins: vec![],
                 overrides: vec![],
@@ -460,6 +462,7 @@ mod tests {
                 type_only_dependencies: Severity::Off,
                 circular_dependencies: Severity::Off,
                 test_only_dependencies: Severity::Off,
+                boundary_violation: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);

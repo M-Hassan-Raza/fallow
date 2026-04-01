@@ -337,5 +337,6 @@ expression: redact_version(&json_str)
         }
       ]
     }
-  ]
+  ],
+  "boundary_violations": []
 }

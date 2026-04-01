@@ -1,3 +1,4 @@
+mod boundaries;
 mod duplicates_config;
 mod format;
 mod health;
@@ -5,6 +6,10 @@ mod parsing;
 mod resolution;
 mod rules;
 
+pub use boundaries::{
+    BoundaryConfig, BoundaryRule, BoundaryZone, ResolvedBoundaryConfig, ResolvedBoundaryRule,
+    ResolvedZone,
+};
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
 };
@@ -90,6 +95,10 @@ pub struct FallowConfig {
     #[serde(default)]
     pub rules: RulesConfig,
 
+    /// Architecture boundary enforcement configuration.
+    #[serde(default)]
+    pub boundaries: BoundaryConfig,
+
     /// Production mode: exclude test/dev files, only start/build scripts.
     #[serde(default)]
     pub production: bool,
@@ -163,6 +172,8 @@ pub struct RegressionBaseline {
     pub type_only_dependencies: usize,
     #[serde(default)]
     pub test_only_dependencies: usize,
+    #[serde(default)]
+    pub boundary_violations: usize,
 }
 
 #[cfg(test)]

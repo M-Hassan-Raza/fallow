@@ -61,5 +61,6 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     }
   ],
   "test_only_dependencies": [],
-  "circular_dependencies": []
+  "circular_dependencies": [],
+  "boundary_violations": []
 }

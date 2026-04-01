@@ -310,6 +310,7 @@ mod tests {
                 duplicates: DuplicatesConfig::default(),
                 health: HealthConfig::default(),
                 rules: RulesConfig::default(),
+                boundaries: fallow_config::BoundaryConfig::default(),
                 production,
                 plugins: vec![],
                 overrides: vec![],

@@ -2,7 +2,9 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{FallowConfig, OutputFormat, PackageJson, ResolvedConfig, WorkspaceInfo};
+use fallow_config::{
+    BoundaryConfig, FallowConfig, OutputFormat, PackageJson, ResolvedConfig, WorkspaceInfo,
+};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 use fallow_types::extract::{ImportInfo, ImportedName};
 
@@ -326,6 +328,7 @@ fn test_config(root: PathBuf) -> ResolvedConfig {
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: fallow_config::RulesConfig::default(),
+        boundaries: BoundaryConfig::default(),
         production: false,
         plugins: vec![],
         overrides: vec![],
@@ -548,6 +551,7 @@ fn ignore_dependencies_config_filters_deps() {
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: fallow_config::RulesConfig::default(),
+        boundaries: BoundaryConfig::default(),
         production: false,
         plugins: vec![],
         overrides: vec![],
@@ -805,6 +809,7 @@ fn type_only_dep_skips_ignored_deps() {
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: fallow_config::RulesConfig::default(),
+        boundaries: BoundaryConfig::default(),
         production: false,
         plugins: vec![],
         overrides: vec![],

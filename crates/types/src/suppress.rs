@@ -47,6 +47,8 @@ pub enum IssueKind {
     TypeOnlyDependency,
     /// A production dependency only imported by test files.
     TestOnlyDependency,
+    /// An import that crosses an architecture boundary.
+    BoundaryViolation,
 }
 
 impl IssueKind {
@@ -68,6 +70,7 @@ impl IssueKind {
             "circular-dependency" => Some(Self::CircularDependency),
             "type-only-dependency" => Some(Self::TypeOnlyDependency),
             "test-only-dependency" => Some(Self::TestOnlyDependency),
+            "boundary-violation" => Some(Self::BoundaryViolation),
             _ => None,
         }
     }
@@ -90,6 +93,7 @@ impl IssueKind {
             Self::CircularDependency => 12,
             Self::TypeOnlyDependency => 13,
             Self::TestOnlyDependency => 14,
+            Self::BoundaryViolation => 15,
         }
     }
 
@@ -111,6 +115,7 @@ impl IssueKind {
             12 => Some(Self::CircularDependency),
             13 => Some(Self::TypeOnlyDependency),
             14 => Some(Self::TestOnlyDependency),
+            15 => Some(Self::BoundaryViolation),
             _ => None,
         }
     }
@@ -203,6 +208,10 @@ mod tests {
             IssueKind::parse("test-only-dependency"),
             Some(IssueKind::TestOnlyDependency)
         );
+        assert_eq!(
+            IssueKind::parse("boundary-violation"),
+            Some(IssueKind::BoundaryViolation)
+        );
     }
 
     #[test]
@@ -224,7 +233,7 @@ mod tests {
     #[test]
     fn discriminant_out_of_range() {
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(15), None);
+        assert_eq!(IssueKind::from_discriminant(16), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -245,6 +254,7 @@ mod tests {
             IssueKind::CircularDependency,
             IssueKind::TypeOnlyDependency,
             IssueKind::TestOnlyDependency,
+            IssueKind::BoundaryViolation,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -252,7 +262,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(15), None);
+        assert_eq!(IssueKind::from_discriminant(16), None);
     }
 
     // ── Discriminant uniqueness ─────────────────────────────────
@@ -274,6 +284,7 @@ mod tests {
             IssueKind::CircularDependency,
             IssueKind::TypeOnlyDependency,
             IssueKind::TestOnlyDependency,
+            IssueKind::BoundaryViolation,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

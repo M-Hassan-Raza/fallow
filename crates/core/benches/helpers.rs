@@ -1,7 +1,7 @@
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-use fallow_config::{FallowConfig, OutputFormat};
+use fallow_config::{BoundaryConfig, FallowConfig, OutputFormat};
 
 #[must_use]
 pub fn create_test_config(root: PathBuf) -> fallow_config::ResolvedConfig {
@@ -22,6 +22,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
         rules: fallow_config::RulesConfig::default(),
+        boundaries: BoundaryConfig::default(),
         production: false,
         plugins: vec![],
         overrides: vec![],
