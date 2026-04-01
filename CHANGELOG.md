@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-04-01
+
+### Fixed
+
+- **`fallow init` no longer panics** -- the global `--base` alias for `--changed-since` collided with Init's own `--base` flag, causing a runtime panic on every `fallow init` invocation. Init's flag is now `--branch`.
+
+### Added
+
+- **CLI integration test infrastructure** -- shared test harness for all CLI commands with 58 new tests covering `check`, `health`, `dupes`, `init`, exit codes, baselines, and MCP end-to-end. 7 new test fixtures (astro, mdx, complexity, config-file, config-toml, hidden-dir-allowlist, error-no-package-json). Human output snapshots for check, health, and dupes commands.
+
 ## [2.8.0] - 2026-04-01
 
 ### Added
@@ -656,7 +666,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.8.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.8.1...HEAD
+[2.8.1]: https://github.com/fallow-rs/fallow/compare/v2.8.0...v2.8.1
 [2.8.0]: https://github.com/fallow-rs/fallow/compare/v2.7.3...v2.8.0
 [2.7.3]: https://github.com/fallow-rs/fallow/compare/v2.7.2...v2.7.3
 [2.7.2]: https://github.com/fallow-rs/fallow/compare/v2.7.1...v2.7.2
