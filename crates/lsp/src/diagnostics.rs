@@ -47,6 +47,7 @@ pub fn build_diagnostics(
     push_duplicate_export_diagnostics(&mut map, results);
     push_duplication_diagnostics(&mut map, duplication);
     push_circular_dep_diagnostics(&mut map, results);
+    push_boundary_violation_diagnostics(&mut map, results);
 
     map
 }
@@ -524,6 +525,57 @@ fn push_circular_dep_diagnostics(
                 ..Default::default()
             });
         }
+    }
+}
+
+fn push_boundary_violation_diagnostics(
+    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    for v in &results.boundary_violations {
+        let Ok(uri) = Url::from_file_path(&v.from_path) else {
+            continue;
+        };
+        let line = v.line.saturating_sub(1);
+        let to_name = v.to_path.file_name().map_or_else(
+            || v.to_path.display().to_string(),
+            |n| n.to_string_lossy().into_owned(),
+        );
+        let message = format!(
+            "Boundary violation: import of {} (zone '{}') is not allowed from zone '{}'",
+            to_name, v.to_zone, v.from_zone,
+        );
+
+        // Related info: link to the target file
+        let related_info = Url::from_file_path(&v.to_path).ok().map(|target_uri| {
+            vec![DiagnosticRelatedInformation {
+                location: Location {
+                    uri: target_uri,
+                    range: FIRST_LINE_RANGE,
+                },
+                message: format!("Target file in zone '{}'", v.to_zone),
+            }]
+        });
+
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position {
+                    line,
+                    character: v.col,
+                },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("boundary-violation".to_string())),
+            code_description: doc_link("boundary-violations"),
+            message,
+            related_information: related_info,
+            ..Default::default()
+        });
     }
 }
 

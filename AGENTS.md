@@ -6,7 +6,7 @@ agent-usage: This CLI is frequently invoked by AI coding agents (Claude Code, Cu
 
 # Fallow CLI -- Agent Integration Guide
 
-Fallow is a codebase analyzer for JS/TS projects. It detects unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, code duplication, and function complexity.
+Fallow is a codebase analyzer for JS/TS projects. It detects unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, boundary violations, code duplication, and function complexity.
 
 ## Rules for AI agents
 
@@ -134,7 +134,7 @@ fallow dead-code --format json --quiet --changed-since main
 - `--trace <FILE:EXPORT>` -- trace export usage chain
 - `--trace-file <PATH>` -- show all edges for a file
 - `--trace-dependency <PACKAGE>` -- show where a dependency is used
-- Issue type filters: `--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--unused-enum-members`, `--unused-class-members`, `--unresolved-imports`, `--unlisted-deps`, `--duplicate-exports`, `--circular-deps`
+- Issue type filters: `--unused-files`, `--unused-exports`, `--unused-deps`, `--unused-types`, `--unused-enum-members`, `--unused-class-members`, `--unresolved-imports`, `--unlisted-deps`, `--duplicate-exports`, `--circular-deps`, `--boundary-violations`
 
 ### `dupes`
 

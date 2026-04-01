@@ -38,6 +38,9 @@ pub struct BaselineData {
     /// Test-only dependencies, keyed by package name.
     #[serde(default)]
     pub test_only_dependencies: Vec<String>,
+    /// Boundary violations, keyed by `from_path->to_path`.
+    #[serde(default)]
+    pub boundary_violations: Vec<String>,
 }
 
 impl BaselineData {
@@ -145,8 +148,22 @@ impl BaselineData {
                 .iter()
                 .map(|d| d.package_name.clone())
                 .collect(),
+            boundary_violations: results
+                .boundary_violations
+                .iter()
+                .map(boundary_violation_key)
+                .collect(),
         }
     }
+}
+
+/// Generate a stable key for a boundary violation: `from_path->to_path`.
+fn boundary_violation_key(v: &fallow_core::results::BoundaryViolation) -> String {
+    format!(
+        "{}->{}",
+        v.from_path.to_string_lossy().replace('\\', "/"),
+        v.to_path.to_string_lossy().replace('\\', "/"),
+    )
 }
 
 /// Generate a stable key for a duplicate export: `name|sorted_paths`.
@@ -318,6 +335,16 @@ pub fn filter_new_issues(
     results
         .test_only_dependencies
         .retain(|d| !baseline_test_only.contains(d.package_name.as_str()));
+
+    let baseline_boundary: FxHashSet<&str> = baseline
+        .boundary_violations
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results.boundary_violations.retain(|v| {
+        let key = boundary_violation_key(v);
+        !baseline_boundary.contains(key.as_str())
+    });
 
     results
 }
@@ -646,6 +673,7 @@ mod tests {
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
+            boundary_violations: vec![],
         };
         let results = AnalysisResults {
             unused_files: vec![
@@ -683,6 +711,7 @@ mod tests {
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
+            boundary_violations: vec![],
         };
         let results = make_results();
         let filtered = filter_new_issues(results, &baseline);
@@ -707,6 +736,7 @@ mod tests {
             duplicate_exports: vec![],
             type_only_dependencies: vec![],
             test_only_dependencies: vec![],
+            boundary_violations: vec![],
         };
         let results = AnalysisResults {
             unused_exports: vec![

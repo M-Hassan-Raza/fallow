@@ -177,6 +177,23 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         },
     );
 
+    // ── Boundary violations ──
+    markdown_section(
+        &mut out,
+        &results.boundary_violations,
+        "Boundary violations",
+        |v| {
+            vec![format!(
+                "- `{}`:{}  \u{2192} `{}` ({} \u{2192} {})",
+                rel(&v.from_path),
+                v.line,
+                rel(&v.to_path),
+                v.from_zone,
+                v.to_zone,
+            )]
+        },
+    );
+
     out
 }
 

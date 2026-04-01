@@ -55,6 +55,11 @@ pub fn filter_to_workspace(
     results
         .circular_dependencies
         .retain(|c| c.files.iter().any(|f| f.starts_with(ws_root)));
+
+    // Boundary violations: keep if the importing file is in this workspace
+    results
+        .boundary_violations
+        .retain(|v| v.from_path.starts_with(ws_root));
 }
 
 /// Resolve `--workspace <name>` to a workspace root path, or exit with an error.
@@ -139,6 +144,11 @@ pub(super) fn filter_changed_files(
     results
         .circular_dependencies
         .retain(|c| c.files.iter().any(|f| changed_files.contains(f)));
+
+    // Boundary violations: keep if the importing file changed
+    results
+        .boundary_violations
+        .retain(|v| changed_files.contains(&v.from_path));
 }
 
 // ── Changed files ────────────────────────────────────────────────

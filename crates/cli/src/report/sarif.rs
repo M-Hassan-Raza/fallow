@@ -244,6 +244,11 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
             "Circular dependency chain detected",
             severity_to_sarif_level(rules.circular_dependencies),
         ),
+        sarif_rule(
+            "fallow/boundary-violation",
+            "Import crosses an architecture boundary",
+            severity_to_sarif_level(rules.boundary_violation),
+        ),
     ]
 }
 
@@ -443,6 +448,30 @@ pub fn build_sarif(
                 uri: first_uri,
                 region: if cycle.line > 0 {
                     Some((cycle.line, cycle.col + 1))
+                } else {
+                    None
+                },
+                properties: None,
+            }
+        },
+    );
+
+    push_sarif_results(
+        &mut sarif_results,
+        &results.boundary_violations,
+        |violation| {
+            let from_uri = relative_uri(&violation.from_path, root);
+            let to_uri = relative_uri(&violation.to_path, root);
+            SarifFields {
+                rule_id: "fallow/boundary-violation",
+                level: severity_to_sarif_level(rules.boundary_violation),
+                message: format!(
+                    "Import from zone '{}' to zone '{}' is not allowed ({})",
+                    violation.from_zone, violation.to_zone, to_uri,
+                ),
+                uri: from_uri,
+                region: if violation.line > 0 {
+                    Some((violation.line, violation.col + 1))
                 } else {
                     None
                 },
@@ -683,7 +712,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 14);
+        assert_eq!(rules.len(), 15);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -700,6 +729,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/unlisted-dependency"));
         assert!(rule_ids.contains(&"fallow/duplicate-export"));
         assert!(rule_ids.contains(&"fallow/circular-dependency"));
+        assert!(rule_ids.contains(&"fallow/boundary-violation"));
     }
 
     #[test]

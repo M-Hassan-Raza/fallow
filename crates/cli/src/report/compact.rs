@@ -102,6 +102,17 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             display_chain.join(" \u{2192} ")
         ));
     }
+    for v in &results.boundary_violations {
+        lines.push(format!(
+            "boundary-violation:{}:{}:{} -> {} ({} -> {})",
+            rel(&v.from_path),
+            v.line,
+            rel(&v.from_path),
+            rel(&v.to_path),
+            v.from_zone,
+            v.to_zone,
+        ));
+    }
 
     lines
 }
@@ -411,8 +422,8 @@ mod tests {
         let results = sample_results(&root);
         let lines = build_compact_lines(&results, &root);
 
-        // 14 issue types, one of each
-        assert_eq!(lines.len(), 14);
+        // 15 issue types, one of each
+        assert_eq!(lines.len(), 15);
 
         // Verify ordering matches output order
         assert!(lines[0].starts_with("unused-file:"));
@@ -429,6 +440,7 @@ mod tests {
         assert!(lines[11].starts_with("type-only-dep:"));
         assert!(lines[12].starts_with("test-only-dep:"));
         assert!(lines[13].starts_with("circular-dependency:"));
+        assert!(lines[14].starts_with("boundary-violation:"));
     }
 
     #[test]

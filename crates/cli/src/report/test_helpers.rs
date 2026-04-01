@@ -110,6 +110,15 @@ pub(super) fn sample_results(root: &Path) -> AnalysisResults {
         line: 3,
         col: 0,
     });
+    r.boundary_violations.push(BoundaryViolation {
+        from_path: root.join("src/ui/Button.tsx"),
+        to_path: root.join("src/db/query.ts"),
+        from_zone: "ui".to_string(),
+        to_zone: "db".to_string(),
+        import_specifier: "src/db/query.ts".to_string(),
+        line: 2,
+        col: 0,
+    });
 
     r
 }

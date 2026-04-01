@@ -1,0 +1,166 @@
+use fallow_config::{
+    BoundaryConfig, BoundaryRule, BoundaryZone, DuplicatesConfig, FallowConfig, HealthConfig,
+    OutputFormat, RulesConfig, Severity,
+};
+
+use super::common::fixture_path;
+
+fn create_boundary_config(
+    root: std::path::PathBuf,
+    boundaries: BoundaryConfig,
+) -> fallow_config::ResolvedConfig {
+    FallowConfig {
+        schema: None,
+        extends: vec![],
+        entry: vec!["src/ui/App.ts".to_string()],
+        ignore_patterns: vec![],
+        framework: vec![],
+        workspaces: None,
+        ignore_dependencies: vec![],
+        ignore_exports: vec![],
+        duplicates: DuplicatesConfig::default(),
+        health: HealthConfig::default(),
+        rules: RulesConfig {
+            boundary_violation: Severity::Error,
+            ..RulesConfig::default()
+        },
+        boundaries,
+        production: false,
+        plugins: vec![],
+        overrides: vec![],
+        regression: None,
+    }
+    .resolve(root, OutputFormat::Human, 4, true, true)
+}
+
+#[test]
+fn detects_boundary_violation() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = BoundaryConfig {
+        zones: vec![
+            BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/ui/**".to_string()],
+                root: None,
+            },
+            BoundaryZone {
+                name: "db".to_string(),
+                patterns: vec!["src/db/**".to_string()],
+                root: None,
+            },
+            BoundaryZone {
+                name: "shared".to_string(),
+                patterns: vec!["src/shared/**".to_string()],
+                root: None,
+            },
+        ],
+        rules: vec![
+            BoundaryRule {
+                from: "ui".to_string(),
+                allow: vec!["shared".to_string()],
+            },
+            BoundaryRule {
+                from: "db".to_string(),
+                allow: vec!["shared".to_string()],
+            },
+        ],
+    };
+    let config = create_boundary_config(root, boundaries);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    // Should find exactly 1 boundary violation: ui/App.ts -> db/query.ts
+    assert_eq!(
+        results.boundary_violations.len(),
+        1,
+        "expected 1 boundary violation, got: {:?}",
+        results
+            .boundary_violations
+            .iter()
+            .map(|v| format!("{} -> {}", v.from_zone, v.to_zone))
+            .collect::<Vec<_>>()
+    );
+
+    let v = &results.boundary_violations[0];
+    assert_eq!(v.from_zone, "ui");
+    assert_eq!(v.to_zone, "db");
+    assert!(
+        v.from_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/ui/App.ts"),
+        "from_path should end with src/ui/App.ts, got: {}",
+        v.from_path.display()
+    );
+    assert!(
+        v.to_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/db/query.ts"),
+        "to_path should end with src/db/query.ts, got: {}",
+        v.to_path.display()
+    );
+}
+
+#[test]
+fn no_violations_when_boundaries_disabled() {
+    let root = fixture_path("boundary-violations");
+    let config = super::common::create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    // Default config has no boundaries configured, so no violations
+    assert!(
+        results.boundary_violations.is_empty(),
+        "no boundary violations expected with default config"
+    );
+}
+
+#[test]
+fn no_violations_when_rule_is_off() {
+    let root = fixture_path("boundary-violations");
+    let boundaries = BoundaryConfig {
+        zones: vec![
+            BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/ui/**".to_string()],
+                root: None,
+            },
+            BoundaryZone {
+                name: "db".to_string(),
+                patterns: vec!["src/db/**".to_string()],
+                root: None,
+            },
+        ],
+        rules: vec![BoundaryRule {
+            from: "ui".to_string(),
+            allow: vec![],
+        }],
+    };
+    let config = FallowConfig {
+        schema: None,
+        extends: vec![],
+        entry: vec!["src/ui/App.ts".to_string()],
+        ignore_patterns: vec![],
+        framework: vec![],
+        workspaces: None,
+        ignore_dependencies: vec![],
+        ignore_exports: vec![],
+        duplicates: DuplicatesConfig::default(),
+        health: HealthConfig::default(),
+        rules: RulesConfig {
+            boundary_violation: Severity::Off,
+            ..RulesConfig::default()
+        },
+        boundaries,
+        production: false,
+        plugins: vec![],
+        overrides: vec![],
+        regression: None,
+    }
+    .resolve(root, OutputFormat::Human, 4, true, true);
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert!(
+        results.boundary_violations.is_empty(),
+        "boundary violations should be empty when rule is off"
+    );
+}

@@ -1,3 +1,4 @@
+mod boundary;
 mod package_json_utils;
 mod predicates;
 mod unused_deps;
@@ -221,6 +222,16 @@ pub fn find_dead_code_full(
     {
         results.test_only_dependencies =
             find_test_only_dependencies(graph, pkg, config, workspaces);
+    }
+
+    // Detect architecture boundary violations
+    if config.rules.boundary_violation != Severity::Off && !config.boundaries.is_empty() {
+        results.boundary_violations = boundary::find_boundary_violations(
+            graph,
+            config,
+            &suppressions_by_file,
+            &line_offsets_by_file,
+        );
     }
 
     // Detect circular dependencies

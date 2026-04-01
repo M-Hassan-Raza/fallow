@@ -74,7 +74,7 @@
     "CheckOutput": {
       "title": "fallow dead-code --format json",
       "type": "object",
-      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "test_only_dependencies", "circular_dependencies"],
+      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "test_only_dependencies", "circular_dependencies", "boundary_violations"],
       "properties": {
         "schema_version": { "$ref": "#/definitions/SchemaVersion" },
         "version": { "$ref": "#/definitions/ToolVersion" },
@@ -138,6 +138,10 @@
         "circular_dependencies": {
           "type": "array",
           "items": { "$ref": "#/definitions/CircularDependency" }
+        },
+        "boundary_violations": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/BoundaryViolation" }
         },
         "regression": {
           "$ref": "#/definitions/RegressionResult",
@@ -997,6 +1001,46 @@
         "col": {
           "type": "integer",
           "description": "0-based byte column offset of the import that starts the cycle."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/Action" },
+          "description": "Suggested actions to resolve this issue."
+        }
+      }
+    },
+
+    "BoundaryViolation": {
+      "type": "object",
+      "required": ["from_path", "to_path", "from_zone", "to_zone", "import_specifier", "line", "col", "actions"],
+      "properties": {
+        "from_path": {
+          "type": "string",
+          "description": "Relative path to the file making the disallowed import."
+        },
+        "to_path": {
+          "type": "string",
+          "description": "Relative path to the file being imported."
+        },
+        "from_zone": {
+          "type": "string",
+          "description": "Architecture zone of the importing file."
+        },
+        "to_zone": {
+          "type": "string",
+          "description": "Architecture zone of the imported file."
+        },
+        "import_specifier": {
+          "type": "string",
+          "description": "Relative path of the imported file (used as specifier)."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the import statement."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset of the import statement."
         },
         "actions": {
           "type": "array",

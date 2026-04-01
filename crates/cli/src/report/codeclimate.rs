@@ -397,6 +397,27 @@ pub fn build_codeclimate(
         ));
     }
 
+    // Boundary violations
+    let level = severity_to_codeclimate(rules.boundary_violation);
+    for v in &results.boundary_violations {
+        let path = cc_path(&v.from_path, root);
+        let to = cc_path(&v.to_path, root);
+        let fp = fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
+        let line = if v.line > 0 { Some(v.line) } else { None };
+        issues.push(cc_issue(
+            "fallow/boundary-violation",
+            &format!(
+                "Boundary violation: {} -> {} ({} -> {})",
+                path, to, v.from_zone, v.to_zone
+            ),
+            level,
+            "Bug Risk",
+            &path,
+            line,
+            &fp,
+        ));
+    }
+
     serde_json::Value::Array(issues)
 }
 

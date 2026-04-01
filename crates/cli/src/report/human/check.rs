@@ -220,6 +220,13 @@ pub(in crate::report) fn build_human_lines(
         root,
     );
 
+    build_boundary_violations_section(
+        &mut lines,
+        &results.boundary_violations,
+        severity_to_level(rules.boundary_violation),
+        root,
+    );
+
     lines
 }
 
@@ -460,6 +467,43 @@ fn build_circular_deps_section(
     }
 }
 
+/// Build boundary violations section grouped by importing file.
+fn build_boundary_violations_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_core::results::BoundaryViolation],
+    level: Level,
+    root: &Path,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Boundary violations";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for v in &items[..shown] {
+        let from = relative_path(&v.from_path, root).display().to_string();
+        let to = relative_path(&v.to_path, root).display().to_string();
+        lines.push(format!(
+            "  {}:{} {} {} {} {}",
+            from,
+            v.line,
+            "\u{2192}".dimmed(),
+            to,
+            format!("({}", v.from_zone).dimmed(),
+            format!("\u{2192} {})", v.to_zone).dimmed(),
+        ));
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        lines.push(format!(
+            "  {}",
+            format!("... and {} more", items.len() - MAX_FLAT_ITEMS).dimmed()
+        ));
+    }
+    push_section_footer(lines, title);
+    lines.push(String::new());
+}
+
 /// Build a one-line summary footer showing counts per issue type.
 fn build_summary_footer(results: &AnalysisResults) -> String {
     let mut parts = Vec::new();
@@ -491,6 +535,7 @@ fn build_summary_footer(results: &AnalysisResults) -> String {
     add(results.type_only_dependencies.len(), "type-only");
     add(results.test_only_dependencies.len(), "test-only");
     add(results.circular_dependencies.len(), "circular");
+    add(results.boundary_violations.len(), "boundary");
 
     parts.join(" \u{00b7} ")
 }

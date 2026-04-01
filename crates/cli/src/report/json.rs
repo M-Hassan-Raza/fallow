@@ -288,6 +288,16 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             suppress: SuppressKind::InlineComment,
             issue_kind: "circular-dependency",
         }),
+        "boundary_violations" => Some(ActionSpec {
+            fix_type: "refactor-boundary",
+            auto_fixable: false,
+            description: "Move the import through an allowed zone or restructure the dependency",
+            note: Some(
+                "This import crosses an architecture boundary that is not permitted by the configured rules",
+            ),
+            suppress: SuppressKind::InlineComment,
+            issue_kind: "boundary-violation",
+        }),
         _ => None,
     }
 }

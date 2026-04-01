@@ -31,6 +31,7 @@ pub struct IssueFilters {
     pub unlisted_deps: bool,
     pub duplicate_exports: bool,
     pub circular_deps: bool,
+    pub boundary_violations: bool,
 }
 
 impl IssueFilters {
@@ -45,6 +46,7 @@ impl IssueFilters {
             || self.unlisted_deps
             || self.duplicate_exports
             || self.circular_deps
+            || self.boundary_violations
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
@@ -84,6 +86,9 @@ impl IssueFilters {
         }
         if !self.circular_deps {
             results.circular_dependencies.clear();
+        }
+        if !self.boundary_violations {
+            results.boundary_violations.clear();
         }
     }
 }
@@ -434,6 +439,7 @@ mod tests {
             unlisted_deps: false,
             duplicate_exports: false,
             circular_deps: false,
+            boundary_violations: false,
         }
     }
 
@@ -548,6 +554,7 @@ mod tests {
             |f| f.unlisted_deps = true,
             |f| f.duplicate_exports = true,
             |f| f.circular_deps = true,
+            |f| f.boundary_violations = true,
         ];
         for setter in flags {
             let mut f = no_filters();

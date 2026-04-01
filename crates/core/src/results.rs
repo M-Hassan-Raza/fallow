@@ -1,8 +1,9 @@
 // Re-export all result types from fallow-types
 pub use fallow_types::results::{
-    AnalysisResults, CircularDependency, DependencyLocation, DuplicateExport, DuplicateLocation,
-    ExportUsage, ImportSite, ReferenceLocation, TestOnlyDependency, TypeOnlyDependency,
-    UnlistedDependency, UnresolvedImport, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+    AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation, DuplicateExport,
+    DuplicateLocation, ExportUsage, ImportSite, ReferenceLocation, TestOnlyDependency,
+    TypeOnlyDependency, UnlistedDependency, UnresolvedImport, UnusedDependency, UnusedExport,
+    UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

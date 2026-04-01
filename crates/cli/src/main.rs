@@ -203,6 +203,10 @@ enum Command {
         #[arg(long)]
         circular_deps: bool,
 
+        /// Only report boundary violations
+        #[arg(long)]
+        boundary_violations: bool,
+
         /// Also run duplication analysis and cross-reference with dead code
         #[arg(long)]
         include_dupes: bool,
@@ -899,6 +903,7 @@ fn dispatch_subcommand(
             unlisted_deps,
             duplicate_exports,
             circular_deps,
+            boundary_violations,
             include_dupes,
             trace,
             trace_file,
@@ -922,6 +927,7 @@ fn dispatch_subcommand(
                 unlisted_deps,
                 duplicate_exports,
                 circular_deps,
+                boundary_violations,
             };
             let trace_opts = TraceOptions {
                 trace_export: trace,
