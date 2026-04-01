@@ -1,0 +1,7 @@
+---
+source: crates/cli/tests/check_tests.rs
+expression: redacted
+---
+● Unused files (1)
+  src/orphan.ts
+  Files not imported or referenced by any entry point — https://docs.fallow.tools/explanations/dead-code#unused-files

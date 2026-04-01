@@ -1,67 +1,26 @@
-use std::path::PathBuf;
+#[path = "common/mod.rs"]
+mod common;
+
+use common::{CommandOutput, fallow_bin, parse_json, run_fallow};
+
 use std::process::Command;
 
-/// Returns the path to the compiled `fallow` binary for testing.
-fn fallow_bin() -> PathBuf {
-    // When running under `cargo test`, CARGO_BIN_EXE_fallow resolves to the
-    // fallow binary built by the current test compilation.
-    // Fallback to target/debug/fallow if the env var is not set.
-    std::env::var_os("CARGO_BIN_EXE_fallow").map_or_else(
-        || {
-            let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-            path.pop(); // crates/
-            path.pop(); // project root
-            path.push("target/debug/fallow");
-            path
-        },
-        PathBuf::from,
-    )
-}
-
-/// Returns the absolute path to a test fixture directory.
-fn fixture_path(name: &str) -> PathBuf {
-    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    path.pop(); // crates/
-    path.pop(); // project root
-    path.push("tests/fixtures");
-    path.push(name);
-    path
-}
-
-/// Run `fallow list` with the given args and return (stdout, stderr, exit_code).
-fn run_list(fixture: &str, args: &[&str]) -> (String, String, i32) {
-    let bin = fallow_bin();
-    let root = fixture_path(fixture);
-    let mut cmd = Command::new(&bin);
-    cmd.arg("list")
-        .arg("--root")
-        .arg(&root)
-        .env("RUST_LOG", "") // suppress tracing output
-        .env("NO_COLOR", "1"); // no ANSI in human output
-    for arg in args {
-        cmd.arg(arg);
-    }
-    let output = cmd.output().expect("failed to run fallow binary");
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    let code = output.status.code().unwrap_or(-1);
-    (stdout, stderr, code)
-}
-
-/// Parse stdout as JSON, panicking with the raw output on failure.
-fn parse_json(stdout: &str) -> serde_json::Value {
-    serde_json::from_str(stdout)
-        .unwrap_or_else(|e| panic!("failed to parse JSON: {e}\nstdout was:\n{stdout}"))
+/// Run `fallow list` with the given args and return structured output.
+fn run_list(fixture: &str, args: &[&str]) -> CommandOutput {
+    run_fallow("list", fixture, args)
 }
 
 // ── show_all behavior ────────────────────────────────────────────
 
 #[test]
 fn list_show_all_json_includes_plugins_files_and_entry_points() {
-    let (stdout, _, code) = run_list("basic-project", &["--format", "json"]);
-    assert_eq!(code, 0, "expected exit code 0, stderr might have details");
+    let output = run_list("basic-project", &["--format", "json"]);
+    assert_eq!(
+        output.code, 0,
+        "expected exit code 0, stderr might have details"
+    );
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
 
     // When no specific flags are set, all three sections should be present
     assert!(json.get("plugins").is_some(), "missing 'plugins' key");
@@ -79,8 +38,8 @@ fn list_show_all_json_includes_plugins_files_and_entry_points() {
 
 #[test]
 fn list_show_all_file_count_matches_files_array_length() {
-    let (stdout, _, _) = run_list("basic-project", &["--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--format", "json"]);
+    let json = parse_json(&output);
 
     let file_count = json["file_count"].as_u64().unwrap();
     let files_len = json["files"].as_array().unwrap().len() as u64;
@@ -92,8 +51,8 @@ fn list_show_all_file_count_matches_files_array_length() {
 
 #[test]
 fn list_show_all_entry_point_count_matches_array_length() {
-    let (stdout, _, _) = run_list("basic-project", &["--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--format", "json"]);
+    let json = parse_json(&output);
 
     let ep_count = json["entry_point_count"].as_u64().unwrap();
     let ep_len = json["entry_points"].as_array().unwrap().len() as u64;
@@ -107,10 +66,10 @@ fn list_show_all_entry_point_count_matches_array_length() {
 
 #[test]
 fn list_plugins_only_json_omits_files_and_entry_points() {
-    let (stdout, _, code) = run_list("basic-project", &["--plugins", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("basic-project", &["--plugins", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     assert!(json.get("plugins").is_some(), "should include 'plugins'");
     assert!(json.get("files").is_none(), "should omit 'files'");
     assert!(json.get("file_count").is_none(), "should omit 'file_count'");
@@ -122,10 +81,10 @@ fn list_plugins_only_json_omits_files_and_entry_points() {
 
 #[test]
 fn list_files_only_json_omits_plugins_and_entry_points() {
-    let (stdout, _, code) = run_list("basic-project", &["--files", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("basic-project", &["--files", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     assert!(json.get("plugins").is_none(), "should omit 'plugins'");
     assert!(json.get("files").is_some(), "should include 'files'");
     assert!(
@@ -140,10 +99,10 @@ fn list_files_only_json_omits_plugins_and_entry_points() {
 
 #[test]
 fn list_entry_points_only_json_omits_plugins_and_files() {
-    let (stdout, _, code) = run_list("basic-project", &["--entry-points", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("basic-project", &["--entry-points", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     assert!(json.get("plugins").is_none(), "should omit 'plugins'");
     assert!(json.get("files").is_none(), "should omit 'files'");
     assert!(
@@ -160,8 +119,8 @@ fn list_entry_points_only_json_omits_plugins_and_files() {
 
 #[test]
 fn list_json_files_are_relative_paths() {
-    let (stdout, _, _) = run_list("basic-project", &["--files", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--files", "--format", "json"]);
+    let json = parse_json(&output);
 
     let files = json["files"].as_array().unwrap();
     for file in files {
@@ -179,8 +138,8 @@ fn list_json_files_are_relative_paths() {
 
 #[test]
 fn list_json_entry_point_paths_are_relative() {
-    let (stdout, _, _) = run_list("basic-project", &["--entry-points", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--entry-points", "--format", "json"]);
+    let json = parse_json(&output);
 
     let eps = json["entry_points"].as_array().unwrap();
     for ep in eps {
@@ -196,8 +155,8 @@ fn list_json_entry_point_paths_are_relative() {
 
 #[test]
 fn list_basic_project_detects_typescript_plugin() {
-    let (stdout, _, _) = run_list("basic-project", &["--plugins", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--plugins", "--format", "json"]);
+    let json = parse_json(&output);
 
     let plugins = json["plugins"].as_array().unwrap();
     let names: Vec<&str> = plugins
@@ -212,8 +171,8 @@ fn list_basic_project_detects_typescript_plugin() {
 
 #[test]
 fn list_nextjs_project_detects_nextjs_plugin() {
-    let (stdout, _, _) = run_list("nextjs-project", &["--plugins", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("nextjs-project", &["--plugins", "--format", "json"]);
+    let json = parse_json(&output);
 
     let plugins = json["plugins"].as_array().unwrap();
     let names: Vec<&str> = plugins
@@ -228,8 +187,8 @@ fn list_nextjs_project_detects_nextjs_plugin() {
 
 #[test]
 fn list_external_plugin_detected() {
-    let (stdout, _, _) = run_list("external-plugins", &["--plugins", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("external-plugins", &["--plugins", "--format", "json"]);
+    let json = parse_json(&output);
 
     let plugins = json["plugins"].as_array().unwrap();
     let names: Vec<&str> = plugins
@@ -246,8 +205,8 @@ fn list_external_plugin_detected() {
 
 #[test]
 fn list_entry_point_has_source_field() {
-    let (stdout, _, _) = run_list("basic-project", &["--entry-points", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--entry-points", "--format", "json"]);
+    let json = parse_json(&output);
 
     let eps = json["entry_points"].as_array().unwrap();
     assert!(!eps.is_empty(), "basic-project should have entry points");
@@ -266,8 +225,8 @@ fn list_entry_point_has_source_field() {
 
 #[test]
 fn list_basic_project_main_entry_point_source() {
-    let (stdout, _, _) = run_list("basic-project", &["--entry-points", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--entry-points", "--format", "json"]);
+    let json = parse_json(&output);
 
     let eps = json["entry_points"].as_array().unwrap();
     // basic-project has "main": "src/index.ts" in package.json
@@ -289,8 +248,8 @@ fn list_basic_project_main_entry_point_source() {
 #[test]
 fn list_plugin_discovered_entry_points_in_show_all_mode() {
     // When no specific flags are set (show_all), plugin entry points are included
-    let (stdout, _, _) = run_list("external-plugins", &["--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("external-plugins", &["--format", "json"]);
+    let json = parse_json(&output);
 
     let eps = json["entry_points"].as_array().unwrap();
     let plugin_eps: Vec<&serde_json::Value> = eps
@@ -319,13 +278,13 @@ fn list_plugin_discovered_entry_points_in_show_all_mode() {
 #[test]
 fn list_entry_points_only_missing_plugin_entries_bug() {
     // show_all mode includes plugin-detected entry points
-    let (all_stdout, _, _) = run_list("external-plugins", &["--format", "json"]);
-    let all_json = parse_json(&all_stdout);
+    let all_output = run_list("external-plugins", &["--format", "json"]);
+    let all_json = parse_json(&all_output);
     let all_eps = all_json["entry_points"].as_array().unwrap();
 
     // --entry-points only mode is missing plugin entries (this is a bug)
-    let (ep_stdout, _, _) = run_list("external-plugins", &["--entry-points", "--format", "json"]);
-    let ep_json = parse_json(&ep_stdout);
+    let ep_output = run_list("external-plugins", &["--entry-points", "--format", "json"]);
+    let ep_json = parse_json(&ep_output);
     let ep_only = ep_json["entry_points"].as_array().unwrap();
 
     // show_all has more entry points because it includes plugin-discovered ones
@@ -342,10 +301,10 @@ fn list_entry_points_only_missing_plugin_entries_bug() {
 
 #[test]
 fn list_workspace_project_discovers_files_across_packages() {
-    let (stdout, _, code) = run_list("workspace-project", &["--files", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("workspace-project", &["--files", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     let files = json["files"].as_array().unwrap();
 
     // Should discover files from multiple workspace packages
@@ -369,10 +328,10 @@ fn list_workspace_project_discovers_files_across_packages() {
 
 #[test]
 fn list_workspace_project_discovers_entry_points_from_multiple_packages() {
-    let (stdout, _, code) = run_list("workspace-project", &["--entry-points", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("workspace-project", &["--entry-points", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     let eps = json["entry_points"].as_array().unwrap();
 
     // Each workspace package has its own entry points
@@ -405,79 +364,89 @@ fn list_workspace_project_discovers_entry_points_from_multiple_packages() {
 
 #[test]
 fn list_human_output_plugins_section() {
-    let (stdout, stderr, code) = run_list("basic-project", &["--plugins"]);
-    assert_eq!(code, 0);
+    let output = run_list("basic-project", &["--plugins"]);
+    assert_eq!(output.code, 0);
 
     // Human output prints plugins to stderr
     assert!(
-        stderr.contains("Active plugins:"),
-        "human output should contain 'Active plugins:' header in stderr. Got stderr: {stderr}"
+        output.stderr.contains("Active plugins:"),
+        "human output should contain 'Active plugins:' header in stderr. Got stderr: {}",
+        output.stderr
     );
     assert!(
-        stderr.contains("typescript"),
-        "human output should list typescript plugin in stderr. Got stderr: {stderr}"
+        output.stderr.contains("typescript"),
+        "human output should list typescript plugin in stderr. Got stderr: {}",
+        output.stderr
     );
     // stdout should be empty when only showing plugins
     assert!(
-        stdout.trim().is_empty(),
-        "stdout should be empty for --plugins in human format. Got: {stdout}"
+        output.stdout.trim().is_empty(),
+        "stdout should be empty for --plugins in human format. Got: {}",
+        output.stdout
     );
 }
 
 #[test]
 fn list_human_output_files_section() {
-    let (stdout, stderr, code) = run_list("basic-project", &["--files"]);
-    assert_eq!(code, 0);
+    let output = run_list("basic-project", &["--files"]);
+    assert_eq!(output.code, 0);
 
     // File count is on stderr
     assert!(
-        stderr.contains("Discovered"),
-        "human output should say 'Discovered' in stderr. Got stderr: {stderr}"
+        output.stderr.contains("Discovered"),
+        "human output should say 'Discovered' in stderr. Got stderr: {}",
+        output.stderr
     );
     assert!(
-        stderr.contains("files"),
-        "human output should mention 'files' in stderr. Got stderr: {stderr}"
+        output.stderr.contains("files"),
+        "human output should mention 'files' in stderr. Got stderr: {}",
+        output.stderr
     );
 
     // File paths are on stdout
     assert!(
-        stdout.contains("index.ts"),
-        "human output stdout should list index.ts. Got: {stdout}"
+        output.stdout.contains("index.ts"),
+        "human output stdout should list index.ts. Got: {}",
+        output.stdout
     );
 }
 
 #[test]
 fn list_human_output_entry_points_section() {
-    let (stdout, stderr, code) = run_list("basic-project", &["--entry-points"]);
-    assert_eq!(code, 0);
+    let output = run_list("basic-project", &["--entry-points"]);
+    assert_eq!(output.code, 0);
 
     // Entry point count is on stderr
     assert!(
-        stderr.contains("Found"),
-        "human output should say 'Found' in stderr. Got stderr: {stderr}"
+        output.stderr.contains("Found"),
+        "human output should say 'Found' in stderr. Got stderr: {}",
+        output.stderr
     );
     assert!(
-        stderr.contains("entry points"),
-        "human output should mention 'entry points' in stderr. Got stderr: {stderr}"
+        output.stderr.contains("entry points"),
+        "human output should mention 'entry points' in stderr. Got stderr: {}",
+        output.stderr
     );
 
     // Entry point paths and sources are on stdout
     assert!(
-        stdout.contains("index.ts"),
-        "human output stdout should list entry point path. Got: {stdout}"
+        output.stdout.contains("index.ts"),
+        "human output stdout should list entry point path. Got: {}",
+        output.stdout
     );
     assert!(
-        stdout.contains("PackageJsonMain"),
-        "human output should include entry point source. Got: {stdout}"
+        output.stdout.contains("PackageJsonMain"),
+        "human output should include entry point source. Got: {}",
+        output.stdout
     );
 }
 
 #[test]
 fn list_human_output_files_are_absolute_paths() {
-    let (stdout, _, _) = run_list("basic-project", &["--files"]);
+    let output = run_list("basic-project", &["--files"]);
 
     // In human format, file paths should be absolute
-    for line in stdout.lines() {
+    for line in output.stdout.lines() {
         let trimmed = line.trim();
         if trimmed.is_empty() {
             continue;
@@ -495,8 +464,8 @@ fn list_human_output_files_are_absolute_paths() {
 
 #[test]
 fn list_json_plugins_array_items_have_name_field() {
-    let (stdout, _, _) = run_list("basic-project", &["--plugins", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--plugins", "--format", "json"]);
+    let json = parse_json(&output);
 
     let plugins = json["plugins"].as_array().unwrap();
     for plugin in plugins {
@@ -513,8 +482,8 @@ fn list_json_plugins_array_items_have_name_field() {
 
 #[test]
 fn list_json_entry_points_array_items_have_path_and_source() {
-    let (stdout, _, _) = run_list("basic-project", &["--entry-points", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--entry-points", "--format", "json"]);
+    let json = parse_json(&output);
 
     let eps = json["entry_points"].as_array().unwrap();
     for ep in eps {
@@ -532,8 +501,8 @@ fn list_json_entry_points_array_items_have_path_and_source() {
 
 #[test]
 fn list_json_files_are_sorted_alphabetically() {
-    let (stdout, _, _) = run_list("basic-project", &["--files", "--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("basic-project", &["--files", "--format", "json"]);
+    let json = parse_json(&output);
 
     let files: Vec<&str> = json["files"]
         .as_array()
@@ -551,13 +520,13 @@ fn list_json_files_are_sorted_alphabetically() {
 
 #[test]
 fn list_plugins_and_files_together_json() {
-    let (stdout, _, code) = run_list(
+    let output = run_list(
         "basic-project",
         &["--plugins", "--files", "--format", "json"],
     );
-    assert_eq!(code, 0);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     assert!(json.get("plugins").is_some(), "should include 'plugins'");
     assert!(json.get("files").is_some(), "should include 'files'");
     // entry_points should not appear since that flag was not set
@@ -569,13 +538,13 @@ fn list_plugins_and_files_together_json() {
 
 #[test]
 fn list_files_and_entry_points_together_json() {
-    let (stdout, _, code) = run_list(
+    let output = run_list(
         "basic-project",
         &["--files", "--entry-points", "--format", "json"],
     );
-    assert_eq!(code, 0);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     assert!(json.get("plugins").is_none(), "should omit 'plugins'");
     assert!(json.get("files").is_some(), "should include 'files'");
     assert!(
@@ -588,9 +557,9 @@ fn list_files_and_entry_points_together_json() {
 
 #[test]
 fn list_returns_exit_code_0_on_success() {
-    let (_, _, code) = run_list("basic-project", &["--format", "json"]);
+    let output = run_list("basic-project", &["--format", "json"]);
     assert_eq!(
-        code, 0,
+        output.code, 0,
         "list command should always return exit code 0 on success"
     );
 }
@@ -599,10 +568,10 @@ fn list_returns_exit_code_0_on_success() {
 
 #[test]
 fn list_cjs_project_discovers_js_files() {
-    let (stdout, _, code) = run_list("cjs-project", &["--files", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("cjs-project", &["--files", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     let files: Vec<&str> = json["files"]
         .as_array()
         .unwrap()
@@ -624,10 +593,10 @@ fn list_cjs_project_discovers_js_files() {
 
 #[test]
 fn list_vue_project_discovers_vue_files() {
-    let (stdout, _, code) = run_list("vue-project", &["--files", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("vue-project", &["--files", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     let files: Vec<&str> = json["files"]
         .as_array()
         .unwrap()
@@ -649,10 +618,10 @@ fn list_vue_project_discovers_vue_files() {
 
 #[test]
 fn list_svelte_project_discovers_svelte_files() {
-    let (stdout, _, code) = run_list("svelte-project", &["--files", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("svelte-project", &["--files", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     let files: Vec<&str> = json["files"]
         .as_array()
         .unwrap()
@@ -670,10 +639,10 @@ fn list_svelte_project_discovers_svelte_files() {
 
 #[test]
 fn list_css_modules_project_discovers_css_module_files() {
-    let (stdout, _, code) = run_list("css-modules-project", &["--files", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("css-modules-project", &["--files", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     let files: Vec<&str> = json["files"]
         .as_array()
         .unwrap()
@@ -692,13 +661,13 @@ fn list_css_modules_project_discovers_css_module_files() {
 #[test]
 fn list_production_mode_flag_accepted() {
     // Verify that --production flag doesn't cause errors
-    let (stdout, _, code) = run_list(
+    let output = run_list(
         "basic-project",
         &["--production", "--files", "--format", "json"],
     );
-    assert_eq!(code, 0, "list with --production should succeed");
+    assert_eq!(output.code, 0, "list with --production should succeed");
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     assert!(
         json.get("files").is_some(),
         "should still list files in production mode"
@@ -729,10 +698,10 @@ fn list_invalid_root_returns_error() {
 
 #[test]
 fn list_json_output_is_valid_json_object() {
-    let (stdout, _, code) = run_list("basic-project", &["--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("basic-project", &["--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     assert!(json.is_object(), "JSON output should be an object");
 }
 
@@ -741,10 +710,10 @@ fn list_json_output_is_valid_json_object() {
 #[test]
 fn list_project_without_known_plugins_has_empty_or_minimal_plugins() {
     // detect-config has react but not any major framework
-    let (stdout, _, code) = run_list("detect-config", &["--plugins", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("detect-config", &["--plugins", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     // The project doesn't have any framework deps, but plugins is still an array
     let plugins = json["plugins"].as_array();
     assert!(
@@ -757,10 +726,10 @@ fn list_project_without_known_plugins_has_empty_or_minimal_plugins() {
 
 #[test]
 fn list_workspace_project_entry_points_have_varied_sources() {
-    let (stdout, _, code) = run_list("workspace-project", &["--entry-points", "--format", "json"]);
-    assert_eq!(code, 0);
+    let output = run_list("workspace-project", &["--entry-points", "--format", "json"]);
+    assert_eq!(output.code, 0);
 
-    let json = parse_json(&stdout);
+    let json = parse_json(&output);
     let eps = json["entry_points"].as_array().unwrap();
     let sources: Vec<&str> = eps
         .iter()
@@ -779,8 +748,8 @@ fn list_workspace_project_entry_points_have_varied_sources() {
 #[test]
 fn list_nextjs_project_app_page_is_plugin_entry_point() {
     // Must use show_all mode (no flags) to get plugin-discovered entry points
-    let (stdout, _, _) = run_list("nextjs-project", &["--format", "json"]);
-    let json = parse_json(&stdout);
+    let output = run_list("nextjs-project", &["--format", "json"]);
+    let json = parse_json(&output);
 
     let eps = json["entry_points"].as_array().unwrap();
     let page_ep = eps
