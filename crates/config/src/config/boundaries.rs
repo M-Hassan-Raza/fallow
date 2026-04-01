@@ -30,6 +30,10 @@ pub enum BoundaryPreset {
     /// Feature-Sliced Design: app > pages > widgets > features > entities > shared.
     /// Each layer may only import from layers below it.
     FeatureSliced,
+    /// Bulletproof React: app → features → shared + server.
+    /// Feature modules are isolated from each other; shared utilities and server
+    /// infrastructure form the base layers.
+    Bulletproof,
 }
 
 impl BoundaryPreset {
@@ -43,6 +47,7 @@ impl BoundaryPreset {
             Self::Layered => Self::layered_config(source_root),
             Self::Hexagonal => Self::hexagonal_config(source_root),
             Self::FeatureSliced => Self::feature_sliced_config(source_root),
+            Self::Bulletproof => Self::bulletproof_config(source_root),
         }
     }
 
@@ -105,6 +110,40 @@ impl BoundaryPreset {
                 Self::rule(name, &below)
             })
             .collect();
+        (zones, rules)
+    }
+
+    fn bulletproof_config(source_root: &str) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
+        let zones = vec![
+            Self::zone("app", source_root),
+            Self::zone("features", source_root),
+            BoundaryZone {
+                name: "shared".to_owned(),
+                patterns: [
+                    "components",
+                    "hooks",
+                    "lib",
+                    "utils",
+                    "utilities",
+                    "providers",
+                    "shared",
+                    "types",
+                    "styles",
+                    "i18n",
+                ]
+                .iter()
+                .map(|dir| format!("{source_root}/{dir}/**"))
+                .collect(),
+                root: None,
+            },
+            Self::zone("server", source_root),
+        ];
+        let rules = vec![
+            Self::rule("app", &["features", "shared", "server"]),
+            Self::rule("features", &["shared", "server"]),
+            Self::rule("server", &["shared"]),
+            Self::rule("shared", &[]),
+        ];
         (zones, rules)
     }
 }
@@ -295,6 +334,7 @@ impl BoundaryConfig {
             BoundaryPreset::Layered => "layered",
             BoundaryPreset::Hexagonal => "hexagonal",
             BoundaryPreset::FeatureSliced => "feature-sliced",
+            BoundaryPreset::Bulletproof => "bulletproof",
         })
     }
 
@@ -826,6 +866,99 @@ allow = ["db"]
         // entities → shared only
         let ent_rule = config.rules.iter().find(|r| r.from == "entities").unwrap();
         assert_eq!(ent_rule.allow, vec!["shared"]);
+    }
+
+    #[test]
+    fn expand_bulletproof_produces_four_zones() {
+        let mut config = BoundaryConfig {
+            preset: Some(BoundaryPreset::Bulletproof),
+            zones: vec![],
+            rules: vec![],
+        };
+        config.expand("src");
+        assert_eq!(config.zones.len(), 4);
+        assert_eq!(config.rules.len(), 4);
+        assert_eq!(config.zones[0].name, "app");
+        assert_eq!(config.zones[1].name, "features");
+        assert_eq!(config.zones[2].name, "shared");
+        assert_eq!(config.zones[3].name, "server");
+        // shared zone has multiple patterns
+        assert!(config.zones[2].patterns.len() > 1);
+        assert!(
+            config.zones[2]
+                .patterns
+                .contains(&"src/components/**".to_string())
+        );
+        assert!(
+            config.zones[2]
+                .patterns
+                .contains(&"src/hooks/**".to_string())
+        );
+        assert!(config.zones[2].patterns.contains(&"src/lib/**".to_string()));
+        assert!(
+            config.zones[2]
+                .patterns
+                .contains(&"src/providers/**".to_string())
+        );
+    }
+
+    #[test]
+    fn expand_bulletproof_rules_correct() {
+        let mut config = BoundaryConfig {
+            preset: Some(BoundaryPreset::Bulletproof),
+            zones: vec![],
+            rules: vec![],
+        };
+        config.expand("src");
+        // app → features, shared, server
+        let app_rule = config.rules.iter().find(|r| r.from == "app").unwrap();
+        assert_eq!(app_rule.allow, vec!["features", "shared", "server"]);
+        // features → shared, server
+        let feat_rule = config.rules.iter().find(|r| r.from == "features").unwrap();
+        assert_eq!(feat_rule.allow, vec!["shared", "server"]);
+        // server → shared
+        let srv_rule = config.rules.iter().find(|r| r.from == "server").unwrap();
+        assert_eq!(srv_rule.allow, vec!["shared"]);
+        // shared → nothing (isolated)
+        let shared_rule = config.rules.iter().find(|r| r.from == "shared").unwrap();
+        assert!(shared_rule.allow.is_empty());
+    }
+
+    #[test]
+    fn expand_bulletproof_then_resolve_classifies() {
+        let mut config = BoundaryConfig {
+            preset: Some(BoundaryPreset::Bulletproof),
+            zones: vec![],
+            rules: vec![],
+        };
+        config.expand("src");
+        let resolved = config.resolve();
+        assert_eq!(
+            resolved.classify_zone("src/app/dashboard/page.tsx"),
+            Some("app")
+        );
+        assert_eq!(
+            resolved.classify_zone("src/features/auth/hooks/useAuth.ts"),
+            Some("features")
+        );
+        assert_eq!(
+            resolved.classify_zone("src/components/Button/Button.tsx"),
+            Some("shared")
+        );
+        assert_eq!(
+            resolved.classify_zone("src/hooks/useFormatters.ts"),
+            Some("shared")
+        );
+        assert_eq!(
+            resolved.classify_zone("src/server/db/schema/users.ts"),
+            Some("server")
+        );
+        // features cannot import shared directly — only via allowed rules
+        assert!(resolved.is_import_allowed("features", "shared"));
+        assert!(resolved.is_import_allowed("features", "server"));
+        assert!(!resolved.is_import_allowed("features", "app"));
+        assert!(!resolved.is_import_allowed("shared", "features"));
+        assert!(!resolved.is_import_allowed("server", "features"));
     }
 
     #[test]

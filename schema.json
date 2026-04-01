@@ -637,6 +637,11 @@
           "description": "Feature-Sliced Design: app > pages > widgets > features > entities > shared.\nEach layer may only import from layers below it.",
           "type": "string",
           "const": "feature-sliced"
+        },
+        {
+          "description": "Bulletproof React: app → features → shared + server.\nFeature modules are isolated from each other; shared utilities and server\ninfrastructure form the base layers.",
+          "type": "string",
+          "const": "bulletproof"
         }
       ]
     },
