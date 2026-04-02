@@ -3,6 +3,7 @@ set -eo pipefail
 
 # Post or update a PR comment with analysis results
 # Required env: GH_TOKEN, PR_NUMBER, GH_REPO, FALLOW_COMMAND, ACTION_JQ_DIR
+# Optional env: CHANGED_SINCE, INPUT_ROOT (for scoping results to changed files)
 
 # Select jq script
 case "$FALLOW_COMMAND" in
@@ -14,13 +15,30 @@ case "$FALLOW_COMMAND" in
   *)               echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
 esac
 
-# Generate comment body
-if ! COMMENT_BODY="$(jq -r -f "$JQ_FILE" fallow-results.json)
-
-<!-- fallow-results -->"; then
-  echo "::warning::Failed to generate PR comment body"
-  exit 0
+# Scope results to changed files when --changed-since is active
+RESULTS_FILE="fallow-results.json"
+if [ -n "${CHANGED_SINCE:-}" ]; then
+  ROOT="${INPUT_ROOT:-.}"
+  CHANGED_FILES=$(cd "$ROOT" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
+  if [ -n "$CHANGED_FILES" ]; then
+    CHANGED_JSON=$(echo "$CHANGED_FILES" | jq -R -s 'split("\n") | map(select(length > 0))')
+    if jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
+      RESULTS_FILE="fallow-results-scoped.json"
+    fi
+  fi
 fi
+
+# Generate comment body
+BODY=$(jq -r -f "$JQ_FILE" "$RESULTS_FILE") || { echo "::warning::Failed to generate PR comment body"; exit 0; }
+
+# Add scoping indicator when results were filtered to changed files
+if [ "$RESULTS_FILE" != "fallow-results.json" ]; then
+  BODY="${BODY}"$'\n\n'"*Scoped to files changed since \`${CHANGED_SINCE:0:7}\`*"
+fi
+
+COMMENT_BODY="${BODY}
+
+<!-- fallow-results -->"
 
 # Find existing fallow comment to update (avoids spam on busy PRs)
 COMMENT_ID=$(gh api \

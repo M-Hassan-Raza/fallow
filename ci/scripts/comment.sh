@@ -4,6 +4,7 @@ set -eo pipefail
 # Post or update an MR comment with analysis results
 # Required env: GITLAB_TOKEN or CI_JOB_TOKEN, CI_API_V4_URL, CI_PROJECT_ID,
 #   CI_MERGE_REQUEST_IID, FALLOW_COMMAND, FALLOW_JQ_DIR
+# Optional env: CHANGED_SINCE, INPUT_ROOT (for scoping results to changed files)
 
 # Auth header
 if [ -n "${GITLAB_TOKEN:-}" ]; then
@@ -35,24 +36,43 @@ case "$FALLOW_COMMAND" in
   *)               echo "ERROR: Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
 esac
 
+# Scope results to changed files when --changed-since is active
+RESULTS_BASE="fallow-results.json"
+if [ -n "${CHANGED_SINCE:-}" ]; then
+  ROOT="${INPUT_ROOT:-.}"
+  FILTER_JQ=$(pick_jq "filter-changed.jq")
+  if [ -f "$FILTER_JQ" ]; then
+    CHANGED_FILES=$(cd "$ROOT" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
+    if [ -n "$CHANGED_FILES" ]; then
+      CHANGED_JSON=$(echo "$CHANGED_FILES" | jq -R -s 'split("\n") | map(select(length > 0))')
+      if jq --argjson changed "$CHANGED_JSON" -f "$FILTER_JQ" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
+        RESULTS_BASE="fallow-results-scoped.json"
+      fi
+    fi
+  fi
+fi
+
 # For combined mode, pass the full JSON; for specific commands, extract section
-INPUT_FILE="fallow-results.json"
+INPUT_FILE="$RESULTS_BASE"
 if [ -z "$FALLOW_COMMAND" ]; then
-  INPUT_FILE="fallow-results.json"
+  INPUT_FILE="$RESULTS_BASE"
 elif [ "$FALLOW_COMMAND" = "dead-code" ] || [ "$FALLOW_COMMAND" = "check" ]; then
   # If running in combined mode but requesting check summary
-  if jq -e '.check' fallow-results.json > /dev/null 2>&1; then
-    jq '.check' fallow-results.json > /tmp/fallow-comment-input.json
+  if jq -e '.check' "$RESULTS_BASE" > /dev/null 2>&1; then
+    jq '.check' "$RESULTS_BASE" > /tmp/fallow-comment-input.json
     INPUT_FILE="/tmp/fallow-comment-input.json"
   fi
 fi
 
 # Generate comment body
-if ! COMMENT_BODY=$(jq -r -f "$JQ_FILE" "$INPUT_FILE"); then
-  echo "WARNING: Failed to generate MR comment body"
-  exit 0
+BODY=$(jq -r -f "$JQ_FILE" "$INPUT_FILE") || { echo "WARNING: Failed to generate MR comment body"; exit 0; }
+
+# Add scoping indicator when results were filtered to changed files
+if [ "$RESULTS_BASE" != "fallow-results.json" ]; then
+  BODY="${BODY}"$'\n\n'"*Scoped to files changed since \`${CHANGED_SINCE:0:7}\`*"
 fi
-COMMENT_BODY="${COMMENT_BODY}
+
+COMMENT_BODY="${BODY}
 
 <!-- fallow-results -->"
 

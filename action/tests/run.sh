@@ -63,6 +63,17 @@ assert_valid_markdown() {
   fi
 }
 
+assert_json_value() {
+  local output="$1" jq_expr="$2" expected="$3" name="$4"
+  local actual
+  actual=$(echo "$output" | jq -r "$jq_expr" 2>/dev/null)
+  if [ "$actual" = "$expected" ]; then
+    pass "$name"
+  else
+    fail "$name" "expected $expected, got $actual"
+  fi
+}
+
 # --- Summary jq tests ---
 
 echo ""
@@ -292,6 +303,66 @@ MANY='[
 ]'
 OUT=$(echo "$MANY" | jq --argjson max 3 -f "$JQ_DIR/merge-comments.jq" 2>&1)
 assert_json_length "$OUT" "3" "respects max limit"
+
+# --- Changed-file filter tests ---
+
+echo ""
+echo "=== Changed-file filter (filter-changed.jq) ==="
+
+echo "  check format:"
+OUT=$(jq --argjson changed '["src/helpers/api.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/check.json" 2>&1)
+assert_valid_json "$OUT" "valid JSON"
+assert_json_value "$OUT" '.unused_exports | length' "3" "keeps only exports in changed files"
+assert_json_value "$OUT" '.unused_files | length' "0" "no unused files match changed path"
+assert_json_value "$OUT" '.unused_dependencies | length' "3" "preserves dependency issues (not file-scoped)"
+assert_json_value "$OUT" '.total_issues' "6" "recalculates total_issues"
+
+echo "  check with no matching files:"
+OUT=$(jq --argjson changed '["nonexistent.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/check.json" 2>&1)
+assert_json_value "$OUT" '.unused_exports | length' "0" "filters all exports"
+assert_json_value "$OUT" '.unused_dependencies | length' "3" "deps preserved even with no file matches"
+
+echo "  check clean passthrough:"
+OUT=$(jq --argjson changed '["src/a.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/check-clean.json" 2>&1)
+assert_json_value "$OUT" '.total_issues' "0" "clean results stay at 0"
+
+echo "  health format:"
+OUT=$(jq --argjson changed '["src/helpers/content-parser.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/health.json" 2>&1)
+assert_valid_json "$OUT" "valid JSON"
+assert_json_value "$OUT" '.file_scores | length' "1" "keeps only changed file scores"
+assert_json_value "$OUT" '.file_scores[0].path' "src/helpers/content-parser.ts" "correct file retained"
+
+echo "  dupes format:"
+DUPES_PATH=$(jq -r '.clone_groups[0].instances[0].file' "$FIXTURES/dupes.json")
+OUT=$(jq --argjson changed "[\"$DUPES_PATH\"]" -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/dupes.json" 2>&1)
+assert_valid_json "$OUT" "valid JSON"
+assert_json_value "$OUT" '.stats.clone_groups' "1" "retains group with changed instance"
+
+OUT=$(jq --argjson changed '["nonexistent.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/dupes.json" 2>&1)
+assert_json_value "$OUT" '.stats.clone_groups' "0" "removes all groups when no match"
+
+echo "  combined format:"
+OUT=$(jq --argjson changed '["src/helpers/api.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/combined.json" 2>&1)
+assert_valid_json "$OUT" "valid JSON"
+assert_json_value "$OUT" '.check.unused_exports | length' "3" "filters check sub-object"
+assert_json_value "$OUT" '.check.total_issues' "6" "recalculates check total"
+
+echo "  combined clean passthrough:"
+OUT=$(jq --argjson changed '["src/a.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/combined-clean.json" 2>&1)
+assert_json_value "$OUT" '.check.total_issues' "0" "clean combined stays at 0"
+
+echo "  boundary violation filter:"
+BV_INPUT='{"total_issues":2,"unused_files":[],"unused_exports":[],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[],"boundary_violations":[{"from_path":"src/ui/App.ts","to_path":"src/db/query.ts","from_zone":"ui","to_zone":"db","import_specifier":"src/db/query.ts","line":5,"col":9},{"from_path":"src/api/handler.ts","to_path":"src/db/repo.ts","from_zone":"api","to_zone":"db","import_specifier":"src/db/repo.ts","line":10,"col":9}],"type_only_dependencies":[]}'
+OUT=$(echo "$BV_INPUT" | jq --argjson changed '["src/ui/App.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT" '.boundary_violations | length' "1" "keeps only violations from changed files"
+assert_json_value "$OUT" '.total_issues' "1" "recalculates total after filtering"
+
+echo "  circular dependency filter:"
+CD_INPUT='{"total_issues":1,"unused_files":[],"unused_exports":[],"unused_types":[],"unused_dependencies":[],"unused_dev_dependencies":[],"unused_optional_dependencies":[],"unused_enum_members":[],"unused_class_members":[],"unresolved_imports":[],"unlisted_dependencies":[],"duplicate_exports":[],"circular_dependencies":[{"files":["src/a.ts","src/b.ts"],"length":2,"line":1,"col":0}],"boundary_violations":[],"type_only_dependencies":[]}'
+OUT=$(echo "$CD_INPUT" | jq --argjson changed '["src/a.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT" '.circular_dependencies | length' "1" "keeps cycle if any file changed"
+OUT=$(echo "$CD_INPUT" | jq --argjson changed '["src/c.ts"]' -f "$JQ_DIR/filter-changed.jq" 2>&1)
+assert_json_value "$OUT" '.circular_dependencies | length' "0" "removes cycle if no file changed"
 
 # --- Summary ---
 

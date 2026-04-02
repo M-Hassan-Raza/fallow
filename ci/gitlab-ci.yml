@@ -195,7 +195,7 @@ variables:
         done
 
         # Shared (platform-agnostic) jq scripts from action/jq/
-        for f in summary-dupes.jq summary-fix.jq review-comments-check.jq review-comments-health.jq review-body.jq merge-comments.jq; do
+        for f in summary-dupes.jq summary-fix.jq review-comments-check.jq review-comments-health.jq review-body.jq merge-comments.jq filter-changed.jq; do
           curl -sf "${FALLOW_SCRIPTS_BASE}/action/jq/${f}" -o "${FALLOW_SHARED_JQ_DIR}/${f}" 2>/dev/null || {
             echo "  WARNING: Failed to download action/jq/${f}"
             DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
@@ -384,6 +384,8 @@ variables:
           echo "Posting MR summary comment..."
           export FALLOW_JQ_DIR="${FALLOW_JQ_DIR:-/tmp/fallow-jq}"
           export FALLOW_SHARED_JQ_DIR="${FALLOW_SHARED_JQ_DIR:-/tmp/fallow-shared-jq}"
+          export CHANGED_SINCE="$FALLOW_CHANGED_SINCE"
+          export INPUT_ROOT="${FALLOW_ROOT:-.}"
           bash /tmp/fallow-scripts/comment.sh || echo "WARNING: MR comment failed"
         else
           echo "WARNING: comment.sh not available — skipping MR comment"
@@ -397,6 +399,7 @@ variables:
           export FALLOW_JQ_DIR="${FALLOW_JQ_DIR:-/tmp/fallow-jq}"
           export FALLOW_SHARED_JQ_DIR="${FALLOW_SHARED_JQ_DIR:-/tmp/fallow-shared-jq}"
           export MAX_COMMENTS="$FALLOW_MAX_COMMENTS"
+          export CHANGED_SINCE="$FALLOW_CHANGED_SINCE"
           bash /tmp/fallow-scripts/review.sh || echo "WARNING: MR review failed"
         else
           echo "WARNING: review.sh not available — skipping MR review"

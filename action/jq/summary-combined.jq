@@ -33,8 +33,15 @@ else
     ([
       (if (.check.unused_files | length) > 0 then "| Unused files | \(.check.unused_files | length) |" else null end),
       (if (.check.unused_exports | length) > 0 then "| Unused exports | \(.check.unused_exports | length) |" else null end),
+      (if (.check.unused_types | length) > 0 then "| Unused types | \(.check.unused_types | length) |" else null end),
       (if (.check.unused_dependencies | length) > 0 then "| Unused dependencies | \(.check.unused_dependencies | length) |" else null end),
+      (if (.check.unused_dev_dependencies | length) > 0 then "| Unused devDependencies | \(.check.unused_dev_dependencies | length) |" else null end),
+      (if (.check.unused_optional_dependencies | length) > 0 then "| Unused optionalDependencies | \(.check.unused_optional_dependencies | length) |" else null end),
+      (if (.check.unused_enum_members | length) > 0 then "| Unused enum members | \(.check.unused_enum_members | length) |" else null end),
+      (if (.check.unused_class_members | length) > 0 then "| Unused class members | \(.check.unused_class_members | length) |" else null end),
       (if (.check.unresolved_imports | length) > 0 then "| Unresolved imports | \(.check.unresolved_imports | length) |" else null end),
+      (if (.check.unlisted_dependencies | length) > 0 then "| Unlisted dependencies | \(.check.unlisted_dependencies | length) |" else null end),
+      (if (.check.duplicate_exports | length) > 0 then "| Duplicate exports | \(.check.duplicate_exports | length) |" else null end),
       (if (.check.circular_dependencies | length) > 0 then "| Circular dependencies | \(.check.circular_dependencies | length) |" else null end),
       (if (.check.boundary_violations | length) > 0 then "| Boundary violations | \(.check.boundary_violations | length) |" else null end),
       (if (.check.type_only_dependencies | length) > 0 then "| Type-only dependencies | \(.check.type_only_dependencies | length) |" else null end)

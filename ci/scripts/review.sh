@@ -96,22 +96,39 @@ fi
 # Export env vars for jq access
 export PREFIX MAX FALLOW_ROOT CI_PROJECT_URL CI_COMMIT_SHA PKG_MANAGER
 
+# --- Scope results to changed files ---
+
+RESULTS_FILE="fallow-results.json"
+if [ -n "${CHANGED_SINCE:-}" ]; then
+  ROOT="${FALLOW_ROOT:-.}"
+  FILTER_JQ=$(pick_jq "filter-changed.jq")
+  if [ -f "$FILTER_JQ" ]; then
+    CHANGED_FILES=$(cd "$ROOT" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
+    if [ -n "$CHANGED_FILES" ]; then
+      CHANGED_JSON=$(echo "$CHANGED_FILES" | jq -R -s 'split("\n") | map(select(length > 0))')
+      if jq --argjson changed "$CHANGED_JSON" -f "$FILTER_JQ" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
+        RESULTS_FILE="fallow-results-scoped.json"
+      fi
+    fi
+  fi
+fi
+
 # --- Collect review comments ---
 
 COMMENTS="[]"
 case "$FALLOW_COMMAND" in
   dead-code|check)
-    COMMENTS=$(jq -f "$(pick_jq review-comments-check.jq)" fallow-results.json 2>&1) || { echo "jq check error: $COMMENTS"; COMMENTS="[]"; } ;;
+    COMMENTS=$(jq -f "$(pick_jq review-comments-check.jq)" "$RESULTS_FILE" 2>&1) || { echo "jq check error: $COMMENTS"; COMMENTS="[]"; } ;;
   dupes)
-    COMMENTS=$(jq -f "$(pick_jq review-comments-dupes.jq)" fallow-results.json 2>&1) || { echo "jq dupes error: $COMMENTS"; COMMENTS="[]"; } ;;
+    COMMENTS=$(jq -f "$(pick_jq review-comments-dupes.jq)" "$RESULTS_FILE" 2>&1) || { echo "jq dupes error: $COMMENTS"; COMMENTS="[]"; } ;;
   health)
-    COMMENTS=$(jq -f "$(pick_jq review-comments-health.jq)" fallow-results.json 2>&1) || { echo "jq health error: $COMMENTS"; COMMENTS="[]"; } ;;
+    COMMENTS=$(jq -f "$(pick_jq review-comments-health.jq)" "$RESULTS_FILE" 2>&1) || { echo "jq health error: $COMMENTS"; COMMENTS="[]"; } ;;
   "")
     # Combined: extract each section and run through its jq script
     WORK_DIR=$(mktemp -d)
-    jq '.check // {}' fallow-results.json > "$WORK_DIR/check.json" 2>/dev/null
-    jq '.dupes // {}' fallow-results.json > "$WORK_DIR/dupes.json" 2>/dev/null
-    jq '.health // {}' fallow-results.json > "$WORK_DIR/health.json" 2>/dev/null
+    jq '.check // {}' "$RESULTS_FILE" > "$WORK_DIR/check.json" 2>/dev/null
+    jq '.dupes // {}' "$RESULTS_FILE" > "$WORK_DIR/dupes.json" 2>/dev/null
+    jq '.health // {}' "$RESULTS_FILE" > "$WORK_DIR/health.json" 2>/dev/null
     CHECK=$(jq -f "$(pick_jq review-comments-check.jq)" "$WORK_DIR/check.json" 2>/dev/null || echo "[]")
     DUPES=$(jq -f "$(pick_jq review-comments-dupes.jq)" "$WORK_DIR/dupes.json" 2>/dev/null || echo "[]")
     HEALTH=$(jq -f "$(pick_jq review-comments-health.jq)" "$WORK_DIR/health.json" 2>/dev/null || echo "[]")
@@ -166,7 +183,7 @@ echo "Posting $TOTAL review comments (after merging)..."
 REVIEW_BODY=""
 REVIEW_BODY_JQ=$(pick_jq review-body.jq)
 if [ -f "$REVIEW_BODY_JQ" ]; then
-  REVIEW_BODY=$(jq -r -f "$REVIEW_BODY_JQ" fallow-results.json 2>&1) || true
+  REVIEW_BODY=$(jq -r -f "$REVIEW_BODY_JQ" "$RESULTS_FILE" 2>&1) || true
 fi
 if [ -z "$REVIEW_BODY" ] || echo "$REVIEW_BODY" | grep -q "^jq:"; then
   REVIEW_BODY="## :seedling: Fallow Review
@@ -174,6 +191,11 @@ if [ -z "$REVIEW_BODY" ] || echo "$REVIEW_BODY" | grep -q "^jq:"; then
 Found **${TOTAL}** issues — see inline comments below.
 
 <!-- fallow-review -->"
+fi
+
+# Add scoping indicator when results were filtered to changed files
+if [ "$RESULTS_FILE" != "fallow-results.json" ]; then
+  REVIEW_BODY="${REVIEW_BODY}"$'\n\n'"*Scoped to files changed since \`${CHANGED_SINCE:0:7}\`*"
 fi
 
 curl -sf \

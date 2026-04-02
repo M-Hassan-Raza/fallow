@@ -3,6 +3,7 @@ set -eo pipefail
 
 # Write job summary using the appropriate jq script
 # Required env: FALLOW_COMMAND, ACTION_JQ_DIR
+# Optional env: CHANGED_SINCE, INPUT_ROOT (for scoping results to changed files)
 
 select_summary_script() {
   case "$FALLOW_COMMAND" in
@@ -20,6 +21,28 @@ if [ ! -f "$JQ_FILE" ]; then
   echo "::warning::Summary script not found: ${JQ_FILE}"
   exit 0
 fi
-if ! jq -r -f "$JQ_FILE" fallow-results.json >> "$GITHUB_STEP_SUMMARY"; then
-  echo "::warning::Failed to generate job summary"
+
+# Scope results to changed files when --changed-since is active
+RESULTS_FILE="fallow-results.json"
+if [ -n "${CHANGED_SINCE:-}" ]; then
+  ROOT="${INPUT_ROOT:-.}"
+  CHANGED_FILES=$(cd "$ROOT" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
+  if [ -n "$CHANGED_FILES" ]; then
+    CHANGED_JSON=$(echo "$CHANGED_FILES" | jq -R -s 'split("\n") | map(select(length > 0))')
+    if jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
+      RESULTS_FILE="fallow-results-scoped.json"
+    fi
+  fi
 fi
+
+if ! BODY=$(jq -r -f "$JQ_FILE" "$RESULTS_FILE"); then
+  echo "::warning::Failed to generate job summary"
+  exit 0
+fi
+
+# Add scoping indicator when results were filtered to changed files
+if [ "$RESULTS_FILE" != "fallow-results.json" ]; then
+  BODY="${BODY}"$'\n\n'"*Scoped to files changed since \`${CHANGED_SINCE:0:7}\`*"
+fi
+
+echo "$BODY" >> "$GITHUB_STEP_SUMMARY"

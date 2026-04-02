@@ -4,6 +4,7 @@ set -eo pipefail
 # Post review comments with rich markdown formatting
 # Required env: GH_TOKEN, PR_NUMBER, GH_REPO, FALLOW_COMMAND, FALLOW_ROOT,
 #   MAX_COMMENTS, ACTION_JQ_DIR
+# Optional env: CHANGED_SINCE (for scoping results to changed files)
 
 MAX="${MAX_COMMENTS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
@@ -49,21 +50,34 @@ fi
 # Export env vars for jq access
 export PREFIX MAX FALLOW_ROOT GH_REPO PR_NUMBER PR_HEAD_SHA PKG_MANAGER
 
+# Scope results to changed files when --changed-since is active
+RESULTS_FILE="fallow-results.json"
+if [ -n "${CHANGED_SINCE:-}" ]; then
+  ROOT="${FALLOW_ROOT:-.}"
+  CHANGED_FILES=$(cd "$ROOT" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
+  if [ -n "$CHANGED_FILES" ]; then
+    CHANGED_JSON=$(echo "$CHANGED_FILES" | jq -R -s 'split("\n") | map(select(length > 0))')
+    if jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
+      RESULTS_FILE="fallow-results-scoped.json"
+    fi
+  fi
+fi
+
 # Collect all review comments from the results
 COMMENTS="[]"
 case "$FALLOW_COMMAND" in
   dead-code|check)
-    COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-check.jq" fallow-results.json 2>&1) || { echo "jq check error: $COMMENTS"; COMMENTS="[]"; } ;;
+    COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-check.jq" "$RESULTS_FILE" 2>&1) || { echo "jq check error: $COMMENTS"; COMMENTS="[]"; } ;;
   dupes)
-    COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-dupes.jq" fallow-results.json 2>&1) || { echo "jq dupes error: $COMMENTS"; COMMENTS="[]"; } ;;
+    COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-dupes.jq" "$RESULTS_FILE" 2>&1) || { echo "jq dupes error: $COMMENTS"; COMMENTS="[]"; } ;;
   health)
-    COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-health.jq" fallow-results.json 2>&1) || { echo "jq health error: $COMMENTS"; COMMENTS="[]"; } ;;
+    COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-health.jq" "$RESULTS_FILE" 2>&1) || { echo "jq health error: $COMMENTS"; COMMENTS="[]"; } ;;
   "")
     # Combined: extract each section and run through its jq script
     WORK_DIR=$(mktemp -d)
-    jq '.check // {}' fallow-results.json > "$WORK_DIR/check.json" 2>/dev/null
-    jq '.dupes // {}' fallow-results.json > "$WORK_DIR/dupes.json" 2>/dev/null
-    jq '.health // {}' fallow-results.json > "$WORK_DIR/health.json" 2>/dev/null
+    jq '.check // {}' "$RESULTS_FILE" > "$WORK_DIR/check.json" 2>/dev/null
+    jq '.dupes // {}' "$RESULTS_FILE" > "$WORK_DIR/dupes.json" 2>/dev/null
+    jq '.health // {}' "$RESULTS_FILE" > "$WORK_DIR/health.json" 2>/dev/null
     CHECK=$(jq -f "${ACTION_JQ_DIR}/review-comments-check.jq" "$WORK_DIR/check.json" 2>/dev/null || echo "[]")
     DUPES=$(jq -f "${ACTION_JQ_DIR}/review-comments-dupes.jq" "$WORK_DIR/dupes.json" 2>/dev/null || echo "[]")
     HEALTH=$(jq -f "${ACTION_JQ_DIR}/review-comments-health.jq" "$WORK_DIR/health.json" 2>/dev/null || echo "[]")
@@ -113,11 +127,16 @@ echo "Posting $TOTAL review comments (after merging)..."
 # Generate rich review body from the analysis results
 REVIEW_BODY=""
 if [ -f "${ACTION_JQ_DIR}/review-body.jq" ]; then
-  REVIEW_BODY=$(jq -r -f "${ACTION_JQ_DIR}/review-body.jq" fallow-results.json 2>&1) || true
+  REVIEW_BODY=$(jq -r -f "${ACTION_JQ_DIR}/review-body.jq" "$RESULTS_FILE" 2>&1) || true
 fi
 # Fallback if jq failed or produced empty output
 if [ -z "$REVIEW_BODY" ] || echo "$REVIEW_BODY" | /usr/bin/grep -q "^jq:"; then
   REVIEW_BODY=$'## \xf0\x9f\x8c\xbf Fallow Review\n\nFound **'"$TOTAL"$'** issues \xe2\x80\x94 see inline comments below.\n\n<!-- fallow-review -->'
+fi
+
+# Add scoping indicator when results were filtered to changed files
+if [ "$RESULTS_FILE" != "fallow-results.json" ]; then
+  REVIEW_BODY="${REVIEW_BODY}"$'\n\n'"*Scoped to files changed since \`${CHANGED_SINCE:0:7}\`*"
 fi
 
 PAYLOAD=$(echo "$COMMENTS" | jq --arg body "$REVIEW_BODY" '{

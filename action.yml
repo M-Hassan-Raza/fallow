@@ -259,6 +259,8 @@ runs:
       env:
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
+        CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
+        INPUT_ROOT: ${{ inputs.root }}
       run: bash ${{ github.action_path }}/action/scripts/summary.sh
 
     - name: Emit inline annotations
@@ -274,6 +276,8 @@ runs:
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         MAX_ANNOTATIONS: ${{ inputs.max-annotations }}
         ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
+        CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
+        INPUT_ROOT: ${{ inputs.root }}
       run: bash ${{ github.action_path }}/action/scripts/annotate.sh
 
     - name: Check Code Scanning availability
@@ -321,6 +325,8 @@ runs:
         GH_REPO: ${{ github.repository }}
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
         ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
+        CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
+        INPUT_ROOT: ${{ inputs.root }}
       run: bash ${{ github.action_path }}/action/scripts/comment.sh
 
     - name: Post review comments
@@ -341,6 +347,7 @@ runs:
         FALLOW_ROOT: ${{ inputs.root }}
         MAX_COMMENTS: ${{ inputs.max-annotations }}
         ACTION_JQ_DIR: ${{ github.action_path }}/action/jq
+        CHANGED_SINCE: ${{ steps.analyze.outputs.changed_since }}
       run: bash ${{ github.action_path }}/action/scripts/review.sh
 
     - name: Check threshold

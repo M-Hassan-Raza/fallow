@@ -146,6 +146,9 @@ if [ -z "${INPUT_CHANGED_SINCE:-}" ] && [ "${INPUT_AUTO_CHANGED_SINCE:-}" = "tru
   echo "::notice::Auto-scoping analysis to files changed since PR base (${PR_BASE_SHA:0:7})"
 fi
 
+# Propagate the effective changed-since value so downstream steps can filter
+echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
+
 # --- Build and run main analysis ---
 
 ARGS=()
