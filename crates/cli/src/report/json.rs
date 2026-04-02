@@ -399,6 +399,250 @@ fn inject_actions(output: &mut serde_json::Value) {
     }
 }
 
+// ── Health action injection ─────────────────────────────────────
+
+/// Inject `actions` arrays into complexity findings in a health JSON output.
+///
+/// Walks `findings` and `targets` arrays, appending machine-actionable
+/// fix and suppress hints to each item.
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) needed — used by audit.rs via re-export, but not part of public API"
+)]
+pub(crate) fn inject_health_actions(output: &mut serde_json::Value) {
+    let Some(map) = output.as_object_mut() else {
+        return;
+    };
+
+    // Complexity findings: refactor the function to reduce complexity
+    if let Some(findings) = map.get_mut("findings").and_then(|v| v.as_array_mut()) {
+        for item in findings {
+            let actions = build_health_finding_actions(item);
+            if let serde_json::Value::Object(obj) = item {
+                obj.insert("actions".to_string(), actions);
+            }
+        }
+    }
+
+    // Refactoring targets: apply the recommended refactoring
+    if let Some(targets) = map.get_mut("targets").and_then(|v| v.as_array_mut()) {
+        for item in targets {
+            let actions = build_refactoring_target_actions(item);
+            if let serde_json::Value::Object(obj) = item {
+                obj.insert("actions".to_string(), actions);
+            }
+        }
+    }
+
+    // Hotspots: files that are both complex and frequently changing
+    if let Some(hotspots) = map.get_mut("hotspots").and_then(|v| v.as_array_mut()) {
+        for item in hotspots {
+            let actions = build_hotspot_actions(item);
+            if let serde_json::Value::Object(obj) = item {
+                obj.insert("actions".to_string(), actions);
+            }
+        }
+    }
+}
+
+/// Build the `actions` array for a single complexity finding.
+fn build_health_finding_actions(item: &serde_json::Value) -> serde_json::Value {
+    let name = item
+        .get("name")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("function");
+
+    let mut actions = vec![serde_json::json!({
+        "type": "refactor-function",
+        "auto_fixable": false,
+        "description": format!("Refactor `{name}` to reduce complexity (extract helper functions, simplify branching)"),
+        "note": "Consider splitting into smaller functions with single responsibilities",
+    })];
+
+    actions.push(serde_json::json!({
+        "type": "suppress-line",
+        "auto_fixable": false,
+        "description": "Suppress with an inline comment above the function declaration",
+        "comment": "// fallow-ignore-next-line complexity",
+        "placement": "above-function-declaration",
+    }));
+
+    serde_json::Value::Array(actions)
+}
+
+/// Build the `actions` array for a single hotspot entry.
+fn build_hotspot_actions(item: &serde_json::Value) -> serde_json::Value {
+    let path = item
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("file");
+
+    let actions = vec![
+        serde_json::json!({
+            "type": "refactor-file",
+            "auto_fixable": false,
+            "description": format!("Refactor `{path}` — high complexity combined with frequent changes makes this a maintenance risk"),
+            "note": "Prioritize extracting complex functions, adding tests, or splitting the module",
+        }),
+        serde_json::json!({
+            "type": "add-tests",
+            "auto_fixable": false,
+            "description": format!("Add test coverage for `{path}` to reduce change risk"),
+            "note": "Frequently changed complex files benefit most from comprehensive test coverage",
+        }),
+    ];
+
+    serde_json::Value::Array(actions)
+}
+
+/// Build the `actions` array for a single refactoring target.
+fn build_refactoring_target_actions(item: &serde_json::Value) -> serde_json::Value {
+    let recommendation = item
+        .get("recommendation")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Apply the recommended refactoring");
+
+    let category = item
+        .get("category")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("refactoring");
+
+    let mut actions = vec![serde_json::json!({
+        "type": "apply-refactoring",
+        "auto_fixable": false,
+        "description": recommendation,
+        "category": category,
+    })];
+
+    // Targets with evidence linking to specific functions get a suppress action
+    if item.get("evidence").is_some() {
+        actions.push(serde_json::json!({
+            "type": "suppress-line",
+            "auto_fixable": false,
+            "description": "Suppress the underlying complexity finding",
+            "comment": "// fallow-ignore-next-line complexity",
+        }));
+    }
+
+    serde_json::Value::Array(actions)
+}
+
+// ── Duplication action injection ────────────────────────────────
+
+/// Inject `actions` arrays into clone families/groups in a duplication JSON output.
+///
+/// Walks `clone_families` and `clone_groups` arrays, appending
+/// machine-actionable fix and config hints to each item.
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) needed — used by audit.rs via re-export, but not part of public API"
+)]
+pub(crate) fn inject_dupes_actions(output: &mut serde_json::Value) {
+    let Some(map) = output.as_object_mut() else {
+        return;
+    };
+
+    // Clone families: extract shared module/function
+    if let Some(families) = map.get_mut("clone_families").and_then(|v| v.as_array_mut()) {
+        for item in families {
+            let actions = build_clone_family_actions(item);
+            if let serde_json::Value::Object(obj) = item {
+                obj.insert("actions".to_string(), actions);
+            }
+        }
+    }
+
+    // Clone groups: extract shared code
+    if let Some(groups) = map.get_mut("clone_groups").and_then(|v| v.as_array_mut()) {
+        for item in groups {
+            let actions = build_clone_group_actions(item);
+            if let serde_json::Value::Object(obj) = item {
+                obj.insert("actions".to_string(), actions);
+            }
+        }
+    }
+}
+
+/// Build the `actions` array for a single clone family.
+fn build_clone_family_actions(item: &serde_json::Value) -> serde_json::Value {
+    let group_count = item
+        .get("groups")
+        .and_then(|v| v.as_array())
+        .map_or(0, Vec::len);
+
+    let total_lines = item
+        .get("total_duplicated_lines")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    let mut actions = vec![serde_json::json!({
+        "type": "extract-shared",
+        "auto_fixable": false,
+        "description": format!(
+            "Extract {group_count} duplicated code block{} ({total_lines} lines) into a shared module",
+            if group_count == 1 { "" } else { "s" }
+        ),
+        "note": "These clone groups share the same files, indicating a structural relationship — refactor together",
+    })];
+
+    // Include any refactoring suggestions from the family
+    if let Some(suggestions) = item.get("suggestions").and_then(|v| v.as_array()) {
+        for suggestion in suggestions {
+            if let Some(desc) = suggestion
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+            {
+                actions.push(serde_json::json!({
+                    "type": "apply-suggestion",
+                    "auto_fixable": false,
+                    "description": desc,
+                }));
+            }
+        }
+    }
+
+    actions.push(serde_json::json!({
+        "type": "suppress-line",
+        "auto_fixable": false,
+        "description": "Suppress with an inline comment above the duplicated code",
+        "comment": "// fallow-ignore-next-line code-duplication",
+    }));
+
+    serde_json::Value::Array(actions)
+}
+
+/// Build the `actions` array for a single clone group.
+fn build_clone_group_actions(item: &serde_json::Value) -> serde_json::Value {
+    let instance_count = item
+        .get("instances")
+        .and_then(|v| v.as_array())
+        .map_or(0, Vec::len);
+
+    let line_count = item
+        .get("line_count")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+
+    let actions = vec![
+        serde_json::json!({
+            "type": "extract-shared",
+            "auto_fixable": false,
+            "description": format!(
+                "Extract duplicated code ({line_count} lines, {instance_count} instance{}) into a shared function",
+                if instance_count == 1 { "" } else { "s" }
+            ),
+        }),
+        serde_json::json!({
+            "type": "suppress-line",
+            "auto_fixable": false,
+            "description": "Suppress with an inline comment above the duplicated code",
+            "comment": "// fallow-ignore-next-line code-duplication",
+        }),
+    ];
+
+    serde_json::Value::Array(actions)
+}
+
 /// Insert a `_meta` key into a JSON object value.
 fn insert_meta(output: &mut serde_json::Value, meta: serde_json::Value) {
     if let serde_json::Value::Object(map) = output {
@@ -423,6 +667,7 @@ pub(super) fn print_health_json(
     let mut output = build_json_envelope(report_value, elapsed);
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
+    inject_health_actions(&mut output);
 
     if explain {
         insert_meta(&mut output, explain::health_meta());
@@ -445,6 +690,7 @@ pub(super) fn print_duplication_json(
     };
 
     let mut output = build_json_envelope(report_value, elapsed);
+    inject_dupes_actions(&mut output);
 
     if explain {
         insert_meta(&mut output, explain::dupes_meta());
@@ -1519,5 +1765,242 @@ mod tests {
                 );
             }
         }
+    }
+
+    // ── Health actions injection ───────────────────────────────────
+
+    #[test]
+    fn health_finding_has_actions() {
+        let mut output = serde_json::json!({
+            "findings": [{
+                "path": "src/utils.ts",
+                "name": "processData",
+                "line": 10,
+                "col": 0,
+                "cyclomatic": 25,
+                "cognitive": 30,
+                "line_count": 150,
+                "exceeded": "both"
+            }]
+        });
+
+        inject_health_actions(&mut output);
+
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0]["type"], "refactor-function");
+        assert_eq!(actions[0]["auto_fixable"], false);
+        assert!(
+            actions[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("processData")
+        );
+        assert_eq!(actions[1]["type"], "suppress-line");
+        assert_eq!(
+            actions[1]["comment"],
+            "// fallow-ignore-next-line complexity"
+        );
+    }
+
+    #[test]
+    fn refactoring_target_has_actions() {
+        let mut output = serde_json::json!({
+            "targets": [{
+                "path": "src/big-module.ts",
+                "priority": 85.0,
+                "efficiency": 42.5,
+                "recommendation": "Split module: 12 exports, 4 unused",
+                "category": "split_high_impact",
+                "effort": "medium",
+                "confidence": "high",
+                "evidence": { "unused_exports": 4 }
+            }]
+        });
+
+        inject_health_actions(&mut output);
+
+        let actions = output["targets"][0]["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0]["type"], "apply-refactoring");
+        assert_eq!(
+            actions[0]["description"],
+            "Split module: 12 exports, 4 unused"
+        );
+        assert_eq!(actions[0]["category"], "split_high_impact");
+        // Target with evidence gets suppress action
+        assert_eq!(actions[1]["type"], "suppress-line");
+    }
+
+    #[test]
+    fn refactoring_target_without_evidence_has_no_suppress() {
+        let mut output = serde_json::json!({
+            "targets": [{
+                "path": "src/simple.ts",
+                "priority": 30.0,
+                "efficiency": 15.0,
+                "recommendation": "Consider extracting helper functions",
+                "category": "extract_complex_functions",
+                "effort": "small",
+                "confidence": "medium"
+            }]
+        });
+
+        inject_health_actions(&mut output);
+
+        let actions = output["targets"][0]["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0]["type"], "apply-refactoring");
+    }
+
+    #[test]
+    fn health_empty_findings_no_actions() {
+        let mut output = serde_json::json!({
+            "findings": [],
+            "targets": []
+        });
+
+        inject_health_actions(&mut output);
+
+        assert!(output["findings"].as_array().unwrap().is_empty());
+        assert!(output["targets"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn hotspot_has_actions() {
+        let mut output = serde_json::json!({
+            "hotspots": [{
+                "path": "src/utils.ts",
+                "complexity_score": 45.0,
+                "churn_score": 12,
+                "hotspot_score": 540.0
+            }]
+        });
+
+        inject_health_actions(&mut output);
+
+        let actions = output["hotspots"][0]["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0]["type"], "refactor-file");
+        assert!(
+            actions[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("src/utils.ts")
+        );
+        assert_eq!(actions[1]["type"], "add-tests");
+    }
+
+    #[test]
+    fn health_finding_suppress_has_placement() {
+        let mut output = serde_json::json!({
+            "findings": [{
+                "path": "src/utils.ts",
+                "name": "processData",
+                "line": 10,
+                "col": 0,
+                "cyclomatic": 25,
+                "cognitive": 30,
+                "line_count": 150,
+                "exceeded": "both"
+            }]
+        });
+
+        inject_health_actions(&mut output);
+
+        let suppress = &output["findings"][0]["actions"][1];
+        assert_eq!(suppress["placement"], "above-function-declaration");
+    }
+
+    // ── Duplication actions injection ─────────────────────────────
+
+    #[test]
+    fn clone_family_has_actions() {
+        let mut output = serde_json::json!({
+            "clone_families": [{
+                "files": ["src/a.ts", "src/b.ts"],
+                "groups": [
+                    { "instances": [{"file": "src/a.ts"}, {"file": "src/b.ts"}], "token_count": 100, "line_count": 20 }
+                ],
+                "total_duplicated_lines": 20,
+                "total_duplicated_tokens": 100,
+                "suggestions": [
+                    { "kind": "ExtractFunction", "description": "Extract shared validation logic", "estimated_savings": 15 }
+                ]
+            }]
+        });
+
+        inject_dupes_actions(&mut output);
+
+        let actions = output["clone_families"][0]["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 3);
+        assert_eq!(actions[0]["type"], "extract-shared");
+        assert_eq!(actions[0]["auto_fixable"], false);
+        assert!(
+            actions[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("20 lines")
+        );
+        // Suggestion forwarded as action
+        assert_eq!(actions[1]["type"], "apply-suggestion");
+        assert!(
+            actions[1]["description"]
+                .as_str()
+                .unwrap()
+                .contains("validation logic")
+        );
+        // Suppress action
+        assert_eq!(actions[2]["type"], "suppress-line");
+        assert_eq!(
+            actions[2]["comment"],
+            "// fallow-ignore-next-line code-duplication"
+        );
+    }
+
+    #[test]
+    fn clone_group_has_actions() {
+        let mut output = serde_json::json!({
+            "clone_groups": [{
+                "instances": [
+                    {"file": "src/a.ts", "start_line": 1, "end_line": 10},
+                    {"file": "src/b.ts", "start_line": 5, "end_line": 14}
+                ],
+                "token_count": 50,
+                "line_count": 10
+            }]
+        });
+
+        inject_dupes_actions(&mut output);
+
+        let actions = output["clone_groups"][0]["actions"].as_array().unwrap();
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0]["type"], "extract-shared");
+        assert!(
+            actions[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("10 lines")
+        );
+        assert!(
+            actions[0]["description"]
+                .as_str()
+                .unwrap()
+                .contains("2 instances")
+        );
+        assert_eq!(actions[1]["type"], "suppress-line");
+    }
+
+    #[test]
+    fn dupes_empty_results_no_actions() {
+        let mut output = serde_json::json!({
+            "clone_families": [],
+            "clone_groups": []
+        });
+
+        inject_dupes_actions(&mut output);
+
+        assert!(output["clone_families"].as_array().unwrap().is_empty());
+        assert!(output["clone_groups"].as_array().unwrap().is_empty());
     }
 }

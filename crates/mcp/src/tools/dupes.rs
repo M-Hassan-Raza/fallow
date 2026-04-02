@@ -60,6 +60,10 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     if let Some(threads) = params.threads {
         args.extend(["--threads".to_string(), threads.to_string()]);
     }
+    if let Some(ref since) = params.changed_since {
+        args.push("--changed-since".to_string());
+        args.push(since.clone());
+    }
 
     Ok(args)
 }

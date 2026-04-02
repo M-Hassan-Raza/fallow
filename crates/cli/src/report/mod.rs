@@ -309,6 +309,24 @@ pub use compact::build_compact_lines;
 pub use json::build_json;
 #[allow(
     unused_imports,
+    reason = "target-dependent: used in bin audit.rs, unused in lib"
+)]
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) deliberately limits visibility — report is pub but these are internal"
+)]
+pub(crate) use json::inject_dupes_actions;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in bin audit.rs, unused in lib"
+)]
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) deliberately limits visibility — report is pub but these are internal"
+)]
+pub(crate) use json::inject_health_actions;
+#[allow(
+    unused_imports,
     reason = "target-dependent: used in lib, unused in bin"
 )]
 pub use markdown::build_duplication_markdown;

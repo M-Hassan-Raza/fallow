@@ -7,15 +7,16 @@ paths:
 
 MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wraps `fallow` CLI via subprocess.
 
-## Tools
-- `analyze` — full dead code analysis (`fallow dead-code --format json`)
+## Tools (9 total)
+- `analyze` — full dead code analysis (`fallow dead-code --format json`), supports `boundary_violations` convenience param
 - `check_changed` — incremental analysis (`fallow dead-code --changed-since`)
-- `find_dupes` — code duplication (`fallow dupes --format json`)
+- `find_dupes` — code duplication (`fallow dupes --format json`), supports `changed_since`
 - `check_health` — complexity metrics (`fallow health --format json`), supports `file_scores`, `hotspots`, `targets`, `since`, `min_commits` params
 - `audit` — combined dead-code + complexity + duplication for changed files, returns verdict (`fallow audit --format json`)
 - `fix_preview` — dry-run auto-fix (`fallow fix --dry-run --format json`)
 - `fix_apply` — apply auto-fixes (`fallow fix --yes --format json`) — destructive
-- `project_info` — project metadata (`fallow list --format json`)
+- `project_info` — project metadata (`fallow list --format json`), supports section params (`entry_points`, `files`, `plugins`, `boundaries`)
+- `list_boundaries` — architecture boundary zones and rules (`fallow list --boundaries --format json`)
 
 ## Global flags (available on all tools)
 - `no_cache` (bool) — disable incremental parse cache
@@ -25,11 +26,22 @@ MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wra
 - `baseline` (string) — compare against saved baseline
 - `save_baseline` (string) — save results as baseline
 
-## Gap fills in v2.1
-- `config` added to `find_dupes`, `check_health`
-- `workspace` added to `find_dupes`, `fix_preview`, `fix_apply`
+## Error handling
+- Subprocess timeout: 120s default, configurable via `FALLOW_TIMEOUT_SECS` env var
+- Exit code 2+ errors: pass through CLI's structured JSON error from stdout when available; fall back to `{"error":true,"message":"...","exit_code":N}` from stderr
+- Exit code 1: treated as success (issues found, not an error)
+
+## Actions injection
+All JSON output includes structured `actions` arrays on every finding:
+- Dead-code issues: fix action + suppress action (via `inject_actions` in `report/json.rs`)
+- Health findings: `refactor-function` + suppress (via `inject_health_actions`)
+- Health targets: `apply-refactoring` + suppress when evidence exists
+- Dupes families: `extract-shared` + suggestions + suppress (via `inject_dupes_actions`)
+- Dupes groups: `extract-shared` + suppress
+- Audit: inherits actions from all three sub-analyses
 
 All params structs except `CheckChangedParams` derive `Default` for ergonomic test construction.
 
 Built with `rmcp` (official Rust MCP SDK). Thin subprocess wrapper — all analysis logic stays in the CLI.
-Set `FALLOW_BIN` env var to point to the fallow binary (defaults to `fallow` in PATH).
+- `FALLOW_BIN` — binary path (defaults to sibling binary or `fallow` in PATH)
+- `FALLOW_TIMEOUT_SECS` — subprocess timeout in seconds (default: 120)

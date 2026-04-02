@@ -25,7 +25,8 @@ fn all_tools_registered() {
     assert!(names.contains(&"project_info".to_string()));
     assert!(names.contains(&"check_health".to_string()));
     assert!(names.contains(&"audit".to_string()));
-    assert_eq!(tools.len(), 8);
+    assert!(names.contains(&"list_boundaries".to_string()));
+    assert_eq!(tools.len(), 9);
 }
 
 #[test]
@@ -40,6 +41,7 @@ fn read_only_tools_have_annotations() {
         "project_info",
         "check_health",
         "audit",
+        "list_boundaries",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -99,6 +101,7 @@ fn open_world_hint_on_analysis_tools() {
         "project_info",
         "check_health",
         "audit",
+        "list_boundaries",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -150,6 +153,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("project_info"));
     assert!(instructions.contains("check_health"));
     assert!(instructions.contains("audit"));
+    assert!(instructions.contains("list_boundaries"));
 }
 
 #[test]
@@ -180,6 +184,7 @@ fn analyze_schema_contains_expected_properties() {
         "production",
         "workspace",
         "issue_types",
+        "boundary_violations",
         "baseline",
         "save_baseline",
         "no_cache",
@@ -258,6 +263,7 @@ fn find_dupes_schema_contains_expected_properties() {
         "save_baseline",
         "no_cache",
         "threads",
+        "changed_since",
     ] {
         assert!(
             schema.contains(prop),
@@ -314,7 +320,16 @@ fn project_info_schema_contains_expected_properties() {
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "project_info").unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
-    for prop in ["root", "config", "no_cache", "threads"] {
+    for prop in [
+        "root",
+        "config",
+        "entry_points",
+        "files",
+        "plugins",
+        "boundaries",
+        "no_cache",
+        "threads",
+    ] {
         assert!(
             schema.contains(prop),
             "project_info schema should contain property '{prop}'"
@@ -375,6 +390,20 @@ fn audit_schema_contains_expected_properties() {
         assert!(
             schema.contains(prop),
             "audit schema should contain property '{prop}'"
+        );
+    }
+}
+
+#[test]
+fn list_boundaries_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "list_boundaries").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in ["root", "config", "no_cache", "threads"] {
+        assert!(
+            schema.contains(prop),
+            "list_boundaries schema should contain property '{prop}'"
         );
     }
 }

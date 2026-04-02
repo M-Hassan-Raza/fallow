@@ -2,7 +2,7 @@ use crate::params::*;
 use crate::tools::{
     ISSUE_TYPE_FLAGS, VALID_DUPES_MODES, build_analyze_args, build_audit_args,
     build_check_changed_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
-    build_health_args, build_project_info_args,
+    build_health_args, build_list_boundaries_args, build_project_info_args,
 };
 
 // ── Helper: minimal CheckChangedParams ────────────────────────────
@@ -47,6 +47,7 @@ fn analyze_args_with_all_options() {
             "unused-files".to_string(),
             "unused-exports".to_string(),
         ]),
+        boundary_violations: None,
         baseline: Some("baseline.json".to_string()),
         save_baseline: Some("new-baseline.json".to_string()),
         fail_on_regression: Some(true),
@@ -262,6 +263,7 @@ fn find_dupes_args_with_all_options() {
         save_baseline: Some("new.json".to_string()),
         no_cache: Some(true),
         threads: Some(8),
+        changed_since: Some("main".to_string()),
     };
     let args = build_find_dupes_args(&params).unwrap();
     assert_eq!(
@@ -297,6 +299,8 @@ fn find_dupes_args_with_all_options() {
             "--no-cache",
             "--threads",
             "8",
+            "--changed-since",
+            "main",
         ]
     );
 }
@@ -448,6 +452,10 @@ fn project_info_args_with_all_options() {
     let params = ProjectInfoParams {
         root: Some("/workspace".to_string()),
         config: Some("fallow.toml".to_string()),
+        entry_points: Some(true),
+        files: Some(true),
+        plugins: Some(true),
+        boundaries: Some(true),
         no_cache: Some(true),
         threads: Some(2),
     };
@@ -463,6 +471,10 @@ fn project_info_args_with_all_options() {
             "/workspace",
             "--config",
             "fallow.toml",
+            "--entry-points",
+            "--files",
+            "--plugins",
+            "--boundaries",
             "--no-cache",
             "--threads",
             "2",
@@ -585,6 +597,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let project_info = build_project_info_args(&ProjectInfoParams::default());
     let health = build_health_args(&HealthParams::default());
     let audit = build_audit_args(&AuditParams::default());
+    let list_boundaries = build_list_boundaries_args(&ListBoundariesParams::default());
 
     for (name, args) in [
         ("analyze", &analyze),
@@ -595,6 +608,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("project_info", &project_info),
         ("health", &health),
         ("audit", &audit),
+        ("list_boundaries", &list_boundaries),
     ] {
         assert!(
             args.contains(&"--format".to_string()),
@@ -628,6 +642,10 @@ fn each_tool_uses_correct_subcommand() {
         "list"
     );
     assert_eq!(build_health_args(&HealthParams::default())[0], "health");
+    assert_eq!(
+        build_list_boundaries_args(&ListBoundariesParams::default())[0],
+        "list"
+    );
 }
 
 // ── Explain flag presence ────────────────────────────────────────
@@ -747,6 +765,12 @@ fn no_cache_false_is_omitted_across_all_tools() {
         ..Default::default()
     });
     assert!(!audit.contains(&"--no-cache".to_string()));
+
+    let list_boundaries = build_list_boundaries_args(&ListBoundariesParams {
+        no_cache: Some(false),
+        ..Default::default()
+    });
+    assert!(!list_boundaries.contains(&"--no-cache".to_string()));
 }
 
 // ── Argument building: audit ─────────────────────────────────────
@@ -790,4 +814,151 @@ fn audit_args_with_all_options() {
     assert!(args.contains(&"--no-cache".to_string()));
     assert!(args.contains(&"--threads".to_string()));
     assert!(args.contains(&"4".to_string()));
+}
+
+// ── Argument building: list_boundaries ──────────────────────────
+
+#[test]
+fn list_boundaries_args_minimal() {
+    let args = build_list_boundaries_args(&ListBoundariesParams::default());
+    assert_eq!(
+        args,
+        ["list", "--boundaries", "--format", "json", "--quiet"]
+    );
+}
+
+#[test]
+fn list_boundaries_args_all_options() {
+    let params = ListBoundariesParams {
+        root: Some("/workspace".to_string()),
+        config: Some("fallow.toml".to_string()),
+        no_cache: Some(true),
+        threads: Some(4),
+    };
+    let args = build_list_boundaries_args(&params);
+    assert_eq!(
+        args,
+        [
+            "list",
+            "--boundaries",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/workspace",
+            "--config",
+            "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "4",
+        ]
+    );
+}
+
+// ── Argument building: find_dupes changed_since ─────────────────
+
+#[test]
+fn find_dupes_args_changed_since() {
+    let params = FindDupesParams {
+        changed_since: Some("feature/branch".to_string()),
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(args.contains(&"--changed-since".to_string()));
+    assert!(args.contains(&"feature/branch".to_string()));
+}
+
+// ── Argument building: analyze boundary_violations ──────────────
+
+#[test]
+fn analyze_args_boundary_violations() {
+    let params = AnalyzeParams {
+        boundary_violations: Some(true),
+        ..Default::default()
+    };
+    let args = build_analyze_args(&params).unwrap();
+    assert!(args.contains(&"--boundary-violations".to_string()));
+}
+
+#[test]
+fn analyze_args_boundary_violations_false_is_omitted() {
+    let params = AnalyzeParams {
+        boundary_violations: Some(false),
+        ..Default::default()
+    };
+    let args = build_analyze_args(&params).unwrap();
+    // boundary_violations=false should not add the flag
+    assert_eq!(
+        args.iter()
+            .filter(|a| *a == "--boundary-violations")
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn analyze_args_boundary_violations_deduped_with_issue_types() {
+    // When both boundary_violations=true AND issue_types includes "boundary-violations",
+    // the flag must appear exactly once — clap rejects duplicate boolean flags.
+    let params = AnalyzeParams {
+        boundary_violations: Some(true),
+        issue_types: Some(vec!["boundary-violations".to_string()]),
+        ..Default::default()
+    };
+    let args = build_analyze_args(&params).unwrap();
+    let count = args
+        .iter()
+        .filter(|a| *a == "--boundary-violations")
+        .count();
+    assert_eq!(
+        count, 1,
+        "boundary_violations convenience param is skipped when issue_types already includes it"
+    );
+}
+
+#[test]
+fn analyze_args_boundary_violations_emitted_when_not_in_issue_types() {
+    // boundary_violations=true with other issue_types (not boundary-violations) should still emit the flag
+    let params = AnalyzeParams {
+        boundary_violations: Some(true),
+        issue_types: Some(vec!["unused-files".to_string()]),
+        ..Default::default()
+    };
+    let args = build_analyze_args(&params).unwrap();
+    assert!(args.contains(&"--boundary-violations".to_string()));
+    assert!(args.contains(&"--unused-files".to_string()));
+}
+
+// ── Argument building: project_info section flags ───────────────
+
+#[test]
+fn project_info_args_section_flags() {
+    let params = ProjectInfoParams {
+        entry_points: Some(true),
+        files: Some(true),
+        plugins: Some(true),
+        boundaries: Some(true),
+        ..Default::default()
+    };
+    let args = build_project_info_args(&params);
+    assert!(args.contains(&"--entry-points".to_string()));
+    assert!(args.contains(&"--files".to_string()));
+    assert!(args.contains(&"--plugins".to_string()));
+    assert!(args.contains(&"--boundaries".to_string()));
+}
+
+#[test]
+fn project_info_args_section_flags_false_are_omitted() {
+    let params = ProjectInfoParams {
+        entry_points: Some(false),
+        files: Some(false),
+        plugins: Some(false),
+        boundaries: Some(false),
+        ..Default::default()
+    };
+    let args = build_project_info_args(&params);
+    assert!(!args.contains(&"--entry-points".to_string()));
+    assert!(!args.contains(&"--files".to_string()));
+    assert!(!args.contains(&"--plugins".to_string()));
+    assert!(!args.contains(&"--boundaries".to_string()));
 }

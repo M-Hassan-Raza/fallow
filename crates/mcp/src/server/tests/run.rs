@@ -84,7 +84,7 @@ async fn run_fallow_exit_code_1_empty_stdout_returns_empty_json() {
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_2_with_stderr_returns_error() {
+async fn run_fallow_exit_code_2_with_stderr_returns_structured_json_error() {
     let result = run_fallow(
         "/bin/sh",
         &[
@@ -96,19 +96,35 @@ async fn run_fallow_exit_code_2_with_stderr_returns_error() {
     .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
-    assert!(text.contains("exited with code 2"));
-    assert!(text.contains("invalid config"));
+    // Error is now structured JSON
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    assert_eq!(parsed["error"], true);
+    assert_eq!(parsed["exit_code"], 2);
+    assert!(
+        parsed["message"]
+            .as_str()
+            .unwrap()
+            .contains("invalid config")
+    );
 }
 
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_exit_code_2_empty_stderr_returns_generic_error() {
+async fn run_fallow_exit_code_2_empty_stderr_returns_structured_json_error() {
     let result = run_fallow("/bin/sh", &["-c".to_string(), "exit 2".to_string()])
         .await
         .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
-    assert_eq!(text, "fallow exited with code 2");
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    assert_eq!(parsed["error"], true);
+    assert_eq!(parsed["exit_code"], 2);
+    assert!(
+        parsed["message"]
+            .as_str()
+            .unwrap()
+            .contains("exited with code 2")
+    );
 }
 
 #[cfg(unix)]
@@ -119,7 +135,8 @@ async fn run_fallow_high_exit_code_returns_error() {
         .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
-    assert!(text.contains("127"));
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    assert_eq!(parsed["exit_code"], 127);
 }
 
 #[cfg(unix)]
@@ -135,8 +152,10 @@ async fn run_fallow_stderr_is_trimmed_in_error_message() {
     .await
     .unwrap();
     let text = extract_text(&result);
-    // Verify stderr is trimmed (no trailing whitespace/newline)
-    assert!(text.ends_with("whitespace around"));
+    // Verify stderr is trimmed in the structured JSON message
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    let msg = parsed["message"].as_str().unwrap();
+    assert!(msg.ends_with("whitespace around"));
 }
 
 // ── resolve_binary ────────────────────────────────────────────────
@@ -172,8 +191,9 @@ async fn run_fallow_killed_by_signal_returns_error_with_negative_code() {
         .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
-    // On signal kill, exit code is None → unwrap_or(-1) → "exited with code -1"
-    assert!(text.contains("-1") || text.contains("exited with code"));
+    // On signal kill, exit code is None → unwrap_or(-1) → structured JSON with exit_code: -1
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    assert_eq!(parsed["exit_code"], -1);
 }
 
 // ── run_fallow: exit code 1 with both stdout and stderr ───────────
@@ -250,8 +270,10 @@ async fn run_fallow_multiline_stderr_in_error() {
     .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
-    assert!(text.contains("error line 1"));
-    assert!(text.contains("error line 2"));
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    let msg = parsed["message"].as_str().unwrap();
+    assert!(msg.contains("error line 1"));
+    assert!(msg.contains("error line 2"));
 }
 
 // ── run_fallow: result always has exactly one content item ─────────
@@ -321,7 +343,9 @@ async fn run_fallow_unicode_in_stderr_error() {
     .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
-    assert!(text.contains("ungültige Konfiguration"));
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    let msg = parsed["message"].as_str().unwrap();
+    assert!(msg.contains("ungültige Konfiguration"));
 }
 
 // ── run_fallow: exit code boundary values ─────────────────────────
@@ -334,7 +358,8 @@ async fn run_fallow_exit_code_255() {
         .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
-    assert!(text.contains("255"));
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    assert_eq!(parsed["exit_code"], 255);
 }
 
 // ── run_fallow: large stderr output ───────────────────────────────
@@ -354,8 +379,10 @@ async fn run_fallow_large_stderr_in_error() {
     .unwrap();
     assert_eq!(result.is_error, Some(true));
     let text = extract_text(&result);
-    assert!(text.contains("error line 1"));
-    assert!(text.contains("error line 100"));
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("error should be valid JSON");
+    let msg = parsed["message"].as_str().unwrap();
+    assert!(msg.contains("error line 1"));
+    assert!(msg.contains("error line 100"));
 }
 
 // ── run_fallow: stdout with trailing whitespace ───────────────────
@@ -410,4 +437,73 @@ async fn run_fallow_stdin_is_not_inherited() {
     .unwrap();
     assert_eq!(result.is_error, Some(false));
     assert_eq!(extract_text(&result), "{}");
+}
+
+// ── run_fallow: timeout ───────────────────────────────────────────
+
+#[cfg(unix)]
+#[tokio::test]
+#[expect(unsafe_code, reason = "env var mutation requires unsafe")]
+async fn run_fallow_timeout_returns_mcp_error() {
+    // Set a very short timeout to trigger it reliably.
+    // Note: env var mutation can race with parallel tests that call timeout_duration().
+    // In practice the 1s window is narrow and no other test depends on this env var.
+    // SAFETY: test-only, sequential env access within this function
+    unsafe { std::env::set_var("FALLOW_TIMEOUT_SECS", "1") };
+
+    let result = run_fallow("/bin/sh", &["-c".to_string(), "sleep 10".to_string()]).await;
+
+    // SAFETY: test-only cleanup
+    unsafe { std::env::remove_var("FALLOW_TIMEOUT_SECS") };
+
+    assert!(result.is_err(), "timeout should produce an MCP error");
+    let err = result.unwrap_err();
+    assert!(err.message.contains("timed out"));
+    assert!(err.message.contains("FALLOW_TIMEOUT_SECS"));
+}
+
+// ── run_fallow: structured JSON error pass-through ────────────────
+
+#[cfg(unix)]
+#[tokio::test]
+async fn run_fallow_exit_code_2_with_json_stdout_passes_through() {
+    // When CLI outputs structured JSON error on stdout (--format json behavior),
+    // the MCP server should pass it through instead of reconstructing from stderr.
+    let result = run_fallow(
+        "/bin/sh",
+        &[
+            "-c".to_string(),
+            r#"echo '{"error":true,"message":"config not found","exit_code":2}'; exit 2"#
+                .to_string(),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let text = extract_text(&result);
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("should be valid JSON");
+    assert_eq!(parsed["error"], true);
+    assert_eq!(parsed["message"], "config not found");
+    assert_eq!(parsed["exit_code"], 2);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn run_fallow_exit_code_2_prefers_json_stdout_over_stderr() {
+    // When both stdout (JSON) and stderr exist, stdout JSON should win.
+    let result = run_fallow(
+        "/bin/sh",
+        &[
+            "-c".to_string(),
+            r#"echo '{"error":true,"message":"structured error","exit_code":2}'; echo 'raw stderr msg' >&2; exit 2"#.to_string(),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let text = extract_text(&result);
+    let parsed: serde_json::Value = serde_json::from_str(text).expect("should be valid JSON");
+    // Should use the structured stdout, not the raw stderr
+    assert_eq!(parsed["message"], "structured error");
+    assert!(!text.contains("raw stderr msg"));
 }

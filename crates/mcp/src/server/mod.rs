@@ -5,12 +5,12 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, FindDupesParams, FixParams, HealthParams,
-    ProjectInfoParams,
+    ListBoundariesParams, ProjectInfoParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args, build_find_dupes_args,
-    build_fix_apply_args, build_fix_preview_args, build_health_args, build_project_info_args,
-    run_fallow,
+    build_fix_apply_args, build_fix_preview_args, build_health_args, build_list_boundaries_args,
+    build_project_info_args, run_fallow,
 };
 
 #[cfg(test)]
@@ -59,7 +59,7 @@ fn resolve_binary() -> String {
 #[tool_router]
 impl FallowMcp {
     #[tool(
-        description = "Analyze a TypeScript/JavaScript project for unused code and circular dependencies. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, and boundary violations. Returns structured JSON with all issues found, grouped by issue type. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baseline comparisons (baseline/save_baseline), regression detection (fail_on_regression, tolerance, regression_baseline, save_regression_baseline), and performance tuning (no_cache, threads).",
+        description = "Analyze a TypeScript/JavaScript project for unused code and circular dependencies. Detects unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted dependencies, duplicate exports, circular dependencies, and boundary violations. Returns structured JSON with all issues found, grouped by issue type. For code duplication use find_dupes, for complexity hotspots use check_health. Supports baseline comparisons (baseline/save_baseline), regression detection (fail_on_regression, tolerance, regression_baseline, save_regression_baseline), and performance tuning (no_cache, threads). Set boundary_violations=true to check only architecture boundary violations (convenience alias for issue_types: [\"boundary-violations\"]).",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn analyze(&self, params: Parameters<AnalyzeParams>) -> Result<CallToolResult, McpError> {
@@ -147,6 +147,18 @@ impl FallowMcp {
         let args = build_audit_args(&params.0);
         run_fallow(&self.binary, &args).await
     }
+
+    #[tool(
+        description = "List architecture boundary zones and access rules configured for the project. Returns zone definitions (name, glob patterns, matched file count) and access rules (which zones may import from which). If boundaries are not configured, returns {\"configured\": false} — in that case, boundary violation checks will find no issues and can be skipped. Use this to understand the project's architecture constraints before running analysis.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn list_boundaries(
+        &self,
+        params: Parameters<ListBoundariesParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = build_list_boundaries_args(&params.0);
+        run_fallow(&self.binary, &args).await
+    }
 }
 
 // ── ServerHandler ──────────────────────────────────────────────────
@@ -165,7 +177,8 @@ impl ServerHandler for FallowMcp {
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \
                  check_health (code complexity metrics), \
-                 audit (combined dead-code + complexity + duplication for changed files, returns verdict).",
+                 audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
+                 list_boundaries (architecture boundary zones and access rules).",
             )
     }
 }

@@ -30,7 +30,7 @@ These interfaces are covered by semver — breaking changes only happen in major
 - **Bare command flags**: `--only`, `--skip` (select which analyses to run)
 - **Health flags**: `--score` (project health score 0-100 with letter grade), `--min-score` (CI quality gate), `--targets` (refactoring recommendations), `--save-snapshot` (saves vital signs snapshot for trend tracking), `--trend` (compare against most recent snapshot)
 - **Init flags**: `--toml`, `--hooks` (scaffold pre-commit git hook), `--base` (base branch for hook)
-- **Environment variables**: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN`
+- **Environment variables**: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN`, `FALLOW_TIMEOUT_SECS`
 
 ### External plugin format
 

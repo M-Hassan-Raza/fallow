@@ -21,6 +21,11 @@ pub struct AnalyzeParams {
     /// unlisted-deps, duplicate-exports, circular-deps, boundary-violations.
     pub issue_types: Option<Vec<String>>,
 
+    #[schemars(
+        description = "Set to true to check only boundary violations. Convenience alias for issue_types: [\"boundary-violations\"]"
+    )]
+    pub boundary_violations: Option<bool>,
+
     /// Compare results against a saved baseline file. Only new issues (not in the baseline) are reported.
     pub baseline: Option<String>,
 
@@ -133,6 +138,11 @@ pub struct FindDupesParams {
 
     /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
+
+    #[schemars(
+        description = "Only report issues in files changed since this git ref (branch, tag, or commit SHA)"
+    )]
+    pub changed_since: Option<String>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -163,6 +173,15 @@ pub struct ProjectInfoParams {
 
     /// Path to fallow config file.
     pub config: Option<String>,
+
+    #[schemars(description = "Show detected entry points")]
+    pub entry_points: Option<bool>,
+    #[schemars(description = "Show all discovered source files")]
+    pub files: Option<bool>,
+    #[schemars(description = "Show active framework plugins")]
+    pub plugins: Option<bool>,
+    #[schemars(description = "Show architecture boundary zones, rules, and per-zone file counts")]
+    pub boundaries: Option<bool>,
 
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
@@ -267,5 +286,18 @@ pub struct AuditParams {
     pub no_cache: Option<bool>,
 
     /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
+/// Parameters for `list_boundaries`.
+#[derive(Debug, Default, serde::Deserialize, schemars::JsonSchema)]
+pub struct ListBoundariesParams {
+    #[schemars(description = "Project root directory (defaults to current working directory)")]
+    pub root: Option<String>,
+    #[schemars(description = "Path to a fallow config file")]
+    pub config: Option<String>,
+    #[schemars(description = "Disable the incremental parse cache")]
+    pub no_cache: Option<bool>,
+    #[schemars(description = "Number of threads for file parsing (defaults to CPU core count)")]
     pub threads: Option<usize>,
 }

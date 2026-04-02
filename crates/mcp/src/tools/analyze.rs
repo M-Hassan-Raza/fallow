@@ -25,6 +25,15 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
     if let Some(ref workspace) = params.workspace {
         args.extend(["--workspace".to_string(), workspace.clone()]);
     }
+    // Add boundary_violations convenience param only if issue_types doesn't
+    // already include it — clap rejects duplicate boolean flags.
+    let types_has_boundaries = params
+        .issue_types
+        .as_ref()
+        .is_some_and(|types| types.iter().any(|t| t == "boundary-violations"));
+    if params.boundary_violations == Some(true) && !types_has_boundaries {
+        args.push("--boundary-violations".to_string());
+    }
     if let Some(ref types) = params.issue_types {
         for t in types {
             if let Some(&(_, flag)) = ISSUE_TYPE_FLAGS.iter().find(|&&(name, _)| name == t) {

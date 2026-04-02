@@ -15,6 +15,18 @@ pub fn build_project_info_args(params: &ProjectInfoParams) -> Vec<String> {
     if let Some(ref config) = params.config {
         args.extend(["--config".to_string(), config.clone()]);
     }
+    if params.entry_points == Some(true) {
+        args.push("--entry-points".to_string());
+    }
+    if params.files == Some(true) {
+        args.push("--files".to_string());
+    }
+    if params.plugins == Some(true) {
+        args.push("--plugins".to_string());
+    }
+    if params.boundaries == Some(true) {
+        args.push("--boundaries".to_string());
+    }
     if params.no_cache == Some(true) {
         args.push("--no-cache".to_string());
     }

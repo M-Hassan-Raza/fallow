@@ -643,7 +643,8 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
 
     if let Some(ref dupes) = result.dupes {
         match serde_json::to_value(&dupes.report) {
-            Ok(json) => {
+            Ok(mut json) => {
+                report::inject_dupes_actions(&mut json);
                 obj.insert("duplication".into(), json);
             }
             Err(e) => {
@@ -658,7 +659,8 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
 
     if let Some(ref health) = result.health {
         match serde_json::to_value(&health.report) {
-            Ok(json) => {
+            Ok(mut json) => {
+                report::inject_health_actions(&mut json);
                 obj.insert("complexity".into(), json);
             }
             Err(e) => {

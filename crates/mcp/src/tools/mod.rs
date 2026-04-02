@@ -4,6 +4,7 @@ mod check_changed;
 mod dupes;
 mod fix;
 mod health;
+mod list_boundaries;
 mod project_info;
 
 pub use analyze::build_analyze_args;
@@ -12,13 +13,18 @@ pub use check_changed::build_check_changed_args;
 pub use dupes::build_find_dupes_args;
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
 pub use health::build_health_args;
+pub use list_boundaries::build_list_boundaries_args;
 pub use project_info::build_project_info_args;
 
 use std::process::Stdio;
+use std::time::Duration;
 
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, Content};
 use tokio::process::Command;
+
+/// Default subprocess timeout in seconds.
+const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
 /// Issue type flag names mapped to their CLI flags.
 pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
@@ -38,24 +44,50 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
 /// Valid detection modes for the `find_dupes` tool.
 pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];
 
+/// Read the subprocess timeout from `FALLOW_TIMEOUT_SECS` or fall back to the default.
+fn timeout_duration() -> Duration {
+    std::env::var("FALLOW_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map_or(
+            Duration::from_secs(DEFAULT_TIMEOUT_SECS),
+            Duration::from_secs,
+        )
+}
+
 /// Execute the fallow CLI binary with the given arguments and return the result.
 pub async fn run_fallow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
-    let output = Command::new(binary)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .output()
-        .await
-        .map_err(|e| {
-            McpError::internal_error(
-                format!(
-                    "Failed to execute fallow binary '{binary}': {e}. \
-                     Ensure fallow is installed and available in PATH, \
-                     or set the FALLOW_BIN environment variable."
-                ),
-                None,
-            )
-        })?;
+    let timeout = timeout_duration();
+
+    let output = tokio::time::timeout(
+        timeout,
+        Command::new(binary)
+            .args(args)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output(),
+    )
+    .await
+    .map_err(|_| {
+        McpError::internal_error(
+            format!(
+                "fallow subprocess timed out after {}s. \
+                 Set FALLOW_TIMEOUT_SECS to increase the limit.",
+                timeout.as_secs()
+            ),
+            None,
+        )
+    })?
+    .map_err(|e| {
+        McpError::internal_error(
+            format!(
+                "Failed to execute fallow binary '{binary}': {e}. \
+                 Ensure fallow is installed and available in PATH, \
+                 or set the FALLOW_BIN environment variable."
+            ),
+            None,
+        )
+    })?;
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -73,14 +105,32 @@ pub async fn run_fallow(binary: &str, args: &[String]) -> Result<CallToolResult,
             return Ok(CallToolResult::success(vec![Content::text(text)]));
         }
 
-        // Exit code 2 = real error (invalid config, etc.)
-        let error_msg = if stderr.is_empty() {
+        // Exit code 2+ = real error. The CLI emits structured JSON on stdout
+        // when --format json is active; prefer that over reconstructing from stderr.
+        // Invariant: stdout on error exit is either valid JSON or empty — never
+        // partial or non-JSON output. If a plugin/hook corrupts stdout, we fall
+        // through to the stderr reconstruction path below.
+        if !stdout.is_empty() && serde_json::from_str::<serde_json::Value>(&stdout).is_ok() {
+            return Ok(CallToolResult::error(vec![Content::text(
+                stdout.to_string(),
+            )]));
+        }
+
+        let message = if stderr.is_empty() {
             format!("fallow exited with code {exit_code}")
         } else {
-            format!("fallow exited with code {exit_code}: {}", stderr.trim())
+            stderr.trim().to_string()
         };
 
-        return Ok(CallToolResult::error(vec![Content::text(error_msg)]));
+        let error_json = serde_json::json!({
+            "error": true,
+            "message": message,
+            "exit_code": exit_code,
+        });
+
+        return Ok(CallToolResult::error(vec![Content::text(
+            error_json.to_string(),
+        )]));
     }
 
     if stdout.is_empty() {

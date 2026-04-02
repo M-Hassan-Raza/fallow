@@ -532,3 +532,85 @@ fn audit_params_with_all_fields() {
     assert_eq!(params.no_cache, Some(true));
     assert_eq!(params.threads, Some(8));
 }
+
+// ── ListBoundariesParams ────────────────────────────────────────
+
+#[test]
+fn list_boundaries_params_minimal() {
+    let params: ListBoundariesParams = serde_json::from_str("{}").unwrap();
+    assert!(params.root.is_none());
+    assert!(params.config.is_none());
+    assert!(params.no_cache.is_none());
+    assert!(params.threads.is_none());
+}
+
+#[test]
+fn list_boundaries_params_full() {
+    let json = r#"{
+        "root": "/project",
+        "config": ".fallowrc.json",
+        "no_cache": true,
+        "threads": 4
+    }"#;
+    let params: ListBoundariesParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.root.as_deref(), Some("/project"));
+    assert_eq!(params.config.as_deref(), Some(".fallowrc.json"));
+    assert_eq!(params.no_cache, Some(true));
+    assert_eq!(params.threads, Some(4));
+}
+
+// ── FindDupesParams: changed_since deserialization ───────────────
+
+#[test]
+fn find_dupes_params_changed_since_deserialize() {
+    let json = r#"{"changed_since": "main"}"#;
+    let params: FindDupesParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.changed_since.as_deref(), Some("main"));
+}
+
+#[test]
+fn find_dupes_params_changed_since_missing_is_none() {
+    let params: FindDupesParams = serde_json::from_str("{}").unwrap();
+    assert!(params.changed_since.is_none());
+}
+
+// ── AnalyzeParams: boundary_violations deserialization ───────────
+
+#[test]
+fn analyze_params_boundary_violations_true_deserialize() {
+    let json = r#"{"boundary_violations": true}"#;
+    let params: AnalyzeParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.boundary_violations, Some(true));
+}
+
+#[test]
+fn analyze_params_boundary_violations_missing_is_none() {
+    let params: AnalyzeParams = serde_json::from_str("{}").unwrap();
+    assert!(params.boundary_violations.is_none());
+}
+
+// ── ProjectInfoParams: section flags deserialization ─────────────
+
+#[test]
+fn project_info_params_section_flags_deserialize() {
+    let json = r#"{
+        "entry_points": true,
+        "files": true,
+        "plugins": true,
+        "boundaries": true
+    }"#;
+    let params: ProjectInfoParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.entry_points, Some(true));
+    assert_eq!(params.files, Some(true));
+    assert_eq!(params.plugins, Some(true));
+    assert_eq!(params.boundaries, Some(true));
+}
+
+#[test]
+fn project_info_params_section_flags_missing_are_none() {
+    let params: ProjectInfoParams = serde_json::from_str("{}").unwrap();
+    assert!(params.entry_points.is_none());
+    assert!(params.files.is_none());
+    assert!(params.plugins.is_none());
+    assert!(params.boundaries.is_none());
+}
