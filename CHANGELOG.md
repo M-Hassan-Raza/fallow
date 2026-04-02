@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.1] - 2026-04-02
+
+### Fixed
+
+- **Deterministic output ordering** -- all result arrays are now sorted after parallel collection, ensuring identical JSON/SARIF/CodeClimate output across runs. Previously, rayon parallelism caused item ordering to vary between invocations.
+- **Symlink canonical index warning** -- downgraded noisy symlink resolution warning to debug level.
+- **GitHub Action scoping** -- PR comments and annotations now correctly scope to changed files when `--changed-since` is active.
+
+### Changed
+
+- **Performance** -- `OutputFormat`, `MemberKind`, and `DupesMode` enums now derive `Copy`, eliminating unnecessary clones and reference indirection across 20 CLI files.
+
+### Internal
+
+- Split 5 large modules into focused submodules: `regression.rs` (5 modules), `diagnostics.rs` (4 modules), `health_types.rs` (5 modules), plus 3 monolith test files into 30 modules.
+- Extracted helper functions from 4 long CLI command functions (1,001 → 365 lines).
+- Added 103 unit tests to the config crate (287 → 390 tests).
+- Added module-level documentation to all `graph/resolve/` submodules.
+
 ## [2.9.0] - 2026-04-01
 
 ### Added
@@ -683,7 +702,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.9.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.9.1...HEAD
+[2.9.1]: https://github.com/fallow-rs/fallow/compare/v2.9.0...v2.9.1
 [2.9.0]: https://github.com/fallow-rs/fallow/compare/v2.8.1...v2.9.0
 [2.8.1]: https://github.com/fallow-rs/fallow/compare/v2.8.0...v2.8.1
 [2.8.0]: https://github.com/fallow-rs/fallow/compare/v2.7.3...v2.8.0
