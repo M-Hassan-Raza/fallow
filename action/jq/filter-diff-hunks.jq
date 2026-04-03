@@ -25,9 +25,15 @@ def parse_hunks:
     ]
   end;
 
+# Normalize $pr_files: --slurpfile wraps contents in an outer array
+# ([[{file1}, ...]]); --argjson passes the array directly ([{file1}, ...]).
+# Detect by checking if the first element is itself an array.
+(if ($pr_files | length) > 0 and ($pr_files[0] | type) == "array"
+ then $pr_files[0] else $pr_files end) as $files |
+
 # Build lookup: { "path": [{start, end}, ...] } for files WITH a patch.
 # Files without patches are absent from this map (fail-open).
-($pr_files
+($files
   | map(select(.patch != null and (.patch | length) > 0))
   | map({ key: .filename, value: (.patch | parse_hunks) })
   | from_entries

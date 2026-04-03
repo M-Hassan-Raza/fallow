@@ -568,6 +568,14 @@ DELETED_COMMENTS='[{"type": "other", "path": "src/gone.ts", "line": 1, "body": "
 OUT=$(echo "$DELETED_COMMENTS" | jq --argjson pr_files "$DELETED_PR" -f "$JQ_DIR/filter-diff-hunks.jq" 2>&1)
 assert_json_length "$OUT" "0" "deleted file (count=0): no new-side lines, comment removed"
 
+echo "  --slurpfile format (outer array wrapper):"
+SLURP_TMP=$(mktemp)
+echo "$PR_FILES" > "$SLURP_TMP"
+OUT=$(echo "$COMMENTS" | jq --slurpfile pr_files "$SLURP_TMP" -f "$JQ_DIR/filter-diff-hunks.jq" 2>&1)
+rm -f "$SLURP_TMP"
+assert_valid_json "$OUT" "slurpfile produces valid JSON"
+assert_json_length "$OUT" "6" "slurpfile: same result as argjson (6 of 8 kept)"
+
 # --- Review body with filtered counts ---
 
 echo ""

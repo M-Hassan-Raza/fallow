@@ -113,16 +113,21 @@ MERGED=$(echo "$COMMENTS" | jq --argjson max "$MAX" -f "${ACTION_JQ_DIR}/merge-c
 # up-front avoids the batch-422-then-retry-one-by-one fallback path entirely.
 # Fail-open: if PR files can't be fetched or a file has no patch, keep all its comments.
 PRE_FILTER_COUNT=$(echo "$COMMENTS" | jq 'length' 2>/dev/null || echo 0)
-PR_FILES=$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/files?per_page=100" --paginate 2>/dev/null \
-  | jq -s 'add // []' 2>/dev/null) || {
+PR_FILES_TMP=$(mktemp)
+gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}/files?per_page=100" --paginate 2>/dev/null \
+  | jq -s 'add // []' > "$PR_FILES_TMP" 2>/dev/null || {
   echo "::warning::Hunk filtering disabled — could not fetch PR files; some comments may be rejected by GitHub"
-  PR_FILES='[]'
+  echo '[]' > "$PR_FILES_TMP"
 }
-if echo "$PR_FILES" | jq -e 'length > 0' > /dev/null 2>&1; then
-  FILTERED=$(echo "$COMMENTS" | jq --argjson pr_files "$PR_FILES" -f "${ACTION_JQ_DIR}/filter-diff-hunks.jq" 2>&1) \
+if jq -e 'length > 0' "$PR_FILES_TMP" > /dev/null 2>&1; then
+  # Use --slurpfile to avoid ARG_MAX limits on large PRs (--argjson inlines the
+  # entire PR files JSON on the command line, which exceeds the limit for 100+ files).
+  # --slurpfile wraps contents in an outer array; the jq script normalizes this.
+  FILTERED=$(echo "$COMMENTS" | jq --slurpfile pr_files "$PR_FILES_TMP" -f "${ACTION_JQ_DIR}/filter-diff-hunks.jq" 2>&1) \
     && COMMENTS="$FILTERED" \
     || echo "::warning::Hunk filter failed, posting all comments: $FILTERED"
 fi
+rm -f "$PR_FILES_TMP"
 POST_FILTER_COUNT=$(echo "$COMMENTS" | jq 'length' 2>/dev/null || echo 0)
 FILTERED_OUT=$((PRE_FILTER_COUNT - POST_FILTER_COUNT))
 if [ "$FILTERED_OUT" -gt 0 ]; then
