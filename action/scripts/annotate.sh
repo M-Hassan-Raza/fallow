@@ -24,10 +24,21 @@ export PKG_MANAGER
 # Scope results to changed files when --changed-since is active
 RESULTS_FILE="fallow-results.json"
 if [ -n "${CHANGED_SINCE:-}" ]; then
-  _ROOT="${INPUT_ROOT:-.}"
-  CHANGED_FILES=$(cd "$_ROOT" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
-  if [ -n "$CHANGED_FILES" ]; then
-    CHANGED_JSON=$(echo "$CHANGED_FILES" | jq -R -s 'split("\n") | map(select(length > 0))')
+  CHANGED_JSON=""
+
+  # Prefer pre-computed list from analyze step (handles shallow clones via API fallback)
+  if [ -f fallow-changed-files.json ]; then
+    CHANGED_JSON=$(cat fallow-changed-files.json)
+  else
+    # Fallback: compute locally (for standalone usage outside the action)
+    _ROOT="${INPUT_ROOT:-.}"
+    CHANGED_FILES=$(cd "$_ROOT" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
+    if [ -n "$CHANGED_FILES" ]; then
+      CHANGED_JSON=$(echo "$CHANGED_FILES" | jq -R -s 'split("\n") | map(select(length > 0))')
+    fi
+  fi
+
+  if [ -n "$CHANGED_JSON" ] && [ "$CHANGED_JSON" != "[]" ]; then
     if jq --argjson changed "$CHANGED_JSON" -f "${ACTION_JQ_DIR}/filter-changed.jq" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
       RESULTS_FILE="fallow-results-scoped.json"
     fi

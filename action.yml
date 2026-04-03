@@ -218,7 +218,10 @@ runs:
         INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
         INPUT_AUTO_CHANGED_SINCE: ${{ inputs.auto-changed-since }}
         PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
         EVENT_NAME: ${{ github.event_name }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
         INPUT_BASELINE: ${{ inputs.baseline }}
         INPUT_SAVE_BASELINE: ${{ inputs.save-baseline }}
         INPUT_ARGS: ${{ inputs.args }}

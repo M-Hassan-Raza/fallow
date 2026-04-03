@@ -149,6 +149,47 @@ fi
 # Propagate the effective changed-since value so downstream steps can filter
 echo "changed_since=${INPUT_CHANGED_SINCE:-}" >> "$GITHUB_OUTPUT"
 
+# --- Pre-compute changed files list for downstream filtering ---
+# Downstream scripts (comment, summary, annotations, review) need the list of
+# changed files to scope results to the PR. On shallow clones (the default
+# actions/checkout depth), git diff against the base SHA fails. We compute the
+# list here once — trying git first, then the GitHub API — and save it for reuse.
+
+if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then
+  _ROOT="${INPUT_ROOT:-.}"
+  _CHANGED=""
+
+  # Try three-dot diff (precise: changes since merge-base, needs full history)
+  _CHANGED=$(cd "$_ROOT" && git diff --name-only --relative "${INPUT_CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
+
+  # Shallow clone fallback: fetch the base commit and try two-dot diff
+  if [ -z "$_CHANGED" ]; then
+    if ! git cat-file -e "${INPUT_CHANGED_SINCE}^{commit}" 2>/dev/null; then
+      git fetch --depth=1 origin "$INPUT_CHANGED_SINCE" 2>/dev/null || true
+    fi
+    _CHANGED=$(cd "$_ROOT" && git diff --name-only --relative "${INPUT_CHANGED_SINCE}" HEAD -- . 2>/dev/null || true)
+  fi
+
+  # Last resort: GitHub API (works regardless of clone depth)
+  if [ -z "$_CHANGED" ] && [ -n "${GH_TOKEN:-}" ] && [ -n "${PR_NUMBER:-}" ] && [ -n "${GH_REPO:-}" ]; then
+    _API_FILES=$(gh api --paginate "repos/${GH_REPO}/pulls/${PR_NUMBER}/files" --jq '.[].filename' 2>/dev/null || true)
+    if [ -n "$_API_FILES" ]; then
+      if [ "$_ROOT" != "." ]; then
+        # Strip root prefix — API returns repo-root-relative paths, fallow JSON uses root-relative
+        _CHANGED=$(echo "$_API_FILES" | sed -n "s|^${_ROOT}/||p")
+      else
+        _CHANGED="$_API_FILES"
+      fi
+    fi
+  fi
+
+  if [ -n "$_CHANGED" ]; then
+    echo "$_CHANGED" | jq -R -s 'split("\n") | map(select(length > 0))' > fallow-changed-files.json
+  else
+    echo "::warning::Could not determine changed files for --changed-since scoping. Use fetch-depth: 0 in actions/checkout for best results."
+  fi
+fi
+
 # --- Build and run main analysis ---
 
 ARGS=()
