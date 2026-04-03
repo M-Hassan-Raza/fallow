@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.11.0] - 2026-04-03
+
+### Added
+
+- **`--group-by owner|directory`** -- new global flag that groups all dead-code analysis output by team ownership (CODEOWNERS) or by first directory component. CODEOWNERS parser with auto-probe (`.github/CODEOWNERS`, `.gitlab/CODEOWNERS`, `docs/CODEOWNERS`), last-match-wins pattern matching, first-owner-on-line selection. All 6 output formats supported: human (colored group headers with summary line, per-type breakdown, matching rule annotations), JSON (grouped envelope with `groups` array), compact (group prefix per line), markdown (section headers per group), SARIF (`properties.owner`), CodeClimate (`owner` field).
+- **`codeowners` config field** -- optional path to a non-standard CODEOWNERS file in `.fallowrc.json` / `fallow.toml`.
+- **MCP `group_by` parameter** -- the `analyze` tool now accepts `group_by: "owner" | "directory"` to produce grouped JSON output.
+
+### Changed
+
+- **GitHub Action review comments** -- now filtered to PR diff hunks using `--slurpfile` for large PRs, preventing `ARG_MAX` crashes on PRs with 50+ changed files.
+- **GitHub Action review UX** -- improved hunk filtering to tolerate whitespace-only and context lines, with better fallback behavior when no hunk matches.
+
 ## [2.10.1] - 2026-04-03
 
 ### Changed
@@ -736,7 +749,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.10.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/fallow-rs/fallow/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/fallow-rs/fallow/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/fallow-rs/fallow/compare/v2.9.3...v2.10.0
 [2.9.3]: https://github.com/fallow-rs/fallow/compare/v2.9.2...v2.9.3
