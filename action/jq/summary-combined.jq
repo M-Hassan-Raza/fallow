@@ -26,7 +26,7 @@ else
   (if $health > 0 then ":warning: **\($health)** complex functions" else ":white_check_mark: Complexity" end) +
   "\n\n" +
 
-  # Dead code breakdown
+  # Code issues breakdown
   (if $check > 0 then
     "<details>\n<summary><strong>Code issues (\($check))</strong></summary>\n\n" +
     "| Category | Count |\n|:---------|------:|\n" +
