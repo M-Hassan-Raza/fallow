@@ -828,5 +828,4 @@ mod tests {
         let path_str = fixes[0]["path"].as_str().unwrap().replace('\\', "/");
         assert_eq!(path_str, "src/utils.ts");
     }
-
 }
