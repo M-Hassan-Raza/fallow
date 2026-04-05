@@ -44,7 +44,7 @@ impl RecommendationCategory {
     pub const fn label(&self) -> &'static str {
         match self {
             Self::UrgentChurnComplexity => "churn+complexity",
-            Self::BreakCircularDependency => "circular dep",
+            Self::BreakCircularDependency => "circular dependency",
             Self::SplitHighImpact => "high impact",
             Self::RemoveDeadCode => "dead code",
             Self::ExtractComplexFunctions => "complexity",

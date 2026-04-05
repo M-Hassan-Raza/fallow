@@ -167,12 +167,12 @@ fn render_health_score(lines: &mut Vec<String>, report: &crate::health_types::He
     if let Some(ud) = p.unused_deps
         && ud > 0.0
     {
-        parts.push(format!("unused deps -{ud:.1}"));
+        parts.push(format!("unused dependencies -{ud:.1}"));
     }
     if let Some(cd) = p.circular_deps
         && cd > 0.0
     {
-        parts.push(format!("circular deps -{cd:.1}"));
+        parts.push(format!("circular dependencies -{cd:.1}"));
     }
     if !parts.is_empty() {
         lines.push(format!(
@@ -339,12 +339,18 @@ fn render_vital_signs(lines: &mut Vec<String>, report: &crate::health_types::Hea
     if let Some(cd) = vs.circular_dep_count
         && cd > 0
     {
-        parts.push(format!("{cd} circular dep{}", plural(cd as usize)));
+        parts.push(format!(
+            "{cd} circular {}",
+            if cd == 1 { "dependency" } else { "dependencies" }
+        ));
     }
     if let Some(ud) = vs.unused_dep_count
         && ud > 0
     {
-        parts.push(format!("{ud} unused dep{}", plural(ud as usize)));
+        parts.push(format!(
+            "{ud} unused {}",
+            if ud == 1 { "dependency" } else { "dependencies" }
+        ));
     }
     lines.push(format!(
         "{} {} {}",
@@ -1125,8 +1131,8 @@ mod tests {
         assert!(text.contains("76 B"));
         assert!(text.contains("maintainability -4.0"));
         assert!(text.contains("hotspots -2.0"));
-        assert!(text.contains("unused deps -1.0"));
-        assert!(text.contains("circular deps -1.0"));
+        assert!(text.contains("unused dependencies -1.0"));
+        assert!(text.contains("circular dependencies -1.0"));
     }
 
     #[test]
@@ -1434,8 +1440,8 @@ mod tests {
         assert!(text.contains("p90 cyclomatic 12"));
         assert!(text.contains("maintainability 72.4"));
         assert!(text.contains("2 churn hotspots"));
-        assert!(text.contains("3 unused deps"));
-        assert!(text.contains("1 circular dep"));
+        assert!(text.contains("3 unused dependencies"));
+        assert!(text.contains("1 circular dependency"));
     }
 
     #[test]
@@ -1517,8 +1523,8 @@ mod tests {
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
         // Zero counts should not appear
-        assert!(!text.contains("unused dep"));
-        assert!(!text.contains("circular dep"));
+        assert!(!text.contains("unused dependenc"));
+        assert!(!text.contains("circular dependenc"));
     }
 
     #[test]
@@ -1541,9 +1547,9 @@ mod tests {
         let text = plain(&lines);
         assert!(text.contains("1 churn hotspot"));
         assert!(!text.contains("1 churn hotspots"));
-        assert!(text.contains("1 unused dep"));
-        assert!(!text.contains("1 unused deps"));
-        assert!(text.contains("2 circular deps"));
+        assert!(text.contains("1 unused dependency"));
+        assert!(!text.contains("1 unused dependencies"));
+        assert!(text.contains("2 circular dependencies"));
     }
 
     // ── render_file_scores ───────────────────────────────────────
@@ -1966,7 +1972,7 @@ mod tests {
             ),
             (
                 crate::health_types::RecommendationCategory::BreakCircularDependency,
-                "circular dep",
+                "circular dependency",
             ),
             (
                 crate::health_types::RecommendationCategory::SplitHighImpact,

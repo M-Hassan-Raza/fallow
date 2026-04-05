@@ -624,8 +624,8 @@ fn print_orientation_header(health: &HealthResult, check: Option<&CheckResult>) 
             && cd > 0
         {
             parts.push(format!(
-                "{cd} circular dep{}",
-                if cd == 1 { "" } else { "s" }
+                "{cd} circular {}",
+                if cd == 1 { "dependency" } else { "dependencies" }
             ));
         }
         if !parts.is_empty() {

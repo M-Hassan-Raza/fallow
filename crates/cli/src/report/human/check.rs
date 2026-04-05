@@ -1058,11 +1058,14 @@ fn build_summary_footer(
     let mut parts = Vec::new();
     let mut add = |count: usize, label: &str| {
         if count > 0 {
-            let display_label = if count == 1 && label.ends_with('s') {
-                // Singularize pre-pluralized labels: "enum members" → "enum member"
-                &label[..label.len() - 1]
+            let display_label = if count == 1 && label.ends_with("ies") {
+                // Singularize -ies plurals: "dependencies" → "dependency"
+                format!("{}y", &label[..label.len() - 3])
+            } else if count == 1 && label.ends_with('s') {
+                // Singularize simple plurals: "enum members" → "enum member"
+                label[..label.len() - 1].to_string()
             } else {
-                label
+                label.to_string()
             };
             let mut s = String::new();
             let _ = write!(s, "{count} {display_label}");
@@ -1085,15 +1088,15 @@ fn build_summary_footer(
         results.unused_types.len().saturating_sub(suppressed_types),
         "type",
     );
-    add(results.unused_dependencies.len(), "unused dep");
+    add(results.unused_dependencies.len(), "unused dependencies");
     add(
         results.unused_dev_dependencies.len() + results.unused_optional_dependencies.len(),
-        "dev/optional dep",
+        "dev/optional dependencies",
     );
     add(results.unused_enum_members.len(), "enum members");
     add(results.unused_class_members.len(), "class members");
     add(results.unresolved_imports.len(), "unresolved imports");
-    add(results.unlisted_dependencies.len(), "unlisted deps");
+    add(results.unlisted_dependencies.len(), "unlisted dependencies");
     // Count unique file-pairs (consistent with the section renderer's grouping)
     {
         let mut pair_set = rustc_hash::FxHashSet::default();
@@ -1110,9 +1113,9 @@ fn build_summary_footer(
         }
         add(pair_set.len(), "duplicate pair");
     }
-    add(results.type_only_dependencies.len(), "type-only deps");
-    add(results.test_only_dependencies.len(), "test-only deps");
-    add(results.circular_dependencies.len(), "circular deps");
+    add(results.type_only_dependencies.len(), "type-only dependencies");
+    add(results.test_only_dependencies.len(), "test-only dependencies");
+    add(results.circular_dependencies.len(), "circular dependencies");
     add(results.boundary_violations.len(), "violations");
 
     parts.join(" \u{00b7} ")
