@@ -33,11 +33,11 @@ cargo fmt --all -- --check
 ### Running locally
 
 ```bash
-cargo run -- check              # Unused code analysis
-cargo run -- dupes              # Duplication detection
-cargo run -- health             # Complexity metrics
-cargo run -- fix --dry-run      # Auto-fix preview
-cargo run -- list --plugins     # Show detected plugins
+cargo run --bin fallow -- dead-code       # Unused code analysis
+cargo run --bin fallow -- dupes           # Duplication detection
+cargo run --bin fallow -- health          # Complexity metrics
+cargo run --bin fallow -- fix --dry-run   # Auto-fix preview
+cargo run --bin fallow -- list --plugins  # Show detected plugins
 ```
 
 ### Benchmarks
