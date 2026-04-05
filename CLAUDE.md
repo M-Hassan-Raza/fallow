@@ -49,9 +49,9 @@ cargo build --workspace
 cargo test --workspace --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
-cargo run                       # Run all analyses (check + dupes + health)
-cargo run -- watch              # Watch mode
-cargo run -- fix --dry-run      # Auto-fix preview
+cargo run --bin fallow                       # Run all analyses (dead-code + dupes + health)
+cargo run --bin fallow -- watch              # Watch mode
+cargo run --bin fallow -- fix --dry-run      # Auto-fix preview
 ```
 
 ## Code conventions
