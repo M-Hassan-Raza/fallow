@@ -279,12 +279,12 @@ pub struct InitOptions<'a> {
     pub root: &'a Path,
     pub use_toml: bool,
     pub hooks: bool,
-    pub base: Option<&'a str>,
+    pub branch: Option<&'a str>,
 }
 
 pub fn run_init(opts: &InitOptions<'_>) -> ExitCode {
     if opts.hooks {
-        return run_init_hooks(opts.root, opts.base);
+        return run_init_hooks(opts.root, opts.branch);
     }
     run_init_config(opts.root, opts.use_toml)
 }
@@ -389,17 +389,17 @@ fn detect_default_branch(root: &Path) -> Option<String> {
     None
 }
 
-fn run_init_hooks(root: &Path, base: Option<&str>) -> ExitCode {
-    // Validate --base to prevent shell injection in the generated hook script.
-    if let Some(b) = base
+fn run_init_hooks(root: &Path, branch: Option<&str>) -> ExitCode {
+    // Validate --branch to prevent shell injection in the generated hook script.
+    if let Some(b) = branch
         && let Err(e) = validate::validate_git_ref(b)
     {
-        eprintln!("Error: invalid --base: {e}");
+        eprintln!("Error: invalid --branch: {e}");
         return ExitCode::from(2);
     }
 
-    // Determine the base ref: explicit --base > detected default branch > "main"
-    let base_ref = base
+    // Determine the base ref: explicit --branch > detected default branch > "main"
+    let base_ref = branch
         .map(String::from)
         .or_else(|| detect_default_branch(root))
         .unwrap_or_else(|| "main".to_string());
@@ -411,7 +411,7 @@ fn run_init_hooks(root: &Path, base: Option<&str>) -> ExitCode {
          # Bypass on a single commit with: git commit --no-verify\n\
          \n\
          command -v fallow >/dev/null 2>&1 || exit 0\n\
-         fallow check --changed-since {base_ref} --fail-on-issues --quiet\n"
+         fallow dead-code --changed-since {base_ref} --fail-on-issues --quiet\n"
     );
 
     // Detect hook target: husky > lefthook > simple-git-hooks > bare .git/hooks
@@ -444,7 +444,7 @@ fn run_init_hooks(root: &Path, base: Option<&str>) -> ExitCode {
                 eprintln!(
                     "Error: .husky/pre-commit already exists. \
                      Add the following line to your existing hook:\n\n  \
-                     fallow check --changed-since {base_ref} --fail-on-issues --quiet"
+                     fallow dead-code --changed-since {base_ref} --fail-on-issues --quiet"
                 );
                 return ExitCode::from(2);
             }
@@ -458,7 +458,7 @@ fn run_init_hooks(root: &Path, base: Option<&str>) -> ExitCode {
             eprintln!(
                 "Lefthook detected. Add the following to your lefthook.yml:\n\n  \
                  pre-commit:\n    commands:\n      fallow:\n        \
-                 run: fallow check --changed-since {base_ref} --fail-on-issues --quiet"
+                 run: fallow dead-code --changed-since {base_ref} --fail-on-issues --quiet"
             );
             return ExitCode::SUCCESS;
         }
@@ -467,7 +467,7 @@ fn run_init_hooks(root: &Path, base: Option<&str>) -> ExitCode {
                 eprintln!(
                     "Error: .git/hooks/pre-commit already exists. \
                      Add the following line to your existing hook:\n\n  \
-                     fallow check --changed-since {base_ref} --fail-on-issues --quiet"
+                     fallow dead-code --changed-since {base_ref} --fail-on-issues --quiet"
                 );
                 return ExitCode::from(2);
             }
@@ -479,7 +479,7 @@ fn run_init_hooks(root: &Path, base: Option<&str>) -> ExitCode {
         }
     }
 
-    eprintln!("\nThe hook runs `fallow check` on files changed since `{base_ref}`.");
+    eprintln!("\nThe hook runs `fallow dead-code` on files changed since `{base_ref}`.");
     eprintln!("To skip the hook on a single commit: git commit --no-verify");
     ExitCode::SUCCESS
 }
@@ -534,16 +534,16 @@ mod tests {
             root,
             use_toml,
             hooks: false,
-            base: None,
+            branch: None,
         }
     }
 
-    fn hooks_opts<'a>(root: &'a Path, base: Option<&'a str>) -> InitOptions<'a> {
+    fn hooks_opts<'a>(root: &'a Path, branch: Option<&'a str>) -> InitOptions<'a> {
         InitOptions {
             root,
             use_toml: false,
             hooks: true,
-            base,
+            branch,
         }
     }
 
@@ -660,14 +660,14 @@ mod tests {
         let hook_path = root.join(".git/hooks/pre-commit");
         assert!(hook_path.exists());
         let content = std::fs::read_to_string(&hook_path).unwrap();
-        assert!(content.contains("fallow check"));
+        assert!(content.contains("fallow dead-code"));
         assert!(content.contains("--changed-since"));
         assert!(content.contains("--fail-on-issues"));
         assert!(content.contains("command -v fallow"));
     }
 
     #[test]
-    fn hooks_uses_custom_base_ref() {
+    fn hooks_uses_custom_branch_ref() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
@@ -726,7 +726,7 @@ mod tests {
     }
 
     #[test]
-    fn hooks_rejects_malicious_base_ref() {
+    fn hooks_rejects_malicious_branch_ref() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
