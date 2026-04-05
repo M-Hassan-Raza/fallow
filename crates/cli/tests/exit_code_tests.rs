@@ -62,10 +62,15 @@ fn combined_human_output_labels_metrics_line() {
         "combined human output should not crash, got exit code {}",
         output.code
     );
+    let metrics_line = output
+        .stderr
+        .lines()
+        .find(|line| line.contains("dead files"))
+        .expect("combined human output should include the orientation metrics line");
     assert!(
-        output.stderr.contains("Metrics:"),
-        "combined human output should label the metrics line. stderr: {}",
-        output.stderr
+        metrics_line.trim_start().starts_with("■ Metrics:"),
+        "combined human output should label the orientation metrics line. line: {metrics_line}\nstderr: {}",
+        output.stderr,
     );
 }
 
