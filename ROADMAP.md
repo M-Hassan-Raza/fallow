@@ -1,6 +1,6 @@
 # Fallow Roadmap
 
-> Last updated: 2026-04-05
+> Last updated: 2026-04-06
 
 AI agents write more code than ever. They rarely clean up after themselves. Every generated file, every scaffolded export, every copied utility accumulates until your codebase is half dead weight.
 
