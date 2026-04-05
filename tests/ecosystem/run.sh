@@ -126,14 +126,14 @@ run_fallow() {
 
     # Run fallow with a timeout (5 minutes per project)
     if command -v timeout &>/dev/null; then
-        timeout 300 "$FALLOW_BIN" check --format json --root "$project_dir" \
+        timeout 300 "$FALLOW_BIN" dead-code --format json --root "$project_dir" \
             > "$output_file" 2>&1 || exit_code=$?
     elif command -v gtimeout &>/dev/null; then
-        gtimeout 300 "$FALLOW_BIN" check --format json --root "$project_dir" \
+        gtimeout 300 "$FALLOW_BIN" dead-code --format json --root "$project_dir" \
             > "$output_file" 2>&1 || exit_code=$?
     else
         # No timeout command available, run without timeout
-        "$FALLOW_BIN" check --format json --root "$project_dir" \
+        "$FALLOW_BIN" dead-code --format json --root "$project_dir" \
             > "$output_file" 2>&1 || exit_code=$?
     fi
 
