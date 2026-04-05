@@ -34,6 +34,10 @@ fn list_show_all_json_includes_plugins_files_and_entry_points() {
         json.get("entry_point_count").is_some(),
         "missing 'entry_point_count' key"
     );
+    assert!(
+        json.get("boundaries").is_none(),
+        "show_all mode should omit 'boundaries' unless --boundaries is requested"
+    );
 }
 
 #[test]
@@ -112,6 +116,23 @@ fn list_entry_points_only_json_omits_plugins_and_files() {
     assert!(
         json.get("entry_point_count").is_some(),
         "should include 'entry_point_count'"
+    );
+}
+
+#[test]
+fn list_show_all_json_omits_boundaries_even_when_configured() {
+    let output = run_list("boundary-violations", &["--format", "json"]);
+    assert_eq!(output.code, 0);
+
+    let json = parse_json(&output);
+    assert!(
+        json.get("boundaries").is_none(),
+        "show_all mode should not include boundaries without --boundaries"
+    );
+    assert!(json.get("files").is_some(), "show_all mode should still include files");
+    assert!(
+        json.get("entry_points").is_some(),
+        "show_all mode should still include entry points"
     );
 }
 
@@ -518,6 +539,28 @@ fn list_human_output_entry_points_section() {
         output.stdout.contains("package.json main"),
         "human output should include entry point source. Got: {}",
         output.stdout
+    );
+}
+
+#[test]
+fn list_human_show_all_omits_boundaries_when_not_requested() {
+    let output = run_list("boundary-violations", &[]);
+    assert_eq!(output.code, 0);
+
+    assert!(
+        !output.stderr.contains("Boundaries:"),
+        "show_all human output should omit boundaries without --boundaries. Got stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("Discovered"),
+        "show_all human output should still include the files section. Got stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("Found"),
+        "show_all human output should still include the entry points section. Got stderr: {}",
+        output.stderr
     );
 }
 

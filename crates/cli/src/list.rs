@@ -95,8 +95,9 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         None
     };
 
-    // Compute boundary zone file counts if boundaries are requested.
-    let boundary_data = if opts.boundaries || show_all {
+    // Boundaries are opt-in to keep the default list view focused on files,
+    // plugins, and entry points.
+    let boundary_data = if opts.boundaries {
         Some(compute_boundary_data(&config, discovered.as_deref()))
     } else {
         None
