@@ -1094,7 +1094,7 @@ fn dispatch_subcommand(
             root,
             use_toml: toml,
             hooks,
-            base: branch.as_deref(),
+            branch: branch.as_deref(),
         }),
         Command::ConfigSchema => init::run_config_schema(),
         Command::PluginSchema => init::run_plugin_schema(),
