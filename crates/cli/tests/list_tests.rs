@@ -129,7 +129,10 @@ fn list_show_all_json_omits_boundaries_even_when_configured() {
         json.get("boundaries").is_none(),
         "show_all mode should not include boundaries without --boundaries"
     );
-    assert!(json.get("files").is_some(), "show_all mode should still include files");
+    assert!(
+        json.get("files").is_some(),
+        "show_all mode should still include files"
+    );
     assert!(
         json.get("entry_points").is_some(),
         "show_all mode should still include entry points"
