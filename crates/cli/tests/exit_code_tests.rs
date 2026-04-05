@@ -54,6 +54,21 @@ fn combined_mode_runs_successfully() {
     assert!(json.is_object(), "combined output should be a JSON object");
 }
 
+#[test]
+fn combined_human_output_labels_metrics_line() {
+    let output = run_fallow_combined("basic-project", &[]);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "combined human output should not crash, got exit code {}",
+        output.code
+    );
+    assert!(
+        output.stderr.contains("Metrics:"),
+        "combined human output should label the metrics line. stderr: {}",
+        output.stderr
+    );
+}
+
 // ---------------------------------------------------------------------------
 // --only / --skip in combined mode
 // ---------------------------------------------------------------------------

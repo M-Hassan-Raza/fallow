@@ -631,8 +631,9 @@ fn print_orientation_header(health: &HealthResult, check: Option<&CheckResult>) 
         if !parts.is_empty() {
             eprintln!();
             eprintln!(
-                "{} {}",
+                "{} {} {}",
                 "\u{25a0}".dimmed(),
+                "Metrics:".dimmed(),
                 parts.join(" \u{00b7} ").dimmed()
             );
         }
