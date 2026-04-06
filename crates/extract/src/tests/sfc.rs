@@ -125,6 +125,69 @@ import * as utils from './utils';
 }
 
 #[test]
+fn vue_component_tag_usage_clears_unused_import_binding() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+import FancyCard from './FancyCard.vue';
+</script>
+<template><FancyCard /><fancy-card /></template>
+"#,
+        "Comp.vue",
+    );
+
+    assert!(
+        !info
+            .unused_import_bindings
+            .contains(&"FancyCard".to_string()),
+        "component tag usage should mark FancyCard as used, got: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn vue_custom_directive_usage_clears_unused_import_binding() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+import { vFocusTrap } from './directives';
+</script>
+<template><input v-focus-trap /></template>
+"#,
+        "Comp.vue",
+    );
+
+    assert!(
+        !info
+            .unused_import_bindings
+            .contains(&"vFocusTrap".to_string()),
+        "custom directive usage should mark vFocusTrap as used, got: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn vue_v_on_object_syntax_clears_unused_import_binding() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+import { handlers } from './utils';
+</script>
+<template><button v-on="handlers">Add</button></template>
+"#,
+        "Comp.vue",
+    );
+
+    assert!(
+        !info
+            .unused_import_bindings
+            .contains(&"handlers".to_string()),
+        "v-on object syntax should mark handlers as used, got: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
 fn extracts_vue_both_scripts() {
     let info = parse_sfc(
         r#"
@@ -241,6 +304,86 @@ import * as utils from './utils';
             .any(|access| access.object == "utils" && access.member == "formatDate"),
         "template namespace access should be recorded, got: {:?}",
         info.member_accesses
+    );
+}
+
+#[test]
+fn svelte_component_tag_usage_clears_unused_import_binding() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import FancyButton from './FancyButton.svelte';
+</script>
+<FancyButton />
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        !info
+            .unused_import_bindings
+            .contains(&"FancyButton".to_string()),
+        "component tag usage should mark FancyButton as used, got: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn svelte_directive_usage_clears_unused_import_binding() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { tooltip } from './actions';
+</script>
+<button use:tooltip>Hi</button>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        !info.unused_import_bindings.contains(&"tooltip".to_string()),
+        "directive name usage should mark tooltip as used, got: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn svelte_attribute_value_usage_clears_unused_import_binding() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { isActive } from './utils';
+</script>
+<button class:active={isActive}>Hi</button>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        !info
+            .unused_import_bindings
+            .contains(&"isActive".to_string()),
+        "attribute value expressions should mark isActive as used, got: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn svelte_store_subscription_clears_unused_import_binding() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { page } from './stores';
+</script>
+<p>{$page.url.pathname}</p>
+"#,
+        "App.svelte",
+    );
+
+    assert!(
+        !info.unused_import_bindings.contains(&"page".to_string()),
+        "store subscription usage should mark page as used, got: {:?}",
+        info.unused_import_bindings
     );
 }
 

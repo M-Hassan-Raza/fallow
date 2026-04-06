@@ -5,7 +5,10 @@ use rustc_hash::FxHashSet;
 use crate::template_usage::TemplateUsage;
 
 use super::scanners::{scan_curly_section, scan_html_tag};
-use super::shared::{extract_pattern_binding_names, merge_expression_usage, merge_statement_usage};
+use super::shared::{
+    extract_pattern_binding_names, merge_component_tag_usage, merge_expression_usage,
+    merge_statement_usage,
+};
 
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
@@ -115,8 +118,9 @@ fn apply_tag(
         return;
     }
 
-    let parsed = parse_tag(trimmed);
     let current = current_locals(scopes);
+    let parsed = parse_tag(trimmed);
+    mark_tag_usage(&parsed.name, imported_bindings, &current, usage);
 
     let mut element_locals = Vec::new();
     if let Some(value) = parsed
@@ -149,6 +153,7 @@ fn apply_tag(
     attr_locals.extend(element_locals.iter().cloned());
 
     for attr in &parsed.attrs {
+        mark_custom_directive_usage(&attr.name, imported_bindings, usage);
         if let Some(expr) = attr.value.as_deref() {
             if attr.name == "v-for"
                 || attr.name == "slot-scope"
@@ -180,6 +185,7 @@ fn current_locals(scopes: &[Vec<String>]) -> Vec<String> {
 
 #[derive(Debug)]
 struct VueTag {
+    name: String,
     attrs: Vec<VueAttr>,
     self_closing: bool,
 }
@@ -195,11 +201,14 @@ fn parse_tag(tag: &str) -> VueTag {
     let self_closing = inner.ends_with('/');
     let inner = inner.trim_end_matches('/').trim_end();
 
-    let mut attrs = Vec::new();
-    let mut index = inner
+    let name_end = inner
         .char_indices()
         .find_map(|(idx, ch)| ch.is_whitespace().then_some(idx))
         .unwrap_or(inner.len());
+    let name = inner[..name_end].trim().to_string();
+
+    let mut attrs = Vec::new();
+    let mut index = name_end;
 
     while index < inner.len() {
         let remaining = &inner[index..];
@@ -258,9 +267,113 @@ fn parse_tag(tag: &str) -> VueTag {
     }
 
     VueTag {
+        name,
         attrs,
         self_closing,
     }
+}
+
+fn mark_tag_usage(
+    tag_name: &str,
+    imported_bindings: &FxHashSet<String>,
+    locals: &[String],
+    usage: &mut TemplateUsage,
+) {
+    if tag_name.is_empty() || is_builtin_component(tag_name) {
+        return;
+    }
+
+    merge_component_tag_usage(usage, tag_name, imported_bindings, locals, true);
+}
+
+fn mark_custom_directive_usage(
+    attr_name: &str,
+    imported_bindings: &FxHashSet<String>,
+    usage: &mut TemplateUsage,
+) {
+    let Some(rest) = attr_name.strip_prefix("v-") else {
+        return;
+    };
+
+    let Some(directive_name) = rest
+        .split([':', '.'])
+        .next()
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    else {
+        return;
+    };
+
+    if is_builtin_directive(directive_name) {
+        return;
+    }
+
+    let mut binding = String::from("v");
+    binding.push_str(&to_pascal_case(directive_name));
+    if imported_bindings.contains(binding.as_str()) {
+        usage.used_bindings.insert(binding);
+    }
+}
+
+fn to_pascal_case(name: &str) -> String {
+    let mut result = String::new();
+    let mut uppercase_next = true;
+    for ch in name.chars() {
+        if matches!(ch, '-' | '_' | ':') {
+            uppercase_next = true;
+            continue;
+        }
+        if uppercase_next {
+            result.extend(ch.to_uppercase());
+            uppercase_next = false;
+        } else {
+            result.push(ch);
+        }
+    }
+    result
+}
+
+fn is_builtin_component(tag_name: &str) -> bool {
+    matches!(
+        tag_name,
+        "component"
+            | "Component"
+            | "slot"
+            | "Slot"
+            | "template"
+            | "Template"
+            | "transition"
+            | "Transition"
+            | "transition-group"
+            | "TransitionGroup"
+            | "keep-alive"
+            | "KeepAlive"
+            | "teleport"
+            | "Teleport"
+            | "suspense"
+            | "Suspense"
+    )
+}
+
+fn is_builtin_directive(name: &str) -> bool {
+    matches!(
+        name,
+        "bind"
+            | "cloak"
+            | "else"
+            | "else-if"
+            | "for"
+            | "html"
+            | "if"
+            | "memo"
+            | "model"
+            | "once"
+            | "on"
+            | "pre"
+            | "show"
+            | "slot"
+            | "text"
+    )
 }
 
 fn is_statement_attr(name: &str) -> bool {
@@ -272,7 +385,15 @@ fn is_expression_attr(name: &str) -> bool {
         || name.starts_with("v-bind:")
         || matches!(
             name,
-            "v-if" | "v-else-if" | "v-show" | "v-html" | "v-text" | "v-memo" | "v-model"
+            "v-if"
+                | "v-else-if"
+                | "v-show"
+                | "v-html"
+                | "v-text"
+                | "v-memo"
+                | "v-model"
+                | "v-on"
+                | "v-bind"
         )
         || name.starts_with("v-model:")
 }
@@ -337,5 +458,68 @@ mod tests {
         );
 
         assert!(usage.used_bindings.contains("increment"));
+    }
+
+    #[test]
+    fn v_bind_object_syntax_marks_binding_used() {
+        let usage = collect_template_usage(
+            "<script setup>import { attrs } from './utils';</script><template><button v-bind=\"attrs\">Add</button></template>",
+            &imported(&["attrs"]),
+        );
+
+        assert!(usage.used_bindings.contains("attrs"));
+    }
+
+    #[test]
+    fn v_on_object_syntax_marks_binding_used() {
+        let usage = collect_template_usage(
+            "<script setup>import { handlers } from './utils';</script><template><button v-on=\"handlers\">Add</button></template>",
+            &imported(&["handlers"]),
+        );
+
+        assert!(usage.used_bindings.contains("handlers"));
+    }
+
+    #[test]
+    fn component_tags_mark_imported_components_used() {
+        let usage = collect_template_usage(
+            "<script setup>import FancyCard from './FancyCard.vue';</script><template><FancyCard /><fancy-card /></template>",
+            &imported(&["FancyCard"]),
+        );
+
+        assert!(usage.used_bindings.contains("FancyCard"));
+    }
+
+    #[test]
+    fn namespaced_component_tags_record_member_usage() {
+        let usage = collect_template_usage(
+            "<script setup>import * as Form from './form';</script><template><Form.Input /></template>",
+            &imported(&["Form"]),
+        );
+
+        assert!(usage.used_bindings.contains("Form"));
+        assert_eq!(usage.member_accesses.len(), 1);
+        assert_eq!(usage.member_accesses[0].object, "Form");
+        assert_eq!(usage.member_accesses[0].member, "Input");
+    }
+
+    #[test]
+    fn local_slot_bindings_shadow_imported_component_tags() {
+        let usage = collect_template_usage(
+            "<script setup>import { Item } from './components';</script><template><List v-slot=\"{ Item }\"><Item /></List></template>",
+            &imported(&["Item"]),
+        );
+
+        assert!(usage.is_empty());
+    }
+
+    #[test]
+    fn custom_directives_mark_imported_bindings_used() {
+        let usage = collect_template_usage(
+            "<script setup>import { vFocusTrap } from './directives';</script><template><input v-focus-trap /></template>",
+            &imported(&["vFocusTrap"]),
+        );
+
+        assert!(usage.used_bindings.contains("vFocusTrap"));
     }
 }

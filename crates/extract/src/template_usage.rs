@@ -58,6 +58,7 @@ pub fn analyze_template_snippet(
     kind: TemplateSnippetKind,
     imported_bindings: &FxHashSet<String>,
     locals: &[String],
+    allow_dollar_prefixed_refs: bool,
 ) -> TemplateUsage {
     let snippet = snippet.trim();
     if snippet.is_empty() || imported_bindings.is_empty() {
@@ -76,7 +77,16 @@ pub fn analyze_template_snippet(
         .keys()
         .filter_map(|name| {
             let name = name.as_str();
-            imported_bindings.contains(name).then(|| name.to_string())
+            if imported_bindings.contains(name) {
+                return Some(name.to_string());
+            }
+            if allow_dollar_prefixed_refs
+                && let Some(stripped) = name.strip_prefix('$')
+                && imported_bindings.contains(stripped)
+            {
+                return Some(stripped.to_string());
+            }
+            None
         })
         .collect();
 
@@ -93,17 +103,46 @@ pub fn analyze_template_snippet(
             extractor
                 .member_accesses
                 .into_iter()
-                .filter(|access| unresolved_names.contains(&access.object))
+                .filter_map(|access| {
+                    remap_object_name(
+                        &access.object,
+                        &unresolved_names,
+                        allow_dollar_prefixed_refs,
+                    )
+                    .map(|object| MemberAccess {
+                        object,
+                        member: access.member,
+                    })
+                })
                 .collect(),
         ),
         whole_object_uses: dedup_names(
             extractor
                 .whole_object_uses
                 .into_iter()
-                .filter(|name| unresolved_names.contains(name))
+                .filter_map(|name| {
+                    remap_object_name(&name, &unresolved_names, allow_dollar_prefixed_refs)
+                })
                 .collect(),
         ),
     }
+}
+
+fn remap_object_name(
+    name: &str,
+    unresolved_names: &FxHashSet<String>,
+    allow_dollar_prefixed_refs: bool,
+) -> Option<String> {
+    if unresolved_names.contains(name) {
+        return Some(name.to_string());
+    }
+    if allow_dollar_prefixed_refs
+        && let Some(stripped) = name.strip_prefix('$')
+        && unresolved_names.contains(stripped)
+    {
+        return Some(stripped.to_string());
+    }
+    None
 }
 
 fn wrap_snippet(snippet: &str, kind: TemplateSnippetKind, locals: &[String]) -> String {
@@ -171,6 +210,7 @@ mod tests {
             TemplateSnippetKind::Expression,
             &bindings(&["formatDate"]),
             &[],
+            false,
         );
 
         assert!(usage.used_bindings.contains("formatDate"));
@@ -185,6 +225,7 @@ mod tests {
             TemplateSnippetKind::Expression,
             &bindings(&["utils"]),
             &[],
+            false,
         );
 
         assert!(usage.used_bindings.contains("utils"));
@@ -200,6 +241,7 @@ mod tests {
             TemplateSnippetKind::Expression,
             &bindings(&["item"]),
             &["item".to_string()],
+            false,
         );
 
         assert!(usage.is_empty());
@@ -212,8 +254,25 @@ mod tests {
             TemplateSnippetKind::Statement,
             &bindings(&["increment"]),
             &[],
+            false,
         );
 
         assert!(usage.used_bindings.contains("increment"));
+    }
+
+    #[test]
+    fn dollar_prefixed_refs_can_map_to_imported_store_bindings() {
+        let usage = analyze_template_snippet(
+            "$page.url.pathname",
+            TemplateSnippetKind::Expression,
+            &bindings(&["page"]),
+            &[],
+            true,
+        );
+
+        assert!(usage.used_bindings.contains("page"));
+        assert_eq!(usage.member_accesses.len(), 1);
+        assert_eq!(usage.member_accesses[0].object, "page");
+        assert_eq!(usage.member_accesses[0].member, "url");
     }
 }

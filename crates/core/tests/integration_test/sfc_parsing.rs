@@ -19,6 +19,10 @@ fn vue_project_discovers_vue_files() {
         !unused_file_names.contains(&"App.vue".to_string()),
         "App.vue should be reachable via import from main.ts, unused: {unused_file_names:?}"
     );
+    assert!(
+        !unused_file_names.contains(&"FancyCard.vue".to_string()),
+        "FancyCard.vue is only used via a Vue component tag and should stay reachable: {unused_file_names:?}"
+    );
 
     // Orphan.vue is not imported by anything, should be unused
     assert!(
@@ -44,6 +48,14 @@ fn vue_imports_mark_exports_used() {
         !unused_export_names.contains(&"formatDate"),
         "formatDate should be used from the Vue template, found: {unused_export_names:?}"
     );
+    assert!(
+        !unused_export_names.contains(&"vFocusTrap"),
+        "vFocusTrap should be used from a Vue template directive, found: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"handlers"),
+        "handlers should be used from Vue v-on object syntax, found: {unused_export_names:?}"
+    );
 
     // unusedUtil is not imported anywhere, should be unused
     assert!(
@@ -53,6 +65,37 @@ fn vue_imports_mark_exports_used() {
     assert!(
         unused_export_names.contains(&"unusedImported"),
         "unusedImported should stay unused even when imported in App.vue, found: {unused_export_names:?}"
+    );
+}
+
+#[test]
+fn vue_component_tags_mark_component_exports_used() {
+    let root = fixture_path("vue-component-tags");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.path.file_name().unwrap().to_string_lossy().to_string(),
+                e.export_name.clone(),
+            )
+        })
+        .collect();
+
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(file, export)| file == "GreetingCard.vue" && export == "default"),
+        "GreetingCard default export should be used via component tags: {unused_exports:?}"
+    );
+    assert!(
+        unused_exports
+            .iter()
+            .any(|(file, export)| file == "GreetingCard.vue" && export == "unusedNamed"),
+        "GreetingCard named dead export should still be reported: {unused_exports:?}"
     );
 }
 
@@ -74,6 +117,10 @@ fn svelte_project_discovers_svelte_files() {
     assert!(
         !unused_file_names.contains(&"App.svelte".to_string()),
         "App.svelte should be reachable via import from main.ts, unused: {unused_file_names:?}"
+    );
+    assert!(
+        !unused_file_names.contains(&"FancyButton.svelte".to_string()),
+        "FancyButton.svelte is only used via a Svelte component tag and should stay reachable: {unused_file_names:?}"
     );
 
     // Orphan.svelte is not imported, should be unused
@@ -99,6 +146,14 @@ fn svelte_imports_mark_exports_used() {
     assert!(
         !unused_export_names.contains(&"formatName"),
         "formatName should be used from the Svelte template, found: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"tooltip"),
+        "tooltip should be used from a Svelte directive name, found: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"isActive"),
+        "isActive should be used from a Svelte attribute value expression, found: {unused_export_names:?}"
     );
 
     // unusedUtil is not imported anywhere, should be unused
@@ -178,5 +233,36 @@ fn sveltekit_workspace_types_not_unresolved() {
     assert!(
         !unresolved_specs.contains(&"./$types"),
         "./$types should not be unresolved in workspace mode, found: {unresolved_specs:?}"
+    );
+}
+
+#[test]
+fn sveltekit_param_matchers_keep_match_export_alive() {
+    let root = fixture_path("sveltekit-project");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|e| {
+            (
+                e.path.file_name().unwrap().to_string_lossy().to_string(),
+                e.export_name.clone(),
+            )
+        })
+        .collect();
+
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(file, export)| file == "integer.ts" && export == "match"),
+        "SvelteKit param matcher export should be framework-used: {unused_exports:?}"
+    );
+    assert!(
+        unused_exports
+            .iter()
+            .any(|(file, export)| file == "integer.ts" && export == "unusedParamHelper"),
+        "SvelteKit matcher file should still report truly unused exports: {unused_exports:?}"
     );
 }

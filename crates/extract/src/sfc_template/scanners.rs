@@ -159,6 +159,12 @@ pub(super) fn scan_html_tag(source: &str, start: usize) -> Option<(&str, usize)>
             continue;
         }
 
+        if byte == b'{' {
+            let (_, next_index) = scan_curly_section(source, index, 1, 1)?;
+            index = next_index;
+            continue;
+        }
+
         match byte {
             b'\'' => {
                 in_single = true;
@@ -210,5 +216,13 @@ mod tests {
         let (tag, next_index) = scan_html_tag(source, 0).expect("tag");
         assert_eq!(tag, source);
         assert_eq!(next_index, source.len());
+    }
+
+    #[test]
+    fn scans_html_tags_with_braced_expressions() {
+        let source = r"<button disabled={count > limit}>{label}</button>";
+        let (tag, next_index) = scan_html_tag(source, 0).expect("tag");
+        assert_eq!(tag, r"<button disabled={count > limit}>");
+        assert_eq!(next_index, r"<button disabled={count > limit}>".len());
     }
 }
