@@ -204,7 +204,9 @@ fn sveltekit_generated_types_not_unresolved() {
         .map(|u| u.specifier.as_str())
         .collect();
 
-    // ./$types and ./$types.js are SvelteKit generated route types — must not be flagged
+    // ./$types and ./$types.js are SvelteKit generated route types — must not be flagged.
+    // This includes files inside route groups with parentheses like (app)/(admin),
+    // which was reported as a false positive source in issue #54.
     assert!(
         !unresolved_specs.contains(&"./$types"),
         "./$types should not be unresolved (generated import), found: {unresolved_specs:?}"
