@@ -226,8 +226,9 @@ pub(super) fn is_path_alias(name: &str) -> bool {
     if name.starts_with('#') {
         return true;
     }
-    // `~/` prefix is a common alias convention (e.g., Nuxt, custom tsconfig)
-    if name.starts_with("~/") {
+    // `~/`, `~~/`, and `@@/` are common alias conventions
+    // (e.g., Nuxt, custom tsconfig)
+    if name.starts_with("~/") || name.starts_with("~~/") || name.starts_with("@@/") {
         return true;
     }
     // `@/` is a very common path alias (e.g., `@/components/Foo`)
@@ -952,6 +953,8 @@ mod tests {
         assert!(is_path_alias("~/lib/helpers"));
         assert!(is_path_alias("~/utils/format"));
         assert!(is_path_alias("~/styles/theme"));
+        assert!(is_path_alias("~~/shared/theme"));
+        assert!(is_path_alias("@@/shared/theme"));
     }
 
     /// Tilde without slash is NOT a path alias — it's a bare specifier.

@@ -55,13 +55,23 @@ impl Plugin for VitePlugin {
         &["virtual:"]
     }
 
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+    fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
         for imp in &imports {
             let dep = crate::resolve::extract_package_name(imp);
             result.referenced_dependencies.push(dep);
+        }
+
+        for (find, replacement) in
+            config_parser::extract_config_aliases(source, config_path, &["resolve", "alias"])
+        {
+            if let Some(normalized) =
+                config_parser::normalize_config_path(&replacement, config_path, root)
+            {
+                result.path_aliases.push((find, normalized));
+            }
         }
 
         // build.rollupOptions.input → entry points (string, array, or object)
@@ -171,5 +181,32 @@ mod tests {
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"react".to_string()));
         assert!(deps.contains(&"@my/heavy-dep".to_string()));
+    }
+
+    #[test]
+    fn resolve_config_extracts_aliases() {
+        let source = r#"
+            import { defineConfig } from 'vite';
+            import { fileURLToPath, URL } from 'node:url';
+
+            export default defineConfig({
+                resolve: {
+                    alias: {
+                        "@": fileURLToPath(new URL("./src", import.meta.url))
+                    }
+                }
+            });
+        "#;
+        let plugin = VitePlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/vite.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.path_aliases,
+            vec![("@".to_string(), "src".to_string())]
+        );
     }
 }

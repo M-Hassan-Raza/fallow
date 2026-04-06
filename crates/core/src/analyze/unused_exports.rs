@@ -52,13 +52,14 @@ fn compile_plugin_matchers(
 
 /// Check whether a module should be skipped for unused-export analysis.
 ///
-/// Skips entry points, CJS-only modules, Svelte files (whose `export let`
-/// declarations are component props), and fully-unreachable modules where
-/// every export has zero references (those are already caught by `find_unused_files`).
-/// Unreachable modules with *some* referenced exports are NOT skipped — their
-/// individually unused exports would otherwise slip through both detectors.
-fn should_skip_module(module: &ModuleNode) -> bool {
-    if module.is_entry_point {
+/// Skips entry points that do not have framework/plugin `used_exports` handling,
+/// CJS-only modules, Svelte files (whose `export let` declarations are component
+/// props), and fully-unreachable modules where every export has zero references
+/// (those are already caught by `find_unused_files`). Unreachable modules with
+/// *some* referenced exports are NOT skipped — their individually unused exports
+/// would otherwise slip through both detectors.
+fn should_skip_module(module: &ModuleNode, has_plugin_used_exports: bool) -> bool {
+    if module.is_entry_point && !has_plugin_used_exports {
         return true;
     }
     if !module.is_reachable {
@@ -112,13 +113,6 @@ pub fn find_unused_exports(
         .collect();
 
     for module in &graph.modules {
-        if should_skip_module(module) {
-            continue;
-        }
-
-        // Namespace imports are now handled with member-access narrowing in graph.rs:
-        // only specific accessed members get references populated. No blanket skip needed.
-
         // Compute relative path once per module for glob matching
         let relative_path = module
             .path
@@ -138,6 +132,13 @@ pub fn find_unused_exports(
             .filter(|(m, _)| m.is_match(file_str.as_ref()))
             .map(|(_, exports)| exports)
             .collect();
+
+        if should_skip_module(module, !matching_plugin.is_empty()) {
+            continue;
+        }
+
+        // Namespace imports are now handled with member-access narrowing in graph.rs:
+        // only specific accessed members get references populated. No blanket skip needed.
 
         for export in &module.exports {
             // For unreachable modules, only references from reachable files count —
@@ -1007,6 +1008,36 @@ mod tests {
         let (exports, types) =
             find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
         assert!(exports.is_empty());
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_reports_non_framework_exports_in_entry_point_with_plugin_rules() {
+        let mut graph = build_graph(&[("/tmp/test/src/app/page.tsx", true)]);
+        graph.modules[0].is_reachable = true;
+        graph.modules[0].exports = vec![
+            make_export("default", 10, 20),
+            make_export("generateMetadata", 30, 40),
+            make_export("helper", 50, 60),
+        ];
+
+        let plugin = make_plugin_result(vec![(
+            "src/app/**/page.{ts,tsx,js,jsx}".to_string(),
+            vec!["default".to_string(), "generateMetadata".to_string()],
+        )]);
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+
+        let (exports, types) = find_unused_exports(
+            &graph,
+            &config,
+            Some(&plugin),
+            &suppressions,
+            &FxHashMap::default(),
+        );
+
+        assert_eq!(exports.len(), 1);
+        assert_eq!(exports[0].export_name, "helper");
         assert!(types.is_empty());
     }
 

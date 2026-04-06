@@ -38,6 +38,16 @@ const ENTRY_PATTERNS: &[&str] = &[
     "app/modules/**/*.{ts,js}",
 ];
 
+const SRC_DIR_ENTRY_PATTERNS: &[&str] = &[
+    "pages/**/*.{vue,ts,tsx,js,jsx}",
+    "layouts/**/*.{vue,ts,tsx,js,jsx}",
+    "middleware/**/*.{ts,js}",
+    "plugins/**/*.{ts,js}",
+    "composables/**/*.{ts,js}",
+    "utils/**/*.{ts,js}",
+    "components/**/*.{vue,ts,tsx,js,jsx}",
+];
+
 const CONFIG_PATTERNS: &[&str] = &["nuxt.config.{ts,js}"];
 
 const ALWAYS_USED: &[&str] = &[
@@ -47,8 +57,11 @@ const ALWAYS_USED: &[&str] = &[
     "error.vue",
     // Nuxt 3 app/ directory structure
     "app/app.vue",
+    "app/app.config.{ts,js}",
     "app/error.vue",
 ];
+
+const SRC_DIR_ALWAYS_USED: &[&str] = &["app.vue", "app.config.{ts,js}", "error.vue"];
 
 /// Implicit dependencies that Nuxt provides — these should not be flagged as unlisted.
 const TOOLING_DEPENDENCIES: &[&str] = &[
@@ -127,9 +140,13 @@ impl Plugin for NuxtPlugin {
         };
         let mut aliases = vec![
             // ~/  → srcDir (app/ or root)
-            ("~/", src_dir),
+            ("~/", src_dir.clone()),
+            // @/  → srcDir (Nuxt alias synonym for ~/)
+            ("@/", src_dir.clone()),
             // ~~/ → rootDir (project root)
             ("~~/", String::new()),
+            // @@/ → rootDir (Nuxt alias synonym for ~~/)
+            ("@@/", String::new()),
             // #shared/ → shared/ directory
             ("#shared/", "shared".to_string()),
             // #server/ → server/ directory
@@ -153,9 +170,19 @@ impl Plugin for NuxtPlugin {
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
-        // Detect whether this project uses the app/ directory structure.
-        // In Nuxt 3, `~` resolves to srcDir (defaults to `app/` when the directory exists).
-        let has_app_dir = root.join("app").is_dir();
+        // Nuxt aliases resolve against srcDir, which defaults to `app/` when it exists
+        // and can be overridden explicitly via config.
+        let default_src_dir = default_nuxt_src_dir(root);
+        let configured_src_dir = extract_nuxt_src_dir(source, config_path, root);
+        let src_dir = configured_src_dir
+            .clone()
+            .unwrap_or_else(|| default_src_dir.clone());
+
+        if let Some(configured_src_dir) = configured_src_dir.as_deref()
+            && configured_src_dir != default_src_dir.as_str()
+        {
+            add_src_dir_support(&mut result, configured_src_dir);
+        }
 
         // Extract import sources as referenced dependencies
         let imports = config_parser::extract_imports(source, config_path);
@@ -177,11 +204,13 @@ impl Plugin for NuxtPlugin {
         let css = config_parser::extract_config_string_array(source, config_path, &["css"]);
         for entry in &css {
             if let Some(stripped) = entry.strip_prefix("~/") {
-                // ~ = srcDir: resolve to app/ if it exists, otherwise project root
-                if has_app_dir {
-                    result.always_used_files.push(format!("app/{stripped}"));
-                } else {
+                // ~ = srcDir: resolve to the configured source root, if any.
+                if src_dir.is_empty() {
                     result.always_used_files.push(stripped.to_string());
+                } else {
+                    result
+                        .always_used_files
+                        .push(format!("{src_dir}/{stripped}"));
                 }
             } else if let Some(stripped) = entry.strip_prefix("~~/") {
                 // ~~ = rootDir: always relative to project root
@@ -209,6 +238,47 @@ impl Plugin for NuxtPlugin {
         let plugins = config_parser::extract_config_string_array(source, config_path, &["plugins"]);
         result.entry_patterns.extend(plugins);
 
+        // alias: { "@shared": "./shared" } → resolver path aliases
+        for (find, replacement) in
+            config_parser::extract_config_aliases(source, config_path, &["alias"])
+        {
+            if let Some(normalized) = normalize_nuxt_path(&replacement, config_path, root, &src_dir)
+            {
+                result.path_aliases.push((find, normalized));
+            }
+        }
+
+        // imports.dirs: ["~/custom/composables"] → auto-import roots
+        for dir in
+            config_parser::extract_config_string_array(source, config_path, &["imports", "dirs"])
+        {
+            if let Some(normalized) = normalize_nuxt_path(&dir, config_path, root, &src_dir) {
+                result.entry_patterns.push(format!(
+                    "{normalized}/**/*.{{ts,tsx,js,jsx,mts,cts,mjs,cjs}}"
+                ));
+            }
+        }
+
+        // components config supports string arrays, object arrays, and object.dirs arrays.
+        let mut component_dirs = config_parser::extract_config_array_object_strings(
+            source,
+            config_path,
+            &["components"],
+            "path",
+        );
+        component_dirs.extend(config_parser::extract_config_string_array(
+            source,
+            config_path,
+            &["components", "dirs"],
+        ));
+        for dir in component_dirs {
+            if let Some(normalized) = normalize_nuxt_path(&dir, config_path, root, &src_dir) {
+                result
+                    .entry_patterns
+                    .push(format!("{normalized}/**/*.{{vue,ts,tsx,js,jsx}}"));
+            }
+        }
+
         // extends: [...] → referenced dependencies
         let extends = config_parser::extract_config_string_array(source, config_path, &["extends"]);
         for ext in &extends {
@@ -219,6 +289,71 @@ impl Plugin for NuxtPlugin {
 
         result
     }
+}
+
+fn default_nuxt_src_dir(root: &Path) -> String {
+    if root.join("app").is_dir() {
+        "app".to_string()
+    } else {
+        String::new()
+    }
+}
+
+fn extract_nuxt_src_dir(source: &str, config_path: &Path, root: &Path) -> Option<String> {
+    let raw = config_parser::extract_config_string(source, config_path, &["srcDir"])?;
+    normalize_nuxt_src_dir(&raw, config_path, root)
+}
+
+fn normalize_nuxt_src_dir(raw: &str, config_path: &Path, root: &Path) -> Option<String> {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.is_empty() || trimmed == "." {
+        return Some(String::new());
+    }
+    config_parser::normalize_config_path(trimmed, config_path, root)
+}
+
+fn add_src_dir_support(result: &mut PluginResult, src_dir: &str) {
+    result
+        .path_aliases
+        .push(("~/".to_string(), src_dir.to_string()));
+    result
+        .path_aliases
+        .push(("@/".to_string(), src_dir.to_string()));
+
+    if src_dir.is_empty() {
+        return;
+    }
+
+    for pattern in SRC_DIR_ENTRY_PATTERNS {
+        result.entry_patterns.push(format!("{src_dir}/{pattern}"));
+    }
+
+    for pattern in SRC_DIR_ALWAYS_USED {
+        result
+            .always_used_files
+            .push(format!("{src_dir}/{pattern}"));
+    }
+}
+
+fn normalize_nuxt_path(
+    raw: &str,
+    config_path: &Path,
+    root: &Path,
+    src_dir: &str,
+) -> Option<String> {
+    if let Some(stripped) = raw.strip_prefix("~/").or_else(|| raw.strip_prefix("@/")) {
+        return Some(if src_dir.is_empty() {
+            stripped.to_string()
+        } else {
+            format!("{src_dir}/{stripped}")
+        });
+    }
+
+    if let Some(stripped) = raw.strip_prefix("~~/").or_else(|| raw.strip_prefix("@@/")) {
+        return Some(stripped.to_string());
+    }
+
+    config_parser::normalize_config_path(raw, config_path, root)
 }
 
 #[cfg(test)]
@@ -270,6 +405,14 @@ mod tests {
     fn virtual_module_prefixes_includes_hash() {
         let plugin = NuxtPlugin;
         assert_eq!(plugin.virtual_module_prefixes(), &["#"]);
+    }
+
+    #[test]
+    fn path_aliases_include_nuxt_at_variants() {
+        let plugin = NuxtPlugin;
+        let aliases = plugin.path_aliases(Path::new("/project"));
+        assert!(aliases.iter().any(|(prefix, _)| *prefix == "@/"));
+        assert!(aliases.iter().any(|(prefix, _)| *prefix == "@@/"));
     }
 
     #[test]
@@ -454,6 +597,150 @@ mod tests {
                 .always_used_files
                 .contains(&"./assets/global.css".to_string()),
             "relative CSS path should be an always-used file"
+        );
+    }
+
+    #[test]
+    fn resolve_config_extracts_custom_aliases_and_dirs() {
+        let source = r#"
+            export default defineNuxtConfig({
+                srcDir: "app/",
+                alias: {
+                    "@shared": "./app/shared"
+                },
+                imports: {
+                    dirs: ["~/custom/composables"]
+                },
+                components: [
+                    { path: "@/feature-components" }
+                ]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .path_aliases
+                .contains(&("@shared".to_string(), "app/shared".to_string()))
+        );
+        assert!(
+            result
+                .path_aliases
+                .contains(&("~/".to_string(), "app".to_string()))
+        );
+        assert!(
+            result
+                .path_aliases
+                .contains(&("@/".to_string(), "app".to_string()))
+        );
+        assert!(
+            result.entry_patterns.contains(
+                &"app/custom/composables/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}".to_string()
+            )
+        );
+        assert!(
+            result
+                .entry_patterns
+                .contains(&"app/feature-components/**/*.{vue,ts,tsx,js,jsx}".to_string())
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"app/app.config.{ts,js}".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_src_dir_overrides_default_app_aliases() {
+        let source = r#"
+            export default defineNuxtConfig({
+                srcDir: "."
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let temp = tempfile::tempdir().expect("temp dir should be created");
+        std::fs::create_dir(temp.path().join("app")).expect("app dir should exist");
+        let config_path = temp.path().join("nuxt.config.ts");
+        let result = plugin.resolve_config(&config_path, source, temp.path());
+
+        assert!(
+            result
+                .path_aliases
+                .contains(&("~/".to_string(), String::new())),
+            "srcDir='.' should remap ~/ to the project root"
+        );
+        assert!(
+            result
+                .path_aliases
+                .contains(&("@/".to_string(), String::new())),
+            "srcDir='.' should remap @/ to the project root"
+        );
+    }
+
+    #[test]
+    fn resolve_config_src_dir_adds_custom_source_roots() {
+        let source = r#"
+            export default defineNuxtConfig({
+                srcDir: "src/",
+                imports: {
+                    dirs: ["~/custom/composables"]
+                },
+                components: [
+                    { path: "@/feature-components" }
+                ]
+            });
+        "#;
+        let plugin = NuxtPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/nuxt.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+
+        assert!(
+            result
+                .path_aliases
+                .contains(&("~/".to_string(), "src".to_string())),
+            "srcDir should remap ~/ to the configured source root"
+        );
+        assert!(
+            result
+                .path_aliases
+                .contains(&("@/".to_string(), "src".to_string())),
+            "srcDir should remap @/ to the configured source root"
+        );
+        assert!(
+            result.entry_patterns.contains(
+                &"src/custom/composables/**/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}".to_string()
+            )
+        );
+        assert!(
+            result
+                .entry_patterns
+                .contains(&"src/feature-components/**/*.{vue,ts,tsx,js,jsx}".to_string())
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"src/app.vue".to_string()),
+            "srcDir should add app.vue under the configured source root"
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"src/app.config.{ts,js}".to_string()),
+            "srcDir should add app.config under the configured source root"
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"src/error.vue".to_string()),
+            "srcDir should add error.vue under the configured source root"
         );
     }
 }

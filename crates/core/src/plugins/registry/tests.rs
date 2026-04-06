@@ -789,6 +789,7 @@ fn process_config_result_merges_all_fields() {
         entry_patterns: vec!["src/routes/**/*.ts".to_string()],
         referenced_dependencies: vec!["lodash".to_string(), "axios".to_string()],
         always_used_files: vec!["setup.ts".to_string()],
+        path_aliases: vec![],
         setup_files: vec![PathBuf::from("/project/test/setup.ts")],
         fixture_patterns: vec![],
     };
@@ -830,6 +831,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
         entry_patterns: vec!["a.ts".to_string()],
         referenced_dependencies: vec!["dep-a".to_string()],
         always_used_files: vec![],
+        path_aliases: vec![],
         setup_files: vec![PathBuf::from("/project/setup-a.ts")],
         fixture_patterns: vec![],
     };
@@ -837,6 +839,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
         entry_patterns: vec!["b.ts".to_string()],
         referenced_dependencies: vec!["dep-b".to_string()],
         always_used_files: vec!["c.ts".to_string()],
+        path_aliases: vec![],
         setup_files: vec![],
         fixture_patterns: vec![],
     };
@@ -878,6 +881,51 @@ fn process_config_result_accumulates_across_multiple_calls() {
     assert_eq!(aggregated.setup_files[0].1, "plugin-a");
 }
 
+#[test]
+fn process_config_result_path_aliases_override_existing_prefixes() {
+    let mut aggregated = AggregatedPluginResult {
+        path_aliases: vec![
+            ("~/".to_string(), "app".to_string()),
+            ("@/".to_string(), "app".to_string()),
+            ("#shared".to_string(), "shared".to_string()),
+        ],
+        ..Default::default()
+    };
+
+    let config_result = PluginResult {
+        path_aliases: vec![
+            ("~/".to_string(), "src".to_string()),
+            ("@/".to_string(), "src".to_string()),
+        ],
+        ..Default::default()
+    };
+
+    process_config_result("nuxt", config_result, &mut aggregated);
+
+    let tilde_aliases: Vec<_> = aggregated
+        .path_aliases
+        .iter()
+        .filter(|(prefix, _)| prefix == "~/")
+        .collect();
+    assert_eq!(tilde_aliases.len(), 1);
+    assert_eq!(tilde_aliases[0].1, "src");
+
+    let at_aliases: Vec<_> = aggregated
+        .path_aliases
+        .iter()
+        .filter(|(prefix, _)| prefix == "@/")
+        .collect();
+    assert_eq!(at_aliases.len(), 1);
+    assert_eq!(at_aliases[0].1, "src");
+
+    assert!(
+        aggregated
+            .path_aliases
+            .contains(&("#shared".to_string(), "shared".to_string())),
+        "unrelated aliases should be preserved"
+    );
+}
+
 // ── PluginResult::is_empty ───────────────────────────────────
 
 #[test]
@@ -901,6 +949,10 @@ fn plugin_result_not_empty_when_any_field_set() {
         },
         PluginResult {
             always_used_files: vec!["setup.ts".to_string()],
+            ..Default::default()
+        },
+        PluginResult {
+            path_aliases: vec![("@".to_string(), "src".to_string())],
             ..Default::default()
         },
         PluginResult {

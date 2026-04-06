@@ -94,6 +94,7 @@ const SERVER_EXPORTS: &[&str] = &[
 const HOOKS_SERVER_EXPORTS: &[&str] = &["handle", "handleError", "handleFetch", "init"];
 const HOOKS_CLIENT_EXPORTS: &[&str] = &["handleError", "init"];
 const HOOKS_SHARED_EXPORTS: &[&str] = &["reroute", "transport", "handleError", "init"];
+const PARAM_MATCHER_EXPORTS: &[&str] = &["match"];
 
 impl Plugin for SvelteKitPlugin {
     fn name(&self) -> &'static str {
@@ -148,10 +149,11 @@ impl Plugin for SvelteKitPlugin {
             ("src/hooks.server.{ts,js}", HOOKS_SERVER_EXPORTS),
             ("src/hooks.client.{ts,js}", HOOKS_CLIENT_EXPORTS),
             ("src/hooks.{ts,js}", HOOKS_SHARED_EXPORTS),
+            ("src/params/**/*.{ts,js}", PARAM_MATCHER_EXPORTS),
         ]
     }
 
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+    fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
         // Extract import sources as referenced dependencies
@@ -159,6 +161,16 @@ impl Plugin for SvelteKitPlugin {
         for imp in &imports {
             let dep = crate::resolve::extract_package_name(imp);
             result.referenced_dependencies.push(dep);
+        }
+
+        for (find, replacement) in
+            config_parser::extract_config_aliases(source, config_path, &["kit", "alias"])
+        {
+            if let Some(normalized) =
+                config_parser::normalize_config_path(&replacement, config_path, root)
+            {
+                result.path_aliases.push((find, normalized));
+            }
         }
 
         // Extract require() calls (CJS configs)
@@ -248,6 +260,41 @@ mod tests {
         assert!(
             patterns.contains(&"/$types"),
             "should include /$types for SvelteKit generated route types"
+        );
+    }
+
+    #[test]
+    fn used_exports_include_param_matchers() {
+        let plugin = SvelteKitPlugin;
+        let exports = plugin.used_exports();
+        let matcher_entry = exports
+            .iter()
+            .find(|(pat, _)| *pat == "src/params/**/*.{ts,js}")
+            .expect("param matcher used exports");
+        assert!(matcher_entry.1.contains(&"match"));
+    }
+
+    #[test]
+    fn resolve_config_extracts_aliases() {
+        let source = r#"
+            export default {
+                kit: {
+                    alias: {
+                        $utils: "./src/lib/utils"
+                    }
+                }
+            };
+        "#;
+        let plugin = SvelteKitPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/svelte.config.ts"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.path_aliases,
+            vec![("$utils".to_string(), "src/lib/utils".to_string())]
         );
     }
 }

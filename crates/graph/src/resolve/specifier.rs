@@ -64,6 +64,10 @@ pub(super) fn resolve_specifier(
     // Bare specifier classification (used for fallback logic below).
     let is_bare = is_bare_specifier(specifier);
     let is_alias = is_path_alias(specifier);
+    let matches_plugin_alias = ctx
+        .path_aliases
+        .iter()
+        .any(|(prefix, _)| specifier.starts_with(prefix));
 
     // Use resolve_file instead of resolve so that TsconfigDiscovery::Auto works.
     // oxc_resolver's resolve() ignores Auto tsconfig discovery — only resolve_file()
@@ -145,10 +149,11 @@ pub(super) fn resolve_specifier(
             }
         }
         Err(_) => {
-            if is_alias {
+            if is_alias || matches_plugin_alias {
                 // Try plugin-provided path aliases before giving up.
-                // These substitute import prefixes (e.g., `~/` → `app/`) and re-resolve
-                // as relative imports from the project root.
+                // This covers both built-in alias shapes (`~/`, `@/`, `#foo`) and
+                // custom prefixes discovered from framework config files such as
+                // `@shared/*` or `$utils/*`.
                 // Path aliases that fail resolution are unresolvable, not npm packages.
                 // Classifying them as NpmPackage would cause false "unlisted dependency" reports.
                 try_path_alias_fallback(ctx, specifier)

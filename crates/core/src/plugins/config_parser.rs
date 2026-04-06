@@ -11,7 +11,7 @@
 //! - Array literals (`["a", "b"]`)
 //! - Object properties (`{ key: "value" }`)
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use oxc_allocator::Allocator;
 #[allow(clippy::wildcard_imports, reason = "many AST types used")]
@@ -267,6 +267,99 @@ pub fn extract_config_require_strings(source: &str, path: &Path, key: &str) -> V
         Some(collect_require_sources(&prop.value))
     })
     .unwrap_or_default()
+}
+
+/// Extract alias mappings from an object or array-based alias config.
+///
+/// Supports common bundler config shapes like:
+/// - `resolve.alias = { "@": "./src" }`
+/// - `resolve.alias = [{ find: "@", replacement: "./src" }]`
+/// - `resolve.alias = [{ find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) }]`
+#[must_use]
+pub fn extract_config_aliases(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<(String, String)> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let expr = get_nested_expression(obj, prop_path)?;
+        let aliases = expression_to_alias_pairs(expr);
+        (!aliases.is_empty()).then_some(aliases)
+    })
+    .unwrap_or_default()
+}
+
+/// Extract string values from a nested array, supporting both string elements and
+/// object elements with a named string/path field.
+///
+/// Useful for configs like:
+/// - `components: ["~/components", { path: "~/feature-components" }]`
+#[must_use]
+pub fn extract_config_array_object_strings(
+    source: &str,
+    path: &Path,
+    array_path: &[&str],
+    key: &str,
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let array_expr = get_nested_expression(obj, array_path)?;
+        let Expression::ArrayExpression(arr) = array_expr else {
+            return None;
+        };
+
+        let mut results = Vec::new();
+        for element in &arr.elements {
+            let Some(expr) = element.as_expression() else {
+                continue;
+            };
+            match expr {
+                Expression::ObjectExpression(item) => {
+                    if let Some(prop) = find_property(item, key)
+                        && let Some(value) = expression_to_path_string(&prop.value)
+                    {
+                        results.push(value);
+                    }
+                }
+                _ => {
+                    if let Some(value) = expression_to_path_string(expr) {
+                        results.push(value);
+                    }
+                }
+            }
+        }
+
+        (!results.is_empty()).then_some(results)
+    })
+    .unwrap_or_default()
+}
+
+/// Normalize a config-relative path string to a project-root-relative path.
+///
+/// Handles values extracted from config files such as `"./src"`, `"src/lib"`,
+/// `"/src"`, or absolute filesystem paths under `root`.
+#[must_use]
+pub fn normalize_config_path(raw: &str, config_path: &Path, root: &Path) -> Option<String> {
+    if raw.is_empty() {
+        return None;
+    }
+
+    let candidate = if let Some(stripped) = raw.strip_prefix('/') {
+        lexical_normalize(root.join(stripped))
+    } else {
+        let path = Path::new(raw);
+        if path.is_absolute() {
+            lexical_normalize(PathBuf::from(path))
+        } else {
+            let base = config_path.parent().unwrap_or(root);
+            lexical_normalize(base.join(path))
+        }
+    };
+
+    let relative = candidate.strip_prefix(root).ok()?;
+    let normalized = relative.to_string_lossy().replace('\\', "/");
+    (!normalized.is_empty()).then_some(normalized)
 }
 
 // ── Internal helpers ──────────────────────────────────────────────
@@ -531,6 +624,138 @@ fn expression_to_string(expr: &Expression) -> Option<String> {
         }
         _ => None,
     }
+}
+
+/// Convert an expression to a path-like string if it's statically recoverable.
+fn expression_to_path_string(expr: &Expression) -> Option<String> {
+    match expr {
+        Expression::ParenthesizedExpression(paren) => expression_to_path_string(&paren.expression),
+        Expression::TSAsExpression(ts_as) => expression_to_path_string(&ts_as.expression),
+        Expression::TSSatisfiesExpression(ts_sat) => expression_to_path_string(&ts_sat.expression),
+        Expression::CallExpression(call) => call_expression_to_path_string(call),
+        Expression::NewExpression(new_expr) => new_expression_to_path_string(new_expr),
+        _ => expression_to_string(expr),
+    }
+}
+
+fn call_expression_to_path_string(call: &CallExpression) -> Option<String> {
+    if matches!(&call.callee, Expression::Identifier(id) if id.name == "fileURLToPath") {
+        return call
+            .arguments
+            .first()
+            .and_then(Argument::as_expression)
+            .and_then(expression_to_path_string);
+    }
+
+    let callee_name = match &call.callee {
+        Expression::Identifier(id) => Some(id.name.as_str()),
+        Expression::StaticMemberExpression(member) => Some(member.property.name.as_str()),
+        _ => None,
+    }?;
+
+    if !matches!(callee_name, "resolve" | "join") {
+        return None;
+    }
+
+    let mut segments = Vec::new();
+    for (index, arg) in call.arguments.iter().enumerate() {
+        let Some(expr) = arg.as_expression() else {
+            return None;
+        };
+
+        if matches!(expr, Expression::Identifier(id) if id.name == "__dirname") {
+            if index == 0 {
+                continue;
+            }
+            return None;
+        }
+
+        segments.push(expression_to_string(expr)?);
+    }
+
+    (!segments.is_empty()).then(|| join_path_segments(&segments))
+}
+
+fn new_expression_to_path_string(new_expr: &NewExpression) -> Option<String> {
+    if !matches!(&new_expr.callee, Expression::Identifier(id) if id.name == "URL") {
+        return None;
+    }
+
+    let source = new_expr
+        .arguments
+        .first()
+        .and_then(Argument::as_expression)
+        .and_then(expression_to_string)?;
+
+    let base = new_expr
+        .arguments
+        .get(1)
+        .and_then(Argument::as_expression)?;
+    is_import_meta_url_expression(base).then_some(source)
+}
+
+fn is_import_meta_url_expression(expr: &Expression) -> bool {
+    if let Expression::StaticMemberExpression(member) = expr {
+        member.property.name == "url" && matches!(member.object, Expression::MetaProperty(_))
+    } else {
+        false
+    }
+}
+
+fn join_path_segments(segments: &[String]) -> String {
+    let mut joined = PathBuf::new();
+    for segment in segments {
+        joined.push(segment);
+    }
+    joined.to_string_lossy().replace('\\', "/")
+}
+
+fn expression_to_alias_pairs(expr: &Expression) -> Vec<(String, String)> {
+    match expr {
+        Expression::ObjectExpression(obj) => obj
+            .properties
+            .iter()
+            .filter_map(|prop| {
+                let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                    return None;
+                };
+                let find = property_key_to_string(&prop.key)?;
+                let replacement = expression_to_path_string(&prop.value)?;
+                Some((find, replacement))
+            })
+            .collect(),
+        Expression::ArrayExpression(arr) => arr
+            .elements
+            .iter()
+            .filter_map(|element| {
+                let Expression::ObjectExpression(obj) = element.as_expression()? else {
+                    return None;
+                };
+                let find = find_property(obj, "find")
+                    .and_then(|prop| expression_to_string(&prop.value))?;
+                let replacement = find_property(obj, "replacement")
+                    .and_then(|prop| expression_to_path_string(&prop.value))?;
+                Some((find, replacement))
+            })
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn lexical_normalize(path: PathBuf) -> PathBuf {
+    let mut normalized = PathBuf::new();
+
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+
+    normalized
 }
 
 /// Convert an expression to a string array if it's an array of string literals.
@@ -1009,6 +1234,85 @@ mod tests {
         let source = r#"module.exports = { plugins: ["a", "b"] };"#;
         let deps = extract_config_require_strings(source, &js_path(), "plugins");
         assert!(deps.is_empty());
+    }
+
+    #[test]
+    fn extract_aliases_from_object_with_file_url_to_path() {
+        let source = r#"
+            import { defineConfig } from 'vite';
+            import { fileURLToPath, URL } from 'node:url';
+
+            export default defineConfig({
+                resolve: {
+                    alias: {
+                        "@": fileURLToPath(new URL("./src", import.meta.url))
+                    }
+                }
+            });
+        "#;
+
+        let aliases = extract_config_aliases(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(aliases, vec![("@".to_string(), "./src".to_string())]);
+    }
+
+    #[test]
+    fn extract_aliases_from_array_form() {
+        let source = r#"
+            export default {
+                resolve: {
+                    alias: [
+                        { find: "@", replacement: "./src" },
+                        { find: "$utils", replacement: "src/lib/utils" }
+                    ]
+                }
+            };
+        "#;
+
+        let aliases = extract_config_aliases(source, &ts_path(), &["resolve", "alias"]);
+        assert_eq!(
+            aliases,
+            vec![
+                ("@".to_string(), "./src".to_string()),
+                ("$utils".to_string(), "src/lib/utils".to_string())
+            ]
+        );
+    }
+
+    #[test]
+    fn extract_array_object_strings_mixed_forms() {
+        let source = r#"
+            export default {
+                components: [
+                    "~/components",
+                    { path: "@/feature-components" }
+                ]
+            };
+        "#;
+
+        let values =
+            extract_config_array_object_strings(source, &ts_path(), &["components"], "path");
+        assert_eq!(
+            values,
+            vec![
+                "~/components".to_string(),
+                "@/feature-components".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn normalize_config_path_relative_to_root() {
+        let config_path = PathBuf::from("/project/vite.config.ts");
+        let root = PathBuf::from("/project");
+
+        assert_eq!(
+            normalize_config_path("./src/lib", &config_path, &root),
+            Some("src/lib".to_string())
+        );
+        assert_eq!(
+            normalize_config_path("/src/lib", &config_path, &root),
+            Some("src/lib".to_string())
+        );
     }
 
     // ── JSON wrapped in parens (for tsconfig.json parsing) ──────────

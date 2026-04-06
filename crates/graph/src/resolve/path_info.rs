@@ -12,8 +12,9 @@ pub fn is_path_alias(specifier: &str) -> bool {
     if specifier.starts_with('#') {
         return true;
     }
-    // `~/` and `~~/` prefixes are common alias conventions (e.g., Nuxt, custom tsconfig)
-    if specifier.starts_with("~/") || specifier.starts_with("~~/") {
+    // `~/`, `~~/`, and `@@/` prefixes are common alias conventions
+    // (e.g., Nuxt, custom tsconfig)
+    if specifier.starts_with("~/") || specifier.starts_with("~~/") || specifier.starts_with("@@/") {
         return true;
     }
     // `@/` is a very common path alias (e.g., `@/components/Foo`)
@@ -132,6 +133,7 @@ mod tests {
     fn path_alias_tilde_prefix() {
         assert!(is_path_alias("~/components/Button"));
         assert!(is_path_alias("~~/utils/helpers"));
+        assert!(is_path_alias("@@/shared/utils"));
     }
 
     #[test]

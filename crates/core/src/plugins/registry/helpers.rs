@@ -194,6 +194,12 @@ pub fn process_config_result(
             .into_iter()
             .map(|p| (p, pname.clone())),
     );
+    for (prefix, replacement) in plugin_result.path_aliases {
+        result
+            .path_aliases
+            .retain(|(existing_prefix, _)| existing_prefix != &prefix);
+        result.path_aliases.push((prefix, replacement));
+    }
     result.setup_files.extend(
         plugin_result
             .setup_files

@@ -76,6 +76,8 @@ pub struct PluginResult {
     pub referenced_dependencies: Vec<String>,
     /// Additional files that are always considered used.
     pub always_used_files: Vec<String>,
+    /// Path alias mappings discovered from config (prefix -> replacement directory).
+    pub path_aliases: Vec<(String, String)>,
     /// Setup/helper files referenced from config.
     pub setup_files: Vec<PathBuf>,
     /// Test fixture glob patterns discovered from config.
@@ -88,6 +90,7 @@ impl PluginResult {
         self.entry_patterns.is_empty()
             && self.referenced_dependencies.is_empty()
             && self.always_used_files.is_empty()
+            && self.path_aliases.is_empty()
             && self.setup_files.is_empty()
             && self.fixture_patterns.is_empty()
     }
