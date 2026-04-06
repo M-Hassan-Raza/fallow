@@ -217,7 +217,7 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 
 ## Framework plugins
 
-84 built-in plugins detect entry points and used exports for your framework automatically.
+84 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
 
 | Category | Plugins |
 |---|---|
