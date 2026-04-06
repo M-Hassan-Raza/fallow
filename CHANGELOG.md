@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.13.4] - 2026-04-06
+
+### Fixed
+
+- **False positive unused exports from namespace exports** -- `export namespace Foo { export function bar() {} }` no longer reports inner declarations (`bar`) as unused top-level exports. Inner exports are now tracked as namespace members. Runtime namespaces (no `declare`) are correctly classified as non-type-only. ([#52](https://github.com/fallow-rs/fallow/issues/52))
+
 ## [2.13.3] - 2026-04-05
 
 ### Changed
@@ -836,7 +842,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.13.3...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.13.4...HEAD
+[2.13.4]: https://github.com/fallow-rs/fallow/compare/v2.13.3...v2.13.4
 [2.13.3]: https://github.com/fallow-rs/fallow/compare/v2.13.2...v2.13.3
 [2.13.2]: https://github.com/fallow-rs/fallow/compare/v2.13.1...v2.13.2
 [2.13.1]: https://github.com/fallow-rs/fallow/compare/v2.13.0...v2.13.1
