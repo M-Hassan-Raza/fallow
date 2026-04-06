@@ -346,14 +346,14 @@ pub fn normalize_config_path(raw: &str, config_path: &Path, root: &Path) -> Opti
     }
 
     let candidate = if let Some(stripped) = raw.strip_prefix('/') {
-        lexical_normalize(root.join(stripped))
+        lexical_normalize(&root.join(stripped))
     } else {
         let path = Path::new(raw);
         if path.is_absolute() {
-            lexical_normalize(PathBuf::from(path))
+            lexical_normalize(path)
         } else {
             let base = config_path.parent().unwrap_or(root);
-            lexical_normalize(base.join(path))
+            lexical_normalize(&base.join(path))
         }
     };
 
@@ -659,9 +659,7 @@ fn call_expression_to_path_string(call: &CallExpression) -> Option<String> {
 
     let mut segments = Vec::new();
     for (index, arg) in call.arguments.iter().enumerate() {
-        let Some(expr) = arg.as_expression() else {
-            return None;
-        };
+        let expr = arg.as_expression()?;
 
         if matches!(expr, Expression::Identifier(id) if id.name == "__dirname") {
             if index == 0 {
@@ -742,7 +740,7 @@ fn expression_to_alias_pairs(expr: &Expression) -> Vec<(String, String)> {
     }
 }
 
-fn lexical_normalize(path: PathBuf) -> PathBuf {
+fn lexical_normalize(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
 
     for component in path.components() {

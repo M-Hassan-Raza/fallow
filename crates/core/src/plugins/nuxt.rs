@@ -142,7 +142,7 @@ impl Plugin for NuxtPlugin {
             // ~/  → srcDir (app/ or root)
             ("~/", src_dir.clone()),
             // @/  → srcDir (Nuxt alias synonym for ~/)
-            ("@/", src_dir.clone()),
+            ("@/", src_dir),
             // ~~/ → rootDir (project root)
             ("~~/", String::new()),
             // @@/ → rootDir (Nuxt alias synonym for ~~/)
