@@ -204,6 +204,58 @@ fn health_coverage_gaps_flag_reports_runtime_gaps() {
 }
 
 #[test]
+fn health_coverage_gaps_suppressed_file_excluded() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    copy_dir_recursive(&fixture_path("coverage-gaps"), root);
+
+    // Add suppression comment to setup-only.ts
+    write_file(
+        &root.join("src/setup-only.ts"),
+        r#"// fallow-ignore-file coverage-gaps
+export function viaSetup(): string {
+  return "setup";
+}
+"#,
+    );
+
+    let output = common::run_fallow_in_root(
+        "health",
+        root,
+        &["--coverage-gaps", "--format", "json", "--quiet"],
+    );
+
+    let json = parse_json(&output);
+    let coverage = json
+        .get("coverage_gaps")
+        .expect("coverage_gaps should be present");
+    let file_paths: Vec<_> = coverage["files"]
+        .as_array()
+        .expect("files array")
+        .iter()
+        .filter_map(|item| item.get("path").and_then(serde_json::Value::as_str))
+        .collect();
+
+    assert!(
+        !file_paths
+            .iter()
+            .any(|path| path.ends_with("src/setup-only.ts")),
+        "setup-only.ts should be excluded when suppressed with fallow-ignore-file: {file_paths:?}"
+    );
+
+    let export_names: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("exports array")
+        .iter()
+        .filter_map(|item| item.get("export_name").and_then(serde_json::Value::as_str))
+        .collect();
+    assert!(
+        !export_names.contains(&"viaSetup"),
+        "viaSetup export should be excluded when file is suppressed: {export_names:?}"
+    );
+}
+
+#[test]
 fn health_coverage_gaps_workspace_scope_limits_results() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();

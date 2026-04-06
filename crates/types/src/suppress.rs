@@ -49,6 +49,8 @@ pub enum IssueKind {
     TestOnlyDependency,
     /// An import that crosses an architecture boundary.
     BoundaryViolation,
+    /// A runtime file or export with no test dependency path.
+    CoverageGaps,
 }
 
 impl IssueKind {
@@ -71,6 +73,7 @@ impl IssueKind {
             "type-only-dependency" => Some(Self::TypeOnlyDependency),
             "test-only-dependency" => Some(Self::TestOnlyDependency),
             "boundary-violation" => Some(Self::BoundaryViolation),
+            "coverage-gaps" => Some(Self::CoverageGaps),
             _ => None,
         }
     }
@@ -94,6 +97,7 @@ impl IssueKind {
             Self::TypeOnlyDependency => 13,
             Self::TestOnlyDependency => 14,
             Self::BoundaryViolation => 15,
+            Self::CoverageGaps => 16,
         }
     }
 
@@ -116,6 +120,7 @@ impl IssueKind {
             13 => Some(Self::TypeOnlyDependency),
             14 => Some(Self::TestOnlyDependency),
             15 => Some(Self::BoundaryViolation),
+            16 => Some(Self::CoverageGaps),
             _ => None,
         }
     }
@@ -212,6 +217,10 @@ mod tests {
             IssueKind::parse("boundary-violation"),
             Some(IssueKind::BoundaryViolation)
         );
+        assert_eq!(
+            IssueKind::parse("coverage-gaps"),
+            Some(IssueKind::CoverageGaps)
+        );
     }
 
     #[test]
@@ -233,7 +242,7 @@ mod tests {
     #[test]
     fn discriminant_out_of_range() {
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(16), None);
+        assert_eq!(IssueKind::from_discriminant(17), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -255,6 +264,7 @@ mod tests {
             IssueKind::TypeOnlyDependency,
             IssueKind::TestOnlyDependency,
             IssueKind::BoundaryViolation,
+            IssueKind::CoverageGaps,
         ] {
             assert_eq!(
                 IssueKind::from_discriminant(kind.to_discriminant()),
@@ -262,7 +272,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(16), None);
+        assert_eq!(IssueKind::from_discriminant(17), None);
     }
 
     // ── Discriminant uniqueness ─────────────────────────────────
@@ -285,6 +295,7 @@ mod tests {
             IssueKind::TypeOnlyDependency,
             IssueKind::TestOnlyDependency,
             IssueKind::BoundaryViolation,
+            IssueKind::CoverageGaps,
         ];
         let discriminants: Vec<u8> = all_kinds.iter().map(|k| k.to_discriminant()).collect();
         let mut sorted = discriminants.clone();

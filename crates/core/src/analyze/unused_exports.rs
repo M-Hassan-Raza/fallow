@@ -288,7 +288,17 @@ pub fn find_duplicate_exports(
                 })
                 .collect();
 
-            if independent.len() > 1 {
+            if independent.len() <= 1 {
+                return None;
+            }
+
+            // Filter: only report duplicates where at least two files share a common
+            // importer in the module graph. Unrelated leaf files (e.g., SvelteKit route
+            // modules in different directories) that happen to export the same name
+            // are not actionable duplicates since they can never be confused at an
+            // import site.
+            let has_shared_importer = has_common_importer(&independent, graph);
+            if has_shared_importer {
                 Some(DuplicateExport {
                     export_name: name,
                     locations: independent,
@@ -298,6 +308,63 @@ pub fn find_duplicate_exports(
             }
         })
         .collect()
+}
+
+/// Check if any two files in the duplicate set share a common importer.
+///
+/// Two files "share a common importer" if there exists a third file that imports
+/// from both. This filters out false positives from unrelated leaf modules (e.g.,
+/// SvelteKit route files in different directories) that coincidentally export the
+/// same name but are never imported together.
+fn has_common_importer(locations: &[DuplicateLocation], graph: &ModuleGraph) -> bool {
+    if locations.len() <= 1 {
+        return false;
+    }
+
+    // Collect FileIds for the duplicate locations by matching paths
+    let file_ids: Vec<FileId> = locations
+        .iter()
+        .filter_map(|loc| {
+            graph
+                .modules
+                .iter()
+                .find(|m| m.path == loc.path)
+                .map(|m| m.file_id)
+        })
+        .collect();
+
+    if file_ids.len() <= 1 {
+        return false;
+    }
+
+    // For each pair, check if they share a common importer via reverse_deps
+    for i in 0..file_ids.len() {
+        let idx_i = file_ids[i].0 as usize;
+        if idx_i >= graph.reverse_deps.len() {
+            continue;
+        }
+        let importers_i: FxHashSet<FileId> = graph.reverse_deps[idx_i].iter().copied().collect();
+        for j in (i + 1)..file_ids.len() {
+            let idx_j = file_ids[j].0 as usize;
+            if idx_j >= graph.reverse_deps.len() {
+                continue;
+            }
+            // Check if any importer of file j also imports file i
+            if graph.reverse_deps[idx_j]
+                .iter()
+                .any(|imp| importers_i.contains(imp))
+            {
+                return true;
+            }
+            // Also check if one directly imports the other
+            if importers_i.contains(&file_ids[j])
+                || graph.reverse_deps[idx_j].contains(&file_ids[i])
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Collect usage counts for all exports in the module graph.
@@ -537,6 +604,9 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         graph.modules[2].is_reachable = true;
         graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+        // entry.ts imports both a.ts and b.ts — they share a common importer
+        graph.reverse_deps[1] = vec![FileId(0)];
+        graph.reverse_deps[2] = vec![FileId(0)];
         let suppressions = FxHashMap::default();
         let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert_eq!(result.len(), 1);
@@ -674,11 +744,61 @@ mod tests {
             graph.modules[i].is_reachable = true;
             graph.modules[i].exports = vec![make_export("sharedFn", 10, 20)];
         }
+        // entry.ts imports all three — they share a common importer
+        graph.reverse_deps[1] = vec![FileId(0)];
+        graph.reverse_deps[2] = vec![FileId(0)];
+        graph.reverse_deps[3] = vec![FileId(0)];
         let suppressions = FxHashMap::default();
         let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].export_name, "sharedFn");
         assert_eq!(result[0].locations.len(), 3);
+    }
+
+    #[test]
+    fn duplicate_exports_unrelated_leaf_files_not_flagged() {
+        // Two route files exporting the same name but with no common importer
+        // (e.g., SvelteKit routes in different directories)
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/routes/foo/page.ts", false),
+            ("/src/routes/bar/page.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("Area", 10, 20)];
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![make_export("Area", 10, 20)];
+        // No shared importer: each is imported by a different parent
+        // (or not imported at all — just reachable via framework routing)
+        let suppressions = FxHashMap::default();
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        assert!(
+            result.is_empty(),
+            "unrelated leaf files should not be flagged as duplicates"
+        );
+    }
+
+    #[test]
+    fn duplicate_exports_direct_import_still_flagged() {
+        // Two files where one imports the other — they are connected
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/a.ts", false),
+            ("/src/b.ts", false),
+        ]);
+        graph.modules[1].is_reachable = true;
+        graph.modules[1].exports = vec![make_export("helper", 10, 20)];
+        graph.modules[2].is_reachable = true;
+        graph.modules[2].exports = vec![make_export("helper", 10, 20)];
+        // a.ts imports b.ts directly
+        graph.reverse_deps[2] = vec![FileId(1)];
+        let suppressions = FxHashMap::default();
+        let result = find_duplicate_exports(&graph, &suppressions, &FxHashMap::default());
+        assert_eq!(
+            result.len(),
+            1,
+            "directly connected files should still be flagged"
+        );
     }
 
     #[test]

@@ -61,6 +61,9 @@ pub(super) struct ImportedSymbol {
     pub(super) local_name: String,
     /// Byte span of the import statement in the source file.
     pub(super) import_span: oxc_span::Span,
+    /// Whether this import is type-only (`import type { ... }`).
+    /// Used to skip type-only edges in circular dependency detection.
+    pub(super) is_type_only: bool,
 }
 
 // Size assertions to prevent memory regressions in hot-path graph types.
@@ -69,7 +72,7 @@ pub(super) struct ImportedSymbol {
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<Edge>() == 32);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ImportedSymbol>() == 56);
+const _: () = assert!(std::mem::size_of::<ImportedSymbol>() == 64);
 
 impl ModuleGraph {
     fn resolve_entry_point_ids(

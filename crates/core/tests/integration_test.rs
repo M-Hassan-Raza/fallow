@@ -19,8 +19,12 @@ mod dynamic_imports;
 mod external_plugins;
 #[path = "integration_test/extraction.rs"]
 mod extraction;
+#[path = "integration_test/false_positive_fixes.rs"]
+mod false_positive_fixes;
 #[path = "integration_test/frameworks.rs"]
 mod frameworks;
+#[path = "integration_test/html_entry.rs"]
+mod html_entry;
 #[path = "integration_test/member_detection.rs"]
 mod member_detection;
 #[path = "integration_test/rules_config.rs"]

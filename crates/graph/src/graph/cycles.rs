@@ -61,6 +61,12 @@ impl ModuleGraph {
             let start = all_succs.len();
             seen_set.clear();
             for edge in &self.edges[module.edge_range.clone()] {
+                // Skip edges where all imports are type-only (`import type`).
+                // Type-only imports are erased at compile time and cannot cause
+                // runtime circular dependency issues.
+                if edge.symbols.iter().all(|s| s.is_type_only) {
+                    continue;
+                }
                 let target = edge.target.0 as usize;
                 if target < n && seen_set.insert(target) {
                     all_succs.push(target);
@@ -1501,5 +1507,142 @@ mod tests {
                 }
             }
         }
+    }
+
+    // ── Type-only cycle tests ────────────────────────────────────
+
+    /// Build a cycle graph where specific edges are type-only.
+    fn build_cycle_graph_with_type_only(
+        file_count: usize,
+        edges_spec: &[(u32, u32, bool)], // (source, target, is_type_only)
+    ) -> ModuleGraph {
+        let files: Vec<DiscoveredFile> = (0..file_count)
+            .map(|i| DiscoveredFile {
+                id: FileId(i as u32),
+                path: PathBuf::from(format!("/project/file{i}.ts")),
+                size_bytes: 100,
+            })
+            .collect();
+
+        let resolved_modules: Vec<ResolvedModule> = (0..file_count)
+            .map(|i| {
+                let imports: Vec<ResolvedImport> = edges_spec
+                    .iter()
+                    .filter(|(src, _, _)| *src == i as u32)
+                    .map(|(_, tgt, type_only)| ResolvedImport {
+                        info: ImportInfo {
+                            source: format!("./file{tgt}"),
+                            imported_name: ImportedName::Named("x".to_string()),
+                            local_name: "x".to_string(),
+                            is_type_only: *type_only,
+                            span: oxc_span::Span::new(0, 10),
+                            source_span: oxc_span::Span::default(),
+                        },
+                        target: ResolveResult::InternalModule(FileId(*tgt)),
+                    })
+                    .collect();
+
+                ResolvedModule {
+                    file_id: FileId(i as u32),
+                    path: PathBuf::from(format!("/project/file{i}.ts")),
+                    exports: vec![fallow_types::extract::ExportInfo {
+                        name: ExportName::Named("x".to_string()),
+                        local_name: Some("x".to_string()),
+                        is_type_only: false,
+                        is_public: false,
+                        span: oxc_span::Span::new(0, 20),
+                        members: vec![],
+                    }],
+                    re_exports: vec![],
+                    resolved_imports: imports,
+                    resolved_dynamic_imports: vec![],
+                    resolved_dynamic_patterns: vec![],
+                    member_accesses: vec![],
+                    whole_object_uses: vec![],
+                    has_cjs_exports: false,
+                    unused_import_bindings: FxHashSet::default(),
+                }
+            })
+            .collect();
+
+        let entry_points = vec![EntryPoint {
+            path: PathBuf::from("/project/file0.ts"),
+            source: EntryPointSource::PackageJsonMain,
+        }];
+
+        ModuleGraph::build(&resolved_modules, &entry_points, &files)
+    }
+
+    #[test]
+    fn type_only_bidirectional_import_not_a_cycle() {
+        // A imports type from B, B imports type from A — not a runtime cycle
+        let graph = build_cycle_graph_with_type_only(2, &[(0, 1, true), (1, 0, true)]);
+        let cycles = graph.find_cycles();
+        assert!(
+            cycles.is_empty(),
+            "type-only bidirectional imports should not be reported as cycles"
+        );
+    }
+
+    #[test]
+    fn mixed_type_and_value_import_not_a_cycle() {
+        // A value-imports B, B type-imports A — NOT a runtime cycle.
+        // B's import of A is type-only (erased at compile time), so the runtime
+        // dependency is one-directional: A→B only.
+        let graph = build_cycle_graph_with_type_only(2, &[(0, 1, false), (1, 0, true)]);
+        let cycles = graph.find_cycles();
+        assert!(
+            cycles.is_empty(),
+            "A->B (value) + B->A (type-only) is not a runtime cycle"
+        );
+    }
+
+    #[test]
+    fn both_value_imports_with_one_type_still_a_cycle() {
+        // A value-imports B AND type-imports B. B value-imports A.
+        // A->B has a non-type-only symbol, B->A has a non-type-only symbol = real cycle.
+        let graph = build_cycle_graph_with_type_only(2, &[(0, 1, false), (1, 0, false)]);
+        let cycles = graph.find_cycles();
+        assert!(
+            !cycles.is_empty(),
+            "bidirectional value imports should be reported as a cycle"
+        );
+    }
+
+    #[test]
+    fn all_value_imports_still_a_cycle() {
+        // A value-imports B, B value-imports A — still a cycle
+        let graph = build_cycle_graph_with_type_only(2, &[(0, 1, false), (1, 0, false)]);
+        let cycles = graph.find_cycles();
+        assert_eq!(cycles.len(), 1);
+    }
+
+    #[test]
+    fn three_node_type_only_cycle_not_reported() {
+        // A -> B -> C -> A, all type-only
+        let graph =
+            build_cycle_graph_with_type_only(3, &[(0, 1, true), (1, 2, true), (2, 0, true)]);
+        let cycles = graph.find_cycles();
+        assert!(
+            cycles.is_empty(),
+            "three-node type-only cycle should not be reported"
+        );
+    }
+
+    #[test]
+    fn three_node_cycle_one_value_edge_still_reported() {
+        // A -value-> B -type-> C -type-> A
+        // B->C and C->A are type-only, but A->B is a value edge.
+        // This still forms a cycle because Tarjan's considers all non-type-only successors.
+        // However, since B only has type-only successors (B->C is type-only),
+        // B has no runtime successors, so no SCC with B will form.
+        let graph =
+            build_cycle_graph_with_type_only(3, &[(0, 1, false), (1, 2, true), (2, 0, true)]);
+        let cycles = graph.find_cycles();
+        // B has no runtime successors (B->C is type-only), so the cycle is broken
+        assert!(
+            cycles.is_empty(),
+            "cycle broken by type-only edge in the middle should not be reported"
+        );
     }
 }

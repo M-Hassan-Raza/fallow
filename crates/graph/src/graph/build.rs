@@ -76,6 +76,7 @@ fn collect_import_edge(
                     imported_name: import.info.imported_name.clone(),
                     local_name: import.info.local_name.clone(),
                     import_span: import.info.span,
+                    is_type_only: import.info.is_type_only,
                 });
         }
         ResolveResult::NpmPackage(name) => {
@@ -113,6 +114,7 @@ fn collect_edges_for_module(
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
+                    is_type_only: re_export.info.is_type_only,
                 });
         } else if let ResolveResult::NpmPackage(name) = &re_export.target {
             record_package_usage(acc, name, file_id, re_export.info.is_type_only);
@@ -137,6 +139,7 @@ fn collect_edges_for_module(
                     imported_name: ImportedName::Namespace,
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
+                    is_type_only: false,
                 });
         }
     }

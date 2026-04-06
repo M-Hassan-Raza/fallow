@@ -146,6 +146,28 @@ fn compute_coverage_gaps(
         let Some(path) = file_paths.get(&node.file_id) else {
             continue;
         };
+
+        // Skip non-executable assets (CSS/SCSS/LESS/SASS) from coverage gap analysis.
+        // These are runtime-reachable (imported by JS) but not testable in the same way.
+        if path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| matches!(ext, "css" | "scss" | "less" | "sass"))
+        {
+            continue;
+        }
+
+        // Check inline suppression: // fallow-ignore-file coverage-gaps
+        let module = module_by_id.get(&node.file_id);
+        if module.is_some_and(|m| {
+            fallow_core::suppress::is_file_suppressed(
+                &m.suppressions,
+                fallow_types::suppress::IssueKind::CoverageGaps,
+            )
+        }) {
+            continue;
+        }
+
         runtime_paths.push((*path).clone());
 
         runtime_files += 1;
@@ -158,7 +180,7 @@ fn compute_coverage_gaps(
             });
         }
 
-        let Some(module) = module_by_id.get(&node.file_id) else {
+        let Some(module) = module else {
             continue;
         };
 

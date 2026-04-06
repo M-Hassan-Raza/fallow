@@ -11,6 +11,7 @@ paths:
 Non-obvious implementation details for each detection feature. These are NOT discoverable from reading the code alone.
 
 ## Parser-level
+- **HTML entry files**: `<script src="...">` (module and classic) and `<link rel="stylesheet" href="...">` / `<link rel="modulepreload" href="...">` create graph edges from HTML to referenced assets. Remote URLs skipped. HTML comments stripped before matching. HTML files exempt from unused-file detection.
 - **Vue/Svelte SFC**: handles `>` in quoted attributes like `generic="T extends Foo<Bar>"`, `<script src="...">` external script support, HTML comment filtering
 - **Namespace destructuring**: `const { a, b } = ns` → member accesses. Rest patterns (`const { foo, ...rest } = ns`) → conservative whole-object use. Works with static/dynamic imports and require.
 - **Unused import bindings**: via `oxc_semantic` scope-aware symbol analysis. Dead imports don't count as references, improving unused-export precision.
@@ -27,10 +28,12 @@ Non-obvious implementation details for each detection feature. These are NOT dis
 - **Tsconfig path aliases**: per-file discovery resolves `@/utils` by finding nearest tsconfig.json per file
 
 ## Graph-level
+- **Type-only cycle filtering**: `import type` edges carry `is_type_only` through `ImportedSymbol` to cycle detection. Edges where all symbols are type-only are excluded from Tarjan's SCC successor list, preventing false circular dependency reports from type-only bidirectional imports.
 - **`export *` chain propagation**: multi-level barrel file chains fully resolved for transitive usage tracking
 - **CSS Modules**: default imports (`import styles from '...'`) resolve `styles.className` to named exports via graph-level narrowing. Spread/`Object.values` handled conservatively.
 
 ## Analysis-level
+- **Duplicate export common-importer filter**: duplicate exports are only reported when at least two files sharing the same export name also share a common importer in the module graph. Unrelated leaf files (e.g., SvelteKit route modules in different directories) that coincidentally export the same name are not flagged.
 - **Decorated class members**: members with decorators (NestJS `@Get()`, Angular `@Input()`, TypeORM `@Column()`) not reported unused
 - **JSDoc `@public` tag**: exports annotated with `/** @public */` never reported unused. Only `/** */` block comments recognized.
 - **Infrastructure entry points**: Dockerfiles, Procfiles, fly.toml scanned for source file refs. Searches root and config/docker/deploy subdirs.
