@@ -701,6 +701,8 @@ fn run_plugins(
         result.active_plugins.iter().cloned().collect();
     let mut seen_prefixes: rustc_hash::FxHashSet<String> =
         result.virtual_module_prefixes.iter().cloned().collect();
+    let mut seen_generated: rustc_hash::FxHashSet<String> =
+        result.generated_import_patterns.iter().cloned().collect();
     for (ws_result, ws_prefix) in ws_results {
         // Prefix helper: workspace-relative patterns need the workspace prefix
         // to be matchable from the monorepo root. But patterns that are already
@@ -764,6 +766,21 @@ fn run_plugins(
                 seen_prefixes.insert(prefix.clone());
                 result.virtual_module_prefixes.push(prefix);
             }
+        }
+        // Generated import patterns (e.g., SvelteKit /$types) are suffix
+        // matches on specifiers, not file paths — no workspace prefix needed.
+        for pattern in ws_result.generated_import_patterns {
+            if !seen_generated.contains(&pattern) {
+                seen_generated.insert(pattern.clone());
+                result.generated_import_patterns.push(pattern);
+            }
+        }
+        // Path aliases from workspace plugins (e.g., SvelteKit $lib/ → src/lib).
+        // Prefix the replacement directory so it resolves from the monorepo root.
+        for (prefix, replacement) in ws_result.path_aliases {
+            result
+                .path_aliases
+                .push((prefix, format!("{ws_prefix}/{replacement}")));
         }
     }
 

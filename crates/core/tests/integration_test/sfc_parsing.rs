@@ -159,3 +159,24 @@ fn sveltekit_generated_types_not_unresolved() {
         "./$types.js should not be unresolved (generated import), found: {unresolved_specs:?}"
     );
 }
+
+// ── Monorepo workspace: generated imports propagate ──────────
+
+#[test]
+fn sveltekit_workspace_types_not_unresolved() {
+    let root = fixture_path("workspace-sveltekit");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.specifier.as_str())
+        .collect();
+
+    // ./$types in a workspace SvelteKit project must not be flagged as unresolved
+    assert!(
+        !unresolved_specs.contains(&"./$types"),
+        "./$types should not be unresolved in workspace mode, found: {unresolved_specs:?}"
+    );
+}
