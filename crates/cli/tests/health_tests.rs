@@ -151,8 +151,8 @@ fn health_coverage_gaps_flag_reports_runtime_gaps() {
         &["--coverage-gaps", "--format", "json", "--quiet"],
     );
     assert_eq!(
-        output.code, 1,
-        "health --coverage-gaps should exit 1 when gaps are present"
+        output.code, 0,
+        "health --coverage-gaps defaults to warn severity (exit 0)"
     );
 
     let json = parse_json(&output);
@@ -297,8 +297,8 @@ export const shared = sharedGap();
         ],
     );
     assert_eq!(
-        output.code, 1,
-        "workspace-scoped health --coverage-gaps should report app-only gaps"
+        output.code, 0,
+        "workspace-scoped health --coverage-gaps defaults to warn severity (exit 0)"
     );
 
     let json = parse_json(&output);
@@ -367,8 +367,8 @@ fn health_coverage_gaps_changed_since_scopes_results() {
         ],
     );
     assert_eq!(
-        output.code, 1,
-        "changed-since should preserve coverage gaps for changed runtime files"
+        output.code, 0,
+        "changed-since coverage gaps defaults to warn severity (exit 0)"
     );
 
     let json = parse_json(&output);

@@ -431,7 +431,7 @@ pub fn discover_workspace_entry_points(
 
     // Fall back to default index files if no entry points found for this workspace
     if entries.is_empty() {
-        entries = apply_default_fallback(all_files, ws_root, None);
+        entries = apply_default_fallback(all_files, ws_root, Some(ws_root));
     }
 
     entries.sort_by(|a, b| a.path.cmp(&b.path));

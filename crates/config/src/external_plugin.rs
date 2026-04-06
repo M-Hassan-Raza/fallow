@@ -91,8 +91,8 @@ pub struct ExternalPluginDef {
 
     /// Coverage role for `entryPoints`.
     ///
-    /// Defaults to `runtime` for backwards compatibility with existing external
-    /// plugins, whose `entryPoints` typically model application roots.
+    /// Defaults to `support`. Set to `runtime` for application entry points
+    /// or `test` for test framework entry points.
     #[serde(default = "default_external_entry_point_role")]
     pub entry_point_role: EntryPointRole,
 
@@ -124,7 +124,7 @@ pub struct ExternalUsedExport {
 }
 
 fn default_external_entry_point_role() -> EntryPointRole {
-    EntryPointRole::Runtime
+    EntryPointRole::Support
 }
 
 impl ExternalPluginDef {

@@ -577,9 +577,19 @@ fn render_coverage_gaps(
         "{} {}",
         "\u{25cf}".yellow(),
         format!(
-            "Coverage gaps ({} untested files, {} untested exports, {:.1}% file coverage)",
+            "Coverage gaps ({} untested {}, {} untested {}, {:.1}% file coverage)",
             gaps.summary.untested_files,
+            if gaps.summary.untested_files == 1 {
+                "file"
+            } else {
+                "files"
+            },
             gaps.summary.untested_exports,
+            if gaps.summary.untested_exports == 1 {
+                "export"
+            } else {
+                "exports"
+            },
             gaps.summary.file_coverage_pct,
         )
         .yellow()
@@ -593,12 +603,7 @@ fn render_coverage_gaps(
         for item in &gaps.files[..shown_files] {
             let file_str = relative_path(&item.path, root).display().to_string();
             let (dir, filename) = split_dir_filename(&file_str);
-            lines.push(format!(
-                "  {} {}{}",
-                format!("{:>2}x", item.value_export_count).dimmed(),
-                dir.dimmed(),
-                filename,
-            ));
+            lines.push(format!("  {}{}", dir.dimmed(), filename,));
         }
         if gaps.files.len() > MAX_FLAT_ITEMS {
             lines.push(format!(
@@ -641,7 +646,7 @@ fn render_coverage_gaps(
     lines.push(format!(
         "  {}",
         format!(
-            "Static test dependency gaps derived from runtime vs test reachability \u{2014} {DOCS_HEALTH}#coverage-gaps"
+            "Static test dependency gaps (not line-level coverage): {DOCS_HEALTH}#coverage-gaps"
         )
         .dimmed()
     ));
@@ -904,10 +909,24 @@ pub(in crate::report) fn print_health_summary(
     }
     if let Some(ref gaps) = report.coverage_gaps {
         println!(
-            "  {:>6}  Untested files ({:.1}% file coverage)",
-            gaps.summary.untested_files, gaps.summary.file_coverage_pct,
+            "  {:>6}  Untested {} ({:.1}% file coverage)",
+            gaps.summary.untested_files,
+            if gaps.summary.untested_files == 1 {
+                "file"
+            } else {
+                "files"
+            },
+            gaps.summary.file_coverage_pct,
         );
-        println!("  {:>6}  Untested exports", gaps.summary.untested_exports);
+        println!(
+            "  {:>6}  Untested {}",
+            gaps.summary.untested_exports,
+            if gaps.summary.untested_exports == 1 {
+                "export"
+            } else {
+                "exports"
+            },
+        );
     }
 
     if !quiet {
@@ -1174,9 +1193,7 @@ mod tests {
 
         let text = plain(&build_health_human_lines(&report, &root));
         assert!(
-            text.contains(
-                "Coverage gaps (1 untested files, 1 untested exports, 0.0% file coverage)"
-            )
+            text.contains("Coverage gaps (1 untested file, 1 untested export, 0.0% file coverage)")
         );
         assert!(text.contains("src/app.ts"));
         assert!(text.contains("loader"));

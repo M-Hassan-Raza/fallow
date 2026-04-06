@@ -545,6 +545,7 @@ mod tests {
                 circular_dependencies: Severity::Off,
                 test_only_dependencies: Severity::Off,
                 boundary_violation: Severity::Off,
+                coverage_gaps: Severity::Off,
             };
             let config = make_config_with_rules(rules);
             let results = find_dead_code(&graph, &config);

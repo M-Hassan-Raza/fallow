@@ -134,8 +134,13 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         findings.truncate(top);
     }
 
+    // --coverage-gaps flag overrides Off severity (explicit user intent).
+    // Without the flag, coverage gaps only activate when config severity is not Off.
+    let effective_coverage_gaps = opts.coverage_gaps;
+
     // Compute file-level health scores (needed by hotspots and targets too)
-    let needs_file_scores = opts.file_scores || opts.coverage_gaps || opts.hotspots || opts.targets;
+    let needs_file_scores =
+        opts.file_scores || effective_coverage_gaps || opts.hotspots || opts.targets;
     let (score_output, files_scored, average_maintainability) = if needs_file_scores {
         compute_filtered_file_scores(
             &config,
@@ -213,6 +218,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     // Assemble final report
     let report = assemble_health_report(
         opts,
+        effective_coverage_gaps,
         findings,
         files_analyzed,
         total_functions,
@@ -499,6 +505,7 @@ fn compute_health_trend(
 )]
 fn assemble_health_report(
     opts: &HealthOptions<'_>,
+    effective_coverage_gaps: bool,
     findings: Vec<HealthFinding>,
     files_analyzed: usize,
     total_functions: usize,
@@ -516,7 +523,7 @@ fn assemble_health_report(
     target_thresholds: Option<TargetThresholds>,
     health_trend: Option<crate::health_types::HealthTrend>,
 ) -> HealthReport {
-    let coverage_gaps = if opts.coverage_gaps {
+    let coverage_gaps = if effective_coverage_gaps {
         score_output.as_ref().map(|o| o.coverage.report.clone())
     } else {
         None
@@ -767,11 +774,12 @@ pub fn print_health_result(
         return ExitCode::from(1);
     }
 
-    if result
-        .report
-        .coverage_gaps
-        .as_ref()
-        .is_some_and(|gaps| !gaps.is_empty())
+    if result.config.rules.coverage_gaps == fallow_config::Severity::Error
+        && result
+            .report
+            .coverage_gaps
+            .as_ref()
+            .is_some_and(|gaps| !gaps.is_empty())
     {
         return ExitCode::from(1);
     }

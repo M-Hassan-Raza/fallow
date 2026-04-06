@@ -425,8 +425,4 @@ impl Default for PluginRegistry {
 }
 
 #[cfg(test)]
-#[expect(
-    clippy::disallowed_types,
-    reason = "test assertions use std HashMap for readability"
-)]
 mod tests;

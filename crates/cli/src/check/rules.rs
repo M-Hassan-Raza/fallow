@@ -195,6 +195,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     if rules.boundary_violation == Severity::Warn {
         rules.boundary_violation = Severity::Error;
     }
+    if rules.coverage_gaps == Severity::Warn {
+        rules.coverage_gaps = Severity::Error;
+    }
 }
 
 #[cfg(test)]
@@ -381,6 +384,7 @@ mod tests {
             test_only_dependencies: Severity::Off,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
+            coverage_gaps: Severity::Off,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -481,6 +485,7 @@ mod tests {
             test_only_dependencies: Severity::Warn,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
+            coverage_gaps: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -507,6 +512,7 @@ mod tests {
             test_only_dependencies: Severity::Warn,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
+            coverage_gaps: Severity::Warn,
         };
         // Only unused_files present, but set to Warn — should not trigger
         assert!(!has_error_severity_issues(&results, &rules, None));
@@ -686,6 +692,7 @@ mod tests {
             test_only_dependencies: Severity::Warn,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Warn,
+            coverage_gaps: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -703,6 +710,7 @@ mod tests {
         assert_eq!(rules.type_only_dependencies, Severity::Error);
         assert_eq!(rules.test_only_dependencies, Severity::Error);
         assert_eq!(rules.circular_dependencies, Severity::Error);
+        assert_eq!(rules.coverage_gaps, Severity::Error);
     }
 
     #[test]
@@ -723,6 +731,7 @@ mod tests {
             test_only_dependencies: Severity::Off,
             boundary_violation: Severity::Error,
             circular_dependencies: Severity::Off,
+            coverage_gaps: Severity::Off,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -731,6 +740,7 @@ mod tests {
         assert_eq!(rules.unused_exports, Severity::Off);
         assert_eq!(rules.unused_types, Severity::Off);
         assert_eq!(rules.circular_dependencies, Severity::Off);
+        assert_eq!(rules.coverage_gaps, Severity::Off);
     }
 
     #[test]

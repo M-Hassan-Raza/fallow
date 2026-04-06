@@ -2,24 +2,27 @@ use super::super::PluginResult;
 use super::*;
 use fallow_config::{ExternalPluginDef, ExternalUsedExport, PluginDetection};
 use helpers::{check_plugin_detection, discover_json_config_files, process_config_result};
-use std::collections::HashMap;
+
+/// Build a dependency object from names for JSON deserialization.
+fn deps_json(names: &[&str]) -> serde_json::Value {
+    let map: serde_json::Map<String, serde_json::Value> = names
+        .iter()
+        .map(|n| (n.to_string(), serde_json::Value::String("*".to_string())))
+        .collect();
+    serde_json::Value::Object(map)
+}
 
 /// Helper: build a PackageJson with given dependency names.
+/// Uses JSON deserialization to avoid the disallowed `std::collections::HashMap`.
 fn make_pkg(deps: &[&str]) -> PackageJson {
-    let map: HashMap<String, String> = deps.iter().map(|d| (d.to_string(), "*".into())).collect();
-    PackageJson {
-        dependencies: Some(map),
-        ..Default::default()
-    }
+    let json = serde_json::json!({ "dependencies": deps_json(deps) });
+    serde_json::from_value(json).unwrap()
 }
 
 /// Helper: build a PackageJson with dev dependencies.
 fn make_pkg_dev(deps: &[&str]) -> PackageJson {
-    let map: HashMap<String, String> = deps.iter().map(|d| (d.to_string(), "*".into())).collect();
-    PackageJson {
-        dev_dependencies: Some(map),
-        ..Default::default()
-    }
+    let json = serde_json::json!({ "devDependencies": deps_json(deps) });
+    serde_json::from_value(json).unwrap()
 }
 
 // ── Plugin detection via enablers ────────────────────────────
@@ -63,12 +66,7 @@ fn prefix_enabler_does_not_match_without_slash() {
     // "storybook" (exact) should match, but "@storybook" (without /) should not match via prefix
     let registry = PluginRegistry::default();
     // This only has a package called "@storybookish" — it should NOT match
-    let mut map = HashMap::new();
-    map.insert("@storybookish".to_string(), "*".to_string());
-    let pkg = PackageJson {
-        dependencies: Some(map),
-        ..Default::default()
-    };
+    let pkg = make_pkg(&["@storybookish"]);
     let result = registry.run(&pkg, Path::new("/project"), &[]);
     assert!(
         !result.active_plugins.contains(&"storybook".to_string()),
@@ -1377,12 +1375,8 @@ fn run_discovers_json_config_on_disk_fallback() {
 
 #[test]
 fn peer_deps_trigger_plugins() {
-    let mut map = HashMap::new();
-    map.insert("next".to_string(), "^14.0.0".to_string());
-    let pkg = PackageJson {
-        peer_dependencies: Some(map),
-        ..Default::default()
-    };
+    let json = serde_json::json!({ "peerDependencies": deps_json(&["next"]) });
+    let pkg: PackageJson = serde_json::from_value(json).unwrap();
     let registry = PluginRegistry::default();
     let result = registry.run(&pkg, Path::new("/project"), &[]);
     assert!(
@@ -1393,12 +1387,8 @@ fn peer_deps_trigger_plugins() {
 
 #[test]
 fn optional_deps_trigger_plugins() {
-    let mut map = HashMap::new();
-    map.insert("next".to_string(), "^14.0.0".to_string());
-    let pkg = PackageJson {
-        optional_dependencies: Some(map),
-        ..Default::default()
-    };
+    let json = serde_json::json!({ "optionalDependencies": deps_json(&["next"]) });
+    let pkg: PackageJson = serde_json::from_value(json).unwrap();
     let registry = PluginRegistry::default();
     let result = registry.run(&pkg, Path::new("/project"), &[]);
     assert!(
