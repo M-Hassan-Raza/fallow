@@ -166,9 +166,10 @@ fn health_coverage_gaps_flag_reports_runtime_gaps() {
         .as_array()
         .expect("coverage_gaps.exports should be an array");
 
-    let file_names: Vec<_> = files
+    let file_names: Vec<String> = files
         .iter()
         .filter_map(|item| item.get("path").and_then(serde_json::Value::as_str))
+        .map(|p| p.replace('\\', "/"))
         .collect();
     assert!(
         file_names
@@ -229,11 +230,12 @@ export function viaSetup(): string {
     let coverage = json
         .get("coverage_gaps")
         .expect("coverage_gaps should be present");
-    let file_paths: Vec<_> = coverage["files"]
+    let file_paths: Vec<String> = coverage["files"]
         .as_array()
         .expect("files array")
         .iter()
         .filter_map(|item| item.get("path").and_then(serde_json::Value::as_str))
+        .map(|p| p.replace('\\', "/"))
         .collect();
 
     assert!(
@@ -358,16 +360,15 @@ export const shared = sharedGap();
         .as_object()
         .expect("workspace-scoped coverage_gaps should be an object");
 
-    let file_paths: Vec<_> = coverage["files"]
+    let file_paths: Vec<String> = coverage["files"]
         .as_array()
         .expect("coverage_gaps.files should be an array")
         .iter()
         .filter_map(|item| item.get("path").and_then(serde_json::Value::as_str))
+        .map(|p| p.replace('\\', "/"))
         .collect();
     assert!(
-        file_paths
-            .iter()
-            .all(|path| path.replace('\\', "/").contains("packages/app/")),
+        file_paths.iter().all(|path| path.contains("packages/app/")),
         "workspace scope should only report app package files: {file_paths:?}"
     );
     assert!(
@@ -428,11 +429,12 @@ fn health_coverage_gaps_changed_since_scopes_results() {
         .as_object()
         .expect("changed-since coverage_gaps should be an object");
 
-    let file_paths: Vec<_> = coverage["files"]
+    let file_paths: Vec<String> = coverage["files"]
         .as_array()
         .expect("coverage_gaps.files should be an array")
         .iter()
         .filter_map(|item| item.get("path").and_then(serde_json::Value::as_str))
+        .map(|p| p.replace('\\', "/"))
         .collect();
     assert_eq!(
         file_paths.len(),
