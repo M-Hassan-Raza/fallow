@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.19.0] - 2026-04-07
+
+### Added
+
+- **Angular external template tracking** -- `@Component({ templateUrl, styleUrl })` decorators now create graph edges to referenced template and style files, preventing false `unused-files` reports. HTML templates are scanned for Angular syntax (`{{ }}`, `[prop]`, `(event)`, `[(ngModel)]`, `*ngIf`, `*ngFor`, `@if`, `@for`, `@switch`, pipes) and referenced identifiers are bridged to the component's class members, preventing false `unused-class-members` reports. Covers both legacy structural directives and Angular 17+ control flow. ([#73](https://github.com/fallow-rs/fallow/issues/73))
+
+### Fixed
+
+- **Factory initializer instance tracking** -- `const [svc] = useState(() => new MyService())` and similar React hook patterns now correctly resolve the first array-destructured element as a class instance for member access tracking. Prevents false `unused-class-members` when the class is instantiated through a wrapper function. Handles arrow expression bodies, arrow block bodies, and function expressions. ([#79](https://github.com/fallow-rs/fallow/pull/79))
+- **VS Code extension binary version skew** -- the auto-downloaded `fallow-lsp` binary in the extension's global storage was never refreshed after initial download, causing LSP diagnostics to diverge from the CLI version. Now checks the installed binary's version on activation and re-downloads when it doesn't match the extension version. ([#80](https://github.com/fallow-rs/fallow/discussions/80))
+
 ## [2.18.3] - 2026-04-07
 
 ### Fixed
@@ -987,7 +998,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.18.3...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/fallow-rs/fallow/compare/v2.18.3...v2.19.0
 [2.18.3]: https://github.com/fallow-rs/fallow/compare/v2.18.2...v2.18.3
 [2.18.2]: https://github.com/fallow-rs/fallow/compare/v2.18.1...v2.18.2
 [2.18.1]: https://github.com/fallow-rs/fallow/compare/v2.18.0...v2.18.1
