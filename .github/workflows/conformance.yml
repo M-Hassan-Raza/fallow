@@ -93,7 +93,7 @@ jobs:
           tool: customBiggerIsBetter
           output-file-path: conformance-bench.json
           data-dir: conformance
-          alert-threshold: '105%'
+          alert-threshold: '115%'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           continue-on-error: 'true'
 

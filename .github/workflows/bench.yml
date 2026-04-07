@@ -53,6 +53,7 @@ jobs:
           tool: cargo
           output-file-path: bench-output.txt
           data-dir: bench
+          alert-threshold: '150%'
           github-token: ${{ secrets.GITHUB_TOKEN }}
           continue-on-error: ${{ github.event_name == 'pull_request' }}
 
