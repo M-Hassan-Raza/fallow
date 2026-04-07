@@ -51,7 +51,7 @@
     "circular-dependencies"
   ],
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.110.0"
   },
   "activationEvents": [
     "workspaceContains:**/package.json"
@@ -331,7 +331,7 @@
   },
   "devDependencies": {
     "@types/node": "25.5.0",
-    "@types/vscode": "1.85.0",
+    "@types/vscode": "1.110.0",
     "@types/mocha": "10.0.10",
     "@vscode/test-electron": "2.5.2",
     "@vscode/vsce": "3.7.1",
