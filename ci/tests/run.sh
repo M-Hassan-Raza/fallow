@@ -99,12 +99,13 @@ assert_contains "$OUT" "+7.2 pts vs previous" "delta: shows score delta"
 assert_contains "$OUT" "C 65.1" "delta: shows previous grade and score"
 assert_contains "$OUT" "dead exports 41.2%" "delta: shows dead export pct"
 assert_contains "$OUT" "(-3.8%)" "delta: shows dead export delta"
-assert_contains "$OUT" "complexity 7.1 (-1.2)" "delta: shows complexity delta"
+assert_contains "$OUT" "avg complexity 7.1 (-1.2)" "delta: shows complexity delta"
 assert_contains "$OUT" "chart_with_upwards_trend" "delta: uses GitLab emoji (no GitHub callout)"
 
 echo "  summary-health.jq (delta header without trend, GitLab):"
 assert_contains "$OUT_CLEAN" "Health: A (92.5)" "no-trend: shows absolute score"
 assert_not_contains "$OUT_CLEAN" "vs previous" "no-trend: no delta line"
+assert_contains "$OUT_CLEAN" "FALLOW_SAVE_SNAPSHOT" "no-trend: shows save-snapshot hint"
 
 echo "  summary-health.jq (no delta header without score, GitLab):"
 OUT_NO_SCORE=$(jq 'del(.health_score) | del(.health_trend)' "$FIXTURES/health.json" | jq -r -f "$CI_JQ_DIR/summary-health.jq" 2>&1)
@@ -149,12 +150,13 @@ assert_contains "$OUT" "+7.2 pts vs previous" "delta: shows score delta"
 assert_contains "$OUT" "C 65.1" "delta: shows previous grade and score"
 assert_contains "$OUT" "dead exports 41.2%" "delta: shows dead export pct"
 assert_contains "$OUT" "(-3.8%)" "delta: shows dead export delta"
-assert_contains "$OUT" "complexity 7.1 (-1.2)" "delta: shows complexity delta"
+assert_contains "$OUT" "avg complexity 7.1 (-1.2)" "delta: shows complexity delta"
 assert_contains "$OUT" "chart_with_upwards_trend" "delta: uses GitLab emoji"
 
 echo "  summary-combined.jq (delta header without trend, GitLab):"
 assert_contains "$OUT_CLEAN" "Health: A (92.5)" "clean+score: shows absolute score"
 assert_not_contains "$OUT_CLEAN" "vs previous" "clean+score: no delta when no trend"
+assert_contains "$OUT_CLEAN" "FALLOW_SAVE_SNAPSHOT" "clean+score: shows save-snapshot hint"
 
 echo "  summary-combined.jq (no delta header without score, GitLab):"
 OUT_NO_SCORE=$(jq 'del(.health.health_score) | del(.health.health_trend)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)

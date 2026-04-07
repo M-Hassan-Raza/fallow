@@ -113,15 +113,15 @@ variables:
   FALLOW_MAX_COGNITIVE: ""
   FALLOW_TOP: ""
   FALLOW_SORT: ""               # cyclomatic, cognitive, or lines
-  FALLOW_SCORE: "false"
+  FALLOW_SCORE: "false"          # health score (0-100 with letter grade), enables delta header in MR comments
   FALLOW_FILE_SCORES: "false"
   FALLOW_HOTSPOTS: "false"
   FALLOW_TARGETS: "false"
   FALLOW_COMPLEXITY: "false"
   FALLOW_SINCE: ""
   FALLOW_MIN_COMMITS: ""
-  FALLOW_SAVE_SNAPSHOT: ""
-  FALLOW_TREND: "false"
+  FALLOW_SAVE_SNAPSHOT: ""       # save snapshot to .fallow/snapshots/ for trend tracking; cache this path across pipelines
+  FALLOW_TREND: "false"          # compare against most recent snapshot; requires FALLOW_SAVE_SNAPSHOT on a prior run
 
   # Fix specific
   FALLOW_DRY_RUN: "true"

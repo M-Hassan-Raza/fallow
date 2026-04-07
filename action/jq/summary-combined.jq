@@ -27,13 +27,15 @@ def metric_delta(name):
   (if $score_delta then
     " \u00b7 \(signed($score_delta.delta)) pts vs previous (\(.health.health_trend.compared_to.grade) \(pct(.health.health_trend.compared_to.score)))" +
     (if $dead_delta and $dead_delta.delta != 0 then
-      " \u00b7 dead exports \(pct($dead_delta.current))% (\(signed($dead_delta.delta))%)" +
+      " \u00b7 \($dead_delta.label | ascii_downcase) \(pct($dead_delta.current))% (\(signed($dead_delta.delta))%)" +
       (if $dead_delta.delta > 0 then " [suppress?](\(suppression_docs))" else "" end)
     else "" end) +
     (if $cx_delta and $cx_delta.delta != 0 then
-      " \u00b7 complexity \(pct($cx_delta.current)) (\(signed($cx_delta.delta)))"
+      " \u00b7 \($cx_delta.label | ascii_downcase) \(pct($cx_delta.current)) (\(signed($cx_delta.delta)))"
     else "" end)
-  else "" end) +
+  else
+    "\n> _Enable `save-snapshot: true` to track score trends over time._"
+  end) +
   "\n\n"
 else "" end) +
 

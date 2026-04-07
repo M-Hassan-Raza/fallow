@@ -133,14 +133,14 @@ inputs:
     description: 'Minimum commits for a file to appear in hotspot ranking (health command, default: 3)'
     required: false
   score:
-    description: 'Compute health score (0-100 with letter grade). Enables the health delta header in PR comments (health command)'
+    description: 'Compute health score (0-100 with letter grade). Enables the health delta header in PR comments. Works with health and bare command (all analyses).'
     required: false
     default: 'false'
   save-snapshot:
-    description: 'Save vital signs snapshot for trend tracking. Provide a path or leave empty for default (health command)'
+    description: 'Save vital signs snapshot to .fallow/snapshots/ for trend tracking. Use actions/cache to persist across runs. Provide a path or leave empty for default. Works with health and bare command.'
     required: false
   trend:
-    description: 'Compare current metrics against the most recent saved snapshot and show per-metric deltas (health command)'
+    description: 'Compare current metrics against the most recent saved snapshot and show per-metric deltas. Requires a previous snapshot from save-snapshot. Works with health and bare command.'
     required: false
   # Check-specific inputs
   issue-types:
