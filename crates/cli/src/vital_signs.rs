@@ -6,6 +6,9 @@
 
 use std::path::{Path, PathBuf};
 
+/// Number of seconds in one day.
+const SECS_PER_DAY: u64 = 86_400;
+
 use crate::health_types::{
     FileHealthScore, HOTSPOT_SCORE_THRESHOLD, HealthScore, HealthScorePenalties, HealthTrend,
     HotspotEntry, SNAPSHOT_SCHEMA_VERSION, TrendCount, TrendDirection, TrendMetric, TrendPoint,
@@ -309,8 +312,8 @@ fn chrono_timestamp() -> String {
     let secs = now.as_secs();
 
     // Simple UTC conversion (no leap seconds, good enough for timestamps)
-    let days = secs / 86400;
-    let time_secs = secs % 86400;
+    let days = secs / SECS_PER_DAY;
+    let time_secs = secs % SECS_PER_DAY;
     let hours = time_secs / 3600;
     let minutes = (time_secs % 3600) / 60;
     let seconds = time_secs % 60;

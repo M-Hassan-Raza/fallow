@@ -55,3 +55,93 @@ impl Plugin for TsupPlugin {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_config_entry_array() {
+        let source = r#"
+            export default {
+                entry: ["src/index.ts", "src/cli.ts"]
+            };
+        "#;
+        let plugin = TsupPlugin;
+        let result =
+            plugin.resolve_config(Path::new("tsup.config.ts"), source, Path::new("/project"));
+        assert_eq!(result.entry_patterns, vec!["src/index.ts", "src/cli.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_entry_single() {
+        let source = r#"
+            export default {
+                entry: ["src/index.ts"]
+            };
+        "#;
+        let plugin = TsupPlugin;
+        let result =
+            plugin.resolve_config(Path::new("tsup.config.ts"), source, Path::new("/project"));
+        assert_eq!(result.entry_patterns, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_imports() {
+        let source = r#"
+            import { defineConfig } from 'tsup';
+            import react from '@vitejs/plugin-react';
+            export default defineConfig({
+                entry: ["src/index.ts"]
+            });
+        "#;
+        let plugin = TsupPlugin;
+        let result =
+            plugin.resolve_config(Path::new("tsup.config.ts"), source, Path::new("/project"));
+        assert!(result.referenced_dependencies.contains(&"tsup".to_string()));
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"@vitejs/plugin-react".to_string())
+        );
+        assert_eq!(result.entry_patterns, vec!["src/index.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_empty() {
+        let source = r"export default {};";
+        let plugin = TsupPlugin;
+        let result =
+            plugin.resolve_config(Path::new("tsup.config.ts"), source, Path::new("/project"));
+        assert!(result.entry_patterns.is_empty());
+        assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn resolve_config_no_entry() {
+        let source = r#"
+            export default {
+                format: ["cjs", "esm"]
+            };
+        "#;
+        let plugin = TsupPlugin;
+        let result =
+            plugin.resolve_config(Path::new("tsup.config.ts"), source, Path::new("/project"));
+        assert!(result.entry_patterns.is_empty());
+    }
+
+    #[test]
+    fn resolve_config_define_config() {
+        let source = r#"
+            import { defineConfig } from 'tsup';
+            export default defineConfig({
+                entry: ["src/main.ts", "src/worker.ts"]
+            });
+        "#;
+        let plugin = TsupPlugin;
+        let result =
+            plugin.resolve_config(Path::new("tsup.config.ts"), source, Path::new("/project"));
+        assert_eq!(result.entry_patterns, vec!["src/main.ts", "src/worker.ts"]);
+        assert!(result.referenced_dependencies.contains(&"tsup".to_string()));
+    }
+}

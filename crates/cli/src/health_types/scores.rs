@@ -3,6 +3,9 @@
 /// Hotspot score threshold for counting a file as a hotspot in vital signs.
 pub const HOTSPOT_SCORE_THRESHOLD: f64 = 50.0;
 
+/// Cognitive complexity threshold above which a function is flagged for extraction.
+pub const COGNITIVE_EXTRACTION_THRESHOLD: u16 = 30;
+
 /// Project-level health score: a single 0–100 number with letter grade.
 ///
 /// ## Score Formula

@@ -10,6 +10,9 @@ use super::tolerance::Tolerance;
 
 use crate::error::emit_error;
 
+/// Number of seconds in one day.
+const SECS_PER_DAY: u64 = 86_400;
+
 // ── Public API ──────────────────────────────────────────────────
 
 /// Where to save the regression baseline.
@@ -493,8 +496,8 @@ fn chrono_now() -> String {
         .unwrap_or_default();
     let secs = duration.as_secs();
     // Manual UTC decomposition — avoids chrono dependency
-    let days = secs / 86400;
-    let time_secs = secs % 86400;
+    let days = secs / SECS_PER_DAY;
+    let time_secs = secs % SECS_PER_DAY;
     let hours = time_secs / 3600;
     let minutes = (time_secs % 3600) / 60;
     let seconds = time_secs % 60;

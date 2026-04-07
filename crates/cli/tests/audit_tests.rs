@@ -4,15 +4,13 @@ mod common;
 use common::{parse_json, run_fallow_raw};
 use std::fs;
 use std::process::Command;
+use tempfile::TempDir;
 
 /// Create a temp git repo with a commit, suitable for audit testing.
-fn create_audit_fixture(suffix: &str) -> std::path::PathBuf {
-    let dir = std::env::temp_dir().join(format!(
-        "fallow-audit-test-{}-{}",
-        std::process::id(),
-        suffix
-    ));
-    let _ = fs::remove_dir_all(&dir);
+/// Returns the `TempDir` guard so the directory lives as long as the caller holds it.
+fn create_audit_fixture(_suffix: &str) -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
     fs::create_dir_all(dir.join("src")).unwrap();
 
     fs::write(
@@ -40,7 +38,7 @@ fn create_audit_fixture(suffix: &str) -> std::path::PathBuf {
     let git = |args: &[&str]| {
         Command::new("git")
             .args(args)
-            .current_dir(&dir)
+            .current_dir(dir)
             .env("GIT_AUTHOR_NAME", "test")
             .env("GIT_AUTHOR_EMAIL", "test@test.com")
             .env("GIT_COMMITTER_NAME", "test")
@@ -53,11 +51,7 @@ fn create_audit_fixture(suffix: &str) -> std::path::PathBuf {
     git(&["add", "."]);
     git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
 
-    dir
-}
-
-fn cleanup(dir: &std::path::Path) {
-    let _ = fs::remove_dir_all(dir);
+    tmp
 }
 
 // ---------------------------------------------------------------------------
@@ -70,7 +64,7 @@ fn audit_json_has_verdict_and_schema() {
     let output = run_fallow_raw(&[
         "audit",
         "--root",
-        dir.to_str().unwrap(),
+        dir.path().to_str().unwrap(),
         "--base",
         "HEAD",
         "--format",
@@ -99,8 +93,6 @@ fn audit_json_has_verdict_and_schema() {
         json.get("schema_version").is_some(),
         "audit JSON should have schema_version"
     );
-
-    cleanup(&dir);
 }
 
 #[test]
@@ -109,7 +101,7 @@ fn audit_pass_verdict_when_no_changes() {
     let output = run_fallow_raw(&[
         "audit",
         "--root",
-        dir.to_str().unwrap(),
+        dir.path().to_str().unwrap(),
         "--base",
         "HEAD",
         "--format",
@@ -130,24 +122,26 @@ fn audit_pass_verdict_when_no_changes() {
         Some(0),
         "should report 0 changed files"
     );
-
-    cleanup(&dir);
 }
 
 #[test]
 fn audit_json_has_summary_with_changes() {
     let dir = create_audit_fixture("summary");
 
-    fs::write(dir.join("src/new.ts"), "export const newThing = 'added';\n").unwrap();
+    fs::write(
+        dir.path().join("src/new.ts"),
+        "export const newThing = 'added';\n",
+    )
+    .unwrap();
 
     Command::new("git")
         .args(["add", "."])
-        .current_dir(&dir)
+        .current_dir(dir.path())
         .output()
         .unwrap();
     Command::new("git")
         .args(["-c", "commit.gpgsign=false", "commit", "-m", "add new file"])
-        .current_dir(&dir)
+        .current_dir(dir.path())
         .env("GIT_AUTHOR_NAME", "test")
         .env("GIT_AUTHOR_EMAIL", "test@test.com")
         .env("GIT_COMMITTER_NAME", "test")
@@ -158,7 +152,7 @@ fn audit_json_has_summary_with_changes() {
     let output = run_fallow_raw(&[
         "audit",
         "--root",
-        dir.to_str().unwrap(),
+        dir.path().to_str().unwrap(),
         "--base",
         "HEAD~1",
         "--format",
@@ -183,8 +177,6 @@ fn audit_json_has_summary_with_changes() {
         summary.get("dead_code_issues").is_some(),
         "summary should have dead_code_issues"
     );
-
-    cleanup(&dir);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,7 +189,7 @@ fn audit_badge_format_exits_2() {
     let output = run_fallow_raw(&[
         "audit",
         "--root",
-        dir.to_str().unwrap(),
+        dir.path().to_str().unwrap(),
         "--base",
         "HEAD",
         "--format",
@@ -208,5 +200,4 @@ fn audit_badge_format_exits_2() {
         output.code, 2,
         "audit with --format badge should exit 2 (unsupported)"
     );
-    cleanup(&dir);
 }

@@ -5,7 +5,7 @@ echo "Running cargo fmt check..."
 cargo fmt --all -- --check
 
 echo "Running cargo clippy..."
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 if command -v typos &> /dev/null; then
   echo "Running typos check..."

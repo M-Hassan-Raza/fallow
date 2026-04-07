@@ -60,8 +60,6 @@ pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, 
 
 pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     let start = Instant::now();
-    let mut max_exit: u8 = 0;
-
     let mut check_result: Option<CheckResult> = None;
     let mut dupes_result: Option<DupesResult> = None;
     let mut health_result: Option<HealthResult> = None;
@@ -164,188 +162,229 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
 
     let total_elapsed = start.elapsed();
 
-    // Build ownership resolver once for human/compact/markdown rendering.
-    // Structured formats (JSON/SARIF/CodeClimate) have their own envelope and skip grouping.
-    let codeowners_cfg = check_result
-        .as_ref()
-        .map(|r| &r.config)
-        .or_else(|| health_result.as_ref().map(|r| &r.config))
-        .or_else(|| dupes_result.as_ref().map(|r| &r.config))
-        .and_then(|c| c.codeowners.as_deref());
-    let resolver = match crate::build_ownership_resolver(
-        opts.group_by,
-        opts.root,
-        codeowners_cfg,
-        opts.output,
+    let mut max_exit = match print_combined_report(
+        opts,
+        check_result.as_ref(),
+        dupes_result.as_ref(),
+        health_result.as_ref(),
+        total_elapsed,
     ) {
-        Ok(r) => r,
+        Ok(exit) => exit,
         Err(code) => return code,
     };
 
-    // Print combined report
+    handle_regression_and_summary(
+        &mut max_exit,
+        opts.quiet,
+        check_result.as_ref(),
+        dupes_result.as_ref(),
+        health_result.as_ref(),
+    );
+
+    ExitCode::from(max_exit)
+}
+
+/// Build ownership resolver, dispatch to format-specific printer, and return
+/// the accumulated max exit code. Returns `Err(ExitCode)` for fatal output errors.
+fn print_combined_report(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    total_elapsed: std::time::Duration,
+) -> Result<u8, ExitCode> {
+    // Build ownership resolver once for human/compact/markdown rendering.
+    // Structured formats (JSON/SARIF/CodeClimate) have their own envelope and skip grouping.
+    let codeowners_cfg = check_result
+        .map(|r| &r.config)
+        .or_else(|| health_result.map(|r| &r.config))
+        .or_else(|| dupes_result.map(|r| &r.config))
+        .and_then(|c| c.codeowners.as_deref());
+    let resolver =
+        crate::build_ownership_resolver(opts.group_by, opts.root, codeowners_cfg, opts.output)?;
+
     match opts.output {
         OutputFormat::Json => {
-            // JSON: single combined object with check/dupes/health keys
             let code = print_combined_json(
-                check_result.as_ref(),
-                dupes_result.as_ref(),
-                health_result.as_ref(),
+                check_result,
+                dupes_result,
+                health_result,
                 total_elapsed,
                 opts.explain,
             );
             if code != ExitCode::SUCCESS {
-                return code;
+                return Err(code);
             }
         }
         OutputFormat::Sarif => {
-            // SARIF: multi-run document with one run per analysis
-            let code = print_combined_sarif(
-                check_result.as_ref(),
-                dupes_result.as_ref(),
-                health_result.as_ref(),
-            );
+            let code = print_combined_sarif(check_result, dupes_result, health_result);
             if code != ExitCode::SUCCESS {
-                return code;
+                return Err(code);
             }
         }
         OutputFormat::CodeClimate => {
-            // CodeClimate: single JSON array merging all analyses
-            let code = print_combined_codeclimate(
-                check_result.as_ref(),
-                dupes_result.as_ref(),
-                health_result.as_ref(),
-            );
+            let code = print_combined_codeclimate(check_result, dupes_result, health_result);
             if code != ExitCode::SUCCESS {
-                return code;
+                return Err(code);
             }
         }
         _ => {
-            // Human/Compact/Markdown: print each section sequentially
-            let show_headers = matches!(opts.output, OutputFormat::Human) && !opts.quiet;
+            return Ok(print_human_sections(
+                opts,
+                check_result,
+                dupes_result,
+                health_result,
+                resolver,
+            ));
+        }
+    }
+    Ok(0)
+}
 
-            // Orientation header: vital signs + analysis scope + start-here nudge
-            if show_headers && let Some(ref result) = health_result {
-                print_orientation_header(result, check_result.as_ref());
-            } else if show_headers && let Some(ref result) = check_result {
-                // No health results (e.g., --only dead-code): show entry-point summary alone
-                print_entry_point_summary(&result.results);
-            }
+/// Print human/compact/markdown sections with optional section headers.
+fn print_human_sections(
+    opts: &CombinedOptions<'_>,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+    resolver: Option<report::OwnershipResolver>,
+) -> u8 {
+    let mut max_exit: u8 = 0;
+    let show_headers = matches!(opts.output, OutputFormat::Human) && !opts.quiet;
 
-            if let Some(ref result) = check_result {
-                if show_headers {
-                    eprintln!();
-                    eprintln!("── Dead Code ──────────────────────────────────────");
-                }
-                let code = crate::check::print_check_result(
-                    result,
-                    opts.quiet,
-                    opts.explain,
-                    false,
-                    resolver,
-                    None,
-                    opts.summary,
-                );
-                max_exit = max_exit.max(exit_code_to_u8(code));
-            }
-
-            if let Some(ref result) = dupes_result {
-                if show_headers {
-                    eprintln!();
-                    eprintln!("── Duplication ────────────────────────────────────");
-                }
-                let code = crate::dupes::print_dupes_result(
-                    result,
-                    opts.quiet,
-                    opts.explain,
-                    opts.summary,
-                );
-                max_exit = max_exit.max(exit_code_to_u8(code));
-            }
-
-            if let Some(ref result) = health_result {
-                if show_headers {
-                    eprintln!();
-                    eprintln!("── Complexity ─────────────────────────────────────");
-                }
-                let code = crate::health::print_health_result(
-                    result,
-                    opts.quiet,
-                    opts.explain,
-                    None,
-                    opts.summary,
-                );
-                max_exit = max_exit.max(exit_code_to_u8(code));
-            }
+    // Orientation header: vital signs + analysis scope + start-here nudge
+    if show_headers {
+        if let Some(result) = health_result {
+            print_orientation_header(result, check_result);
+        } else if let Some(result) = check_result {
+            print_entry_point_summary(&result.results);
         }
     }
 
+    if let Some(result) = check_result {
+        if show_headers {
+            eprintln!();
+            eprintln!("── Dead Code ──────────────────────────────────────");
+        }
+        let code = crate::check::print_check_result(
+            result,
+            opts.quiet,
+            opts.explain,
+            false,
+            resolver,
+            None,
+            opts.summary,
+        );
+        max_exit = max_exit.max(exit_code_to_u8(code));
+    }
+
+    if let Some(result) = dupes_result {
+        if show_headers {
+            eprintln!();
+            eprintln!("── Duplication ────────────────────────────────────");
+        }
+        let code = crate::dupes::print_dupes_result(result, opts.quiet, opts.explain, opts.summary);
+        max_exit = max_exit.max(exit_code_to_u8(code));
+    }
+
+    if let Some(result) = health_result {
+        if show_headers {
+            eprintln!();
+            eprintln!("── Complexity ─────────────────────────────────────");
+        }
+        let code = crate::health::print_health_result(
+            result,
+            opts.quiet,
+            opts.explain,
+            None,
+            opts.summary,
+        );
+        max_exit = max_exit.max(exit_code_to_u8(code));
+    }
+
+    max_exit
+}
+
+/// Handle regression outcome and print failure summary.
+fn handle_regression_and_summary(
+    max_exit: &mut u8,
+    quiet: bool,
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+) {
     // Regression exit code (applies regardless of output format)
-    if let Some(ref result) = check_result
+    if let Some(result) = check_result
         && let Some(ref outcome) = result.regression
     {
-        if !opts.quiet {
+        if !quiet {
             regression::print_regression_outcome(outcome);
         }
         if outcome.is_failure() {
-            max_exit = max_exit.max(1);
+            *max_exit = (*max_exit).max(1);
         }
     }
 
     // Summary on failure
-    if max_exit > 0 && !opts.quiet {
-        let mut parts = Vec::new();
-        if let Some(ref r) = check_result {
-            let issues = r.results.total_issues();
-            if issues > 0 {
-                let delta_suffix = r
-                    .baseline_deltas
-                    .as_ref()
-                    .map_or_else(String::new, |d| match d.total_delta.cmp(&0) {
-                        std::cmp::Ordering::Greater => {
-                            format!(", +{} since baseline", d.total_delta)
-                        }
-                        std::cmp::Ordering::Less => format!(", {} since baseline", d.total_delta),
-                        std::cmp::Ordering::Equal => ", \u{00b1}0 since baseline".to_string(),
-                    });
-                parts.push(format!("dead-code ({issues} issues{delta_suffix})"));
-            }
-        }
-        if let Some(ref r) = dupes_result {
-            let groups = r.report.clone_groups.len();
-            if groups > 0 {
-                parts.push(format!("dupes ({groups} clone groups)"));
-            }
-        }
-        if let Some(ref r) = health_result {
-            let above = r.report.summary.functions_above_threshold;
-            if above > 0 {
-                parts.push(format!("health ({above} above threshold)"));
-            }
-        }
-        if !parts.is_empty() {
-            // Repeat start-here nudge so it's visible at the bottom of scrolled output
-            let nudge = health_result
-                .as_ref()
-                .filter(|r| !r.report.targets.is_empty())
-                .map(|r| {
-                    // Prefer non-test/fixture target; skip nudge if all targets are noise
-                    if let Some(top) = r.report.targets.iter().find(|t| !is_test_path(&t.path)) {
-                        let name = top
-                            .path
-                            .file_name()
-                            .map(|f| f.to_string_lossy().to_string())
-                            .unwrap_or_default();
-                        format!(" \u{2014} start with {name}")
-                    } else {
-                        String::new()
+    if *max_exit > 0 && !quiet {
+        print_failure_summary(check_result, dupes_result, health_result);
+    }
+}
+
+/// Print a summary line listing which analyses had failures.
+fn print_failure_summary(
+    check_result: Option<&CheckResult>,
+    dupes_result: Option<&DupesResult>,
+    health_result: Option<&HealthResult>,
+) {
+    let mut parts = Vec::new();
+    if let Some(r) = check_result {
+        let issues = r.results.total_issues();
+        if issues > 0 {
+            let delta_suffix = r.baseline_deltas.as_ref().map_or_else(String::new, |d| {
+                match d.total_delta.cmp(&0) {
+                    std::cmp::Ordering::Greater => {
+                        format!(", +{} since baseline", d.total_delta)
                     }
-                })
-                .unwrap_or_default();
-            eprintln!("\nFailed: {}{nudge}", parts.join(", "));
+                    std::cmp::Ordering::Less => format!(", {} since baseline", d.total_delta),
+                    std::cmp::Ordering::Equal => ", \u{00b1}0 since baseline".to_string(),
+                }
+            });
+            parts.push(format!("dead-code ({issues} issues{delta_suffix})"));
         }
     }
-
-    ExitCode::from(max_exit)
+    if let Some(r) = dupes_result {
+        let groups = r.report.clone_groups.len();
+        if groups > 0 {
+            parts.push(format!("dupes ({groups} clone groups)"));
+        }
+    }
+    if let Some(r) = health_result {
+        let above = r.report.summary.functions_above_threshold;
+        if above > 0 {
+            parts.push(format!("health ({above} above threshold)"));
+        }
+    }
+    if !parts.is_empty() {
+        // Repeat start-here nudge so it's visible at the bottom of scrolled output
+        let nudge = health_result
+            .filter(|r| !r.report.targets.is_empty())
+            .map(|r| {
+                // Prefer non-test/fixture target; skip nudge if all targets are noise
+                if let Some(top) = r.report.targets.iter().find(|t| !is_test_path(&t.path)) {
+                    let name = top
+                        .path
+                        .file_name()
+                        .map(|f| f.to_string_lossy().to_string())
+                        .unwrap_or_default();
+                    format!(" \u{2014} start with {name}")
+                } else {
+                    String::new()
+                }
+            })
+            .unwrap_or_default();
+        eprintln!("\nFailed: {}{nudge}", parts.join(", "));
+    }
 }
 
 /// Print combined JSON output wrapping check, dupes, and health results.

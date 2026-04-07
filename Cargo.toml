@@ -63,7 +63,7 @@ bincode = "2"
 # Diagnostics & output
 colored = "3"
 indicatif = "0.18"
-miette = { version = "7", features = ["fancy"] }
+miette = { version = "7" }
 
 # Logging
 tracing = "0.1"
@@ -74,7 +74,7 @@ fixedbitset = "0.5"
 
 # LSP
 tower-lsp = "0.20"
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-std", "process", "time"] }
 
 # File watching
 notify = "8"

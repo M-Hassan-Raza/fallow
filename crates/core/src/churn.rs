@@ -9,6 +9,9 @@ use std::process::Command;
 
 use serde::Serialize;
 
+/// Number of seconds in one day.
+const SECS_PER_DAY: f64 = 86_400.0;
+
 /// Recency weight half-life in days. A commit from 90 days ago counts half
 /// as much as today's commit; 180 days ago counts 25%.
 const HALF_LIFE_DAYS: f64 = 90.0;
@@ -244,7 +247,7 @@ fn parse_git_log(stdout: &str, root: &Path) -> FxHashMap<PathBuf, FileChurn> {
         if let Some((added, deleted, path)) = parse_numstat_line(line) {
             let abs_path = root.join(path);
             let ts = current_timestamp.unwrap_or(now_secs);
-            let age_days = (now_secs.saturating_sub(ts)) as f64 / 86400.0;
+            let age_days = (now_secs.saturating_sub(ts)) as f64 / SECS_PER_DAY;
             let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
 
             let entry = accum.entry(abs_path).or_insert_with(|| FileAccum {

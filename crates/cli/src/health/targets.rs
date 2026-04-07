@@ -1,6 +1,7 @@
 use crate::health_types::{
-    Confidence, ContributingFactor, EffortEstimate, EvidenceFunction, FileHealthScore,
-    HotspotEntry, RecommendationCategory, RefactoringTarget, TargetEvidence, TargetThresholds,
+    COGNITIVE_EXTRACTION_THRESHOLD, Confidence, ContributingFactor, EffortEstimate,
+    EvidenceFunction, FileHealthScore, HotspotEntry, RecommendationCategory, RefactoringTarget,
+    TargetEvidence, TargetThresholds,
 };
 
 /// Auxiliary data used by `compute_refactoring_targets` to generate evidence and apply rules.
@@ -233,12 +234,12 @@ pub(super) fn compute_refactoring_targets(
         }
         if let Some(fns) = top_fns
             && let Some((name, _, cog)) = fns.first()
-            && *cog >= 30
+            && *cog >= COGNITIVE_EXTRACTION_THRESHOLD
         {
             factors.push(ContributingFactor {
                 metric: "cognitive_complexity",
                 value: f64::from(*cog),
-                threshold: 30.0,
+                threshold: f64::from(COGNITIVE_EXTRACTION_THRESHOLD),
                 detail: format!("{name} has cognitive complexity {cog}"),
             });
         }
@@ -390,9 +391,12 @@ fn try_match_rules(
         ));
     }
 
-    // Rule 5: Extract complex functions (cognitive >= 30)
+    // Rule 5: Extract complex functions above cognitive extraction threshold
     if let Some(fns) = top_fns {
-        let high: Vec<&(String, u32, u16)> = fns.iter().filter(|(_, _, cog)| *cog >= 30).collect();
+        let high: Vec<&(String, u32, u16)> = fns
+            .iter()
+            .filter(|(_, _, cog)| *cog >= COGNITIVE_EXTRACTION_THRESHOLD)
+            .collect();
         if !high.is_empty() {
             let desc = match high.len() {
                 1 => format!(
@@ -508,7 +512,7 @@ fn build_evidence(
             let functions = top_fns
                 .map(|fns| {
                     fns.iter()
-                        .filter(|(_, _, cog)| *cog >= 30)
+                        .filter(|(_, _, cog)| *cog >= COGNITIVE_EXTRACTION_THRESHOLD)
                         .map(|(name, line, cog)| EvidenceFunction {
                             name: name.clone(),
                             line: *line,

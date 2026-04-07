@@ -65,3 +65,131 @@ impl Plugin for RolldownPlugin {
         result
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_config_input_string() {
+        let source = r#"export default { input: "./src/index.js" };"#;
+        let plugin = RolldownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("rolldown.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(result.entry_patterns, vec!["./src/index.js"]);
+    }
+
+    #[test]
+    fn resolve_config_input_array() {
+        let source = r#"
+            export default {
+                input: ["./src/index.js", "./src/cli.js"]
+            };
+        "#;
+        let plugin = RolldownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("rolldown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["./src/index.js", "./src/cli.js"]
+        );
+    }
+
+    #[test]
+    fn resolve_config_input_object() {
+        let source = r#"
+            export default {
+                input: {
+                    main: "./src/main.js",
+                    utils: "./src/utils.js"
+                }
+            };
+        "#;
+        let plugin = RolldownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("rolldown.config.mjs"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(
+            result.entry_patterns,
+            vec!["./src/main.js", "./src/utils.js"]
+        );
+    }
+
+    #[test]
+    fn resolve_config_external() {
+        let source = r#"
+            export default {
+                input: "./src/index.js",
+                external: ["react", "react-dom", "@scope/lib"]
+            };
+        "#;
+        let plugin = RolldownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("rolldown.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"react".to_string()));
+        assert!(deps.contains(&"react-dom".to_string()));
+        assert!(deps.contains(&"@scope/lib".to_string()));
+    }
+
+    #[test]
+    fn resolve_config_imports() {
+        let source = r#"
+            import { defineConfig } from 'rolldown';
+            import pluginA from '@rolldown/pluginutils';
+            export default defineConfig({
+                input: "./src/main.ts"
+            });
+        "#;
+        let plugin = RolldownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("rolldown.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        let deps = &result.referenced_dependencies;
+        assert!(deps.contains(&"rolldown".to_string()));
+        assert!(deps.contains(&"@rolldown/pluginutils".to_string()));
+        assert_eq!(result.entry_patterns, vec!["./src/main.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_empty() {
+        let source = r"export default {};";
+        let plugin = RolldownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("rolldown.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(result.entry_patterns.is_empty());
+        assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn resolve_config_no_input() {
+        let source = r#"
+            export default {
+                output: { dir: "dist" }
+            };
+        "#;
+        let plugin = RolldownPlugin;
+        let result = plugin.resolve_config(
+            Path::new("rolldown.config.js"),
+            source,
+            Path::new("/project"),
+        );
+        assert!(result.entry_patterns.is_empty());
+    }
+}

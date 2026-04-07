@@ -135,7 +135,7 @@ mod tests {
     use std::path::PathBuf;
 
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
-    use fallow_core::results::{AnalysisResults, CircularDependency};
+    use fallow_core::results::{AnalysisResults, BoundaryViolation, CircularDependency};
     use tower_lsp::lsp_types::{DiagnosticSeverity, NumberOrString, Url};
 
     use crate::diagnostics::build_diagnostics;
@@ -254,6 +254,152 @@ mod tests {
             col: 0,
             is_cross_package: false,
         });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+        assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn boundary_violation_produces_warning_with_zone_message() {
+        let root = test_root();
+        let from_file = root.join("src/feature/api.ts");
+        let to_file = root.join("src/core/secret.ts");
+
+        let mut results = AnalysisResults::default();
+        results.boundary_violations.push(BoundaryViolation {
+            from_path: from_file.clone(),
+            to_path: to_file,
+            from_zone: "feature".to_string(),
+            to_zone: "core".to_string(),
+            import_specifier: "../core/secret".to_string(),
+            line: 3,
+            col: 10,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&from_file).unwrap();
+        let file_diags = &diags[&uri];
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("boundary-violation".to_string()))
+        );
+        assert!(d.message.contains("Boundary violation"));
+        assert!(d.message.contains("secret.ts"));
+        assert!(d.message.contains("core"));
+        assert!(d.message.contains("feature"));
+
+        // Line should be 0-based
+        assert_eq!(d.range.start.line, 2); // 1-based 3 -> 0-based 2
+        assert_eq!(d.range.start.character, 10);
+        assert_eq!(d.range.end.character, u32::MAX);
+    }
+
+    #[test]
+    fn boundary_violation_has_warning_severity() {
+        let root = test_root();
+        let from_file = root.join("src/ui/button.ts");
+        let to_file = root.join("src/infra/db.ts");
+
+        let mut results = AnalysisResults::default();
+        results.boundary_violations.push(BoundaryViolation {
+            from_path: from_file.clone(),
+            to_path: to_file,
+            from_zone: "ui".to_string(),
+            to_zone: "infra".to_string(),
+            import_specifier: "../infra/db".to_string(),
+            line: 1,
+            col: 0,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&from_file).unwrap();
+        let d = &diags[&uri][0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(d.source, Some("fallow".to_string()));
+    }
+
+    #[test]
+    fn boundary_violation_has_related_info_linking_to_target() {
+        let root = test_root();
+        let from_file = root.join("src/app/page.ts");
+        let to_file = root.join("src/domain/entity.ts");
+
+        let mut results = AnalysisResults::default();
+        results.boundary_violations.push(BoundaryViolation {
+            from_path: from_file.clone(),
+            to_path: to_file.clone(),
+            from_zone: "app".to_string(),
+            to_zone: "domain".to_string(),
+            import_specifier: "../domain/entity".to_string(),
+            line: 5,
+            col: 0,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&from_file).unwrap();
+        let d = &diags[&uri][0];
+
+        let related = d.related_information.as_ref().unwrap();
+        assert_eq!(related.len(), 1);
+        assert_eq!(related[0].message, "Target file in zone 'domain'");
+
+        let target_uri = Url::from_file_path(&to_file).unwrap();
+        assert_eq!(related[0].location.uri, target_uri);
+    }
+
+    #[test]
+    fn multiple_boundary_violations_in_same_file_aggregate() {
+        let root = test_root();
+        let from_file = root.join("src/feature/handler.ts");
+        let to_file_a = root.join("src/core/auth.ts");
+        let to_file_b = root.join("src/infra/cache.ts");
+
+        let mut results = AnalysisResults::default();
+        results.boundary_violations.push(BoundaryViolation {
+            from_path: from_file.clone(),
+            to_path: to_file_a,
+            from_zone: "feature".to_string(),
+            to_zone: "core".to_string(),
+            import_specifier: "../core/auth".to_string(),
+            line: 1,
+            col: 0,
+        });
+        results.boundary_violations.push(BoundaryViolation {
+            from_path: from_file.clone(),
+            to_path: to_file_b,
+            from_zone: "feature".to_string(),
+            to_zone: "infra".to_string(),
+            import_specifier: "../infra/cache".to_string(),
+            line: 2,
+            col: 0,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&from_file).unwrap();
+        let file_diags = &diags[&uri];
+        assert_eq!(file_diags.len(), 2);
+
+        assert!(file_diags[0].message.contains("auth.ts"));
+        assert!(file_diags[1].message.contains("cache.ts"));
+    }
+
+    #[test]
+    fn empty_boundary_violations_produces_no_diagnostics() {
+        let root = test_root();
+        let results = AnalysisResults::default();
 
         let duplication = empty_duplication();
         let diags = build_diagnostics(&results, &duplication, &root);

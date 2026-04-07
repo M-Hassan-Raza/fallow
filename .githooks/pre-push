@@ -8,10 +8,10 @@ echo "→ cargo fmt"
 cargo fmt --all -- --check
 
 echo "→ cargo clippy"
-cargo clippy --workspace -- -D warnings
+cargo clippy --workspace --all-targets -- -D warnings
 
 echo "→ cargo test"
-cargo test --workspace
+cargo test --workspace --all-targets
 
 echo "→ cargo doc (rustdoc warnings)"
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items 2>&1 | tail -1

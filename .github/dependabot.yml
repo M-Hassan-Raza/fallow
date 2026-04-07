@@ -14,6 +14,22 @@ updates:
         patterns: ["oxc_*"]
     open-pull-requests-limit: 10
 
+  - package-ecosystem: npm
+    directory: /editors/vscode
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: npm
+    directory: /npm/fallow
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    open-pull-requests-limit: 5
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
