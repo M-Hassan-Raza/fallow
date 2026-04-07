@@ -5,6 +5,7 @@
 
 mod build;
 mod cycles;
+mod narrowing;
 mod re_exports;
 mod reachability;
 pub mod types;
