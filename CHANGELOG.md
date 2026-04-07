@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.18.2] - 2026-04-07
+
+### Fixed
+
+- **npm publish CI** -- pinned `npm@10` in the release workflow to avoid `promise-retry` module error on Node 22 runners that broke npm package publishing.
+
 ## [2.18.1] - 2026-04-07
 
 ### Changed
@@ -974,7 +980,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.18.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.18.2...HEAD
+[2.18.2]: https://github.com/fallow-rs/fallow/compare/v2.18.1...v2.18.2
 [2.18.1]: https://github.com/fallow-rs/fallow/compare/v2.18.0...v2.18.1
 [2.18.0]: https://github.com/fallow-rs/fallow/compare/v2.17.1...v2.18.0
 [2.17.1]: https://github.com/fallow-rs/fallow/compare/v2.17.0...v2.17.1
