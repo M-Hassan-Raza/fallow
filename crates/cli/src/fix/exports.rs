@@ -13,8 +13,12 @@ pub(super) struct ExportFix {
 /// Check if a line (after stripping `export `) is a named export list like `{ A, B } ...`
 fn is_export_list(after_export: &str) -> bool {
     let s = after_export.trim_start();
-    // `export type { ... }` also counts
-    let s = s.strip_prefix("type ").unwrap_or(s);
+    // `export type { ... }` also counts (handle any whitespace between `type` and `{`)
+    let s = if let Some(rest) = s.strip_prefix("type") {
+        rest.trim_start()
+    } else {
+        s
+    };
     s.starts_with('{')
 }
 
@@ -27,14 +31,12 @@ fn remove_specifiers_from_export_list(line: &str, names_to_remove: &[&str]) -> O
 
     // Determine if it's `export type { ... }` or `export { ... }`
     let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-    let (type_prefix, after_type) = if after_export.starts_with("type {")
-        || after_export.starts_with("type\t{")
-        || after_export.starts_with("type  {")
-    {
-        (
-            "type ",
-            after_export.strip_prefix("type").unwrap().trim_start(),
-        )
+    let (type_prefix, after_type) = if let Some(rest) = after_export.strip_prefix("type") {
+        if rest.trim_start().starts_with('{') {
+            ("type ", rest.trim_start())
+        } else {
+            ("", after_export)
+        }
     } else {
         ("", after_export)
     };
@@ -182,7 +184,6 @@ pub(super) fn apply_export_fixes(
 
             for (line_idx, names) in &grouped {
                 let line = &new_lines[*line_idx];
-                let indent = line.len() - line.trim_start().len();
                 let trimmed = line.trim_start();
                 let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
 
@@ -199,6 +200,7 @@ pub(super) fn apply_export_fixes(
                         }
                     }
                 } else {
+                    let indent = line.len() - trimmed.len();
                     let replacement = if after_export.starts_with("default function ")
                         || after_export.starts_with("default async function ")
                         || after_export.starts_with("default class ")
