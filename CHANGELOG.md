@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.17.0] - 2026-04-07
+
+### Added
+
+- **Nuxt runtime convention hardening** -- `plugins/`, `middleware/`, `server/middleware/`, and `components/` directories now have their default exports and named exports (`defineNuxtPlugin`, `defineNuxtRouteMiddleware`, `defineEventHandler`, `defineNuxtComponent`) treated as framework-used. Nested directory scanning for plugins, composables, and utils. Nuxt config `plugins`, `css`, and `modules` entries discovered as runtime entry points with path normalization. ([#60](https://github.com/fallow-rs/fallow/pull/60))
+- **Vue SFC edge case hardening** -- `<script src="...">` external script references in Vue SFCs now generate graph edges. `<script>` blocks with `generic="T extends Foo<Bar>"` containing `>` in type parameters are parsed correctly. HTML comments in Vue templates are stripped before import extraction. ([#60](https://github.com/fallow-rs/fallow/pull/60))
+
+### Fixed
+
+- **HTML root-relative path resolution** -- root-relative paths in HTML files (e.g., `<script src="/src/main.tsx">`) are now resolved against the project root instead of being treated as absolute filesystem paths. This fixes false unresolved-import reports in Vite, Parcel, and similar dev server setups. ([#61](https://github.com/fallow-rs/fallow/pull/61))
+
 ## [2.16.0] - 2026-04-07
 
 ### Added
@@ -923,7 +934,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.16.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.17.0...HEAD
+[2.17.0]: https://github.com/fallow-rs/fallow/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/fallow-rs/fallow/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/fallow-rs/fallow/compare/v2.14.2...v2.15.0
 [2.14.2]: https://github.com/fallow-rs/fallow/compare/v2.14.1...v2.14.2
