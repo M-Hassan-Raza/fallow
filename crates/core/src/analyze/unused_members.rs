@@ -956,6 +956,64 @@ mod tests {
     }
 
     #[test]
+    fn this_field_chained_access_not_flagged() {
+        // `this.service = new MyService()` then `this.service.doWork()`
+        // should recognize doWork as a used member of MyService.
+        // The visitor emits MemberAccess { object: "MyService", member: "doWork" }
+        // after resolving the `this.service` binding via instance_binding_names.
+        let mut graph = build_graph(&[("/src/main.ts", true), ("/src/service.ts", false)]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export_with_members(
+            "MyService",
+            vec![
+                make_member("doWork", MemberKind::ClassMethod),
+                make_member("unusedMethod", MemberKind::ClassMethod),
+            ],
+            Some(0),
+        )];
+
+        // Consumer imports MyService, stores in a field, and calls through it.
+        // The visitor resolves `this.service.doWork()` → `MyService.doWork`.
+        let resolved_modules = vec![ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/src/main.ts"),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![ResolvedImport {
+                info: ImportInfo {
+                    source: "./service".to_string(),
+                    imported_name: ImportedName::Named("MyService".to_string()),
+                    local_name: "MyService".to_string(),
+                    is_type_only: false,
+                    span: Span::new(0, 30),
+                    source_span: Span::default(),
+                },
+                target: ResolveResult::InternalModule(FileId(1)),
+            }],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![MemberAccess {
+                // Already resolved by visitor from `this.service.doWork()` → `MyService.doWork`
+                object: "MyService".to_string(),
+                member: "doWork".to_string(),
+            }],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+        }];
+
+        let (_, class_members) = find_unused_members(
+            &graph,
+            &resolved_modules,
+            &FxHashMap::default(),
+            &FxHashMap::default(),
+        );
+        // Only unusedMethod should be flagged; doWork is used via this.service.doWork()
+        assert_eq!(class_members.len(), 1);
+        assert_eq!(class_members[0].member_name, "unusedMethod");
+    }
+
+    #[test]
     fn export_with_no_members_skipped() {
         let mut graph = build_graph(&[("/src/entry.ts", true), ("/src/utils.ts", false)]);
         graph.modules[1].set_reachable(true);

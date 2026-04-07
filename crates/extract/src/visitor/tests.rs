@@ -460,6 +460,86 @@ fn multiple_instances_same_class() {
     );
 }
 
+// ── this.field chained member access ────────────────────────
+
+#[test]
+fn this_field_new_assignment_enables_chained_access() {
+    let info = parse(
+        r"
+            import { MyService } from './service';
+            class App {
+                constructor() {
+                    this.service = new MyService();
+                }
+                run() {
+                    this.service.doWork();
+                }
+            }
+            ",
+    );
+    // this.service.doWork() should be mapped to MyService.doWork
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "MyService" && a.member == "doWork"),
+        "this.service.doWork() should be mapped to MyService.doWork, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn this_field_chained_access_without_new_not_mapped() {
+    let info = parse(
+        r"
+            class App {
+                run() {
+                    this.config.getValue();
+                }
+            }
+            ",
+    );
+    // No `this.config = new Config()` assignment, so no class mapping.
+    // The raw `this.config.getValue` access should exist but not be resolved to a class.
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "this.config" && a.member == "getValue"),
+        "raw this.config.getValue access should be recorded, found: {:?}",
+        info.member_accesses
+    );
+    // No class-level mapping should exist
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "Config" && a.member == "getValue"),
+        "without assignment, no class mapping should exist, found: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn this_field_builtin_constructor_not_tracked() {
+    let info = parse(
+        r"
+            class App {
+                constructor() {
+                    this.cache = new Map();
+                }
+                run() {
+                    this.cache.get('key');
+                }
+            }
+            ",
+    );
+    // Built-in constructors should not create this.field bindings
+    assert!(
+        !info.member_accesses.iter().any(|a| a.object == "Map"),
+        "new Map() should not create this.field instance binding, found: {:?}",
+        info.member_accesses
+    );
+}
+
 // ── CJS export patterns ──────────────────────────────────────
 
 #[test]
