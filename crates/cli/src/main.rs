@@ -1351,6 +1351,17 @@ fn dispatch_health(
 mod tests {
     use super::*;
 
+    // ── CLI definition validity ─────────────────────────────────────
+
+    /// Validates that the CLI definition has no flag name collisions, missing
+    /// fields, or other structural errors. Catches issues like a global alias
+    /// `--base` colliding with a subcommand's `--base` flag.
+    #[test]
+    fn cli_definition_has_no_flag_collisions() {
+        use clap::CommandFactory;
+        Cli::command().debug_assert();
+    }
+
     // ── emit_error ──────────────────────────────────────────────────
 
     #[test]

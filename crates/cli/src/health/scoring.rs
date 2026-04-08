@@ -2594,4 +2594,67 @@ mod tests {
         assert!((max).abs() < f64::EPSILON);
         assert_eq!(above, 0);
     }
+
+    // --- dead_code_ratio: type-only export exclusion ---
+
+    fn make_export(name: &str, is_type_only: bool) -> fallow_core::graph::ExportSymbol {
+        fallow_core::graph::ExportSymbol {
+            name: fallow_types::extract::ExportName::Named(name.into()),
+            is_type_only,
+            is_public: false,
+            span: oxc_span::Span::default(),
+            references: vec![],
+            members: vec![],
+        }
+    }
+
+    #[test]
+    fn dead_code_ratio_type_only_exports_excluded_from_denominator() {
+        let path = std::path::Path::new("src/types.ts");
+        let exports = vec![
+            make_export("MyInterface", true),
+            make_export("MyType", true),
+            make_export("myFunction", false),
+        ];
+        let unused_files = rustc_hash::FxHashSet::default();
+        let mut unused_by_path = rustc_hash::FxHashMap::default();
+        unused_by_path.insert(path, 1_usize); // 1 unused value export
+
+        let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_by_path);
+        // 1 unused / 1 value export = 1.0 (type-only excluded from denominator)
+        assert!((ratio - 1.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn dead_code_ratio_only_type_exports_returns_zero() {
+        let path = std::path::Path::new("src/types.ts");
+        let exports = vec![
+            make_export("MyInterface", true),
+            make_export("MyType", true),
+        ];
+        let unused_files = rustc_hash::FxHashSet::default();
+        let unused_by_path = rustc_hash::FxHashMap::default();
+
+        let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_by_path);
+        // No value exports -> 0.0
+        assert!(ratio.abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn dead_code_ratio_mixed_exports_counts_only_values() {
+        let path = std::path::Path::new("src/component.ts");
+        let exports = vec![
+            make_export("Props", true),      // type-only, excluded
+            make_export("State", true),      // type-only, excluded
+            make_export("Component", false), // value
+            make_export("helper", false),    // value
+        ];
+        let unused_files = rustc_hash::FxHashSet::default();
+        let mut unused_by_path = rustc_hash::FxHashMap::default();
+        unused_by_path.insert(path, 1_usize); // 1 unused value export
+
+        let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_by_path);
+        // 1 unused / 2 value exports = 0.5
+        assert!((ratio - 0.5).abs() < f64::EPSILON);
+    }
 }
