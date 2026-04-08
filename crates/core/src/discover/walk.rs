@@ -115,7 +115,13 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
     let mut files: Vec<DiscoveredFile> = walker
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().is_some_and(|ft| !ft.is_dir()))
-        .filter(|entry| !config.ignore_patterns.is_match(entry.path()))
+        .filter(|entry| {
+            let relative = entry
+                .path()
+                .strip_prefix(&config.root)
+                .unwrap_or_else(|_| entry.path());
+            !config.ignore_patterns.is_match(relative)
+        })
         .filter(|entry| {
             // In production mode, exclude test/story/dev files
             production_excludes.as_ref().is_none_or(|excludes| {
@@ -627,6 +633,61 @@ mod tests {
             );
         }
 
+        /// Create a config with custom ignore patterns.
+        fn make_config_with_ignores(root: PathBuf, ignores: Vec<String>) -> ResolvedConfig {
+            FallowConfig {
+                schema: None,
+                extends: vec![],
+                entry: vec![],
+                ignore_patterns: ignores,
+                framework: vec![],
+                workspaces: None,
+                ignore_dependencies: vec![],
+                ignore_exports: vec![],
+                duplicates: DuplicatesConfig::default(),
+                health: HealthConfig::default(),
+                rules: RulesConfig::default(),
+                boundaries: fallow_config::BoundaryConfig::default(),
+                production: false,
+                plugins: vec![],
+                dynamically_loaded: vec![],
+                overrides: vec![],
+                regression: None,
+                codeowners: None,
+                public_packages: vec![],
+            }
+            .resolve(root, OutputFormat::Human, 1, true, true)
+        }
+
+        #[test]
+        fn custom_ignore_patterns_exclude_matching_files() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+
+            let generated = dir.path().join("src").join("api").join("generated");
+            std::fs::create_dir_all(&generated).unwrap();
+            std::fs::write(generated.join("client.ts"), "export const api = {};").unwrap();
+
+            let client = dir.path().join("src").join("api").join("client");
+            std::fs::create_dir_all(&client).unwrap();
+            std::fs::write(client.join("fetch.ts"), "export const fetch = {};").unwrap();
+
+            let src = dir.path().join("src");
+            std::fs::write(src.join("index.ts"), "export const x = 1;").unwrap();
+
+            let config = make_config_with_ignores(
+                dir.path().to_path_buf(),
+                vec![
+                    "src/api/generated/**".to_string(),
+                    "src/api/client/**".to_string(),
+                ],
+            );
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert_eq!(names.len(), 1, "only non-ignored files: {names:?}");
+            assert!(names.contains(&"src/index.ts".to_string()));
+        }
+
         #[test]
         fn default_ignore_patterns_exclude_node_modules_and_dist() {
             let dir = tempfile::tempdir().expect("create temp dir");
@@ -649,6 +710,36 @@ mod tests {
 
             assert_eq!(names.len(), 1);
             assert!(names.contains(&"src/index.ts".to_string()));
+        }
+
+        #[test]
+        fn default_ignore_patterns_exclude_root_build() {
+            let dir = tempfile::tempdir().expect("create temp dir");
+
+            // Root-level build/ should be excluded
+            let build = dir.path().join("build");
+            std::fs::create_dir_all(&build).unwrap();
+            std::fs::write(build.join("output.js"), "// built").unwrap();
+
+            // Nested build/ should NOT be excluded
+            let nested_build = dir.path().join("src").join("build");
+            std::fs::create_dir_all(&nested_build).unwrap();
+            std::fs::write(nested_build.join("helper.ts"), "export const h = 1;").unwrap();
+
+            let src = dir.path().join("src");
+            std::fs::write(src.join("index.ts"), "export const x = 1;").unwrap();
+
+            let config = make_config(dir.path().to_path_buf(), false);
+            let files = discover_files(&config);
+            let names = file_names(&files, dir.path());
+
+            assert_eq!(
+                names.len(),
+                2,
+                "root build/ excluded, nested kept: {names:?}"
+            );
+            assert!(names.contains(&"src/index.ts".to_string()));
+            assert!(names.contains(&"src/build/helper.ts".to_string()));
         }
     }
 }

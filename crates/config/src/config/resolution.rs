@@ -939,8 +939,10 @@ mod tests {
             }
 
             /// Custom ignore patterns are merged with defaults, not replacing them.
+            /// Uses a pattern regex that cannot match node_modules paths, so the
+            /// assertion proves the default pattern is what provides the match.
             #[test]
-            fn custom_ignores_dont_replace_defaults(pattern in "[a-zA-Z0-9_*/.]{1,30}") {
+            fn custom_ignores_dont_replace_defaults(pattern in "[a-z_]{1,10}/[a-z_]{1,10}") {
                 let mut config = make_config(false);
                 config.ignore_patterns = vec![pattern];
                 let resolved = config.resolve(
@@ -950,7 +952,8 @@ mod tests {
                     true,
                     true,
                 );
-                // Defaults should still be present
+                // Defaults should still be present (the custom pattern cannot
+                // match this path, so only the default **/node_modules/** can)
                 prop_assert!(
                     resolved.ignore_patterns.is_match("node_modules/foo/bar.js"),
                     "Default node_modules ignore should still be active"
