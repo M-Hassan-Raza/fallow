@@ -70,7 +70,7 @@ cargo run --bin fallow -- fix --dry-run      # Auto-fix preview
 - **Flat edge storage**: Contiguous `Vec<Edge>` with range indices for cache-friendly traversal.
 - **Re-export chain resolution**: Iterative propagation through barrel files with cycle detection.
 - **FileIds are path-sorted** (not insertion order) for stable cross-run identity.
-- **Hidden directory allowlist**: `.storybook`, `.well-known`, `.changeset`, `.github` — other dotdirs are skipped. Only root-level `build/` is ignored.
+- **Hidden directory allowlist**: `.storybook`, `.vitepress`, `.well-known`, `.changeset`, `.github` — other dotdirs are skipped. Only root-level `build/` is ignored.
 - **FxHashMap/FxHashSet required**: Standard `HashMap`/`HashSet` are disallowed (enforced via `.clippy.toml`). Use `rustc_hash` types for deterministic, faster hashing.
 
 ## Git conventions

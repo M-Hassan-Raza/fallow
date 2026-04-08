@@ -8,7 +8,7 @@ paths:
 Re-exports fallow-extract and fallow-graph for backwards compatibility.
 
 Key modules:
-- `discover.rs` — File walking + entry point detection (workspace-aware). Hidden directory allowlist (`.storybook`, `.well-known`, `.changeset`, `.github`). Only root-level `build/` is ignored (not nested).
+- `discover.rs` — File walking + entry point detection (workspace-aware). Hidden directory allowlist (`.storybook`, `.vitepress`, `.well-known`, `.changeset`, `.github`). Only root-level `build/` is ignored (not nested).
 - `analyze/mod.rs` — Orchestration: runs all detectors, collects `AnalysisResults`
 - `analyze/predicates.rs` — Lookup tables and helper predicates for detection logic
 - `analyze/unused_files.rs`, `unused_exports.rs`, `unused_deps.rs`, `unused_members.rs` — Per-issue-type detection
