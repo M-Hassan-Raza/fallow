@@ -848,14 +848,12 @@ mod tests {
     #[test]
     fn apply_unused_deps_clears_optional_and_type_only() {
         let mut results = make_results();
-        results
-            .unused_optional_dependencies
-            .push(UnusedDependency {
-                package_name: "fsevents".into(),
-                location: DependencyLocation::OptionalDependencies,
-                path: PathBuf::from("/project/package.json"),
-                line: 5,
-            });
+        results.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "fsevents".into(),
+            location: DependencyLocation::OptionalDependencies,
+            path: PathBuf::from("/project/package.json"),
+            line: 5,
+        });
         results
             .type_only_dependencies
             .push(fallow_core::results::TypeOnlyDependency {

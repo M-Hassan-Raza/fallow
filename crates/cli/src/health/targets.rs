@@ -1305,10 +1305,7 @@ mod tests {
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &hotspots);
         assert!(!targets.is_empty());
         let target = &targets[0];
-        assert!(target
-            .factors
-            .iter()
-            .any(|f| f.metric == "hotspot_score"));
+        assert!(target.factors.iter().any(|f| f.metric == "hotspot_score"));
     }
 
     #[test]
@@ -1352,10 +1349,12 @@ mod tests {
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
         let target = &targets[0];
-        assert!(target
-            .factors
-            .iter()
-            .any(|f| f.metric == "circular_dependency"));
+        assert!(
+            target
+                .factors
+                .iter()
+                .any(|f| f.metric == "circular_dependency")
+        );
     }
 
     #[test]
@@ -1374,10 +1373,7 @@ mod tests {
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
         let target = &targets[0];
-        assert!(target
-            .factors
-            .iter()
-            .any(|f| f.metric == "dead_code_ratio"));
+        assert!(target.factors.iter().any(|f| f.metric == "dead_code_ratio"));
     }
 
     #[test]
@@ -1423,10 +1419,12 @@ mod tests {
         let (targets, _) = compute_refactoring_targets(&scores, &aux, &[]);
         assert!(!targets.is_empty());
         let target = &targets[0];
-        assert!(target
-            .factors
-            .iter()
-            .any(|f| f.metric == "cognitive_complexity"));
+        assert!(
+            target
+                .factors
+                .iter()
+                .any(|f| f.metric == "cognitive_complexity")
+        );
     }
 
     #[test]

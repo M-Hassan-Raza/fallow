@@ -646,9 +646,7 @@ mod tests {
 
     #[test]
     fn mode_label_package() {
-        let pr = PackageResolver {
-            workspaces: vec![],
-        };
+        let pr = PackageResolver { workspaces: vec![] };
         assert_eq!(OwnershipResolver::Package(pr).mode_label(), "package");
     }
 
@@ -712,9 +710,7 @@ mod tests {
         results
             .unused_files
             .push(unused_file("/root/packages/auth/login.ts"));
-        results
-            .unused_files
-            .push(unused_file("/root/src/main.ts"));
+        results.unused_files.push(unused_file("/root/src/main.ts"));
 
         let groups = group_analysis_results(&results, &root(), &resolver);
         assert_eq!(groups.len(), 3);
@@ -732,8 +728,7 @@ mod tests {
 
     #[test]
     fn resolve_with_rule_directory_mode_no_rule() {
-        let (key, rule) =
-            OwnershipResolver::Directory.resolve_with_rule(Path::new("src/file.ts"));
+        let (key, rule) = OwnershipResolver::Directory.resolve_with_rule(Path::new("src/file.ts"));
         assert_eq!(key, "src");
         assert!(rule.is_none());
     }
@@ -759,9 +754,7 @@ mod tests {
 
     #[test]
     fn resolve_with_rule_package_mode_no_rule() {
-        let pr = PackageResolver {
-            workspaces: vec![],
-        };
+        let pr = PackageResolver { workspaces: vec![] };
         let resolver = OwnershipResolver::Package(pr);
         let (key, rule) = resolver.resolve_with_rule(Path::new("src/file.ts"));
         assert_eq!(key, ROOT_PACKAGE_LABEL);
@@ -773,14 +766,12 @@ mod tests {
     #[test]
     fn group_unused_optional_deps() {
         let mut results = AnalysisResults::default();
-        results
-            .unused_optional_dependencies
-            .push(UnusedDependency {
-                package_name: "fsevents".to_string(),
-                location: fallow_core::results::DependencyLocation::OptionalDependencies,
-                path: PathBuf::from("/root/package.json"),
-                line: 5,
-            });
+        results.unused_optional_dependencies.push(UnusedDependency {
+            package_name: "fsevents".to_string(),
+            location: fallow_core::results::DependencyLocation::OptionalDependencies,
+            path: PathBuf::from("/root/package.json"),
+            line: 5,
+        });
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);
         assert_eq!(groups.len(), 1);

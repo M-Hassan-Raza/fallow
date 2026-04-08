@@ -1130,13 +1130,14 @@ mod tests {
             line: 42,
             col: 0,
         });
-        r.unresolved_imports.push(fallow_core::results::UnresolvedImport {
-            path: PathBuf::from("src/app.ts"),
-            specifier: "./missing".to_string(),
-            line: 3,
-            col: 0,
-            specifier_col: 0,
-        });
+        r.unresolved_imports
+            .push(fallow_core::results::UnresolvedImport {
+                path: PathBuf::from("src/app.ts"),
+                specifier: "./missing".to_string(),
+                line: 3,
+                col: 0,
+                specifier_col: 0,
+            });
         r.unlisted_dependencies
             .push(fallow_core::results::UnlistedDependency {
                 package_name: "chalk".to_string(),
@@ -1307,8 +1308,7 @@ mod tests {
                 evidence: None,
             },
         ];
-        let baseline =
-            HealthBaselineData::from_findings(&[], &targets[..1], &root);
+        let baseline = HealthBaselineData::from_findings(&[], &targets[..1], &root);
         let filtered = filter_new_health_targets(targets, &baseline, &root);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].path, root.join("src/new-issue.ts"));

@@ -2751,15 +2751,12 @@ mod tests {
 
     #[test]
     fn istanbul_crap_match_statistics() {
-        let funcs = vec![
-            make_fn_complexity(5),
-            {
-                let mut f = make_fn_complexity(3);
-                f.name = "other_fn".into();
-                f.line = 10;
-                f
-            },
-        ];
+        let funcs = vec![make_fn_complexity(5), {
+            let mut f = make_fn_complexity(3);
+            f.name = "other_fn".into();
+            f.line = 10;
+            f
+        }];
         let mut functions = rustc_hash::FxHashMap::default();
         // Only match first function
         functions.insert(("test_fn".to_string(), 1), 80.0);
