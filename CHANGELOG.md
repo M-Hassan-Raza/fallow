@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.4] - 2026-04-08
+
+### Added
+
+- **Nuxt module authoring support** -- projects using `@nuxt/kit` with `src/runtime/` directory now have components, composables, plugins, utils, locale, types, and vue subdirectories recognized as entry points. Tested on Nuxt UI v3: false positive unused files dropped from 521 to 226.
+
+### Fixed
+
+- **Stack overflow on Svelte 5 typed snippet parameters** -- `{#snippet Link({ href, content }: Props)}` caused infinite recursion in `extract_pattern_binding_names` because the TypeScript type annotation prevented destructuring pattern matching. Projects like shadcn-svelte now analyze without crashing.
+
+### Changed
+
+- **Duplicate detection in re-export chain resolution** -- switched from linear scan to `FxHashSet` for O(1) duplicate detection during star re-export propagation.
+- **Reduced allocations in plugin system and graph construction** -- reuses scratch buffers and avoids unnecessary `String`/`Vec` allocations.
+
 ## [2.22.3] - 2026-04-08
 
 ### Fixed
@@ -1090,7 +1105,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.22.3...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.22.4...HEAD
+[2.22.4]: https://github.com/fallow-rs/fallow/compare/v2.22.3...v2.22.4
 [2.22.3]: https://github.com/fallow-rs/fallow/compare/v2.22.2...v2.22.3
 [2.22.2]: https://github.com/fallow-rs/fallow/compare/v2.22.1...v2.22.2
 [2.22.1]: https://github.com/fallow-rs/fallow/compare/v2.22.0...v2.22.1
