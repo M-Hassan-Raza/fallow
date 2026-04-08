@@ -662,6 +662,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         trend: Some(true),
         effort: Some("high".to_string()),
         summary: Some(true),
+        coverage: Some("coverage/coverage-final.json".to_string()),
     };
     let args = build_health_args(&params);
     // Every single flag should be present
@@ -681,6 +682,8 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
     assert!(args.contains(&"--summary".to_string()));
     assert!(args.contains(&"--no-cache".to_string()));
     assert!(args.contains(&"--trend".to_string()));
+    assert!(args.contains(&"--coverage".to_string()));
+    assert!(args.contains(&"coverage/coverage-final.json".to_string()));
 }
 
 // ── Unicode in paths for all arg builders ─────────────────────────

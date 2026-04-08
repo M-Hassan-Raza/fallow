@@ -522,6 +522,7 @@ fn health_args_with_all_options() {
         trend: None,
         effort: Some("high".to_string()),
         summary: Some(true),
+        coverage: Some("coverage/coverage-final.json".to_string()),
     };
     let args = build_health_args(&params);
     assert_eq!(
@@ -567,6 +568,8 @@ fn health_args_with_all_options() {
             "--effort",
             "high",
             "--summary",
+            "--coverage",
+            "coverage/coverage-final.json",
         ]
     );
 }

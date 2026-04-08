@@ -29,6 +29,7 @@ oxc_resolver = "11"
 oxc_semantic = "0.123"
 oxc_span = "0.123"
 oxc_syntax = "0.123"
+oxc_coverage_instrument = "0.2"
 
 # CLI
 clap = { version = "4", features = ["derive"] }

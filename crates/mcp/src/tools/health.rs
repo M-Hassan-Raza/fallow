@@ -92,6 +92,9 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if params.summary == Some(true) {
         args.push("--summary".to_string());
     }
+    if let Some(ref coverage) = params.coverage {
+        args.extend(["--coverage".to_string(), coverage.clone()]);
+    }
 
     args
 }

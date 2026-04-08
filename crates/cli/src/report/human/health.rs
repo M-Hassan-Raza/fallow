@@ -577,7 +577,7 @@ fn render_file_scores(
     }
     lines.push(format!(
         "  {}",
-        format!("Composite file quality scores based on complexity, coupling, and dead code. Risk: low <15, moderate 15-30, high >=30. Untested files scored CC\u{00b2}+CC instead of CC \u{2014} {DOCS_HEALTH}#file-health-scores").dimmed()
+        format!("Composite file quality scores based on complexity, coupling, and dead code. Risk: low <15, moderate 15-30, high >=30. CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Use --coverage for exact scores \u{2014} {DOCS_HEALTH}#file-health-scores").dimmed()
     ));
     lines.push(String::new());
 }

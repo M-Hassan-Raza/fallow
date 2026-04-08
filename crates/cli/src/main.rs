@@ -440,6 +440,15 @@ enum Command {
         /// directional indicators. Implies --score.
         #[arg(long)]
         trend: bool,
+
+        /// Path to coverage data (coverage-final.json) for exact per-function
+        /// CRAP scores. Generate with `jest --coverage`, `vitest run --coverage
+        /// --provider istanbul`, or any Istanbul-compatible tool. Requires
+        /// Istanbul format (not v8/c8 native format). Accepts a file or directory
+        /// containing coverage-final.json. Affects CRAP scores only, not
+        /// --coverage-gaps. Also configurable via FALLOW_COVERAGE env var.
+        #[arg(long, value_name = "PATH")]
+        coverage: Option<PathBuf>,
     },
 
     /// Audit changed files for dead code, complexity, and duplication.
@@ -1184,30 +1193,37 @@ fn dispatch_subcommand(
             min_commits,
             save_snapshot,
             trend,
-        } => dispatch_health(
-            cli,
-            root,
-            output,
-            quiet,
-            cli_format_was_explicit,
-            threads,
-            max_cyclomatic,
-            max_cognitive,
-            top,
-            sort,
-            complexity,
-            file_scores,
-            coverage_gaps,
-            hotspots,
-            targets,
-            effort,
-            score,
-            min_score,
-            since.as_deref(),
-            min_commits,
-            save_snapshot.as_ref(),
-            trend,
-        ),
+            coverage,
+        } => {
+            // Resolve coverage: CLI flag > FALLOW_COVERAGE env var
+            let coverage =
+                coverage.or_else(|| std::env::var("FALLOW_COVERAGE").ok().map(PathBuf::from));
+            dispatch_health(
+                cli,
+                root,
+                output,
+                quiet,
+                cli_format_was_explicit,
+                threads,
+                max_cyclomatic,
+                max_cognitive,
+                top,
+                sort,
+                complexity,
+                file_scores,
+                coverage_gaps,
+                hotspots,
+                targets,
+                effort,
+                score,
+                min_score,
+                since.as_deref(),
+                min_commits,
+                save_snapshot.as_ref(),
+                trend,
+                coverage.as_deref(),
+            )
+        }
         Command::Audit => audit::run_audit(&audit::AuditOptions {
             root,
             config_path: &cli.config,
@@ -1258,6 +1274,7 @@ fn dispatch_health(
     min_commits: Option<u32>,
     save_snapshot: Option<&Option<String>>,
     trend: bool,
+    coverage: Option<&std::path::Path>,
 ) -> ExitCode {
     let (output, quiet, _fail_on_issues) = apply_ci_defaults(
         cli.ci,
@@ -1314,6 +1331,7 @@ fn dispatch_health(
         save_snapshot: save_snapshot.map(|opt| PathBuf::from(opt.as_deref().unwrap_or_default())),
         trend,
         group_by: cli.group_by,
+        coverage,
     })
 }
 

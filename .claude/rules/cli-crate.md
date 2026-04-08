@@ -28,6 +28,7 @@ Key modules:
 - `FALLOW_FORMAT` — default output format
 - `FALLOW_QUIET` — suppress progress bars
 - `FALLOW_BIN` — binary path for MCP server
+- `FALLOW_COVERAGE` — path to Istanbul coverage data for accurate CRAP scores
 
 ## JSON error format
 Structured JSON errors on stdout when `--format json` is active: `{"error": true, "message": "...", "exit_code": 2}`

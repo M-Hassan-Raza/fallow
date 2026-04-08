@@ -96,15 +96,16 @@ pub(super) const CRAP_THRESHOLD: f64 = 30.0;
 /// Compute per-function CRAP scores using the static binary model.
 ///
 /// Binary model: test-reachable file -> CRAP = CC, untested -> CRAP = CC^2 + CC.
-/// Files suppressed via `// fallow-ignore-file coverage-gaps` should be treated
-/// as test-reachable by the caller.
+/// Superseded by `compute_crap_scores_estimated` but retained for test coverage
+/// of the binary formula behavior.
 ///
 /// Returns `(max_crap, count_above_threshold)`.
+#[cfg(test)]
 #[expect(
     clippy::suboptimal_flops,
     reason = "cc * cc + cc matches the CRAP formula specification"
 )]
-fn compute_crap_scores(
+fn compute_crap_scores_binary(
     complexity: &[fallow_types::extract::FunctionComplexity],
     is_test_reachable: bool,
 ) -> (f64, usize) {
@@ -122,6 +123,277 @@ fn compute_crap_scores(
         }
     }
     ((max * 10.0).round() / 10.0, above)
+}
+
+/// Compute per-function CRAP scores using Istanbul coverage data.
+///
+/// For each function, looks up its per-function statement coverage percentage
+/// from the Istanbul data and applies the canonical CRAP formula:
+/// `CRAP = CC^2 * (1 - cov/100)^3 + CC`
+///
+/// Functions not found in the coverage data fall back to the binary model
+/// using the file's test-reachability status.
+///
+/// Returns `(max_crap, count_above_threshold)`.
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "cc * cc + cc matches the CRAP formula specification"
+)]
+fn compute_crap_scores_istanbul(
+    complexity: &[fallow_types::extract::FunctionComplexity],
+    file_coverage: Option<&IstanbulFileCoverage>,
+    is_test_reachable: bool,
+) -> (f64, usize) {
+    if complexity.is_empty() {
+        return (0.0, 0);
+    }
+    let mut max = 0.0_f64;
+    let mut above = 0usize;
+    for f in complexity {
+        let cc = f64::from(f.cyclomatic);
+        let crap = if let Some(cov_pct) =
+            file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line))
+        {
+            crap_formula(cc, cov_pct)
+        } else if is_test_reachable {
+            cc
+        } else {
+            cc * cc + cc
+        };
+        max = max.max(crap);
+        if crap >= CRAP_THRESHOLD {
+            above += 1;
+        }
+    }
+    ((max * 10.0).round() / 10.0, above)
+}
+
+/// Estimated coverage for functions directly referenced by test-reachable modules.
+/// An export imported in a test file likely exercises most of the function body.
+const DIRECT_TEST_COVERAGE_ESTIMATE: f64 = 85.0;
+
+/// Estimated coverage for functions in test-reachable files but not directly
+/// referenced by tests. The file is imported by tests, so the function may
+/// be exercised indirectly, but with lower confidence.
+const INDIRECT_TEST_COVERAGE_ESTIMATE: f64 = 40.0;
+
+/// Compute per-function CRAP scores using graph-based coverage estimation.
+///
+/// For each function, estimates coverage from the module graph:
+/// - Function name matches an export with test-reachable references: 85%
+/// - File is test-reachable but function not directly referenced: 40%
+/// - File is not test-reachable at all: 0%
+///
+/// Applies the canonical CRAP formula with these estimates.
+/// Returns `(max_crap, count_above_threshold)`.
+fn compute_crap_scores_estimated(
+    complexity: &[fallow_types::extract::FunctionComplexity],
+    test_referenced_exports: &rustc_hash::FxHashSet<String>,
+    is_test_reachable: bool,
+) -> (f64, usize) {
+    if complexity.is_empty() {
+        return (0.0, 0);
+    }
+    let mut max = 0.0_f64;
+    let mut above = 0usize;
+    for f in complexity {
+        let cc = f64::from(f.cyclomatic);
+        let estimated_coverage = if test_referenced_exports.contains(f.name.as_str()) {
+            DIRECT_TEST_COVERAGE_ESTIMATE
+        } else if is_test_reachable {
+            INDIRECT_TEST_COVERAGE_ESTIMATE
+        } else {
+            0.0
+        };
+        let crap = crap_formula(cc, estimated_coverage);
+        max = max.max(crap);
+        if crap >= CRAP_THRESHOLD {
+            above += 1;
+        }
+    }
+    ((max * 10.0).round() / 10.0, above)
+}
+
+/// Build the set of export names that have at least one test-reachable reference.
+///
+/// This is the per-function signal: if an export named "foo" has a reference from
+/// a test-reachable module, the function "foo" is considered directly tested.
+fn build_test_referenced_exports(
+    exports: &[fallow_core::graph::ExportSymbol],
+    graph_modules: &[fallow_core::graph::ModuleNode],
+) -> rustc_hash::FxHashSet<String> {
+    let mut set = rustc_hash::FxHashSet::default();
+    for export in exports {
+        if export.is_type_only {
+            continue;
+        }
+        let has_test_ref = export.references.iter().any(|reference| {
+            graph_modules
+                .get(reference.from_file.0 as usize)
+                .is_some_and(fallow_core::graph::ModuleNode::is_test_reachable)
+        });
+        if has_test_ref {
+            set.insert(export.name.to_string());
+        }
+    }
+    set
+}
+
+/// Canonical CRAP formula: `CC^2 * (1 - cov/100)^3 + CC`.
+/// At 100% coverage: CRAP = CC. At 0% coverage: CRAP = CC^2 + CC.
+#[expect(
+    clippy::suboptimal_flops,
+    reason = "explicit multiplication matches the CRAP formula specification"
+)]
+fn crap_formula(cc: f64, coverage_pct: f64) -> f64 {
+    let uncovered = 1.0 - coverage_pct / 100.0;
+    cc * cc * uncovered * uncovered * uncovered + cc
+}
+
+/// Pre-processed per-function coverage data for a single file,
+/// derived from Istanbul `coverage-final.json`.
+pub(super) struct IstanbulFileCoverage {
+    /// Per-function coverage percentages, keyed by (name, line).
+    /// Line is 1-based, matching both fallow's `FunctionComplexity.line`
+    /// and Istanbul's `FnEntry.line`.
+    functions: rustc_hash::FxHashMap<(String, u32), f64>,
+}
+
+impl IstanbulFileCoverage {
+    /// Look up coverage for a function by name and start line.
+    ///
+    /// Tries exact (name, line) match first. If that fails, tries matching
+    /// by name alone (for small line-number differences due to formatting).
+    fn lookup(&self, name: &str, line: u32) -> Option<f64> {
+        // Exact match
+        if let Some(&pct) = self.functions.get(&(name.to_string(), line)) {
+            return Some(pct);
+        }
+        // Fuzzy: match by name, pick the closest line within offset of 2.
+        // Uses min_by_key for determinism (FxHashMap iteration order is arbitrary).
+        self.functions
+            .iter()
+            .filter(|((n, l), _)| n == name && l.abs_diff(line) <= 2)
+            .min_by_key(|((_, l), _)| l.abs_diff(line))
+            .map(|(_, &pct)| pct)
+    }
+}
+
+/// Loaded Istanbul coverage data, keyed by canonical file path.
+pub(super) struct IstanbulCoverage {
+    files: rustc_hash::FxHashMap<std::path::PathBuf, IstanbulFileCoverage>,
+}
+
+impl IstanbulCoverage {
+    /// Get coverage data for a file path.
+    pub fn get(&self, path: &std::path::Path) -> Option<&IstanbulFileCoverage> {
+        self.files.get(path)
+    }
+}
+
+/// Load Istanbul coverage data from a `coverage-final.json` file or directory.
+///
+/// Auto-detect a `coverage-final.json` file in common locations relative to the project root.
+///
+/// Checks (in order): `coverage/coverage-final.json`, `.nyc_output/coverage-final.json`.
+/// Returns the first path found, or `None` if no coverage file exists.
+pub(super) fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::PathBuf> {
+    let candidates = [
+        root.join("coverage/coverage-final.json"),
+        root.join(".nyc_output/coverage-final.json"),
+    ];
+    candidates.into_iter().find(|p| p.is_file())
+}
+
+/// If `path` is a directory, looks for `coverage-final.json` inside it.
+/// Parses the Istanbul JSON format and pre-computes per-function statement
+/// coverage percentages for efficient lookup during CRAP scoring.
+pub(super) fn load_istanbul_coverage(path: &std::path::Path) -> Result<IstanbulCoverage, String> {
+    let file_path = if path.is_dir() {
+        let candidate = path.join("coverage-final.json");
+        if candidate.is_file() {
+            candidate
+        } else {
+            return Err(format!(
+                "no coverage-final.json found in {}",
+                path.display()
+            ));
+        }
+    } else {
+        path.to_path_buf()
+    };
+
+    let json = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("failed to read coverage file {}: {e}", file_path.display()))?;
+
+    let raw: std::collections::BTreeMap<String, oxc_coverage_instrument::FileCoverage> =
+        oxc_coverage_instrument::parse_coverage_map(&json).map_err(|e| {
+            format!(
+                "failed to parse coverage data from {}: {e}",
+                file_path.display()
+            )
+        })?;
+
+    let mut files = rustc_hash::FxHashMap::default();
+    for file_cov in raw.values() {
+        let file_path = std::path::PathBuf::from(&file_cov.path);
+        let canonical = dunce::canonicalize(&file_path).unwrap_or(file_path);
+
+        let mut functions = rustc_hash::FxHashMap::default();
+        for (fn_id, fn_entry) in &file_cov.fn_map {
+            let coverage_pct = compute_function_statement_coverage(file_cov, fn_id, fn_entry);
+            functions.insert((fn_entry.name.clone(), fn_entry.line), coverage_pct);
+        }
+
+        files.insert(canonical, IstanbulFileCoverage { functions });
+    }
+
+    Ok(IstanbulCoverage { files })
+}
+
+/// Compute statement-level coverage percentage for a single function.
+///
+/// Maps statements from `statementMap` to the function's body range (`loc`)
+/// and computes the fraction with non-zero hit counts. When no statements
+/// fall within the function body (e.g., one-liner arrow functions, getters),
+/// falls back to the function hit count as a binary signal.
+fn compute_function_statement_coverage(
+    file_cov: &oxc_coverage_instrument::FileCoverage,
+    fn_id: &str,
+    fn_entry: &oxc_coverage_instrument::FnEntry,
+) -> f64 {
+    let fn_start_line = fn_entry.loc.start.line;
+    let fn_start_col = fn_entry.loc.start.column;
+    let fn_end_line = fn_entry.loc.end.line;
+    let fn_end_col = fn_entry.loc.end.column;
+
+    let mut total = 0u32;
+    let mut covered = 0u32;
+
+    for (stmt_id, stmt_loc) in &file_cov.statement_map {
+        // Check if statement falls within the function body
+        let after_start = stmt_loc.start.line > fn_start_line
+            || (stmt_loc.start.line == fn_start_line && stmt_loc.start.column >= fn_start_col);
+        let before_end = stmt_loc.end.line < fn_end_line
+            || (stmt_loc.end.line == fn_end_line && stmt_loc.end.column <= fn_end_col);
+
+        if after_start && before_end {
+            total += 1;
+            if file_cov.s.get(stmt_id).copied().unwrap_or(0) > 0 {
+                covered += 1;
+            }
+        }
+    }
+
+    if total == 0 {
+        // No statements in range: fall back to function hit count.
+        // If the function was entered at least once, treat as 100% covered;
+        // if never entered, treat as 0% covered.
+        let hit = file_cov.f.get(fn_id).copied().unwrap_or(0);
+        if hit > 0 { 100.0 } else { 0.0 }
+    } else {
+        f64::from(covered) / f64::from(total) * 100.0
+    }
 }
 
 /// Count unused VALUE exports per file path for O(1) lookup.
@@ -307,6 +579,7 @@ pub(super) fn compute_file_scores(
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
     analysis_output: fallow_core::AnalysisOutput,
+    istanbul_coverage: Option<&IstanbulCoverage>,
 ) -> Result<FileScoreOutput, String> {
     let graph = analysis_output.graph.ok_or("graph not available")?;
     let results = &analysis_output.results;
@@ -456,7 +729,9 @@ pub(super) fn compute_file_scores(
             fan_out,
         );
 
-        // CRAP scoring: combine per-function CC with binary test reachability.
+        // CRAP scoring: combine per-function CC with coverage data.
+        // Tier 3 (Istanbul): real per-function statement coverage from coverage-final.json.
+        // Tier 2 (estimated): graph-based per-function estimation from export references.
         // Files suppressed via `// fallow-ignore-file coverage-gaps` are treated
         // as test-reachable to stay consistent with coverage gap output.
         let module = module_by_id.get(&node.file_id);
@@ -466,11 +741,21 @@ pub(super) fn compute_file_scores(
                 fallow_types::suppress::IssueKind::CoverageGaps,
             )
         });
+        let is_test_reachable = node.is_test_reachable() || is_coverage_suppressed;
         let (crap_max, crap_above_threshold) = module.map_or((0.0, 0), |m| {
-            compute_crap_scores(
-                &m.complexity,
-                node.is_test_reachable() || is_coverage_suppressed,
-            )
+            if let Some(istanbul) = istanbul_coverage {
+                let canonical =
+                    dunce::canonicalize(&path_owned).unwrap_or_else(|_| path_owned.clone());
+                compute_crap_scores_istanbul(
+                    &m.complexity,
+                    istanbul.get(&canonical),
+                    is_test_reachable,
+                )
+            } else {
+                // Tier 2: graph-based estimation using export test references
+                let test_refs = build_test_referenced_exports(&node.exports, &graph.modules);
+                compute_crap_scores_estimated(&m.complexity, &test_refs, is_test_reachable)
+            }
         });
 
         scores.push(FileHealthScore {
@@ -1072,7 +1357,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         assert!(result.scores.is_empty());
         assert!(result.circular_files.is_empty());
         assert!(result.top_complex_fns.is_empty());
@@ -1092,7 +1377,7 @@ mod tests {
             graph: None,
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output);
+        let result = compute_file_scores(&modules, &file_paths, None, output, None);
         assert!(result.is_err());
         match result {
             Err(msg) => assert_eq!(msg, "graph not available"),
@@ -1157,7 +1442,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         assert_eq!(result.scores.len(), 1);
 
         let score = &result.scores[0];
@@ -1214,7 +1499,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         // Barrel files (function_count == 0) are excluded
         assert!(result.scores.is_empty());
     }
@@ -1312,7 +1597,8 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, Some(&changed), output).unwrap();
+        let result =
+            compute_file_scores(&modules, &file_paths, Some(&changed), output, None).unwrap();
         // Only path_b should remain
         assert_eq!(result.scores.len(), 1);
         assert_eq!(result.scores[0].path, path_b_check);
@@ -1407,7 +1693,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         assert_eq!(result.scores.len(), 2);
         // Sorted ascending: worst (lowest MI) first
         assert!(result.scores[0].maintainability_index <= result.scores[1].maintainability_index);
@@ -1479,7 +1765,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         // Unused file should have dead_code_ratio = 1.0
         assert_eq!(result.scores.len(), 1);
         assert!((result.scores[0].dead_code_ratio - 1.0).abs() < f64::EPSILON);
@@ -1568,7 +1854,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         assert!(result.top_complex_fns.contains_key(&path_a));
         let top = &result.top_complex_fns[&path_a];
         // Truncated to 3, sorted by cognitive descending
@@ -1680,7 +1966,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         // Both files should appear in circular_files
         assert!(result.circular_files.contains(&path_a));
         assert!(result.circular_files.contains(&path_b));
@@ -1795,7 +2081,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         assert_eq!(result.analysis_counts.total_exports, 2);
         // dead_exports = unused_exports + unused_types = 1 + 1 = 2
         assert_eq!(result.analysis_counts.dead_exports, 2);
@@ -1851,7 +2137,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         assert!(result.scores.is_empty());
     }
 
@@ -1906,7 +2192,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         let mi = result.scores[0].maintainability_index;
         // MI should be rounded to 1 decimal place
         let rounded = (mi * 10.0).round() / 10.0;
@@ -1989,7 +2275,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         // value_export_counts should track only non-type-only exports
         assert_eq!(result.value_export_counts[&path_a], 2);
     }
@@ -2045,7 +2331,7 @@ mod tests {
             graph: Some(graph),
         };
 
-        let result = compute_file_scores(&modules, &file_paths, None, output).unwrap();
+        let result = compute_file_scores(&modules, &file_paths, None, output, None).unwrap();
         // Top function has cognitive=0, so it should not be included
         assert!(!result.top_complex_fns.contains_key(&path_a));
     }
@@ -2065,7 +2351,7 @@ mod tests {
 
     #[test]
     fn crap_scores_empty_complexity() {
-        let (max, above) = compute_crap_scores(&[], true);
+        let (max, above) = compute_crap_scores_binary(&[], true);
         assert!((max).abs() < f64::EPSILON);
         assert_eq!(above, 0);
     }
@@ -2074,7 +2360,7 @@ mod tests {
     fn crap_scores_test_reachable() {
         // Test-reachable: CRAP = CC, so CC=5 -> 5.0 (below threshold)
         let funcs = vec![make_fn_complexity(5)];
-        let (max, above) = compute_crap_scores(&funcs, true);
+        let (max, above) = compute_crap_scores_binary(&funcs, true);
         assert!((max - 5.0).abs() < f64::EPSILON);
         assert_eq!(above, 0);
     }
@@ -2083,7 +2369,7 @@ mod tests {
     fn crap_scores_untested_at_threshold() {
         // Untested: CC=5 -> 5^2 + 5 = 30.0 (exactly at threshold, inclusive)
         let funcs = vec![make_fn_complexity(5)];
-        let (max, above) = compute_crap_scores(&funcs, false);
+        let (max, above) = compute_crap_scores_binary(&funcs, false);
         assert!((max - 30.0).abs() < f64::EPSILON);
         assert_eq!(above, 1);
     }
@@ -2092,7 +2378,7 @@ mod tests {
     fn crap_scores_untested_above_threshold() {
         // Untested: CC=6 -> 6^2 + 6 = 42.0
         let funcs = vec![make_fn_complexity(6)];
-        let (max, above) = compute_crap_scores(&funcs, false);
+        let (max, above) = compute_crap_scores_binary(&funcs, false);
         assert!((max - 42.0).abs() < f64::EPSILON);
         assert_eq!(above, 1);
     }
@@ -2101,7 +2387,7 @@ mod tests {
     fn crap_scores_untested_below_threshold() {
         // Untested: CC=4 -> 4^2 + 4 = 20.0 (below 30)
         let funcs = vec![make_fn_complexity(4)];
-        let (max, above) = compute_crap_scores(&funcs, false);
+        let (max, above) = compute_crap_scores_binary(&funcs, false);
         assert!((max - 20.0).abs() < f64::EPSILON);
         assert_eq!(above, 0);
     }
@@ -2114,9 +2400,141 @@ mod tests {
             make_fn_complexity(5),
             make_fn_complexity(8),
         ];
-        let (max, above) = compute_crap_scores(&funcs, false);
+        let (max, above) = compute_crap_scores_binary(&funcs, false);
         assert!((max - 72.0).abs() < f64::EPSILON);
         // CC=5 (30.0) and CC=8 (72.0) are >= threshold
         assert_eq!(above, 2);
+    }
+
+    // --- crap_formula ---
+
+    #[test]
+    fn crap_formula_full_coverage() {
+        // 100% coverage: CRAP = CC^2 * 0^3 + CC = CC
+        let result = crap_formula(10.0, 100.0);
+        assert!((result - 10.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn crap_formula_zero_coverage() {
+        // 0% coverage: CRAP = CC^2 * 1^3 + CC = CC^2 + CC
+        let result = crap_formula(5.0, 0.0);
+        assert!((result - 30.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn crap_formula_partial_coverage() {
+        // 50% coverage, CC=10: CRAP = 100 * 0.125 + 10 = 22.5
+        let result = crap_formula(10.0, 50.0);
+        assert!((result - 22.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn crap_formula_high_coverage_low_complexity() {
+        // 90% coverage, CC=2: CRAP = 4 * 0.001 + 2 = 2.004
+        let result = crap_formula(2.0, 90.0);
+        assert!((result - 2.004).abs() < 0.001);
+    }
+
+    // --- compute_crap_scores_istanbul ---
+
+    #[test]
+    fn istanbul_crap_with_coverage_data() {
+        let funcs = vec![make_fn_complexity(10)];
+        let mut functions = rustc_hash::FxHashMap::default();
+        // 80% coverage: CRAP = 100 * 0.008 + 10 = 10.8
+        functions.insert(("test_fn".to_string(), 1), 80.0);
+        let file_cov = IstanbulFileCoverage { functions };
+        let (max, above) = compute_crap_scores_istanbul(&funcs, Some(&file_cov), false);
+        assert!((max - 10.8).abs() < 0.1);
+        assert_eq!(above, 0);
+    }
+
+    #[test]
+    fn istanbul_crap_falls_back_to_binary_when_no_match() {
+        let funcs = vec![make_fn_complexity(6)];
+        // Empty coverage: no function match, untested fallback: 6^2 + 6 = 42
+        let file_cov = IstanbulFileCoverage {
+            functions: rustc_hash::FxHashMap::default(),
+        };
+        let (max, above) = compute_crap_scores_istanbul(&funcs, Some(&file_cov), false);
+        assert!((max - 42.0).abs() < f64::EPSILON);
+        assert_eq!(above, 1);
+    }
+
+    #[test]
+    fn istanbul_crap_falls_back_to_binary_when_no_file_coverage() {
+        let funcs = vec![make_fn_complexity(5)];
+        // No file coverage at all, test-reachable: CRAP = CC = 5
+        let (max, above) = compute_crap_scores_istanbul(&funcs, None, true);
+        assert!((max - 5.0).abs() < f64::EPSILON);
+        assert_eq!(above, 0);
+    }
+
+    #[test]
+    fn istanbul_crap_zero_coverage_matches_binary_untested() {
+        let funcs = vec![make_fn_complexity(5)];
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("test_fn".to_string(), 1), 0.0);
+        let file_cov = IstanbulFileCoverage { functions };
+        // 0% coverage: CRAP = 25 * 1 + 5 = 30 (same as binary untested)
+        let (max, above) = compute_crap_scores_istanbul(&funcs, Some(&file_cov), false);
+        assert!((max - 30.0).abs() < f64::EPSILON);
+        assert_eq!(above, 1);
+    }
+
+    // --- compute_crap_scores_estimated ---
+
+    #[test]
+    fn estimated_crap_direct_test_reference() {
+        // Function "test_fn" is directly test-referenced: 85% estimated coverage
+        // CC=10: CRAP = 100 * (0.15)^3 + 10 = 100 * 0.003375 + 10 = 10.3375
+        let funcs = vec![make_fn_complexity(10)];
+        let mut refs = rustc_hash::FxHashSet::default();
+        refs.insert("test_fn".to_string());
+        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, true);
+        assert!((max - 10.3).abs() < 0.1);
+        assert_eq!(above, 0);
+    }
+
+    #[test]
+    fn estimated_crap_indirect_test_reachable() {
+        // File is test-reachable but function not directly referenced: 40% estimated
+        // CC=10: CRAP = 100 * (0.6)^3 + 10 = 100 * 0.216 + 10 = 31.6
+        let funcs = vec![make_fn_complexity(10)];
+        let refs = rustc_hash::FxHashSet::default();
+        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, true);
+        assert!((max - 31.6).abs() < 0.1);
+        assert_eq!(above, 1); // above threshold of 30
+    }
+
+    #[test]
+    fn estimated_crap_untested_file() {
+        // File not test-reachable, no refs: 0% coverage
+        // CC=5: CRAP = 25 * 1 + 5 = 30
+        let funcs = vec![make_fn_complexity(5)];
+        let refs = rustc_hash::FxHashSet::default();
+        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, false);
+        assert!((max - 30.0).abs() < f64::EPSILON);
+        assert_eq!(above, 1);
+    }
+
+    #[test]
+    fn estimated_crap_low_complexity_direct_ref() {
+        // CC=2 with direct test ref (85%): CRAP = 4 * 0.003375 + 2 ≈ 2.0
+        let funcs = vec![make_fn_complexity(2)];
+        let mut refs = rustc_hash::FxHashSet::default();
+        refs.insert("test_fn".to_string());
+        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, true);
+        assert!(max < 3.0);
+        assert_eq!(above, 0);
+    }
+
+    #[test]
+    fn estimated_crap_empty() {
+        let refs = rustc_hash::FxHashSet::default();
+        let (max, above) = compute_crap_scores_estimated(&[], &refs, true);
+        assert!((max).abs() < f64::EPSILON);
+        assert_eq!(above, 0);
     }
 }

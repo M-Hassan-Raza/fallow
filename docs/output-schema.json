@@ -404,8 +404,8 @@
         },
         "coverage_model": {
           "type": "string",
-          "enum": ["static_binary"],
-          "description": "Coverage model used for CRAP score computation. 'static_binary' uses module graph test reachability (tested = CC, untested = CC^2 + CC). Only present when file scores are computed."
+          "enum": ["static_binary", "static_estimated", "istanbul"],
+          "description": "Coverage model used for CRAP score computation. 'static_estimated' (default) uses per-function graph-based estimation from export references: directly test-referenced = 85%, indirectly reachable = 40%, untested = 0%. 'istanbul' uses real per-function statement coverage from a coverage-final.json file (--coverage flag or auto-detected). 'static_binary' is the legacy binary model. Only present when file scores are computed."
         }
       }
     },

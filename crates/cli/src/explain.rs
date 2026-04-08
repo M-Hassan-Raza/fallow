@@ -325,7 +325,7 @@ pub fn health_meta() -> Value {
             },
             "crap_max": {
                 "name": "Untested Complexity Risk (CRAP)",
-                "description": "Change Risk Anti-Patterns score (Savoia & Evans, 2007). Static binary model: test-reachable file = CC, untested file = CC\u{00b2} + CC. Considers test-graph reachability from the module graph, not runtime code coverage. Files not imported by any test file are treated as 0% covered regardless of actual test execution.",
+                "description": "Change Risk Anti-Patterns score (Savoia & Evans, 2007). Formula: CC\u{00b2} \u{00d7} (1 - cov/100)\u{00b3} + CC. Default model (static_estimated): estimates per-function coverage from export references \u{2014} directly test-referenced exports get 85%, indirectly test-reachable functions get 40%, untested files get 0%. Provide --coverage <path> with Istanbul-format coverage-final.json (from Jest, Vitest, c8, nyc) for exact per-function CRAP scores.",
                 "range": "[1, \u{221e})",
                 "interpretation": "lower is better; >=30 is high-risk (CC >= 5 without test path)"
             }

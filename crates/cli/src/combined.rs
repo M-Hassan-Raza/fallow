@@ -626,6 +626,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
             .map(|opt| std::path::PathBuf::from(opt.as_deref().unwrap_or_default())),
         trend: opts.trend,
         group_by: opts.group_by,
+        coverage: None,
     }
 }
 

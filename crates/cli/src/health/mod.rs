@@ -63,6 +63,8 @@ pub struct HealthOptions<'a> {
     pub save_snapshot: Option<std::path::PathBuf>,
     pub trend: bool,
     pub group_by: Option<crate::GroupBy>,
+    /// Path to Istanbul-format coverage data (coverage-final.json) for accurate CRAP scores.
+    pub coverage: Option<&'a std::path::Path>,
 }
 
 /// Run health analysis and return results without printing.
@@ -140,6 +142,23 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     // Without the flag, coverage gaps only activate when config severity is not Off.
     let effective_coverage_gaps = opts.coverage_gaps;
 
+    // Load Istanbul coverage data for accurate CRAP scoring.
+    // Priority: explicit --coverage flag > auto-detected coverage-final.json.
+    let istanbul_coverage = if let Some(coverage_path) = opts.coverage {
+        match scoring::load_istanbul_coverage(coverage_path) {
+            Ok(cov) => Some(cov),
+            Err(e) => {
+                emit_error(&format!("coverage: {e}"), 2, opts.output);
+                return Err(ExitCode::from(2));
+            }
+        }
+    } else if let Some(auto_path) = scoring::auto_detect_coverage(&config.root) {
+        // Auto-detected coverage file: best-effort, don't fail if it can't be parsed
+        scoring::load_istanbul_coverage(&auto_path).ok()
+    } else {
+        None
+    };
+
     // Compute file-level health scores (needed by hotspots and targets too)
     let needs_file_scores =
         opts.file_scores || effective_coverage_gaps || opts.hotspots || opts.targets;
@@ -152,6 +171,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
             ws_root.as_deref(),
             &ignore_set,
             opts.output,
+            istanbul_coverage.as_ref(),
         )?
     } else {
         (None, None, None)
@@ -245,6 +265,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         targets,
         target_thresholds,
         health_trend,
+        istanbul_coverage.is_some(),
     );
 
     Ok(HealthResult {
@@ -267,6 +288,10 @@ fn sort_findings(findings: &mut [HealthFinding], sort: &SortBy) {
 type FileScoreResult = (Option<scoring::FileScoreOutput>, Option<usize>, Option<f64>);
 
 /// Compute file scores, applying workspace and ignore filters.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "filter pipeline requires all these inputs"
+)]
 fn compute_filtered_file_scores(
     config: &ResolvedConfig,
     modules: &[fallow_core::extract::ModuleInfo],
@@ -275,10 +300,17 @@ fn compute_filtered_file_scores(
     ws_root: Option<&std::path::Path>,
     ignore_set: &globset::GlobSet,
     output: OutputFormat,
+    istanbul_coverage: Option<&scoring::IstanbulCoverage>,
 ) -> Result<FileScoreResult, ExitCode> {
     let analysis_output = fallow_core::analyze_with_parse_result(config, modules)
         .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, output))?;
-    match compute_file_scores(modules, file_paths, changed_files, analysis_output) {
+    match compute_file_scores(
+        modules,
+        file_paths,
+        changed_files,
+        analysis_output,
+        istanbul_coverage,
+    ) {
         Ok(mut output) => {
             if let Some(ws) = ws_root {
                 output.scores.retain(|s| s.path.starts_with(ws));
@@ -528,6 +560,7 @@ fn assemble_health_report(
     targets: Vec<RefactoringTarget>,
     target_thresholds: Option<TargetThresholds>,
     health_trend: Option<crate::health_types::HealthTrend>,
+    has_istanbul_coverage: bool,
 ) -> HealthReport {
     let coverage_gaps = if effective_coverage_gaps {
         score_output.as_ref().map(|o| o.coverage.report.clone())
@@ -571,7 +604,11 @@ fn assemble_health_report(
                 || opts.hotspots
                 || opts.targets
             {
-                Some(crate::health_types::CoverageModel::StaticBinary)
+                Some(if has_istanbul_coverage {
+                    crate::health_types::CoverageModel::Istanbul
+                } else {
+                    crate::health_types::CoverageModel::StaticEstimated
+                })
             } else {
                 None
             },

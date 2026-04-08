@@ -275,6 +275,10 @@ pub struct HealthParams {
 
     /// Include a natural-language summary of findings alongside the structured JSON output.
     pub summary: Option<bool>,
+
+    /// Path to Istanbul-format coverage data (coverage-final.json) for accurate per-function CRAP scores.
+    /// Accepts a file path or a directory containing coverage-final.json.
+    pub coverage: Option<String>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]

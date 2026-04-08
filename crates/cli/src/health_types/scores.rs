@@ -203,7 +203,20 @@ pub struct FileHealthScore {
 #[serde(rename_all = "snake_case")]
 pub enum CoverageModel {
     /// Binary model: test-reachable = CC, untested = CC^2 + CC.
+    /// Superseded by `StaticEstimated`; retained for serialization compatibility.
+    #[allow(
+        dead_code,
+        reason = "retained for backwards-compatible JSON deserialization"
+    )]
     StaticBinary,
+    /// Graph-based estimation: per-function coverage derived from export
+    /// reference analysis. Directly test-referenced = 85%, indirectly
+    /// test-reachable = 40%, untested = 0%. Default model.
+    StaticEstimated,
+    /// Istanbul-format coverage data: real per-function statement coverage
+    /// from Jest, Vitest, c8, nyc, or any Istanbul-compatible tool.
+    /// CRAP = CC^2 * (1 - cov/100)^3 + CC.
+    Istanbul,
 }
 
 /// A hotspot: a file that is both complex and frequently changing.
@@ -329,5 +342,11 @@ mod tests {
     fn coverage_model_serializes_as_snake_case() {
         let json = serde_json::to_string(&CoverageModel::StaticBinary).unwrap();
         assert_eq!(json, r#""static_binary""#);
+
+        let json = serde_json::to_string(&CoverageModel::StaticEstimated).unwrap();
+        assert_eq!(json, r#""static_estimated""#);
+
+        let json = serde_json::to_string(&CoverageModel::Istanbul).unwrap();
+        assert_eq!(json, r#""istanbul""#);
     }
 }
