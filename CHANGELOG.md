@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.2] - 2026-04-08
+
+### Added
+
+- **Meta-framework prepare step warning** -- warns when Nuxt, Next.js, SvelteKit, or Astro need a prepare/build step before analysis can see generated types and routes.
+
+### Fixed
+
+- **CI dupes comment showing "No code duplication found" with `--changed-since` active** -- duplication JSON output had absolute file paths instead of project-relative paths, causing the GitHub Action's changed-file filter to silently drop all clone groups. The same issue existed in combined and audit mode for both dupes and health sections. ([#85](https://github.com/fallow-rs/fallow/issues/85))
+- **Star re-exports not propagated through entry point chains** -- `export * from './module'` in barrel files referenced by entry points now correctly marks the re-exported module's exports as used.
+- **Wildcard subpath exports missing CSS/asset entry points** -- package.json `exports` maps with wildcards (`"./*": "./dist/*.js"`) now expand to discover CSS, SCSS, and asset entry points.
+- **Astro `getStaticPaths` not recognized for TypeScript page files** -- `.ts` files in Astro `src/pages/` now have `getStaticPaths` marked as framework-used.
+- **`.js` resolved before `.d.ts` when both exist side-by-side** -- prevents false unresolved imports when a `.js` implementation file coexists with a `.d.ts` declaration.
+- **Test framework `include`/`testMatch`/`testRegex` patterns not used as entry point overrides** -- Vitest `test.include` and Jest `testMatch`/`testRegex` config patterns now correctly override the default test file discovery.
+- **Case-insensitive HTML/SFC regex matching on non-ASCII** -- added `unicode-case` feature to regex crate for correct case-insensitive matching in HTML and Vue/Svelte template parsing.
+- **TLS provider not configured for URL extends resolution** -- explicitly configured native-tls provider for ureq HTTP client, fixing `extends: "https://..."` config resolution.
+- **OpenSSL missing on Linux musl/cross-compilation** -- added vendored OpenSSL for static linking on musl targets.
+
+### Changed
+
+- **Binary size reduced by 16.6%** (-1.38MB) via release profile optimizations.
+- **Oxc parser upgraded from 0.123 to 0.124.**
+- **Sub-packages discovered from package.json exports map** -- nested packages referenced via `exports` field subpath patterns are now resolved.
+
 ## [2.22.1] - 2026-04-08
 
 ### Fixed
@@ -1060,7 +1084,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.22.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.22.2...HEAD
+[2.22.2]: https://github.com/fallow-rs/fallow/compare/v2.22.1...v2.22.2
 [2.22.1]: https://github.com/fallow-rs/fallow/compare/v2.22.0...v2.22.1
 [2.22.0]: https://github.com/fallow-rs/fallow/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/fallow-rs/fallow/compare/v2.20.0...v2.21.0
