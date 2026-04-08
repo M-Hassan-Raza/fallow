@@ -56,7 +56,7 @@ xxhash-rust = { version = "0.8", features = ["xxh3"] }
 rustc-hash = "2"
 
 # HTTP
-ureq = { version = "3", default-features = false, features = ["native-tls"] }
+ureq = { version = "3", default-features = false, features = ["native-tls", "vendored"] }
 
 # Caching
 bitcode = "0.6"
