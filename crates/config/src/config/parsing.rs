@@ -385,11 +385,6 @@ fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .https_only(true)
-        .tls_config(
-            ureq::tls::TlsConfig::builder()
-                .provider(ureq::tls::TlsProvider::NativeTls)
-                .build(),
-        )
         .build()
         .new_agent();
 

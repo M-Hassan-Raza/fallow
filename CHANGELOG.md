@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.3] - 2026-04-08
+
+### Fixed
+
+- **aarch64-linux-musl release build failure** -- switched from vendored OpenSSL (`native-tls`) to `rustls` for TLS, eliminating all C dependencies for cross-compilation. Vendored OpenSSL linked against glibc symbols (`__memcpy_chk`) unavailable on musl targets.
+
 ## [2.22.2] - 2026-04-08
 
 ### Added
@@ -1084,7 +1090,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.22.2...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.22.3...HEAD
+[2.22.3]: https://github.com/fallow-rs/fallow/compare/v2.22.2...v2.22.3
 [2.22.2]: https://github.com/fallow-rs/fallow/compare/v2.22.1...v2.22.2
 [2.22.1]: https://github.com/fallow-rs/fallow/compare/v2.22.0...v2.22.1
 [2.22.0]: https://github.com/fallow-rs/fallow/compare/v2.21.0...v2.22.0
