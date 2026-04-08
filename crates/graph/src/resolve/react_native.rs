@@ -12,18 +12,23 @@ pub(super) fn has_react_native_plugin(active_plugins: &[String]) -> bool {
 /// Build the resolver extension list, optionally prepending React Native platform
 /// extensions when the RN/Expo plugin is active.
 pub(super) fn build_extensions(active_plugins: &[String]) -> Vec<String> {
+    // Declaration files (.d.ts, .d.mts, .d.cts) must come AFTER runtime files
+    // (.js, .jsx, etc.). When both exist side-by-side (e.g. suspense.js +
+    // suspense.d.ts), the import should resolve to the runtime module, not the
+    // type declaration. Declarations provide types for their companion .js files
+    // but are not standalone modules.
     let base: Vec<String> = vec![
         ".ts".into(),
         ".tsx".into(),
-        ".d.ts".into(),
-        ".d.mts".into(),
-        ".d.cts".into(),
         ".mts".into(),
         ".cts".into(),
         ".js".into(),
         ".jsx".into(),
         ".mjs".into(),
         ".cjs".into(),
+        ".d.ts".into(),
+        ".d.mts".into(),
+        ".d.cts".into(),
         ".json".into(),
         ".vue".into(),
         ".svelte".into(),
