@@ -179,6 +179,12 @@ pub fn process_config_result(
     result: &mut AggregatedPluginResult,
 ) {
     let pname = plugin_name.to_string();
+    // When the config explicitly defines entry patterns (e.g. vitest test.include,
+    // jest testMatch), they replace the plugin's static defaults rather than adding
+    // to them. The tool treats its config as a full override of the defaults.
+    if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
+        result.entry_patterns.retain(|(_, name)| name != &pname);
+    }
     result.entry_patterns.extend(
         plugin_result
             .entry_patterns

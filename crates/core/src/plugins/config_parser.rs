@@ -802,6 +802,28 @@ fn collect_shallow_string_values(expr: &Expression) -> Vec<String> {
                 }
             }
         }
+        // Handle objects: { "key": "value" } or { "key": ["pkg", { opts }] } → extract values
+        Expression::ObjectExpression(obj) => {
+            for prop in &obj.properties {
+                if let ObjectPropertyKind::ObjectProperty(p) = prop {
+                    match &p.value {
+                        Expression::StringLiteral(s) => {
+                            values.push(s.value.to_string());
+                        }
+                        // Handle tuples: { "key": ["pkg-name", { options }] }
+                        Expression::ArrayExpression(sub_arr) => {
+                            if let Some(first) = sub_arr.elements.first()
+                                && let Some(first_expr) = first.as_expression()
+                                && let Some(s) = expression_to_string(first_expr)
+                            {
+                                values.push(s);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
         _ => {}
     }
     values

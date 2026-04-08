@@ -72,6 +72,11 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
 pub struct PluginResult {
     /// Additional entry point glob patterns discovered from config.
     pub entry_patterns: Vec<String>,
+    /// When true, `entry_patterns` from config replace the plugin's static
+    /// `entry_patterns()` defaults instead of adding to them. Tools like Vitest
+    /// and Jest treat their config's include/testMatch as a replacement for built-in
+    /// defaults, so when the config is explicit the static patterns must be dropped.
+    pub replace_entry_patterns: bool,
     /// Additional export-usage rules discovered from config.
     pub used_exports: Vec<(String, Vec<String>)>,
     /// Dependencies referenced in config files (should not be flagged as unused).

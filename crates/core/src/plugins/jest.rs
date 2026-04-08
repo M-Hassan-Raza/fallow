@@ -127,10 +127,70 @@ fn extract_jest_setup_files(
         }
     }
 
-    // testMatch → additional entry patterns
+    // testMatch → entry patterns that replace defaults
+    // Jest treats testMatch as a full override of its default patterns,
+    // so when present the static ENTRY_PATTERNS should be dropped.
     let test_match =
         config_parser::extract_config_string_array(parse_source, parse_path, &["testMatch"]);
+    if !test_match.is_empty() {
+        result.replace_entry_patterns = true;
+    }
     result.entry_patterns.extend(test_match);
+
+    // testRegex → convert to best-effort glob and replace defaults
+    // Jest's testRegex restricts which files are tests. Common pattern: "src/.*\\.test\\.ts$"
+    // Extract a directory prefix (if any) and generate a matching glob.
+    if result.entry_patterns.is_empty()
+        && let Some(regex) =
+            config_parser::extract_config_string(parse_source, parse_path, &["testRegex"])
+        && let Some(glob) = test_regex_to_glob(&regex)
+    {
+        result.replace_entry_patterns = true;
+        result.entry_patterns.push(glob);
+    }
+}
+
+/// Best-effort conversion of a Jest `testRegex` to a glob pattern.
+///
+/// Handles common patterns like:
+/// - `"src/.*\\.test\\.ts$"` → `"src/**/*.test.ts"`
+/// - `".*\\.(test|spec)\\.tsx?$"` → stays as defaults (no fixed prefix)
+fn test_regex_to_glob(regex: &str) -> Option<String> {
+    // Extract a fixed directory prefix before the first regex metachar
+    let meta_chars = ['.', '*', '+', '?', '(', '[', '|', '^', '$', '{', '\\'];
+    let prefix_end = regex
+        .find(|c: char| meta_chars.contains(&c))
+        .unwrap_or(regex.len());
+    let prefix = &regex[..prefix_end];
+
+    // Must have a non-empty directory prefix to be useful (otherwise same as defaults)
+    if prefix.is_empty() || !prefix.contains('/') {
+        return None;
+    }
+
+    // Detect file extension from the regex suffix
+    let ext = if regex.contains("tsx?") {
+        "{ts,tsx}"
+    } else if regex.contains("jsx?") {
+        "{js,jsx}"
+    } else if regex.contains("\\.ts") {
+        "ts"
+    } else if regex.contains("\\.js") {
+        "js"
+    } else {
+        "{ts,tsx,js,jsx}"
+    };
+
+    // Detect test naming convention
+    let name_pattern = if regex.contains("(test|spec)") || regex.contains("(spec|test)") {
+        "*.{test,spec}"
+    } else if regex.contains("\\.spec\\.") {
+        "*.spec"
+    } else {
+        "*.test"
+    };
+
+    Some(format!("{prefix}**/{name_pattern}.{ext}"))
 }
 
 /// Extract referenced dependencies from Jest config (transform, reporters, environment, etc.).
@@ -385,6 +445,81 @@ mod tests {
             result
                 .referenced_dependencies
                 .contains(&"ts-jest".to_string())
+        );
+    }
+
+    #[test]
+    fn test_regex_with_directory_prefix() {
+        assert_eq!(
+            test_regex_to_glob(r"src/.*\.test\.ts$"),
+            Some("src/**/*.test.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn test_regex_without_directory_prefix() {
+        assert_eq!(
+            test_regex_to_glob(r".*\.test\.ts$"),
+            None,
+            "regex without directory prefix should return None (same as defaults)"
+        );
+    }
+
+    #[test]
+    fn test_regex_tsx_extension() {
+        assert_eq!(
+            test_regex_to_glob(r"src/.*\.test\.tsx?$"),
+            Some("src/**/*.test.{ts,tsx}".to_string())
+        );
+    }
+
+    #[test]
+    fn test_regex_spec_pattern() {
+        assert_eq!(
+            test_regex_to_glob(r"src/.*\.spec\.ts$"),
+            Some("src/**/*.spec.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn test_regex_test_or_spec() {
+        assert_eq!(
+            test_regex_to_glob(r"src/.*(test|spec)\.ts$"),
+            Some("src/**/*.{test,spec}.ts".to_string())
+        );
+    }
+
+    #[test]
+    fn resolve_config_test_regex_replaces_defaults() {
+        let source =
+            r#"{"testRegex": "src/.*\\.test\\.ts$", "transform": {"^.+\\.tsx?$": "ts-jest"}}"#;
+        let plugin = JestPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("jest.config.json"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(
+            result.replace_entry_patterns,
+            "testRegex with directory prefix should trigger replacement"
+        );
+        assert_eq!(result.entry_patterns, vec!["src/**/*.test.ts"]);
+    }
+
+    #[test]
+    fn resolve_config_json_transform_object_values() {
+        let source = r#"{"transform": {"^.+\\.tsx?$": "ts-jest"}}"#;
+        let plugin = JestPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("jest.config.json"),
+            source,
+            std::path::Path::new("/project"),
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"ts-jest".to_string()),
+            "should extract transform values from object"
         );
     }
 }

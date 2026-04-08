@@ -787,6 +787,7 @@ fn process_config_result_merges_all_fields() {
     let mut aggregated = AggregatedPluginResult::default();
     let config_result = PluginResult {
         entry_patterns: vec!["src/routes/**/*.ts".to_string()],
+        replace_entry_patterns: false,
         used_exports: vec![("src/routes/**/*.ts".to_string(), vec!["loader".to_string()])],
         referenced_dependencies: vec!["lodash".to_string(), "axios".to_string()],
         always_used_files: vec!["setup.ts".to_string()],
@@ -834,6 +835,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
 
     let result1 = PluginResult {
         entry_patterns: vec!["a.ts".to_string()],
+        replace_entry_patterns: false,
         used_exports: vec![("a.ts".to_string(), vec!["default".to_string()])],
         referenced_dependencies: vec!["dep-a".to_string()],
         always_used_files: vec![],
@@ -843,6 +845,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
     };
     let result2 = PluginResult {
         entry_patterns: vec!["b.ts".to_string()],
+        replace_entry_patterns: false,
         used_exports: vec![("b.ts".to_string(), vec!["loader".to_string()])],
         referenced_dependencies: vec!["dep-b".to_string()],
         always_used_files: vec!["c.ts".to_string()],
@@ -935,6 +938,76 @@ fn process_config_result_path_aliases_override_existing_prefixes() {
             .contains(&("#shared".to_string(), "shared".to_string())),
         "unrelated aliases should be preserved"
     );
+}
+
+#[test]
+fn process_config_result_replace_entry_patterns_removes_static_defaults() {
+    let mut aggregated = AggregatedPluginResult::default();
+    // Simulate static patterns already added by process_static_patterns()
+    aggregated
+        .entry_patterns
+        .push(("**/*.test.ts".to_string(), "vitest".to_string()));
+    aggregated
+        .entry_patterns
+        .push(("**/*.spec.ts".to_string(), "vitest".to_string()));
+    // Also add a pattern from a different plugin that should survive
+    aggregated
+        .entry_patterns
+        .push(("**/*.stories.tsx".to_string(), "storybook".to_string()));
+
+    let config_result = PluginResult {
+        entry_patterns: vec!["src/**/*.test.ts".to_string()],
+        replace_entry_patterns: true,
+        ..Default::default()
+    };
+
+    process_config_result("vitest", config_result, &mut aggregated);
+
+    // Static vitest patterns should be replaced by the config pattern
+    let vitest_patterns: Vec<_> = aggregated
+        .entry_patterns
+        .iter()
+        .filter(|(_, name)| name == "vitest")
+        .collect();
+    assert_eq!(
+        vitest_patterns.len(),
+        1,
+        "should have exactly the config pattern"
+    );
+    assert_eq!(vitest_patterns[0].0, "src/**/*.test.ts");
+
+    // Storybook pattern should be untouched
+    assert!(
+        aggregated
+            .entry_patterns
+            .iter()
+            .any(|(p, n)| p == "**/*.stories.tsx" && n == "storybook"),
+        "patterns from other plugins should be preserved"
+    );
+}
+
+#[test]
+fn process_config_result_replace_entry_patterns_noop_when_empty() {
+    let mut aggregated = AggregatedPluginResult::default();
+    aggregated
+        .entry_patterns
+        .push(("**/*.test.ts".to_string(), "vitest".to_string()));
+
+    // replace_entry_patterns is true but no patterns provided — static defaults should survive
+    let config_result = PluginResult {
+        entry_patterns: vec![],
+        replace_entry_patterns: true,
+        ..Default::default()
+    };
+
+    process_config_result("vitest", config_result, &mut aggregated);
+
+    assert_eq!(
+        aggregated.entry_patterns.len(),
+        1,
+        "static pattern should survive when config provides none"
+    );
+    assert_eq!(aggregated.entry_patterns[0].0, "**/*.test.ts");
 }
 
 // ── PluginResult::is_empty ───────────────────────────────────
@@ -1382,6 +1455,18 @@ test: {
             .any(|(p, _)| p == "tests/**/*.test.ts"),
         "config parsing should extract test.include patterns"
     );
+    // test.include should replace the static defaults, not add to them
+    let vitest_patterns: Vec<_> = result
+        .entry_patterns
+        .iter()
+        .filter(|(_, name)| name == "vitest")
+        .collect();
+    assert_eq!(
+        vitest_patterns.len(),
+        1,
+        "test.include should replace static defaults, not add to them; found: {vitest_patterns:?}"
+    );
+    assert_eq!(vitest_patterns[0].0, "tests/**/*.test.ts");
     // Config parsing should have discovered setup files
     assert!(
         !result.setup_files.is_empty(),

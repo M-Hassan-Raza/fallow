@@ -20,7 +20,10 @@ const ENTRY_PATTERNS: &[&str] = &[
     "**/*.bench.{ts,tsx,js,jsx}",
 ];
 
-const CONFIG_PATTERNS: &[&str] = &["vitest.config.{ts,js,mts,mjs}", "vitest.workspace.{ts,js}"];
+const CONFIG_PATTERNS: &[&str] = &[
+    "**/vitest.config.{ts,js,mts,mjs}",
+    "vitest.workspace.{ts,js}",
+];
 
 const ALWAYS_USED: &[&str] = &[
     "vitest.config.{ts,js,mts,mjs}",
@@ -120,17 +123,25 @@ impl Plugin for VitestPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // test.include → additional entry patterns
-        let mut includes =
+        // test.include → entry patterns that replace defaults
+        // Vitest treats root-level test.include as a full override of its default
+        // patterns. Project-level includes (test.projects[*].test.include) only ADD
+        // to the patterns since projects without test.include inherit root defaults.
+        let root_includes =
             config_parser::extract_config_string_array(source, config_path, &["test", "include"]);
+        if !root_includes.is_empty() {
+            result.replace_entry_patterns = true;
+        }
+        result.entry_patterns.extend(root_includes);
+
         // Also check test.projects[*].test.include (Vitest projects/workspaces)
-        includes.extend(config_parser::extract_config_array_nested_string_or_array(
+        let project_includes = config_parser::extract_config_array_nested_string_or_array(
             source,
             config_path,
             &["test", "projects"],
             &["test", "include"],
-        ));
-        result.entry_patterns.extend(includes);
+        );
+        result.entry_patterns.extend(project_includes);
 
         // test.setupFiles → setup files (string or array)
         let mut setup_files = config_parser::extract_config_string_or_array(
@@ -481,5 +492,63 @@ mod tests {
         "#;
         let result = resolve(source);
         assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn test_include_sets_replace_entry_patterns() {
+        let source = r#"
+            export default {
+                test: {
+                    include: ["src/**/*.test.ts"]
+                }
+            };
+        "#;
+        let result = resolve(source);
+        assert!(
+            result.replace_entry_patterns,
+            "test.include should trigger replacement of static entry patterns"
+        );
+        assert_eq!(result.entry_patterns, vec!["src/**/*.test.ts"]);
+    }
+
+    #[test]
+    fn no_test_include_keeps_defaults() {
+        let source = r#"
+            export default {
+                test: {
+                    environment: "jsdom"
+                }
+            };
+        "#;
+        let result = resolve(source);
+        assert!(
+            !result.replace_entry_patterns,
+            "without test.include, static patterns should be kept"
+        );
+        assert!(result.entry_patterns.is_empty());
+    }
+
+    #[test]
+    fn project_level_include_does_not_replace_defaults() {
+        let source = r#"
+            export default {
+                test: {
+                    projects: [
+                        {
+                            test: {
+                                name: "unit-jsdom",
+                                include: ["packages/vue/**/*.spec.ts"],
+                            }
+                        }
+                    ]
+                }
+            };
+        "#;
+        let result = resolve(source);
+        assert!(
+            !result.replace_entry_patterns,
+            "project-level test.include should not replace static defaults"
+        );
+        assert_eq!(result.entry_patterns, vec!["packages/vue/**/*.spec.ts"]);
     }
 }
