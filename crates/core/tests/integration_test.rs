@@ -27,6 +27,8 @@ mod framework_convention_coverage_astro_gatsby;
 mod framework_convention_coverage_common;
 #[path = "integration_test/framework_convention_coverage_router.rs"]
 mod framework_convention_coverage_router;
+#[path = "integration_test/framework_convention_coverage_vitepress.rs"]
+mod framework_convention_coverage_vitepress;
 #[path = "integration_test/frameworks.rs"]
 mod frameworks;
 #[path = "integration_test/html_entry.rs"]
