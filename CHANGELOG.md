@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.22.0] - 2026-04-08
+
+### Added
+
+- **Expanded Astro convention coverage** -- actions (`src/actions/index`), content config (`src/content/config`, `src/content.config`), nested middleware (`src/middleware/index`), page exports (`getStaticPaths`, `prerender`, `partial`), and endpoint HTTP method handlers (`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`, `ALL`) are now recognized as framework-used. ([#84](https://github.com/fallow-rs/fallow/pull/84))
+- **React Router v7 route config and root module exports** -- `app/routes.ts` default export, root `Layout`, `middleware`, `clientMiddleware`, and `shouldRevalidate` are now kept alive. ([#84](https://github.com/fallow-rs/fallow/pull/84))
+- **Remix root and client data exports** -- `clientLoader`, `clientAction`, `shouldRevalidate`, `Layout`, and `HydrateFallback` on root and route modules are now recognized. ([#84](https://github.com/fallow-rs/fallow/pull/84))
+- **Gatsby `config` page export and `src/api` function conventions** -- page-level `config` export (Gatsby 5 Slice API) and `src/api/**` serverless function exports (`default`, `config`) are now covered. ([#84](https://github.com/fallow-rs/fallow/pull/84))
+- **VitePress `docs/` scaffold discovery** -- `.vitepress` added to hidden directory allowlist, and `docs/.vitepress/config` and `docs/.vitepress/theme/index` patterns added for the common docs-subdirectory layout. Theme entry `default` export is kept alive. ([#84](https://github.com/fallow-rs/fallow/pull/84))
+
 ## [2.21.0] - 2026-04-08
 
 ### Added
@@ -1044,7 +1054,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.21.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.22.0...HEAD
+[2.22.0]: https://github.com/fallow-rs/fallow/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/fallow-rs/fallow/compare/v2.20.0...v2.21.0
 [2.20.0]: https://github.com/fallow-rs/fallow/compare/v2.19.3...v2.20.0
 [2.19.3]: https://github.com/fallow-rs/fallow/compare/v2.19.2...v2.19.3
