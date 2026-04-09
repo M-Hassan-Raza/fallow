@@ -570,6 +570,13 @@ fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
     target
         .circular_dependencies
         .extend(source.circular_dependencies);
+    target
+        .test_only_dependencies
+        .extend(source.test_only_dependencies);
+    target
+        .boundary_violations
+        .extend(source.boundary_violations);
+    target.export_usages.extend(source.export_usages);
 }
 
 /// Merge duplication reports from a sub-project into the accumulated report.
@@ -601,8 +608,8 @@ mod tests {
 
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::results::{
-        CircularDependency, UnlistedDependency, UnusedDependency, UnusedExport, UnusedFile,
-        UnusedMember,
+        BoundaryViolation, CircularDependency, ExportUsage, TestOnlyDependency,
+        UnlistedDependency, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
     };
 
     // -----------------------------------------------------------------------
@@ -765,6 +772,28 @@ mod tests {
             col: 0,
             is_cross_package: false,
         });
+        source.test_only_dependencies.push(TestOnlyDependency {
+            package_name: "test-only".to_string(),
+            path: "/pkg.json".into(),
+            line: 11,
+        });
+        source.boundary_violations.push(BoundaryViolation {
+            from_path: "/a.ts".into(),
+            to_path: "/b.ts".into(),
+            from_zone: "ui".to_string(),
+            to_zone: "data".to_string(),
+            import_specifier: "../data/db".to_string(),
+            line: 12,
+            col: 0,
+        });
+        source.export_usages.push(ExportUsage {
+            path: "/f.ts".into(),
+            export_name: "used".to_string(),
+            line: 13,
+            col: 0,
+            reference_count: 3,
+            reference_locations: vec![],
+        });
 
         merge_results(&mut target, source);
 
@@ -781,6 +810,9 @@ mod tests {
         assert_eq!(target.duplicate_exports.len(), 1);
         assert_eq!(target.type_only_dependencies.len(), 1);
         assert_eq!(target.circular_dependencies.len(), 1);
+        assert_eq!(target.test_only_dependencies.len(), 1);
+        assert_eq!(target.boundary_violations.len(), 1);
+        assert_eq!(target.export_usages.len(), 1);
     }
 
     #[test]
