@@ -852,7 +852,7 @@ pub(super) fn compute_file_scores(
     });
 
     // Compute aggregate counts for vital signs
-    let total_exports: usize = modules.iter().map(|m| m.exports.len()).sum();
+    let total_exports: usize = graph.modules.iter().map(|m| m.exports.len()).sum();
     let dead_exports = results.unused_exports.len() + results.unused_types.len();
     let unused_deps = results.unused_dependencies.len()
         + results.unused_dev_dependencies.len()
@@ -2067,7 +2067,24 @@ mod tests {
         let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
             file_id: fallow_core::discover::FileId(0),
             path: path_a.clone(),
-            exports: vec![],
+            exports: vec![
+                fallow_types::extract::ExportInfo {
+                    name: fallow_core::extract::ExportName::Named("foo".into()),
+                    local_name: None,
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::empty(0),
+                    members: vec![],
+                },
+                fallow_types::extract::ExportInfo {
+                    name: fallow_core::extract::ExportName::Named("bar".into()),
+                    local_name: None,
+                    is_type_only: false,
+                    is_public: false,
+                    span: oxc_span::Span::empty(0),
+                    members: vec![],
+                },
+            ],
             re_exports: vec![],
             resolved_imports: vec![],
             resolved_dynamic_imports: vec![],
@@ -2080,7 +2097,7 @@ mod tests {
 
         let graph = build_test_graph(&files, &[], &resolved_modules);
 
-        // Module has 2 exports so total_exports = 2
+        // Graph module has 2 exports so total_exports = 2
         let mut module = make_module_info(
             0,
             10,

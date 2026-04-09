@@ -56,25 +56,15 @@ pub struct HealthReport {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn health_report_skips_empty_collections() {
-        let report = HealthReport {
+#[expect(
+    clippy::derivable_impls,
+    reason = "test-only Default with custom HealthSummary thresholds (20/15)"
+)]
+impl Default for HealthReport {
+    fn default() -> Self {
+        Self {
             findings: vec![],
-            summary: HealthSummary {
-                files_analyzed: 0,
-                functions_analyzed: 0,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
-            },
+            summary: HealthSummary::default(),
             vital_signs: None,
             health_score: None,
             file_scores: vec![],
@@ -85,7 +75,17 @@ mod tests {
             targets: vec![],
             target_thresholds: None,
             health_trend: None,
-        };
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn health_report_skips_empty_collections() {
+        let report = HealthReport::default();
         let json = serde_json::to_string(&report).unwrap();
         // Empty vecs should be omitted due to skip_serializing_if
         assert!(!json.contains("file_scores"));
@@ -99,31 +99,7 @@ mod tests {
 
     #[test]
     fn health_score_none_skipped_in_report() {
-        let report = HealthReport {
-            findings: vec![],
-            summary: HealthSummary {
-                files_analyzed: 0,
-                functions_analyzed: 0,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
-            },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
-        };
+        let report = HealthReport::default();
         let json = serde_json::to_string(&report).unwrap();
         assert!(!json.contains("health_score"));
     }

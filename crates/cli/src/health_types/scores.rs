@@ -183,6 +183,24 @@ pub struct HealthSummary {
     pub istanbul_total: Option<usize>,
 }
 
+#[cfg(test)]
+impl Default for HealthSummary {
+    fn default() -> Self {
+        Self {
+            files_analyzed: 0,
+            functions_analyzed: 0,
+            functions_above_threshold: 0,
+            max_cyclomatic_threshold: 20,
+            max_cognitive_threshold: 15,
+            files_scored: None,
+            average_maintainability: None,
+            coverage_model: None,
+            istanbul_matched: None,
+            istanbul_total: None,
+        }
+    }
+}
+
 /// Per-file health score combining complexity, coupling, and dead code metrics.
 ///
 /// Files with zero functions (barrel files, re-export files) are excluded by default.

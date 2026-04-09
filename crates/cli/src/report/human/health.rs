@@ -1208,29 +1208,12 @@ mod tests {
     fn health_empty_findings_produces_no_header() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -1257,24 +1240,9 @@ mod tests {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -1306,24 +1274,9 @@ mod tests {
                 files_analyzed: 100,
                 functions_analyzed: 500,
                 functions_above_threshold: 10,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -1363,24 +1316,9 @@ mod tests {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 functions_above_threshold: 2,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -1393,29 +1331,12 @@ mod tests {
 
     fn empty_report() -> crate::health_types::HealthReport {
         crate::health_types::HealthReport {
-            findings: vec![],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         }
     }
 

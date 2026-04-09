@@ -1041,22 +1041,11 @@ mod tests {
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
-            findings: vec![],
             summary: HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 2,
@@ -1076,12 +1065,7 @@ mod tests {
                     col: 4,
                 }],
             }),
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
 
         let output = build_health_codeclimate(&report, &root);

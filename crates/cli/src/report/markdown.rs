@@ -1156,29 +1156,12 @@ mod tests {
     fn health_markdown_empty_no_findings() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("no functions exceed complexity thresholds"));
@@ -1204,24 +1187,9 @@ mod tests {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("## Fallow: 1 high complexity function\n"));
@@ -1252,24 +1220,9 @@ mod tests {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         // Cyclomatic 15 is below threshold 20, no marker
@@ -1284,26 +1237,11 @@ mod tests {
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
-            findings: vec![],
             summary: HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
             targets: vec![
                 RefactoringTarget {
                     path: PathBuf::from("/project/src/complex.ts"),
@@ -1333,8 +1271,7 @@ mod tests {
                     evidence: None,
                 },
             ],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
 
@@ -1361,22 +1298,11 @@ mod tests {
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
-            findings: vec![],
             summary: HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 2,
@@ -1396,12 +1322,7 @@ mod tests {
                     col: 4,
                 }],
             }),
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
 
         let md = build_health_markdown(&report, &root);
@@ -1549,18 +1470,10 @@ mod tests {
     fn health_markdown_vital_signs_table() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
             vital_signs: Some(crate::health_types::VitalSigns {
                 avg_cyclomatic: 3.5,
@@ -1578,15 +1491,7 @@ mod tests {
                 p95_fan_in: None,
                 coupling_high_pct: None,
             }),
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("## Vital Signs"));
@@ -1622,16 +1527,10 @@ mod tests {
                 files_analyzed: 5,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
                 files_scored: Some(1),
                 average_maintainability: Some(65.0),
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
             file_scores: vec![crate::health_types::FileHealthScore {
                 path: root.join("src/utils.ts"),
                 fan_in: 5,
@@ -1646,13 +1545,7 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
             }],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("### File Health Scores (1 files)"));
@@ -1682,18 +1575,8 @@ mod tests {
                 files_analyzed: 5,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
             hotspots: vec![crate::health_types::HotspotEntry {
                 path: root.join("src/hot.ts"),
                 score: 85.0,
@@ -1712,10 +1595,7 @@ mod tests {
                 files_excluded: 5,
                 shallow_clone: false,
             }),
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("### Hotspots (1 files, since 6 months)"));
@@ -1744,16 +1624,10 @@ mod tests {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
                 files_scored: Some(1),
                 average_maintainability: Some(70.0),
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
             file_scores: vec![crate::health_types::FileHealthScore {
                 path: root.join("src/x.ts"),
                 fan_in: 1,
@@ -1768,13 +1642,7 @@ mod tests {
                 crap_max: 0.0,
                 crap_above_threshold: 0,
             }],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("<details><summary>Metric definitions</summary>"));
@@ -1804,24 +1672,9 @@ mod tests {
                 files_analyzed: 10,
                 functions_analyzed: 50,
                 functions_above_threshold: 5, // 5 total but only 1 shown
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("5 high complexity functions (1 shown)"));
@@ -1896,18 +1749,8 @@ mod tests {
                 files_analyzed: 5,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
             hotspots: vec![crate::health_types::HotspotEntry {
                 path: root.join("src/hot.ts"),
                 score: 50.0,
@@ -1926,10 +1769,7 @@ mod tests {
                 files_excluded: 0,
                 shallow_clone: false,
             }),
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let md = build_health_markdown(&report, &root);
         assert!(!md.contains("files excluded"));

@@ -1079,29 +1079,12 @@ mod tests {
     fn health_sarif_empty_no_results() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            findings: vec![],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let sarif = build_health_sarif(&report, &root);
         assert_eq!(sarif["version"], "2.1.0");
@@ -1132,24 +1115,9 @@ mod tests {
                 files_analyzed: 5,
                 functions_analyzed: 20,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
@@ -1189,24 +1157,9 @@ mod tests {
                 files_analyzed: 3,
                 functions_analyzed: 10,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
@@ -1240,24 +1193,9 @@ mod tests {
                 files_analyzed: 1,
                 functions_analyzed: 1,
                 functions_above_threshold: 1,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
         let sarif = build_health_sarif(&report, &root);
         let entry = &sarif["runs"][0]["results"][0];
@@ -1655,26 +1593,11 @@ mod tests {
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
-            findings: vec![],
             summary: HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
             targets: vec![RefactoringTarget {
                 path: root.join("src/complex.ts"),
                 priority: 85.0,
@@ -1686,8 +1609,7 @@ mod tests {
                 factors: vec![],
                 evidence: None,
             }],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
 
         let sarif = build_health_sarif(&report, &root);
@@ -1707,22 +1629,11 @@ mod tests {
 
         let root = PathBuf::from("/project");
         let report = HealthReport {
-            findings: vec![],
             summary: HealthSummary {
                 files_analyzed: 10,
                 functions_analyzed: 50,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
             coverage_gaps: Some(CoverageGaps {
                 summary: CoverageGapSummary {
                     runtime_files: 2,
@@ -1742,12 +1653,7 @@ mod tests {
                     col: 4,
                 }],
             }),
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         };
 
         let sarif = build_health_sarif(&report, &root);
@@ -1780,31 +1686,7 @@ mod tests {
     #[test]
     fn health_sarif_rules_have_full_descriptions() {
         let root = PathBuf::from("/project");
-        let report = crate::health_types::HealthReport {
-            findings: vec![],
-            summary: crate::health_types::HealthSummary {
-                files_analyzed: 0,
-                functions_analyzed: 0,
-                functions_above_threshold: 0,
-                max_cyclomatic_threshold: 20,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
-            },
-            vital_signs: None,
-            health_score: None,
-            file_scores: vec![],
-            coverage_gaps: None,
-            hotspots: vec![],
-            hotspot_summary: None,
-            large_functions: vec![],
-            targets: vec![],
-            target_thresholds: None,
-            health_trend: None,
-        };
+        let report = crate::health_types::HealthReport::default();
         let sarif = build_health_sarif(&report, &root);
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()

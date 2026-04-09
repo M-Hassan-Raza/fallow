@@ -303,29 +303,11 @@ mod tests {
         use crate::health_types::HealthSummary;
 
         HealthReport {
-            findings: Vec::new(),
             summary: HealthSummary {
-                files_analyzed: 0,
-                functions_analyzed: 0,
-                functions_above_threshold: 0,
                 max_cyclomatic_threshold: 10,
-                max_cognitive_threshold: 15,
-                files_scored: None,
-                average_maintainability: None,
-                coverage_model: None,
-                istanbul_matched: None,
-                istanbul_total: None,
+                ..Default::default()
             },
-            vital_signs: None,
-            health_score: None,
-            file_scores: Vec::new(),
-            coverage_gaps: None,
-            hotspots: Vec::new(),
-            hotspot_summary: None,
-            large_functions: Vec::new(),
-            targets: Vec::new(),
-            target_thresholds: None,
-            health_trend: None,
+            ..Default::default()
         }
     }
 
