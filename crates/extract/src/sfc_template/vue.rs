@@ -613,4 +613,41 @@ mod tests {
 
         assert!(usage.used_bindings.contains("fallbackItem"));
     }
+
+    // --- typed destructuring (TypeScript annotations) ---
+
+    #[test]
+    fn v_for_typed_destructure_does_not_infinite_recurse() {
+        // Regression: `{ id, name }: Item` in v-for caused infinite recursion
+        // because the type annotation prevented strip_wrapping from matching.
+        let usage = collect_template_usage(
+            "<script setup>import { id } from './utils';</script><template><li v-for=\"({ id, name }: Item) in items\">{{ id }}</li></template>",
+            &imported(&["id"]),
+        );
+
+        // id is shadowed by the v-for binding
+        assert!(usage.is_empty());
+    }
+
+    #[test]
+    fn v_slot_typed_destructure_does_not_infinite_recurse() {
+        let usage = collect_template_usage(
+            "<script setup>import { data } from './utils';</script><template><List v-slot=\"{ data, loading }: QueryResult\">{{ data }}</List></template>",
+            &imported(&["data"]),
+        );
+
+        // data is shadowed by the slot binding
+        assert!(usage.is_empty());
+    }
+
+    #[test]
+    fn v_for_typed_destructure_still_tracks_iterable() {
+        let usage = collect_template_usage(
+            "<script setup>import { items } from './data';</script><template><li v-for=\"({ id }: Item) in items\">{{ id }}</li></template>",
+            &imported(&["items"]),
+        );
+
+        // items is used as the iterable expression
+        assert!(usage.used_bindings.contains("items"));
+    }
 }

@@ -751,3 +751,78 @@ import { good } from 'vue';
     assert_eq!(info.imports.len(), 1);
     assert_eq!(info.imports[0].source, "vue");
 }
+
+// --- TypeScript typed template bindings (regression: infinite recursion) ---
+
+#[test]
+fn vue_v_for_typed_destructure_full_pipeline() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+import { items } from './data';
+import type { Item } from './types';
+</script>
+<template><li v-for="({ id, name }: Item) in items">{{ id }} {{ name }}</li></template>
+"#,
+        "TypedVFor.vue",
+    );
+
+    // items is used in the template (iterable), so it should NOT be in unused_import_bindings
+    assert!(
+        !info.unused_import_bindings.contains(&"items".to_string()),
+        "items should be marked as used in v-for iterable, got unused: {:?}",
+        info.unused_import_bindings
+    );
+}
+
+#[test]
+fn vue_v_slot_typed_destructure_full_pipeline() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts">
+import { data } from './store';
+import List from './List.vue';
+</script>
+<template><List v-slot="{ data, loading }: QueryResult">{{ data }}</List></template>
+"#,
+        "TypedSlot.vue",
+    );
+
+    // data is shadowed by the slot binding, so it should be in unused_import_bindings
+    assert!(
+        info.unused_import_bindings.contains(&"data".to_string()),
+        "data should be shadowed by v-slot binding, got unused: {:?}",
+        info.unused_import_bindings
+    );
+    // List component is used
+    assert!(
+        !info.unused_import_bindings.contains(&"List".to_string()),
+        "List component should be used"
+    );
+}
+
+#[test]
+fn svelte_typed_snippet_full_pipeline() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { cn } from '$lib/utils';
+type Props = { href?: string; content?: string };
+</script>
+
+{#snippet Link({ href, content }: Props)}
+	<a {href}>{content}</a>
+{/snippet}
+
+{@render Link({ href: "/", content: "Home" })}
+"#,
+        "TypedSnippet.svelte",
+    );
+
+    // cn is imported but never used in the template
+    assert!(
+        info.unused_import_bindings.contains(&"cn".to_string()),
+        "cn should be unused, got unused: {:?}",
+        info.unused_import_bindings
+    );
+}
