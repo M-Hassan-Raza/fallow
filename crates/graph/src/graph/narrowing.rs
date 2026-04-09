@@ -338,17 +338,9 @@ mod tests {
     #[test]
     fn is_unused_binding_true() {
         let resolved = ResolvedModule {
-            file_id: FileId(0),
             path: std::path::PathBuf::from("/project/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
             unused_import_bindings: FxHashSet::from_iter(["unusedVar".to_string()]),
+            ..Default::default()
         };
         assert!(is_unused_import_binding(
             "unusedVar",
@@ -360,17 +352,9 @@ mod tests {
     #[test]
     fn is_unused_binding_false_when_used() {
         let resolved = ResolvedModule {
-            file_id: FileId(0),
             path: std::path::PathBuf::from("/project/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
             unused_import_bindings: FxHashSet::from_iter(["otherVar".to_string()]),
+            ..Default::default()
         };
         assert!(!is_unused_import_binding(
             "usedVar",
@@ -382,17 +366,9 @@ mod tests {
     #[test]
     fn is_unused_binding_false_for_side_effect() {
         let resolved = ResolvedModule {
-            file_id: FileId(0),
             path: std::path::PathBuf::from("/project/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
             unused_import_bindings: FxHashSet::from_iter(["x".to_string()]),
+            ..Default::default()
         };
         // SideEffect imports are never "unused bindings"
         assert!(!is_unused_import_binding(
@@ -405,17 +381,8 @@ mod tests {
     #[test]
     fn is_unused_binding_false_for_empty_local_name() {
         let resolved = ResolvedModule {
-            file_id: FileId(0),
             path: std::path::PathBuf::from("/project/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         };
         assert!(!is_unused_import_binding(
             "",
@@ -438,13 +405,7 @@ mod tests {
     #[test]
     fn extract_accessed_members_found() {
         let resolved = ResolvedModule {
-            file_id: FileId(0),
             path: std::path::PathBuf::from("/project/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
             member_accesses: vec![
                 fallow_types::extract::MemberAccess {
                     object: "ns".to_string(),
@@ -459,9 +420,7 @@ mod tests {
                     member: "baz".to_string(),
                 },
             ],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         };
         let members = extract_accessed_members(Some(&&resolved), "ns");
         assert_eq!(members, vec!["foo".to_string(), "bar".to_string()]);
@@ -716,8 +675,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: fallow_types::extract::ImportInfo {
                         source: "./utils".to_string(),
@@ -729,12 +686,8 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
                 unused_import_bindings: FxHashSet::from_iter(["foo".to_string()]),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -747,14 +700,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -792,8 +738,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: fallow_types::extract::ImportInfo {
                         source: "./utils".to_string(),
@@ -805,15 +749,11 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![fallow_types::extract::MemberAccess {
                     object: "utils".to_string(),
                     member: "foo".to_string(),
                 }],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -836,14 +776,7 @@ mod tests {
                         members: vec![],
                     },
                 ],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -892,8 +825,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: fallow_types::extract::ImportInfo {
                         source: "./utils".to_string(),
@@ -905,12 +836,8 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
                 whole_object_uses: vec!["utils".to_string()],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -933,14 +860,7 @@ mod tests {
                         members: vec![],
                     },
                 ],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -978,8 +898,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: fallow_types::extract::ImportInfo {
                         source: "./Button.module.css".to_string(),
@@ -991,15 +909,11 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
                 member_accesses: vec![fallow_types::extract::MemberAccess {
                     object: "styles".to_string(),
                     member: "primary".to_string(),
                 }],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1022,14 +936,7 @@ mod tests {
                         members: vec![],
                     },
                 ],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -1077,8 +984,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: std::path::PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: fallow_types::extract::ImportInfo {
                         source: "./component".to_string(),
@@ -1090,12 +995,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1108,14 +1008,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -1146,8 +1039,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: std::path::PathBuf::from("/project/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![ResolvedImport {
                 info: fallow_types::extract::ImportInfo {
                     source: "react".to_string(),
@@ -1159,12 +1050,7 @@ mod tests {
                 },
                 target: ResolveResult::NpmPackage("react".to_string()),
             }],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 

@@ -65,6 +65,25 @@ pub struct ResolvedModule {
     pub unused_import_bindings: FxHashSet<String>,
 }
 
+#[cfg(test)]
+impl Default for ResolvedModule {
+    fn default() -> Self {
+        Self {
+            file_id: FileId(0),
+            path: PathBuf::new(),
+            exports: vec![],
+            re_exports: vec![],
+            resolved_imports: vec![],
+            resolved_dynamic_imports: vec![],
+            resolved_dynamic_patterns: vec![],
+            member_accesses: vec![],
+            whole_object_uses: vec![],
+            has_cjs_exports: false,
+            unused_import_bindings: FxHashSet::default(),
+        }
+    }
+}
+
 /// Shared context for resolving import specifiers.
 ///
 /// Groups the immutable lookup tables and caches that are shared across all

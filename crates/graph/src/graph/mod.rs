@@ -255,8 +255,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/project/src/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "./utils".to_string(),
@@ -268,12 +266,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -296,14 +289,7 @@ mod tests {
                         members: vec![],
                     },
                 ],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
 
@@ -399,8 +385,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/project/src/main.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "./runtime-only".to_string(),
@@ -412,12 +396,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -430,20 +409,11 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(2),
                 path: PathBuf::from("/project/tests/app.test.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "../src/covered".to_string(),
@@ -455,18 +425,11 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(4)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(3),
                 path: PathBuf::from("/project/tests/setup.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "../src/runtime-only".to_string(),
@@ -478,12 +441,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(4),
@@ -496,14 +454,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
 
@@ -591,8 +542,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "./utils".to_string(),
@@ -604,12 +553,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -622,14 +566,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
 
@@ -676,8 +613,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "./utils".to_string(),
@@ -689,12 +624,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -707,14 +637,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(2),
@@ -727,14 +650,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
 
@@ -790,12 +706,7 @@ mod tests {
                     target: ResolveResult::NpmPackage("lodash".to_string()),
                 },
             ],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -827,15 +738,8 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/project/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
             has_cjs_exports: true,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -918,8 +822,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/project/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![
                 ResolvedImport {
                     info: ImportInfo {
@@ -944,12 +846,7 @@ mod tests {
                     target: ResolveResult::NpmPackage("react".to_string()),
                 },
             ],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -979,8 +876,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "./utils".to_string(),
@@ -992,12 +887,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1010,14 +900,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
 
@@ -1057,8 +940,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/project/entry.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "./styles".to_string(),
@@ -1070,12 +951,7 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
@@ -1088,14 +964,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
 
@@ -1144,8 +1013,6 @@ mod tests {
             ResolvedModule {
                 file_id: FileId(0),
                 path: PathBuf::from("/project/main.ts"),
-                exports: vec![],
-                re_exports: vec![],
                 resolved_imports: vec![ResolvedImport {
                     info: ImportInfo {
                         source: "./shared".to_string(),
@@ -1157,25 +1024,12 @@ mod tests {
                     },
                     target: ResolveResult::InternalModule(FileId(2)),
                 }],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(1),
                 path: PathBuf::from("/project/worker.ts"),
-                exports: vec![],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
             ResolvedModule {
                 file_id: FileId(2),
@@ -1188,14 +1042,7 @@ mod tests {
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                 }],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             },
         ];
 

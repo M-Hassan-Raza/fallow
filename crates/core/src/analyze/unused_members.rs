@@ -291,15 +291,7 @@ mod tests {
             .map(|f| ResolvedModule {
                 file_id: f.id,
                 path: f.path.clone(),
-                exports: vec![],
-                re_exports: vec![],
-                resolved_imports: vec![],
-                resolved_dynamic_imports: vec![],
-                resolved_dynamic_patterns: vec![],
-                member_accesses: vec![],
-                whole_object_uses: vec![],
-                has_cjs_exports: false,
-                unused_import_bindings: FxHashSet::default(),
+                ..Default::default()
             })
             .collect();
 
@@ -392,8 +384,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/src/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![ResolvedImport {
                 info: ImportInfo {
                     source: "./enums".to_string(),
@@ -405,15 +395,11 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
             member_accesses: vec![MemberAccess {
                 object: "Status".to_string(),
                 member: "Active".to_string(),
             }],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (enum_members, _) = find_unused_members(
@@ -444,8 +430,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/src/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![ResolvedImport {
                 info: ImportInfo {
                     source: "./enums".to_string(),
@@ -457,12 +441,8 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
             whole_object_uses: vec!["Status".to_string()],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (enum_members, class_members) = find_unused_members(
@@ -553,18 +533,11 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(1), // same file as the service
             path: PathBuf::from("/src/service.ts"),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
             member_accesses: vec![MemberAccess {
                 object: "this".to_string(),
                 member: "label".to_string(),
             }],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (_, class_members) = find_unused_members(
@@ -691,8 +664,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/src/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![ResolvedImport {
                 info: ImportInfo {
                     source: "./service".to_string(),
@@ -704,16 +675,12 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
             member_accesses: vec![MemberAccess {
                 // Already mapped by the visitor from `svc.greet()` → `MyService.greet`
                 object: "MyService".to_string(),
                 member: "greet".to_string(),
             }],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (_, class_members) = find_unused_members(
@@ -746,18 +713,11 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(1),
             path: PathBuf::from("/src/enums.ts"),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
             member_accesses: vec![MemberAccess {
                 object: "this".to_string(),
                 member: "Up".to_string(),
             }],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (enum_members, _) = find_unused_members(
@@ -813,8 +773,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/src/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![ResolvedImport {
                 info: ImportInfo {
                     source: "./enums".to_string(),
@@ -826,15 +784,11 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
             member_accesses: vec![MemberAccess {
                 object: "S".to_string(), // uses local alias
                 member: "Active".to_string(),
             }],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (enum_members, _) = find_unused_members(
@@ -865,8 +819,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/src/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![ResolvedImport {
                 info: ImportInfo {
                     source: "./enums".to_string(),
@@ -878,15 +830,11 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
             member_accesses: vec![MemberAccess {
                 object: "MyEnum".to_string(),
                 member: "X".to_string(),
             }],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (enum_members, _) = find_unused_members(
@@ -973,8 +921,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/src/entry.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![ResolvedImport {
                 info: ImportInfo {
                     source: "./enums".to_string(),
@@ -986,12 +932,8 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
             whole_object_uses: vec!["S".to_string()], // aliased local name
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (enum_members, _) = find_unused_members(
@@ -1029,8 +971,6 @@ mod tests {
         let resolved_modules = vec![ResolvedModule {
             file_id: FileId(0),
             path: PathBuf::from("/src/main.ts"),
-            exports: vec![],
-            re_exports: vec![],
             resolved_imports: vec![ResolvedImport {
                 info: ImportInfo {
                     source: "./service".to_string(),
@@ -1042,16 +982,12 @@ mod tests {
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
             member_accesses: vec![MemberAccess {
                 // Already resolved by visitor from `this.service.doWork()` → `MyService.doWork`
                 object: "MyService".to_string(),
                 member: "doWork".to_string(),
             }],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: FxHashSet::default(),
+            ..Default::default()
         }];
 
         let (_, class_members) = find_unused_members(
