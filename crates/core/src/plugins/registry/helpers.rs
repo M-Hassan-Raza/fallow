@@ -105,12 +105,10 @@ pub fn process_external_plugins(
                 .tooling_dependencies
                 .extend(ext.tooling_dependencies.clone());
             for ue in &ext.used_exports {
-                result
-                    .used_exports
-                    .push(PluginUsedExportRule::new(
-                        ext.name.clone(),
-                        UsedExportRule::new(ue.pattern.clone(), ue.exports.clone()),
-                    ));
+                result.used_exports.push(PluginUsedExportRule::new(
+                    ext.name.clone(),
+                    UsedExportRule::new(ue.pattern.clone(), ue.exports.clone()),
+                ));
             }
         }
     }

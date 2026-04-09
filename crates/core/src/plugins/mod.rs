@@ -368,7 +368,10 @@ impl CompiledPathRule {
     pub(crate) fn matches(&self, path: &str) -> bool {
         self.include.is_match(path)
             && !self.exclude_globs.iter().any(|glob| glob.is_match(path))
-            && !self.exclude_regexes.iter().any(|regex| regex.is_match(path))
+            && !self
+                .exclude_regexes
+                .iter()
+                .any(|regex| regex.is_match(path))
             && !matches_segment_regex(path, &self.exclude_segment_regexes)
     }
 }
@@ -396,19 +399,21 @@ fn compile_excluded_globs(
 ) -> Vec<globset::GlobMatcher> {
     patterns
         .iter()
-        .filter_map(|pattern| match globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-        {
-            Ok(glob) => Some(glob.compile_matcher()),
-            Err(err) => {
-                tracing::warn!(
-                    "skipping invalid excluded glob '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                None
+        .filter_map(|pattern| {
+            match globset::GlobBuilder::new(pattern)
+                .literal_separator(true)
+                .build()
+            {
+                Ok(glob) => Some(glob.compile_matcher()),
+                Err(err) => {
+                    tracing::warn!(
+                        "skipping invalid excluded glob '{}' for {} '{}': {err}",
+                        pattern,
+                        rule_kind,
+                        rule_pattern
+                    );
+                    None
+                }
             }
         })
         .collect()

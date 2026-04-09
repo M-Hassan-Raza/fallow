@@ -209,7 +209,9 @@ fn tanstack_router_custom_route_dir_replaces_default_used_export_rules() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     assert!(
-        !unused_files.iter().any(|path| path == "src/routes/legacy.tsx"),
+        !unused_files
+            .iter()
+            .any(|path| path == "src/routes/legacy.tsx"),
         "helper import should keep the legacy file reachable, unused files: {unused_files:?}"
     );
 
@@ -251,7 +253,9 @@ fn tanstack_router_invalid_ignore_pattern_only_drops_the_bad_filter() {
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     let unused_files = collect_unused_files(root, &results);
     assert!(
-        !unused_files.iter().any(|path| path == "src/routes/index.tsx"),
+        !unused_files
+            .iter()
+            .any(|path| path == "src/routes/index.tsx"),
         "invalid ignore patterns should not disable route discovery, unused files: {unused_files:?}"
     );
 

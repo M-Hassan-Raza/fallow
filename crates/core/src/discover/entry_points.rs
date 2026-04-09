@@ -1,9 +1,9 @@
 use std::path::{Path, PathBuf};
 
-use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
-use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use super::parse_scripts::extract_script_file_refs;
 use super::walk::SOURCE_EXTENSIONS;
+use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
+use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 
 /// Known output directory names from exports maps.
 /// When an entry point path is inside one of these directories, we also try

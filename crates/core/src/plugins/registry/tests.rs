@@ -846,10 +846,7 @@ fn process_config_result_merges_all_fields() {
     assert_eq!(aggregated.entry_patterns[0].1, "test-plugin");
 
     assert_eq!(aggregated.used_exports.len(), 1);
-    assert_eq!(
-        aggregated.used_exports[0].plugin_name,
-        "test-plugin"
-    );
+    assert_eq!(aggregated.used_exports[0].plugin_name, "test-plugin");
     assert_eq!(
         aggregated.used_exports[0].rule.path.pattern,
         "src/routes/**/*.ts"
@@ -1047,17 +1044,21 @@ fn process_config_result_replace_entry_patterns_removes_static_defaults() {
 #[test]
 fn process_config_result_replace_used_export_rules_removes_static_defaults() {
     let mut aggregated = AggregatedPluginResult::default();
-    aggregated
-        .used_exports
-        .push(plugin_used_export_rule("tanstack-router", "src/routes/**/*.tsx", &["Route"]));
+    aggregated.used_exports.push(plugin_used_export_rule(
+        "tanstack-router",
+        "src/routes/**/*.tsx",
+        &["Route"],
+    ));
     aggregated.used_exports.push(plugin_used_export_rule(
         "tanstack-router",
         "app/routes/**/*.tsx",
         &["Route"],
     ));
-    aggregated
-        .used_exports
-        .push(plugin_used_export_rule("nextjs", "app/**/page.tsx", &["default"]));
+    aggregated.used_exports.push(plugin_used_export_rule(
+        "nextjs",
+        "app/**/page.tsx",
+        &["default"],
+    ));
 
     let config_result = PluginResult {
         replace_used_export_rules: true,
@@ -1107,9 +1108,11 @@ fn process_config_result_replace_entry_patterns_noop_when_empty() {
 #[test]
 fn process_config_result_replace_used_export_rules_noop_when_empty() {
     let mut aggregated = AggregatedPluginResult::default();
-    aggregated
-        .used_exports
-        .push(plugin_used_export_rule("tanstack-router", "src/routes/**/*.tsx", &["Route"]));
+    aggregated.used_exports.push(plugin_used_export_rule(
+        "tanstack-router",
+        "src/routes/**/*.tsx",
+        &["Route"],
+    ));
 
     let config_result = PluginResult {
         replace_used_export_rules: true,
@@ -1384,8 +1387,7 @@ fn external_plugin_multiple_used_exports() {
             && rule.rule.exports.contains(&"loader".to_string())
     }));
     assert!(result.used_exports.iter().any(|rule| {
-        rule.rule.path.pattern == "api/**/*.ts"
-            && rule.rule.exports.contains(&"GET".to_string())
+        rule.rule.path.pattern == "api/**/*.ts" && rule.rule.exports.contains(&"GET".to_string())
     }));
 }
 
