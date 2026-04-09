@@ -337,7 +337,10 @@ mod tests {
     }
 
     #[test]
-    #[expect(clippy::too_many_lines, reason = "integration test with extensive fixture setup")]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "integration test with extensive fixture setup"
+    )]
     fn graph_distinguishes_runtime_test_and_support_reachability() {
         let files = vec![
             DiscoveredFile {

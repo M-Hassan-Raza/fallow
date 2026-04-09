@@ -156,7 +156,10 @@ fn strip_non_template_content(source: &str) -> String {
     visible
 }
 
-#[expect(clippy::too_many_lines, reason = "Svelte tag dispatch is inherently branchy; split candidate for sig-audit-loop")]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Svelte tag dispatch is inherently branchy; split candidate for sig-audit-loop"
+)]
 fn apply_tag(
     tag: &str,
     imported_bindings: &FxHashSet<String>,
