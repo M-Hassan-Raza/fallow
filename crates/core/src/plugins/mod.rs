@@ -127,7 +127,8 @@ impl PluginResult {
     }
 }
 
-/// A file-pattern rule with optional exclusion globs or full-path regexes.
+/// A file-pattern rule with optional exclusion globs plus path-level or
+/// segment-level regex filters.
 ///
 /// Exclusion regexes are matched against the project-relative path and should be
 /// anchored when generated dynamically so they can be safely workspace-prefixed.
@@ -136,6 +137,10 @@ pub struct PathRule {
     pub pattern: String,
     pub exclude_globs: Vec<String>,
     pub exclude_regexes: Vec<String>,
+    /// Regexes matched against individual path segments. These are not prefixed
+    /// for workspaces because they intentionally operate on segment names rather
+    /// than the full project-relative path.
+    pub exclude_segment_regexes: Vec<String>,
 }
 
 impl PathRule {
@@ -145,6 +150,7 @@ impl PathRule {
             pattern: pattern.into(),
             exclude_globs: Vec::new(),
             exclude_regexes: Vec::new(),
+            exclude_segment_regexes: Vec::new(),
         }
     }
 
@@ -176,6 +182,17 @@ impl PathRule {
     }
 
     #[must_use]
+    pub fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.exclude_segment_regexes
+            .extend(patterns.into_iter().map(Into::into));
+        self
+    }
+
+    #[must_use]
     pub fn prefixed(&self, ws_prefix: &str) -> Self {
         Self {
             pattern: prefix_workspace_pattern(&self.pattern, ws_prefix),
@@ -189,6 +206,7 @@ impl PathRule {
                 .iter()
                 .map(|pattern| prefix_workspace_regex(pattern, ws_prefix))
                 .collect(),
+            exclude_segment_regexes: self.exclude_segment_regexes.clone(),
         }
     }
 }
@@ -234,6 +252,16 @@ impl UsedExportRule {
         S: Into<String>,
     {
         self.path = self.path.with_excluded_regexes(patterns);
+        self
+    }
+
+    #[must_use]
+    pub fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.path = self.path.with_excluded_segment_regexes(patterns);
         self
     }
 

@@ -50,6 +50,7 @@ struct CompiledUsedExportRule<'a> {
     include: globset::GlobMatcher,
     exclude_globs: Vec<globset::GlobMatcher>,
     exclude_regexes: Vec<Regex>,
+    exclude_segment_regexes: Vec<Regex>,
     exports: Vec<&'a str>,
 }
 
@@ -61,6 +62,7 @@ impl CompiledUsedExportRule<'_> {
                 .exclude_regexes
                 .iter()
                 .any(|regex| regex.is_match(path))
+            && !matches_segment_regex(path, &self.exclude_segment_regexes)
     }
 }
 
@@ -84,10 +86,16 @@ fn compile_used_export_rule(
         "used_exports",
         &rule.path.pattern,
     )?;
+    let exclude_segment_regexes = compile_excluded_segment_regexes(
+        &rule.path.exclude_segment_regexes,
+        "used_exports",
+        &rule.path.pattern,
+    )?;
     Some(CompiledUsedExportRule {
         include,
         exclude_globs,
         exclude_regexes,
+        exclude_segment_regexes,
         exports: rule.exports.iter().map(String::as_str).collect(),
     })
 }
@@ -138,6 +146,35 @@ fn compile_excluded_regexes(
         regexes.push(regex);
     }
     Some(regexes)
+}
+
+fn compile_excluded_segment_regexes(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Option<Vec<Regex>> {
+    let mut regexes = Vec::with_capacity(patterns.len());
+    for pattern in patterns {
+        let regex = match Regex::new(pattern) {
+            Ok(regex) => regex,
+            Err(err) => {
+                tracing::warn!(
+                    "invalid excluded segment regex '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                return None;
+            }
+        };
+        regexes.push(regex);
+    }
+    Some(regexes)
+}
+
+fn matches_segment_regex(path: &str, regexes: &[Regex]) -> bool {
+    path.split('/')
+        .any(|segment| regexes.iter().any(|regex| regex.is_match(segment)))
 }
 
 /// Check whether a module should be skipped for unused-export analysis.

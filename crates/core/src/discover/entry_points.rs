@@ -569,6 +569,7 @@ pub fn discover_plugin_entry_point_sets(
             glob_meta.push(CompiledEntryRule {
                 exclude_globs: Vec::new(),
                 exclude_regexes: Vec::new(),
+                exclude_segment_regexes: Vec::new(),
                 plugin_name: pname,
                 role: EntryPointRole::Support,
             });
@@ -696,6 +697,7 @@ pub fn discover_dynamically_loaded_entry_points(
 struct CompiledEntryRule<'a> {
     exclude_globs: Vec<globset::GlobMatcher>,
     exclude_regexes: Vec<Regex>,
+    exclude_segment_regexes: Vec<Regex>,
     plugin_name: &'a str,
     role: EntryPointRole,
 }
@@ -707,6 +709,7 @@ impl CompiledEntryRule<'_> {
                 .exclude_regexes
                 .iter()
                 .any(|regex| regex.is_match(path))
+            && !matches_segment_regex(path, &self.exclude_segment_regexes)
     }
 }
 
@@ -729,6 +732,11 @@ fn compile_entry_rule<'a>(
         compile_excluded_globs(&rule.exclude_globs, "entry pattern", &rule.pattern)?;
     let exclude_regexes =
         compile_excluded_regexes(&rule.exclude_regexes, "entry pattern", &rule.pattern)?;
+    let exclude_segment_regexes = compile_excluded_segment_regexes(
+        &rule.exclude_segment_regexes,
+        "entry pattern",
+        &rule.pattern,
+    )?;
     let role = plugin_result
         .entry_point_roles
         .get(plugin_name)
@@ -739,6 +747,7 @@ fn compile_entry_rule<'a>(
         CompiledEntryRule {
             exclude_globs,
             exclude_regexes,
+            exclude_segment_regexes,
             plugin_name,
             role,
         },
@@ -794,6 +803,35 @@ fn compile_excluded_regexes(
         regexes.push(regex);
     }
     Some(regexes)
+}
+
+fn compile_excluded_segment_regexes(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Option<Vec<Regex>> {
+    let mut regexes = Vec::with_capacity(patterns.len());
+    for pattern in patterns {
+        let regex = match Regex::new(pattern) {
+            Ok(regex) => regex,
+            Err(err) => {
+                tracing::warn!(
+                    "invalid excluded segment regex '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                return None;
+            }
+        };
+        regexes.push(regex);
+    }
+    Some(regexes)
+}
+
+fn matches_segment_regex(path: &str, regexes: &[Regex]) -> bool {
+    path.split('/')
+        .any(|segment| regexes.iter().any(|regex| regex.is_match(segment)))
 }
 
 /// Pre-compile a set of glob patterns for efficient matching against many paths.

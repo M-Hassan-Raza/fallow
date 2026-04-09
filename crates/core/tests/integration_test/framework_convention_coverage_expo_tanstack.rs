@@ -73,6 +73,16 @@ fn tanstack_router_custom_route_dir_and_lazy_exports_are_covered() {
         "custom route dir should be reachable through generated route tree, unused files: {unused_files:?}"
     );
     assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "src/routeTree.gen.ts"),
+        "custom route dir should not relocate the default generated route tree path, unused files: {unused_files:?}"
+    );
+    assert!(
+        !unused_files.iter().any(|path| path == "src/router.ts"),
+        "custom route dir should not relocate the default router entry path, unused files: {unused_files:?}"
+    );
+    assert!(
         unused_files
             .iter()
             .any(|path| path == "src/routes/legacy.tsx"),
@@ -105,4 +115,44 @@ fn tanstack_router_custom_route_dir_and_lazy_exports_are_covered() {
             "{path}:{export} should still be reported as unused, found: {unused_exports:?}"
         );
     }
+}
+
+#[test]
+fn tanstack_router_prefix_and_ignore_patterns_stay_strict() {
+    let root = fixture_path("tanstack-router-prefix-and-ignore");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = collect_unused_files(&root, &results);
+    for path in ["src/routes/helper.tsx", "src/routes/ignored.page.tsx"] {
+        assert!(
+            unused_files.iter().any(|unused| unused == path),
+            "{path} should not be treated as a live route file, unused files: {unused_files:?}"
+        );
+    }
+    for path in [
+        "src/routes/route-home.tsx",
+        "src/routes/route-posts.lazy.tsx",
+    ] {
+        assert!(
+            !unused_files.iter().any(|unused| unused == path),
+            "{path} should stay reachable as a configured route file, unused files: {unused_files:?}"
+        );
+    }
+
+    let unused_exports = collect_unused_exports(&root, &results);
+    for (path, export) in [
+        ("src/routes/route-home.tsx", "Route"),
+        ("src/routes/route-posts.lazy.tsx", "Route"),
+        ("src/routes/route-posts.lazy.tsx", "component"),
+    ] {
+        assert!(
+            !has_unused_export(&unused_exports, path, export),
+            "{path}:{export} should be framework-used, found: {unused_exports:?}"
+        );
+    }
+    assert!(
+        has_unused_export(&unused_exports, "src/routes/route-posts.lazy.tsx", "loader"),
+        "lazy routes should not inherit non-lazy exports, found: {unused_exports:?}"
+    );
 }
