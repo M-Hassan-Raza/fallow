@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.25.1] - 2026-04-09
+
+### Fixed
+
+- **VS Code extension: duplicate diagnostics in multi-root workspaces** -- diagnostics were shown N times (once per workspace root) when hovering over issues. Fixed by building diagnostics once from the merged results instead of per-root. ([#90](https://github.com/fallow-rs/fallow/issues/90))
+
 ## [2.25.0] - 2026-04-09
 
 ### Added
@@ -1154,7 +1160,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.25.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.25.1...HEAD
+[2.25.1]: https://github.com/fallow-rs/fallow/compare/v2.25.0...v2.25.1
 [2.25.0]: https://github.com/fallow-rs/fallow/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/fallow-rs/fallow/compare/v2.23.1...v2.24.0
 [2.23.1]: https://github.com/fallow-rs/fallow/compare/v2.23.0...v2.23.1
