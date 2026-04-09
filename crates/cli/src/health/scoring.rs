@@ -2143,14 +2143,7 @@ mod tests {
                     members: vec![],
                 },
             ],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: rustc_hash::FxHashSet::default(),
+            ..Default::default()
         }];
 
         let graph = build_test_graph(&files, &[], &resolved_modules);
@@ -2283,15 +2276,7 @@ mod tests {
         let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
             file_id: fallow_core::discover::FileId(0),
             path: path_a.clone(),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: rustc_hash::FxHashSet::default(),
+            ..Default::default()
         }];
 
         let graph = build_test_graph(&files, std::slice::from_ref(&path_a), &resolved_modules);
@@ -2368,14 +2353,7 @@ mod tests {
                     members: vec![],
                 },
             ],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: rustc_hash::FxHashSet::default(),
+            ..Default::default()
         }];
 
         let graph = build_test_graph(&files, &[], &resolved_modules);
@@ -2424,15 +2402,7 @@ mod tests {
         let resolved_modules = vec![fallow_core::resolve::ResolvedModule {
             file_id: fallow_core::discover::FileId(0),
             path: path_a.clone(),
-            exports: vec![],
-            re_exports: vec![],
-            resolved_imports: vec![],
-            resolved_dynamic_imports: vec![],
-            resolved_dynamic_patterns: vec![],
-            member_accesses: vec![],
-            whole_object_uses: vec![],
-            has_cjs_exports: false,
-            unused_import_bindings: rustc_hash::FxHashSet::default(),
+            ..Default::default()
         }];
 
         let graph = build_test_graph(&files, &[], &resolved_modules);

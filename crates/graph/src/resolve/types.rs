@@ -65,7 +65,6 @@ pub struct ResolvedModule {
     pub unused_import_bindings: FxHashSet<String>,
 }
 
-#[cfg(test)]
 impl Default for ResolvedModule {
     fn default() -> Self {
         Self {

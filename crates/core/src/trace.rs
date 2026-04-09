@@ -446,7 +446,6 @@ pub fn trace_clone(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rustc_hash::FxHashSet;
 
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
     use crate::extract::{ExportInfo, ExportName, ImportInfo, ImportedName};
