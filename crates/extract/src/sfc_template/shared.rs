@@ -185,6 +185,9 @@ fn collect_pattern_usage(
         return;
     }
 
+    // Strip trailing TypeScript type annotations (same as extract_pattern_binding_names).
+    let pattern = strip_trailing_type_annotation(pattern);
+
     if let Some(inner) = strip_wrapping(pattern, '{', '}') {
         for part in split_top_level(inner, ',') {
             let part = part.trim();
@@ -545,6 +548,35 @@ mod tests {
 
         assert_eq!(locals, vec!["a", "b"]);
         assert!(usage.used_bindings.contains("fallback"));
+    }
+
+    #[test]
+    fn pattern_usage_typed_destructure_does_not_infinite_recurse() {
+        // Regression: `{ id, name }: Item` caused infinite recursion via
+        // the same mechanism as extract_pattern_binding_names.
+        let mut usage = TemplateUsage::default();
+        let imported_bindings = FxHashSet::from_iter(["id".to_string(), "name".to_string()]);
+
+        let locals =
+            merge_pattern_binding_usage(&mut usage, "{ id, name }: Item", &imported_bindings, &[]);
+
+        // id and name become locals (shadowing imports)
+        assert_eq!(locals.len(), 2);
+        assert!(locals.contains(&"id".to_string()));
+        assert!(locals.contains(&"name".to_string()));
+    }
+
+    #[test]
+    fn pattern_usage_typed_array_destructure() {
+        let mut usage = TemplateUsage::default();
+        let imported_bindings = FxHashSet::from_iter(["a".to_string()]);
+
+        let locals =
+            merge_pattern_binding_usage(&mut usage, "[a, b]: number[]", &imported_bindings, &[]);
+
+        assert_eq!(locals.len(), 2);
+        assert!(locals.contains(&"a".to_string()));
+        assert!(locals.contains(&"b".to_string()));
     }
 
     // --- merge_component_tag_usage ---
