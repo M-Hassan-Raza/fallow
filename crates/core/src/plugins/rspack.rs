@@ -4,12 +4,8 @@
 //! Parses rspack.config to extract entry points, loader dependencies,
 //! and plugin packages -- using the same webpack-compatible config format.
 
-use std::path::Path;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
-
-pub struct RspackPlugin;
 
 const ENABLERS: &[&str] = &["@rspack/core", "@rspack/cli"];
 
@@ -34,32 +30,14 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@rspack/plugin-html",
 ];
 
-impl Plugin for RspackPlugin {
-    fn name(&self) -> &'static str {
-        "rspack"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn entry_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct RspackPlugin => "rspack",
+    enablers: ENABLERS,
+    entry_patterns: ENTRY_PATTERNS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         // Extract import sources as referenced dependencies

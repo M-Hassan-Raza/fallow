@@ -4,12 +4,8 @@
 //! Parses babel config to extract presets, plugins, and imports as referenced dependencies.
 //! Supports Babel short name resolution for presets/plugins and JSON config files.
 
-use std::path::Path;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
-
-pub struct BabelPlugin;
 
 const ENABLERS: &[&str] = &["@babel/core"];
 
@@ -27,32 +23,14 @@ const ALWAYS_USED: &[&str] = &[
 
 const TOOLING_DEPENDENCIES: &[&str] = &["@babel/core", "@babel/cli", "@babel/runtime"];
 
-impl Plugin for BabelPlugin {
-    fn name(&self) -> &'static str {
-        "babel"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn package_json_config_key(&self) -> Option<&'static str> {
-        Some("babel")
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct BabelPlugin => "babel",
+    enablers: ENABLERS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    package_json_config_key: "babel",
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         // Handle JSON configs (.babelrc, .babelrc.json)
@@ -65,7 +43,7 @@ impl Plugin for BabelPlugin {
         } else {
             (source.to_string(), config_path.to_path_buf())
         };
-        let parse_path: &Path = &parse_path_buf;
+        let parse_path: &std::path::Path = &parse_path_buf;
 
         let imports = config_parser::extract_imports(&parse_source, parse_path);
         for imp in &imports {
@@ -73,8 +51,8 @@ impl Plugin for BabelPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // presets → referenced dependencies (shallow to avoid options objects)
-        // Babel short name resolution: "env" → "@babel/preset-env"
+        // presets -> referenced dependencies (shallow to avoid options objects)
+        // Babel short name resolution: "env" -> "@babel/preset-env"
         let presets =
             config_parser::extract_config_shallow_strings(&parse_source, parse_path, "presets");
         for preset in &presets {
@@ -83,8 +61,8 @@ impl Plugin for BabelPlugin {
                 .push(resolve_babel_preset_name(preset));
         }
 
-        // plugins → referenced dependencies (shallow to avoid options objects)
-        // Babel short name resolution: "transform-runtime" → "@babel/plugin-transform-runtime"
+        // plugins -> referenced dependencies (shallow to avoid options objects)
+        // Babel short name resolution: "transform-runtime" -> "@babel/plugin-transform-runtime"
         let plugins =
             config_parser::extract_config_shallow_strings(&parse_source, parse_path, "plugins");
         for plugin in &plugins {
@@ -93,7 +71,7 @@ impl Plugin for BabelPlugin {
                 .push(resolve_babel_plugin_name(plugin));
         }
 
-        // extends → referenced dependency or config file
+        // extends -> referenced dependency or config file
         if let Some(extends) =
             config_parser::extract_config_string(&parse_source, parse_path, &["extends"])
         {

@@ -3,12 +3,8 @@
 //! Detects tsdown projects and marks config files as always used.
 //! Parses tsdown config to extract referenced dependencies.
 
-use std::path::Path;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
-
-pub struct TsdownPlugin;
 
 const ENABLERS: &[&str] = &["tsdown"];
 
@@ -18,28 +14,13 @@ const ALWAYS_USED: &[&str] = &["tsdown.config.{ts,js,cjs,mjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["tsdown"];
 
-impl Plugin for TsdownPlugin {
-    fn name(&self) -> &'static str {
-        "tsdown"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct TsdownPlugin => "tsdown",
+    enablers: ENABLERS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
@@ -48,7 +29,7 @@ impl Plugin for TsdownPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // entry → source entry points for the library
+        // entry -> source entry points for the library
         let entries = config_parser::extract_config_string_array(source, config_path, &["entry"]);
         result.entry_patterns.extend(entries);
 
@@ -58,6 +39,8 @@ impl Plugin for TsdownPlugin {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]

@@ -3,12 +3,8 @@
 //! Detects Prettier projects and marks config files as always used.
 //! Parses prettier config to extract plugins as referenced dependencies.
 
-use std::path::Path;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
-
-pub struct PrettierPlugin;
 
 const ENABLERS: &[&str] = &["prettier"];
 
@@ -27,32 +23,14 @@ const ALWAYS_USED: &[&str] = &[
 
 const TOOLING_DEPENDENCIES: &[&str] = &["prettier"];
 
-impl Plugin for PrettierPlugin {
-    fn name(&self) -> &'static str {
-        "prettier"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn package_json_config_key(&self) -> Option<&'static str> {
-        Some("prettier")
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct PrettierPlugin => "prettier",
+    enablers: ENABLERS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    package_json_config_key: "prettier",
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         // Handle JSON configs (.prettierrc, .prettierrc.json)
@@ -65,7 +43,7 @@ impl Plugin for PrettierPlugin {
         } else {
             (source.to_string(), config_path.to_path_buf())
         };
-        let parse_path: &Path = &parse_path_buf;
+        let parse_path: &std::path::Path = &parse_path_buf;
 
         // Extract imports from JS/TS configs
         let imports = config_parser::extract_imports(&parse_source, parse_path);
@@ -74,7 +52,7 @@ impl Plugin for PrettierPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // plugins → referenced dependencies
+        // plugins -> referenced dependencies
         // e.g. { "plugins": ["prettier-plugin-svelte", "prettier-plugin-tailwindcss"] }
         let plugins =
             config_parser::extract_config_shallow_strings(&parse_source, parse_path, "plugins");
@@ -89,6 +67,8 @@ impl Plugin for PrettierPlugin {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]

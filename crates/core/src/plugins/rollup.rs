@@ -3,12 +3,8 @@
 //! Detects Rollup projects and marks config files as always used.
 //! Parses rollup config to extract imports and plugin references as dependencies.
 
-use std::path::Path;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
-
-pub struct RollupPlugin;
 
 const ENABLERS: &[&str] = &["rollup"];
 
@@ -18,28 +14,13 @@ const ALWAYS_USED: &[&str] = &["rollup.config.{js,ts,mjs,cjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["rollup"];
 
-impl Plugin for RollupPlugin {
-    fn name(&self) -> &'static str {
-        "rollup"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct RollupPlugin => "rollup",
+    enablers: ENABLERS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         let imports = config_parser::extract_imports(source, config_path);
@@ -48,11 +29,11 @@ impl Plugin for RollupPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // input → entry points (string, array, or object)
+        // input -> entry points (string, array, or object)
         let inputs = config_parser::extract_config_string_or_array(source, config_path, &["input"]);
         result.entry_patterns.extend(inputs);
 
-        // external → referenced dependencies (string array)
+        // external -> referenced dependencies (string array)
         let external =
             config_parser::extract_config_shallow_strings(source, config_path, "external");
         for ext in &external {
@@ -67,6 +48,8 @@ impl Plugin for RollupPlugin {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     #[test]

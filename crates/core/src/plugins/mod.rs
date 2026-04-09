@@ -280,6 +280,20 @@ fn builtin_entry_point_role(name: &str) -> EntryPointRole {
 ///     tooling_dependencies: TOOLING_DEPENDENCIES,
 ///     resolve_config: imports_only,
 /// }
+///
+/// // Plugin with custom resolve_config body:
+/// define_plugin! {
+///     struct RollupPlugin => "rollup",
+///     enablers: ENABLERS,
+///     config_patterns: CONFIG_PATTERNS,
+///     always_used: ALWAYS_USED,
+///     tooling_dependencies: TOOLING_DEPENDENCIES,
+///     resolve_config(config_path, source, _root) {
+///         let mut result = PluginResult::default();
+///         // custom config parsing...
+///         result
+///     }
+/// }
 /// ```
 ///
 /// All fields except `struct` and `enablers` are optional and default to `&[]` / `vec![]`.
@@ -337,6 +351,63 @@ macro_rules! define_plugin {
                 }
                 result
             }
+        }
+    };
+
+    // Variant with custom resolve_config body — generates a resolve_config method
+    // with the caller-supplied block. Parameter names are caller-controlled (use
+    // `_root` for unused params to satisfy clippy).
+    (
+        struct $name:ident => $display:expr,
+        enablers: $enablers:expr
+        $(, entry_patterns: $entry:expr)?
+        $(, config_patterns: $config:expr)?
+        $(, always_used: $always:expr)?
+        $(, tooling_dependencies: $tooling:expr)?
+        $(, fixture_glob_patterns: $fixtures:expr)?
+        $(, virtual_module_prefixes: $virtual:expr)?
+        $(, package_json_config_key: $pkg_key:expr)?
+        $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
+        , resolve_config($cp:ident, $src:ident, $root:ident) $body:block
+        $(,)?
+    ) => {
+        pub struct $name;
+
+        impl Plugin for $name {
+            fn name(&self) -> &'static str {
+                $display
+            }
+
+            fn enablers(&self) -> &'static [&'static str] {
+                $enablers
+            }
+
+            $( fn entry_patterns(&self) -> &'static [&'static str] { $entry } )?
+            $( fn config_patterns(&self) -> &'static [&'static str] { $config } )?
+            $( fn always_used(&self) -> &'static [&'static str] { $always } )?
+            $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
+            $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
+            $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
+
+            $(
+                fn package_json_config_key(&self) -> Option<&'static str> {
+                    Some($pkg_key)
+                }
+            )?
+
+            $(
+                fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
+                    vec![$( ($pat, $exports) ),*]
+                }
+            )?
+
+            fn resolve_config(
+                &self,
+                $cp: &std::path::Path,
+                $src: &str,
+                $root: &std::path::Path,
+            ) -> PluginResult
+            $body
         }
     };
 

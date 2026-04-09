@@ -11,8 +11,6 @@ use std::path::Path;
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
-pub struct DrizzlePlugin;
-
 const ENABLERS: &[&str] = &["drizzle-orm"];
 
 const ENTRY_PATTERNS: &[&str] = &["drizzle/**/*.{ts,js}"];
@@ -23,32 +21,14 @@ const ALWAYS_USED: &[&str] = &["drizzle.config.{ts,js,mjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["drizzle-orm", "drizzle-kit"];
 
-impl Plugin for DrizzlePlugin {
-    fn name(&self) -> &'static str {
-        "drizzle"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn entry_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct DrizzlePlugin => "drizzle",
+    enablers: ENABLERS,
+    entry_patterns: ENTRY_PATTERNS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         // Extract import sources as referenced dependencies
@@ -58,7 +38,7 @@ impl Plugin for DrizzlePlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // Extract `schema` field → entry patterns for schema files.
+        // Extract `schema` field -> entry patterns for schema files.
         // Drizzle schema files export tables, relations, and enums that are
         // consumed by the Drizzle runtime (via `drizzle()` init) and by
         // drizzle-kit (for migrations). These exports are never directly
@@ -77,7 +57,7 @@ impl Plugin for DrizzlePlugin {
                 .extend(schema_path_to_entry_patterns(path));
         }
 
-        // Extract `out` field → custom migration output directory.
+        // Extract `out` field -> custom migration output directory.
         // Default is `drizzle/` (covered by static ENTRY_PATTERNS), but users
         // can configure a different directory.
         if let Some(out_dir) = config_parser::extract_config_string(source, config_path, &["out"]) {

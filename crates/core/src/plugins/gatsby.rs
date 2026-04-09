@@ -8,8 +8,6 @@ use std::path::Path;
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
-pub struct GatsbyPlugin;
-
 const ENABLERS: &[&str] = &["gatsby"];
 
 const ENTRY_PATTERNS: &[&str] = &[
@@ -41,40 +39,19 @@ const TOOLING_DEPENDENCIES: &[&str] = &["gatsby", "gatsby-cli"];
 const PAGE_EXPORTS: &[&str] = &["default", "Head", "query", "config", "getServerData"];
 const FUNCTION_EXPORTS: &[&str] = &["default", "config"];
 
-impl Plugin for GatsbyPlugin {
-    fn name(&self) -> &'static str {
-        "gatsby"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn entry_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
-        vec![
-            ("src/pages/**/*.{ts,tsx,js,jsx}", PAGE_EXPORTS),
-            ("src/templates/**/*.{ts,tsx,js,jsx}", PAGE_EXPORTS),
-            ("src/api/**/*.{ts,js}", FUNCTION_EXPORTS),
-        ]
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct GatsbyPlugin => "gatsby",
+    enablers: ENABLERS,
+    entry_patterns: ENTRY_PATTERNS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    used_exports: [
+        ("src/pages/**/*.{ts,tsx,js,jsx}", PAGE_EXPORTS),
+        ("src/templates/**/*.{ts,tsx,js,jsx}", PAGE_EXPORTS),
+        ("src/api/**/*.{ts,js}", FUNCTION_EXPORTS),
+    ],
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         // Extract import sources as referenced dependencies

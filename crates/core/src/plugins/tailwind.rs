@@ -3,12 +3,8 @@
 //! Detects Tailwind projects and marks config files as always used.
 //! Parses tailwind.config to extract content globs and plugin dependencies.
 
-use std::path::Path;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
-
-pub struct TailwindPlugin;
 
 const ENABLERS: &[&str] = &["tailwindcss", "@tailwindcss/postcss"];
 
@@ -18,28 +14,13 @@ const ALWAYS_USED: &[&str] = &["tailwind.config.{ts,js,cjs,mjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["tailwindcss", "@tailwindcss/postcss"];
 
-impl Plugin for TailwindPlugin {
-    fn name(&self) -> &'static str {
-        "tailwind"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct TailwindPlugin => "tailwind",
+    enablers: ENABLERS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         // Extract import sources as referenced dependencies
@@ -49,7 +30,7 @@ impl Plugin for TailwindPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // content → file globs that Tailwind scans for class usage
+        // content -> file globs that Tailwind scans for class usage
         // e.g. content: ["./src/**/*.{js,ts,jsx,tsx}", "./index.html"]
         let content = config_parser::extract_config_string_array(source, config_path, &["content"]);
         result.always_used_files.extend(content);
@@ -72,7 +53,7 @@ impl Plugin for TailwindPlugin {
                 .push(crate::resolve::extract_package_name(plugin));
         }
 
-        // presets → referenced dependencies
+        // presets -> referenced dependencies
         let presets = config_parser::extract_config_shallow_strings(source, config_path, "presets");
         for preset in &presets {
             result
@@ -97,9 +78,9 @@ mod tests {
         "#;
         let plugin = TailwindPlugin;
         let result = plugin.resolve_config(
-            Path::new("tailwind.config.js"),
+            std::path::Path::new("tailwind.config.js"),
             source,
-            Path::new("/project"),
+            std::path::Path::new("/project"),
         );
         assert_eq!(
             result.always_used_files,
@@ -116,9 +97,9 @@ mod tests {
         "#;
         let plugin = TailwindPlugin;
         let result = plugin.resolve_config(
-            Path::new("tailwind.config.js"),
+            std::path::Path::new("tailwind.config.js"),
             source,
-            Path::new("/project"),
+            std::path::Path::new("/project"),
         );
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"@tailwindcss/typography".to_string()));
@@ -134,9 +115,9 @@ mod tests {
         "#;
         let plugin = TailwindPlugin;
         let result = plugin.resolve_config(
-            Path::new("tailwind.config.js"),
+            std::path::Path::new("tailwind.config.js"),
             source,
-            Path::new("/project"),
+            std::path::Path::new("/project"),
         );
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"@tailwindcss/typography".to_string()));
@@ -152,9 +133,9 @@ mod tests {
         "#;
         let plugin = TailwindPlugin;
         let result = plugin.resolve_config(
-            Path::new("tailwind.config.js"),
+            std::path::Path::new("tailwind.config.js"),
             source,
-            Path::new("/project"),
+            std::path::Path::new("/project"),
         );
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"@acme/tailwind-preset".to_string()));
@@ -172,9 +153,9 @@ mod tests {
         "#;
         let plugin = TailwindPlugin;
         let result = plugin.resolve_config(
-            Path::new("tailwind.config.ts"),
+            std::path::Path::new("tailwind.config.ts"),
             source,
-            Path::new("/project"),
+            std::path::Path::new("/project"),
         );
         let deps = &result.referenced_dependencies;
         assert!(deps.contains(&"tailwindcss".to_string()));
@@ -193,9 +174,9 @@ mod tests {
         "#;
         let plugin = TailwindPlugin;
         let result = plugin.resolve_config(
-            Path::new("tailwind.config.js"),
+            std::path::Path::new("tailwind.config.js"),
             source,
-            Path::new("/project"),
+            std::path::Path::new("/project"),
         );
         assert_eq!(result.always_used_files, vec!["./src/**/*.tsx"]);
         let deps = &result.referenced_dependencies;
@@ -209,9 +190,9 @@ mod tests {
         let source = r"module.exports = {};";
         let plugin = TailwindPlugin;
         let result = plugin.resolve_config(
-            Path::new("tailwind.config.js"),
+            std::path::Path::new("tailwind.config.js"),
             source,
-            Path::new("/project"),
+            std::path::Path::new("/project"),
         );
         assert!(result.always_used_files.is_empty());
         assert!(result.referenced_dependencies.is_empty());
@@ -226,9 +207,9 @@ mod tests {
         "#;
         let plugin = TailwindPlugin;
         let result = plugin.resolve_config(
-            Path::new("tailwind.config.js"),
+            std::path::Path::new("tailwind.config.js"),
             source,
-            Path::new("/project"),
+            std::path::Path::new("/project"),
         );
         assert!(
             result

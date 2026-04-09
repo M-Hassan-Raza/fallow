@@ -4,12 +4,8 @@
 //! Parses .storybook/main config to extract addons, framework, stories,
 //! core.builder, and typescript.reactDocgen as referenced dependencies.
 
-use std::path::Path;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
-
-pub struct StorybookPlugin;
 
 const ENABLERS: &[&str] = &["storybook", "@storybook/"];
 
@@ -42,32 +38,14 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@storybook/preview-api",
 ];
 
-impl Plugin for StorybookPlugin {
-    fn name(&self) -> &'static str {
-        "storybook"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn entry_patterns(&self) -> &'static [&'static str] {
-        ENTRY_PATTERNS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct StorybookPlugin => "storybook",
+    enablers: ENABLERS,
+    entry_patterns: ENTRY_PATTERNS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         // Extract import sources as referenced dependencies
@@ -77,7 +55,7 @@ impl Plugin for StorybookPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // addons → referenced dependencies
+        // addons -> referenced dependencies
         // Handles both string form ("@storybook/addon-essentials") and
         // object form ({ name: "@storybook/addon-essentials", options: {} })
         let addons = config_parser::extract_config_shallow_strings(source, config_path, "addons");
@@ -95,7 +73,7 @@ impl Plugin for StorybookPlugin {
             }
         }
 
-        // framework → referenced dependency
+        // framework -> referenced dependency
         // Can be a string or an object with a `.name` property
         if let Some(framework) =
             config_parser::extract_config_string(source, config_path, &["framework"])
@@ -109,11 +87,11 @@ impl Plugin for StorybookPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // stories → additional entry patterns (if string values)
+        // stories -> additional entry patterns (if string values)
         let stories = config_parser::extract_config_string_array(source, config_path, &["stories"]);
         result.entry_patterns.extend(stories);
 
-        // core.builder → referenced dependency
+        // core.builder -> referenced dependency
         // Can be a string or an object with a `.name` property
         if let Some(builder) =
             config_parser::extract_config_string(source, config_path, &["core", "builder"])
@@ -127,7 +105,7 @@ impl Plugin for StorybookPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // typescript.reactDocgen → referenced dependency
+        // typescript.reactDocgen -> referenced dependency
         if let Some(docgen) = config_parser::extract_config_string(
             source,
             config_path,

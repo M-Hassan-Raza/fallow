@@ -4,12 +4,8 @@
 //! Parses rsbuild config to extract entry points, plugin dependencies,
 //! and import references.
 
-use std::path::Path;
-
 use super::config_parser;
 use super::{Plugin, PluginResult};
-
-pub struct RsbuildPlugin;
 
 const ENABLERS: &[&str] = &["@rsbuild/core"];
 
@@ -19,28 +15,13 @@ const ALWAYS_USED: &[&str] = &["rsbuild.config.{ts,js,mjs,cjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["@rsbuild/core"];
 
-impl Plugin for RsbuildPlugin {
-    fn name(&self) -> &'static str {
-        "rsbuild"
-    }
-
-    fn enablers(&self) -> &'static [&'static str] {
-        ENABLERS
-    }
-
-    fn config_patterns(&self) -> &'static [&'static str] {
-        CONFIG_PATTERNS
-    }
-
-    fn always_used(&self) -> &'static [&'static str] {
-        ALWAYS_USED
-    }
-
-    fn tooling_dependencies(&self) -> &'static [&'static str] {
-        TOOLING_DEPENDENCIES
-    }
-
-    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
+define_plugin! {
+    struct RsbuildPlugin => "rsbuild",
+    enablers: ENABLERS,
+    config_patterns: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
+    tooling_dependencies: TOOLING_DEPENDENCIES,
+    resolve_config(config_path, source, _root) {
         let mut result = PluginResult::default();
 
         // Extract import sources as referenced dependencies
@@ -50,7 +31,7 @@ impl Plugin for RsbuildPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        // source.entry → entry points (string or object with string values)
+        // source.entry -> entry points (string or object with string values)
         let entries = config_parser::extract_config_string_or_array(
             source,
             config_path,
@@ -58,7 +39,7 @@ impl Plugin for RsbuildPlugin {
         );
         result.entry_patterns.extend(entries);
 
-        // plugins → extract plugin package names from imports
+        // plugins -> extract plugin package names from imports
         // Rsbuild plugins are typically imported and passed to the plugins array,
         // so the import extraction above already covers them. Additionally extract
         // any string references or require() calls in the plugins array.
