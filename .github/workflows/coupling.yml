@@ -47,6 +47,10 @@ jobs:
         run: cargo install cargo-modules --locked
 
       - name: Collect module dependency graphs
+        # Note: --acyclic is intentionally omitted. cargo-modules reports
+        # struct-to-method relationships (e.g. Foo -> Foo::bar) as circular
+        # dependencies even with --no-fns, producing false positives.
+        # Cycle detection is handled by fallow's own --circular-deps instead.
         run: |
           for crate in fallow-config fallow-types fallow-extract fallow-graph fallow-core fallow-cli; do
             cargo modules dependencies --lib -p "$crate" \
