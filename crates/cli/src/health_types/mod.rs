@@ -41,6 +41,9 @@ pub struct HealthReport {
     /// Hotspot analysis summary (only set with `--hotspots`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
+    /// Functions exceeding 60 LOC (only populated when unit size very-high-risk >= 3%).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub large_functions: Vec<LargeFunctionEntry>,
     /// Ranked refactoring recommendations (only populated with `--targets`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub targets: Vec<RefactoringTarget>,
@@ -78,6 +81,7 @@ mod tests {
             coverage_gaps: None,
             hotspots: vec![],
             hotspot_summary: None,
+            large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
             health_trend: None,
@@ -87,6 +91,7 @@ mod tests {
         assert!(!json.contains("file_scores"));
         assert!(!json.contains("hotspots"));
         assert!(!json.contains("hotspot_summary"));
+        assert!(!json.contains("large_functions"));
         assert!(!json.contains("targets"));
         assert!(!json.contains("vital_signs"));
         assert!(!json.contains("health_score"));
@@ -114,6 +119,7 @@ mod tests {
             coverage_gaps: None,
             hotspots: vec![],
             hotspot_summary: None,
+            large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
             health_trend: None,

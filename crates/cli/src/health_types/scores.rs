@@ -22,6 +22,7 @@ pub const COGNITIVE_EXTRACTION_THRESHOLD: u16 = 30;
 ///   - min(circular_dep_count, 10)
 ///   - min(max(0, very_high_risk_pct − 5) × 0.5, 10)    [unit size]
 ///   - min(max(0, p95_fan_in − 30) × 0.25, 5)            [coupling]
+///   - min(max(0, duplication_pct − 5) × 1.0, 10)        [duplication]
 /// ```
 ///
 /// Missing metrics (from pipelines that didn't run) don't penalize — run
@@ -74,6 +75,9 @@ pub struct HealthScorePenalties {
     /// Points lost from coupling concentration (max 5).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coupling: Option<f64>,
+    /// Points lost from code duplication (max 10).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplication: Option<f64>,
 }
 
 /// Map a numeric score (0–100) to a letter grade.
@@ -132,6 +136,19 @@ pub enum ExceededThreshold {
     Cognitive,
     /// Both thresholds exceeded.
     Both,
+}
+
+/// A function exceeding the very-high-risk size threshold (>60 LOC).
+#[derive(Debug, serde::Serialize)]
+pub struct LargeFunctionEntry {
+    /// Absolute file path.
+    pub path: std::path::PathBuf,
+    /// Function name.
+    pub name: String,
+    /// 1-based line number.
+    pub line: u32,
+    /// Number of lines in the function.
+    pub line_count: u32,
 }
 
 /// Summary statistics for the health report.
@@ -346,6 +363,7 @@ mod tests {
                 circular_deps: Some(4.0),
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         };
         let json = serde_json::to_string(&score).unwrap();
@@ -356,6 +374,7 @@ mod tests {
         // None fields should be absent
         assert!(!json.contains("maintainability"));
         assert!(!json.contains("hotspots"));
+        assert!(!json.contains("duplication"));
     }
 
     #[test]

@@ -1785,6 +1785,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         coverage_gaps: None,
         hotspots: vec![],
         hotspot_summary: None,
+        large_functions: vec![],
         targets: vec![],
         target_thresholds: None,
         health_trend: None,
@@ -1813,6 +1814,7 @@ const fn empty_health_report() -> HealthReport {
         coverage_gaps: None,
         hotspots: vec![],
         hotspot_summary: None,
+        large_functions: vec![],
         targets: vec![],
         target_thresholds: None,
         health_trend: None,
@@ -1943,6 +1945,7 @@ fn health_report_with_score(root: &Path) -> HealthReport {
             circular_deps: Some(4.0),
             unit_size: None,
             coupling: None,
+            duplication: None,
         },
     });
     report

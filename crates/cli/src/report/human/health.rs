@@ -99,6 +99,7 @@ pub(in crate::report) fn build_health_human_lines(
     render_health_trend(&mut lines, report);
     render_vital_signs(&mut lines, report);
     render_risk_profiles(&mut lines, report);
+    render_large_functions(&mut lines, report, root);
     render_findings(&mut lines, report, root);
     render_coverage_gaps(&mut lines, report, root);
     render_file_scores(&mut lines, report, root);
@@ -186,6 +187,11 @@ fn render_health_score(lines: &mut Vec<String>, report: &crate::health_types::He
         && cp > 0.0
     {
         parts.push(format!("coupling -{cp:.1}"));
+    }
+    if let Some(dp) = p.duplication
+        && dp > 0.0
+    {
+        parts.push(format!("duplication -{dp:.1}"));
     }
     if !parts.is_empty() {
         lines.push(format!(
@@ -302,7 +308,7 @@ fn render_health_trend(lines: &mut Vec<String>, report: &crate::health_types::He
         lines.push(format!(
             "  {}",
             format!(
-                "note: score formula updated in snapshot v{} (added unit size and coupling penalties); score delta may reflect formula change, not code change",
+                "note: score formula updated in snapshot v{} (added unit size, coupling, and duplication penalties); score delta may reflect formula change, not code change",
                 crate::health_types::SNAPSHOT_SCHEMA_VERSION
             )
                 .yellow()
@@ -406,6 +412,9 @@ fn render_vital_signs(lines: &mut Vec<String>, report: &crate::health_types::Hea
             }
         ));
     }
+    if let Some(dp) = vs.duplication_pct {
+        parts.push(format!("duplication {dp:.1}%"));
+    }
     lines.push(format!(
         "{} {} {}",
         "\u{25a0}".dimmed(),
@@ -456,6 +465,51 @@ fn render_risk_profiles(lines: &mut Vec<String>, report: &crate::health_types::H
     if lines.len() > before {
         lines.push(String::new());
     }
+}
+
+fn render_large_functions(
+    lines: &mut Vec<String>,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    if report.large_functions.is_empty() {
+        return;
+    }
+
+    let total = report.large_functions.len();
+    let shown = total.min(MAX_FLAT_ITEMS);
+    lines.push(format!(
+        "{} {}",
+        "\u{25cf}".red(),
+        if shown < total {
+            format!("Large functions ({shown} shown, {total} total)")
+        } else {
+            format!("Large functions ({total})")
+        }
+        .red()
+        .bold()
+    ));
+
+    let mut last_file = String::new();
+    for entry in report.large_functions.iter().take(MAX_FLAT_ITEMS) {
+        let file_str = relative_path(&entry.path, root).display().to_string();
+        if file_str != last_file {
+            lines.push(format!("  {}", format_path(&file_str)));
+            last_file = file_str;
+        }
+        lines.push(format!(
+            "    {} {}  {} lines",
+            format!(":{}", entry.line).dimmed(),
+            entry.name.bold(),
+            format!("{:>3}", entry.line_count).red().bold(),
+        ));
+    }
+    lines.push(format!(
+        "  {}",
+        format!("Functions exceeding 60 lines of code (very high risk): {DOCS_HEALTH}#unit-size")
+            .dimmed()
+    ));
+    lines.push(String::new());
 }
 
 fn render_findings(
@@ -1152,6 +1206,7 @@ mod tests {
             coverage_gaps: None,
             hotspots: vec![],
             hotspot_summary: None,
+            large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
             health_trend: None,
@@ -1195,6 +1250,7 @@ mod tests {
             coverage_gaps: None,
             hotspots: vec![],
             hotspot_summary: None,
+            large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
             health_trend: None,
@@ -1243,6 +1299,7 @@ mod tests {
             coverage_gaps: None,
             hotspots: vec![],
             hotspot_summary: None,
+            large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
             health_trend: None,
@@ -1299,6 +1356,7 @@ mod tests {
             coverage_gaps: None,
             hotspots: vec![],
             hotspot_summary: None,
+            large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
             health_trend: None,
@@ -1333,6 +1391,7 @@ mod tests {
             coverage_gaps: None,
             hotspots: vec![],
             hotspot_summary: None,
+            large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
             health_trend: None,
@@ -1431,6 +1490,7 @@ mod tests {
                 circular_deps: Some(0.0),
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         let lines = build_health_human_lines(&report, &root);
@@ -1461,6 +1521,7 @@ mod tests {
                 circular_deps: Some(1.0),
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         let lines = build_health_human_lines(&report, &root);
@@ -1490,6 +1551,7 @@ mod tests {
                 circular_deps: None,
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         let lines = build_health_human_lines(&report, &root);
@@ -1515,6 +1577,7 @@ mod tests {
                 circular_deps: None,
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         let lines = build_health_human_lines(&report, &root);
@@ -1540,6 +1603,7 @@ mod tests {
                 circular_deps: None,
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         let lines = build_health_human_lines(&report, &root);
@@ -1566,6 +1630,7 @@ mod tests {
                 circular_deps: Some(0.0),
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         let lines = build_health_human_lines(&report, &root);
@@ -1591,6 +1656,7 @@ mod tests {
                 circular_deps: Some(0.0),
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         let lines = build_health_human_lines(&report, &root);
@@ -2485,6 +2551,7 @@ mod tests {
                 circular_deps: Some(1.0),
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         report.file_scores = vec![crate::health_types::FileHealthScore {

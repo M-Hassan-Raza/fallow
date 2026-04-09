@@ -231,7 +231,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     }
 
     // Compute vital signs (always needed for report summary)
-    let (vital_signs, counts) = compute_vital_signs_and_counts(
+    let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(
         score_output.as_ref(),
         &parse_result.modules,
         needs_file_scores,
@@ -241,11 +241,38 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         files.len(),
     );
 
+    // Run duplication analysis when --score is active to populate the duplication penalty.
+    if opts.score {
+        let dupes_report =
+            fallow_core::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
+        let pct = dupes_report.stats.duplication_percentage;
+        vital_signs.duplication_pct = Some((pct * 10.0).round() / 10.0);
+        // Update both the snapshot counts and the embedded vital signs counts
+        // so that JSON consumers can see raw numerator/denominator alongside the percentage.
+        counts.duplicated_lines = Some(dupes_report.stats.duplicated_lines);
+        counts.total_lines = Some(dupes_report.stats.total_lines);
+        if let Some(ref mut vc) = vital_signs.counts {
+            vc.duplicated_lines = Some(dupes_report.stats.duplicated_lines);
+            vc.total_lines = Some(dupes_report.stats.total_lines);
+        }
+    }
+
     let health_score = if opts.score {
         Some(vital_signs::compute_health_score(&vital_signs, files.len()))
     } else {
         None
     };
+
+    // Collect large functions (>60 LOC) when the risk profile warrants it
+    let large_functions = collect_large_functions(
+        &vital_signs,
+        &parse_result.modules,
+        &file_paths,
+        &config.root,
+        &ignore_set,
+        changed_files.as_ref(),
+        ws_root.as_deref(),
+    );
 
     // Determine coverage model for snapshot and report
     let active_coverage_model = if istanbul_coverage.is_some() {
@@ -289,6 +316,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         target_thresholds,
         health_trend,
         istanbul_coverage.is_some(),
+        large_functions,
     );
 
     Ok(HealthResult {
@@ -586,6 +614,7 @@ fn assemble_health_report(
     target_thresholds: Option<TargetThresholds>,
     health_trend: Option<crate::health_types::HealthTrend>,
     has_istanbul_coverage: bool,
+    large_functions: Vec<LargeFunctionEntry>,
 ) -> HealthReport {
     let coverage_gaps = if effective_coverage_gaps {
         score_output.as_ref().map(|o| o.coverage.report.clone())
@@ -664,10 +693,66 @@ fn assemble_health_report(
         coverage_gaps,
         hotspots: report_hotspots,
         hotspot_summary: report_hotspot_summary,
+        large_functions,
         targets,
         target_thresholds,
         health_trend,
     }
+}
+
+/// Collect functions exceeding 60 LOC when the unit size risk profile warrants it.
+///
+/// Only populated when `very_high_risk >= 3%` in the unit size profile (same threshold
+/// that triggers showing the risk profile line). Sorted by line count descending.
+fn collect_large_functions(
+    vital_signs: &crate::health_types::VitalSigns,
+    modules: &[fallow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    config_root: &std::path::Path,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_root: Option<&std::path::Path>,
+) -> Vec<LargeFunctionEntry> {
+    let dominated = vital_signs
+        .unit_size_profile
+        .as_ref()
+        .is_some_and(|p| p.very_high_risk >= 3.0);
+    if !dominated {
+        return Vec::new();
+    }
+
+    let mut entries = Vec::new();
+    for module in modules {
+        let Some(&path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let relative = path.strip_prefix(config_root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        if let Some(changed) = changed_files
+            && !changed.contains(path.as_path())
+        {
+            continue;
+        }
+        if let Some(ws) = ws_root
+            && !path.starts_with(ws)
+        {
+            continue;
+        }
+        for func in &module.complexity {
+            if func.line_count > 60 {
+                entries.push(LargeFunctionEntry {
+                    path: path.clone(),
+                    name: func.name.clone(),
+                    line: func.line,
+                    line_count: func.line_count,
+                });
+            }
+        }
+    }
+    entries.sort_by(|a, b| b.line_count.cmp(&a.line_count));
+    entries
 }
 
 /// Build a glob set from health ignore patterns.

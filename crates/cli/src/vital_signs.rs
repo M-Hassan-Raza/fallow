@@ -348,6 +348,14 @@ pub fn compute_health_score(vs: &VitalSigns, total_files: usize) -> HealthScore 
         score -= p;
     }
 
+    // Duplication penalty: 1 point per percent above 5%, max 10
+    let duplication_penalty = vs
+        .duplication_pct
+        .map(|dp| round1(((dp - 5.0).max(0.0) * 1.0).min(10.0)));
+    if let Some(p) = duplication_penalty {
+        score -= p;
+    }
+
     let score = (score * 10.0).round() / 10.0;
     let score = score.clamp(0.0, 100.0);
     let grade = letter_grade(score);
@@ -366,6 +374,7 @@ pub fn compute_health_score(vs: &VitalSigns, total_files: usize) -> HealthScore 
             circular_deps: circular_deps_penalty,
             unit_size: unit_size_penalty,
             coupling: coupling_penalty,
+            duplication: duplication_penalty,
         },
     }
 }
@@ -748,6 +757,28 @@ pub fn compute_trend(
             false,
             None,
             None,
+        ));
+    }
+
+    // Duplication % — lower is better
+    if let (Some(prev_val), Some(cur_val)) =
+        (prev.vital_signs.duplication_pct, current_vs.duplication_pct)
+    {
+        metrics.push(make_metric(
+            "duplication_pct",
+            "Duplication",
+            prev_val,
+            cur_val,
+            "%",
+            false,
+            prev.counts
+                .duplicated_lines
+                .zip(prev.counts.total_lines)
+                .map(|(d, t)| TrendCount { value: d, total: t }),
+            current_counts
+                .duplicated_lines
+                .zip(current_counts.total_lines)
+                .map(|(d, t)| TrendCount { value: d, total: t }),
         ));
     }
 
@@ -1152,6 +1183,7 @@ mod tests {
         assert_eq!(score.grade, "A");
         assert!(score.penalties.dead_files.is_none());
         assert!(score.penalties.unused_deps.is_none());
+        assert!(score.penalties.duplication.is_none());
     }
 
     #[test]
@@ -1252,6 +1284,44 @@ mod tests {
         // 5 hotspots in 1000 files = 0.5% = 1 point
         let score_1000 = compute_health_score(&vs, 1000);
         assert!(score_1000.score > score_100.score);
+    }
+
+    #[test]
+    fn health_score_duplication_penalty() {
+        let vs = VitalSigns {
+            dead_file_pct: None,
+            dead_export_pct: None,
+            avg_cyclomatic: 1.0,
+            p90_cyclomatic: 2,
+            duplication_pct: Some(10.0), // 10% - 5% = 5 points
+            hotspot_count: None,
+            maintainability_avg: None,
+            unused_dep_count: None,
+            circular_dep_count: None,
+            counts: None,
+            unit_size_profile: None,
+            unit_interfacing_profile: None,
+            p95_fan_in: None,
+            coupling_high_pct: None,
+        };
+        let score = compute_health_score(&vs, 100);
+        assert_eq!(score.penalties.duplication, Some(5.0));
+
+        // Below threshold: 4% duplication should not penalize
+        let vs_low = VitalSigns {
+            duplication_pct: Some(4.0),
+            ..vs.clone()
+        };
+        let score_low = compute_health_score(&vs_low, 100);
+        assert_eq!(score_low.penalties.duplication, Some(0.0));
+
+        // At cap: 20% should cap at 10 points
+        let vs_high = VitalSigns {
+            duplication_pct: Some(20.0),
+            ..vs
+        };
+        let score_high = compute_health_score(&vs_high, 100);
+        assert_eq!(score_high.penalties.duplication, Some(10.0));
     }
 
     // --- load_snapshots ---

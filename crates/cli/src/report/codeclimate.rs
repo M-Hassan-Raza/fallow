@@ -1078,6 +1078,7 @@ mod tests {
             }),
             hotspots: vec![],
             hotspot_summary: None,
+            large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
             health_trend: None,

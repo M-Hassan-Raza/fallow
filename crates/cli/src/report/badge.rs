@@ -322,6 +322,7 @@ mod tests {
             coverage_gaps: None,
             hotspots: Vec::new(),
             hotspot_summary: None,
+            large_functions: Vec::new(),
             targets: Vec::new(),
             target_thresholds: None,
             health_trend: None,
@@ -354,6 +355,7 @@ mod tests {
                 circular_deps: None,
                 unit_size: None,
                 coupling: None,
+                duplication: None,
             },
         });
         let code = print_health_badge(&report);

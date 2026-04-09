@@ -307,6 +307,11 @@
           "$ref": "#/definitions/HealthScore",
           "description": "Project-level health score (0-100) with letter grade. Only present when --score is used."
         },
+        "large_functions": {
+          "type": "array",
+          "description": "Functions exceeding 60 LOC (very high risk). Only present when unit size very-high-risk bin >= 3%. Sorted by line count descending.",
+          "items": { "$ref": "#/definitions/LargeFunctionEntry" }
+        },
         "targets": {
           "type": "array",
           "description": "Ranked refactoring recommendations. Only present when --targets is used. Sorted by efficiency (priority/effort) descending.",
@@ -467,6 +472,17 @@
           "items": { "$ref": "#/definitions/HealthFindingAction" },
           "description": "Suggested actions to address this complex function."
         }
+      }
+    },
+    "LargeFunctionEntry": {
+      "type": "object",
+      "description": "A function exceeding 60 lines of code (very high risk size bin).",
+      "required": ["path", "name", "line", "line_count"],
+      "properties": {
+        "path": { "type": "string", "description": "File path (relative to project root)." },
+        "name": { "type": "string", "description": "Function name, or \"<anonymous>\" for unnamed functions/arrows." },
+        "line": { "type": "integer", "description": "1-based line number." },
+        "line_count": { "type": "integer", "description": "Number of lines in the function body." }
       }
     },
     "FileHealthScore": {
@@ -804,7 +820,8 @@
         "unused_deps": { "type": ["number", "null"], "description": "Points lost from unused dependencies (max 10). Null if dead code pipeline not run." },
         "circular_deps": { "type": ["number", "null"], "description": "Points lost from circular dependencies (max 10). Null if dead code pipeline not run." },
         "unit_size": { "type": ["number", "null"], "description": "Points lost from oversized functions (max 10). Null if no functions analyzed." },
-        "coupling": { "type": ["number", "null"], "description": "Points lost from coupling concentration (max 5). Null if file scores not computed." }
+        "coupling": { "type": ["number", "null"], "description": "Points lost from coupling concentration (max 5). Null if file scores not computed." },
+        "duplication": { "type": ["number", "null"], "description": "Points lost from code duplication (max 10). Penalty = min(max(0, duplication_pct - 5) * 1, 10). Null if duplication pipeline not run." }
       }
     },
 

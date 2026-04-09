@@ -5,7 +5,8 @@
 /// v3: Added `coverage_model` field.
 /// v4: Added risk profiles (`unit_size_profile`, `unit_interfacing_profile`) and
 ///     coupling concentration (`p95_fan_in`, `coupling_high_pct`).
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 4;
+/// v5: Added duplication penalty to health score formula.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 5;
 
 /// Project-wide vital signs — a fixed set of metrics for trend tracking.
 ///
@@ -244,8 +245,8 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_schema_version_is_four() {
-        assert_eq!(SNAPSHOT_SCHEMA_VERSION, 4);
+    fn snapshot_schema_version_is_five() {
+        assert_eq!(SNAPSHOT_SCHEMA_VERSION, 5);
     }
 
     #[test]
