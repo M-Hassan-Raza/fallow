@@ -1727,9 +1727,9 @@ dependencies = [
 
 [[package]]
 name = "oxc_coverage_instrument"
-version = "0.2.9"
+version = "0.2.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b384f46ceed381c2229368892d97fe6a47fcc0a9acfd2b074e080a1ebfd5f85b"
+checksum = "90d4f43864ec3e23f2b3b4bb2d6026895a9fa4646a743ef8381e57b639c54e53"
 dependencies = [
  "oxc_allocator",
  "oxc_ast",
@@ -2827,9 +2827,9 @@ dependencies = [
 
 [[package]]
 name = "tokio"
-version = "1.51.0"
+version = "1.51.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2bd1c4c0fc4a7ab90fc15ef6daaa3ec3b893f004f915f2392557ed23237820cd"
+checksum = "f66bf9585cda4b724d3e78ab34b73fb2bbaba9011b9bfdf69dc836382ea13b8c"
 dependencies = [
  "bytes",
  "libc",
