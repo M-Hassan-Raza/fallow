@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.26.1] - 2026-04-09
+
+### Changed
+
+- **Health: churn disk cache and parallel git log** -- churn analysis results are now cached to disk and git log calls run in parallel, significantly reducing health command runtime on repos with long histories. New `--performance` flag prints timing breakdown per analysis phase.
+
+### Fixed
+
+- **VS Code extension: stale LSP binary after extension update** -- the version check that detects outdated auto-downloaded binaries silently skipped re-downloading when `--version` output could not be parsed, leaving a stale binary in place. Now writes a `.fallow-version` marker file alongside downloaded binaries and treats unknown-version binaries as stale. Also warns when a PATH-resolved binary is outdated relative to the extension. ([#90](https://github.com/fallow-rs/fallow/issues/90))
+- **GitHub Action: multiple JSON objects in bare invocation** -- `analyze.sh` now handles bare invocations that produce multiple JSON objects instead of failing to parse.
+
 ## [2.26.0] - 2026-04-09
 
 ### Added
@@ -1173,7 +1184,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.26.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.26.1...HEAD
+[2.26.1]: https://github.com/fallow-rs/fallow/compare/v2.26.0...v2.26.1
 [2.26.0]: https://github.com/fallow-rs/fallow/compare/v2.25.1...v2.26.0
 [2.25.1]: https://github.com/fallow-rs/fallow/compare/v2.25.0...v2.25.1
 [2.25.0]: https://github.com/fallow-rs/fallow/compare/v2.24.0...v2.25.0
