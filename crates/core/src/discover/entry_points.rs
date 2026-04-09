@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
+use regex::Regex;
 
 use super::parse_scripts::extract_script_file_refs;
 use super::walk::SOURCE_EXTENSIONS;
@@ -544,23 +545,14 @@ pub fn discover_plugin_entry_point_sets(
         })
         .collect();
 
-    // Match plugin entry patterns against files using a single GlobSet
-    // for O(files) matching instead of O(patterns × files).
-    // Track which plugin name and reachability role correspond to each glob index.
+    // Match plugin entry patterns against files using a single GlobSet for
+    // include globs, then filter candidate matches through any exclusions.
     let mut builder = globset::GlobSetBuilder::new();
-    let mut glob_meta: Vec<(&str, EntryPointRole)> = Vec::new();
-    for (pattern, pname) in &plugin_result.entry_patterns {
-        if let Ok(glob) = globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-        {
-            builder.add(glob);
-            let role = plugin_result
-                .entry_point_roles
-                .get(pname)
-                .copied()
-                .unwrap_or(EntryPointRole::Support);
-            glob_meta.push((pname, role));
+    let mut glob_meta: Vec<CompiledEntryRule<'_>> = Vec::new();
+    for (rule, pname) in &plugin_result.entry_patterns {
+        if let Some((include, compiled)) = compile_entry_rule(rule, pname, plugin_result) {
+            builder.add(include);
+            glob_meta.push(compiled);
         }
     }
     for (pattern, pname) in plugin_result
@@ -574,16 +566,25 @@ pub fn discover_plugin_entry_point_sets(
             .build()
         {
             builder.add(glob);
-            glob_meta.push((pname, EntryPointRole::Support));
+            glob_meta.push(CompiledEntryRule {
+                exclude_globs: Vec::new(),
+                exclude_regexes: Vec::new(),
+                plugin_name: pname,
+                role: EntryPointRole::Support,
+            });
         }
     }
     if let Ok(glob_set) = builder.build()
         && !glob_set.is_empty()
     {
         for (idx, rel) in relative_paths.iter().enumerate() {
-            let matches = glob_set.matches(rel);
+            let matches: Vec<usize> = glob_set
+                .matches(rel)
+                .into_iter()
+                .filter(|match_idx| glob_meta[*match_idx].matches(rel))
+                .collect();
             if !matches.is_empty() {
-                let (name, _) = glob_meta[matches[0]];
+                let name = glob_meta[matches[0]].plugin_name;
                 let entry = EntryPoint {
                     path: files[idx].path.clone(),
                     source: EntryPointSource::Plugin {
@@ -595,7 +596,7 @@ pub fn discover_plugin_entry_point_sets(
                 let mut has_test = false;
                 let mut has_support = false;
                 for match_idx in matches {
-                    match glob_meta[match_idx].1 {
+                    match glob_meta[match_idx].role {
                         EntryPointRole::Runtime => has_runtime = true,
                         EntryPointRole::Test => has_test = true,
                         EntryPointRole::Support => has_support = true,
@@ -690,6 +691,109 @@ pub fn discover_dynamically_loaded_entry_points(
         }
     }
     entries
+}
+
+struct CompiledEntryRule<'a> {
+    exclude_globs: Vec<globset::GlobMatcher>,
+    exclude_regexes: Vec<Regex>,
+    plugin_name: &'a str,
+    role: EntryPointRole,
+}
+
+impl CompiledEntryRule<'_> {
+    fn matches(&self, path: &str) -> bool {
+        !self.exclude_globs.iter().any(|glob| glob.is_match(path))
+            && !self
+                .exclude_regexes
+                .iter()
+                .any(|regex| regex.is_match(path))
+    }
+}
+
+fn compile_entry_rule<'a>(
+    rule: &'a crate::plugins::PathRule,
+    plugin_name: &'a str,
+    plugin_result: &'a crate::plugins::AggregatedPluginResult,
+) -> Option<(globset::Glob, CompiledEntryRule<'a>)> {
+    let include = match globset::GlobBuilder::new(&rule.pattern)
+        .literal_separator(true)
+        .build()
+    {
+        Ok(glob) => glob,
+        Err(err) => {
+            tracing::warn!("invalid entry pattern '{}': {err}", rule.pattern);
+            return None;
+        }
+    };
+    let exclude_globs =
+        compile_excluded_globs(&rule.exclude_globs, "entry pattern", &rule.pattern)?;
+    let exclude_regexes =
+        compile_excluded_regexes(&rule.exclude_regexes, "entry pattern", &rule.pattern)?;
+    let role = plugin_result
+        .entry_point_roles
+        .get(plugin_name)
+        .copied()
+        .unwrap_or(EntryPointRole::Support);
+    Some((
+        include,
+        CompiledEntryRule {
+            exclude_globs,
+            exclude_regexes,
+            plugin_name,
+            role,
+        },
+    ))
+}
+
+fn compile_excluded_globs(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Option<Vec<globset::GlobMatcher>> {
+    let mut matchers = Vec::with_capacity(patterns.len());
+    for pattern in patterns {
+        let glob = match globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+        {
+            Ok(glob) => glob,
+            Err(err) => {
+                tracing::warn!(
+                    "invalid excluded glob '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                return None;
+            }
+        };
+        matchers.push(glob.compile_matcher());
+    }
+    Some(matchers)
+}
+
+fn compile_excluded_regexes(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Option<Vec<Regex>> {
+    let mut regexes = Vec::with_capacity(patterns.len());
+    for pattern in patterns {
+        let regex = match Regex::new(pattern) {
+            Ok(regex) => regex,
+            Err(err) => {
+                tracing::warn!(
+                    "invalid excluded regex '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                return None;
+            }
+        };
+        regexes.push(regex);
+    }
+    Some(regexes)
 }
 
 /// Pre-compile a set of glob patterns for efficient matching against many paths.
@@ -832,12 +936,14 @@ mod tests {
         ];
 
         let mut plugin_result = crate::plugins::AggregatedPluginResult::default();
-        plugin_result
-            .entry_patterns
-            .push(("src/runtime.ts".to_string(), "runtime-plugin".to_string()));
-        plugin_result
-            .entry_patterns
-            .push(("tests/app.test.ts".to_string(), "test-plugin".to_string()));
+        plugin_result.entry_patterns.push((
+            crate::plugins::PathRule::new("src/runtime.ts"),
+            "runtime-plugin".to_string(),
+        ));
+        plugin_result.entry_patterns.push((
+            crate::plugins::PathRule::new("tests/app.test.ts"),
+            "test-plugin".to_string(),
+        ));
         plugin_result
             .always_used
             .push(("src/setup.ts".to_string(), "support-plugin".to_string()));
@@ -889,6 +995,86 @@ mod tests {
                 .any(|entry| entry.path.ends_with("src/setup.ts")),
             "support entries should not bleed into test reachability"
         );
+    }
+
+    #[test]
+    fn plugin_entry_point_rules_respect_exclusions() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("app/pages")).unwrap();
+        std::fs::write(
+            root.join("app/pages/index.tsx"),
+            "export default function Page() { return null; }",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("app/pages/-helper.ts"),
+            "export const helper = 1;",
+        )
+        .unwrap();
+
+        let config = FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
+            rules: RulesConfig::default(),
+            boundaries: fallow_config::BoundaryConfig::default(),
+            production: false,
+            plugins: vec![],
+            dynamically_loaded: vec![],
+            overrides: vec![],
+            regression: None,
+            codeowners: None,
+            public_packages: vec![],
+        }
+        .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: root.join("app/pages/index.tsx"),
+                size_bytes: 1,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: root.join("app/pages/-helper.ts"),
+                size_bytes: 1,
+            },
+        ];
+
+        let mut plugin_result = crate::plugins::AggregatedPluginResult::default();
+        plugin_result.entry_patterns.push((
+            crate::plugins::PathRule::new("app/pages/**/*.{ts,tsx,js,jsx}")
+                .with_excluded_globs(["app/pages/**/-*", "app/pages/**/-*/**/*"]),
+            "tanstack-router".to_string(),
+        ));
+        plugin_result
+            .entry_point_roles
+            .insert("tanstack-router".to_string(), EntryPointRole::Runtime);
+
+        let entries = discover_plugin_entry_point_sets(&plugin_result, &config, &files);
+        let entry_paths: Vec<_> = entries
+            .all
+            .iter()
+            .map(|entry| {
+                entry
+                    .path
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect();
+
+        assert!(entry_paths.contains(&"app/pages/index.tsx".to_string()));
+        assert!(!entry_paths.contains(&"app/pages/-helper.ts".to_string()));
     }
 
     // resolve_entry_path unit tests

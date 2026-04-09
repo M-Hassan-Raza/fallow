@@ -5,8 +5,12 @@
 //! Parses `angular.json` to extract styles, scripts, main, and polyfills
 //! from build targets as additional entry points.
 
+use std::path::Path;
+
 use super::config_parser;
 use super::{Plugin, PluginResult};
+
+pub struct AngularPlugin;
 
 const ENABLERS: &[&str] = &["@angular/core"];
 
@@ -58,14 +62,32 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@angular/platform-browser-dynamic",
 ];
 
-define_plugin! {
-    struct AngularPlugin => "angular",
-    enablers: ENABLERS,
-    entry_patterns: ENTRY_PATTERNS,
-    config_patterns: CONFIG_PATTERNS,
-    always_used: ALWAYS_USED,
-    tooling_dependencies: TOOLING_DEPENDENCIES,
-    resolve_config(config_path, source, _root) {
+impl Plugin for AngularPlugin {
+    fn name(&self) -> &'static str {
+        "angular"
+    }
+
+    fn enablers(&self) -> &'static [&'static str] {
+        ENABLERS
+    }
+
+    fn entry_patterns(&self) -> &'static [&'static str] {
+        ENTRY_PATTERNS
+    }
+
+    fn config_patterns(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
+    fn always_used(&self) -> &'static [&'static str] {
+        ALWAYS_USED
+    }
+
+    fn tooling_dependencies(&self) -> &'static [&'static str] {
+        TOOLING_DEPENDENCIES
+    }
+
+    fn resolve_config(&self, config_path: &Path, source: &str, _root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
 
         // angular.json: projects.*.architect.build.options.styles -> entry patterns
@@ -78,7 +100,7 @@ define_plugin! {
         );
         for style in &styles {
             let path = style.trim_start_matches("./");
-            result.entry_patterns.push(path.to_string());
+            result.push_entry_pattern(path.to_string());
         }
 
         // angular.json: projects.*.architect.build.options.scripts -> entry patterns
@@ -90,7 +112,7 @@ define_plugin! {
         );
         for script in &scripts {
             let path = script.trim_start_matches("./");
-            result.entry_patterns.push(path.to_string());
+            result.push_entry_pattern(path.to_string());
         }
 
         // angular.json: projects.*.architect.build.options.main -> entry patterns
@@ -104,7 +126,7 @@ define_plugin! {
             );
             for main in &mains {
                 let path = main.trim_start_matches("./");
-                result.entry_patterns.push(path.to_string());
+                result.push_entry_pattern(path.to_string());
             }
         }
 
@@ -122,7 +144,7 @@ define_plugin! {
             // File paths contain "/" (directory separators) or start with "src/", etc.
             // Bare package names like "zone.js" have no "/" and shouldn't be entry points.
             if trimmed.contains('/') {
-                result.entry_patterns.push(trimmed.to_string());
+                result.push_entry_pattern(trimmed.to_string());
             }
         }
 
@@ -135,7 +157,7 @@ define_plugin! {
         );
         for main in &test_mains {
             let path = main.trim_start_matches("./");
-            result.entry_patterns.push(path.to_string());
+            result.push_entry_pattern(path.to_string());
         }
 
         result
@@ -145,6 +167,13 @@ define_plugin! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn has_entry_pattern(result: &PluginResult, pattern: &str) -> bool {
+        result
+            .entry_patterns
+            .iter()
+            .any(|entry_pattern| entry_pattern.pattern == pattern)
+    }
 
     #[test]
     fn resolve_config_extracts_styles() {
@@ -162,21 +191,10 @@ mod tests {
             }
         }"#;
         let plugin = AngularPlugin;
-        let result = plugin.resolve_config(
-            std::path::Path::new("angular.json"),
-            source,
-            std::path::Path::new("/project"),
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/styles.css".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/theme.scss".to_string())
-        );
+        let result =
+            plugin.resolve_config(Path::new("angular.json"), source, Path::new("/project"));
+        assert!(has_entry_pattern(&result, "src/styles.css"));
+        assert!(has_entry_pattern(&result, "src/theme.scss"));
     }
 
     #[test]
@@ -195,12 +213,9 @@ mod tests {
             }
         }"#;
         let plugin = AngularPlugin;
-        let result = plugin.resolve_config(
-            std::path::Path::new("angular.json"),
-            source,
-            std::path::Path::new("/project"),
-        );
-        assert!(result.entry_patterns.contains(&"src/main.ts".to_string()));
+        let result =
+            plugin.resolve_config(Path::new("angular.json"), source, Path::new("/project"));
+        assert!(has_entry_pattern(&result, "src/main.ts"));
     }
 
     #[test]
@@ -219,16 +234,12 @@ mod tests {
             }
         }"#;
         let plugin = AngularPlugin;
-        let result = plugin.resolve_config(
-            std::path::Path::new("angular.json"),
-            source,
-            std::path::Path::new("/project"),
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"node_modules/some-lib/dist/script.js".to_string())
-        );
+        let result =
+            plugin.resolve_config(Path::new("angular.json"), source, Path::new("/project"));
+        assert!(has_entry_pattern(
+            &result,
+            "node_modules/some-lib/dist/script.js"
+        ));
     }
 
     #[test]
@@ -258,31 +269,12 @@ mod tests {
             }
         }"#;
         let plugin = AngularPlugin;
-        let result = plugin.resolve_config(
-            std::path::Path::new("angular.json"),
-            source,
-            std::path::Path::new("/project"),
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"apps/one/src/styles.css".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"apps/two/src/styles.css".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"apps/one/src/main.ts".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"apps/two/src/main.ts".to_string())
-        );
+        let result =
+            plugin.resolve_config(Path::new("angular.json"), source, Path::new("/project"));
+        assert!(has_entry_pattern(&result, "apps/one/src/styles.css"));
+        assert!(has_entry_pattern(&result, "apps/two/src/styles.css"));
+        assert!(has_entry_pattern(&result, "apps/one/src/main.ts"));
+        assert!(has_entry_pattern(&result, "apps/two/src/main.ts"));
     }
 
     #[test]
@@ -301,18 +293,11 @@ mod tests {
             }
         }"#;
         let plugin = AngularPlugin;
-        let result = plugin.resolve_config(
-            std::path::Path::new("angular.json"),
-            source,
-            std::path::Path::new("/project"),
-        );
+        let result =
+            plugin.resolve_config(Path::new("angular.json"), source, Path::new("/project"));
         // zone.js is a package, not a file — should be skipped
-        assert!(!result.entry_patterns.contains(&"zone.js".to_string()));
+        assert!(!has_entry_pattern(&result, "zone.js"));
         // src/polyfills.ts is a file path — should be included
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/polyfills.ts".to_string())
-        );
+        assert!(has_entry_pattern(&result, "src/polyfills.ts"));
     }
 }

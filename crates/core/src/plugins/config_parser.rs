@@ -335,6 +335,74 @@ pub fn extract_config_array_object_strings(
     .unwrap_or_default()
 }
 
+/// Extract a string-like option from a plugin tuple inside a config plugin array.
+///
+/// Supports config shapes like:
+/// - `{ expo: { plugins: [["expo-router", { root: "src/app" }]] } }`
+/// - `export default { expo: { plugins: [["expo-router", { root: "./src/app" }]] } }`
+/// - `{ plugins: [["expo-router", { root: "./src/routes" }]] }`
+#[must_use]
+pub fn extract_config_plugin_option_string(
+    source: &str,
+    path: &Path,
+    plugins_path: &[&str],
+    plugin_name: &str,
+    option_key: &str,
+) -> Option<String> {
+    extract_from_source(source, path, |program| {
+        let obj = find_config_object(program)?;
+        let plugins_expr = get_nested_expression(obj, plugins_path)?;
+        let Expression::ArrayExpression(plugins) = plugins_expr else {
+            return None;
+        };
+
+        for entry in &plugins.elements {
+            let Some(Expression::ArrayExpression(tuple)) = entry.as_expression() else {
+                continue;
+            };
+            let Some(plugin_expr) = tuple
+                .elements
+                .first()
+                .and_then(ArrayExpressionElement::as_expression)
+            else {
+                continue;
+            };
+            if expression_to_string(plugin_expr).as_deref() != Some(plugin_name) {
+                continue;
+            }
+
+            let Some(options_expr) = tuple
+                .elements
+                .get(1)
+                .and_then(ArrayExpressionElement::as_expression)
+            else {
+                continue;
+            };
+            let Expression::ObjectExpression(options_obj) = options_expr else {
+                continue;
+            };
+            let option = find_property(options_obj, option_key)?;
+            return expression_to_path_string(&option.value);
+        }
+
+        None
+    })
+}
+
+/// Extract a string-like option from the first plugin array path that contains it.
+#[must_use]
+pub fn extract_config_plugin_option_string_from_paths(
+    source: &str,
+    path: &Path,
+    plugin_paths: &[&[&str]],
+    plugin_name: &str,
+    option_key: &str,
+) -> Option<String> {
+    plugin_paths.iter().find_map(|plugins_path| {
+        extract_config_plugin_option_string(source, path, plugins_path, plugin_name, option_key)
+    })
+}
+
 /// Normalize a config-relative path string to a project-root-relative path.
 ///
 /// Handles values extracted from config files such as `"./src"`, `"src/lib"`,
@@ -1318,6 +1386,90 @@ mod tests {
                 "@/feature-components".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn extract_config_plugin_option_string_from_json() {
+        let source = r#"{
+            "expo": {
+                "plugins": [
+                    ["expo-router", { "root": "src/app" }]
+                ]
+            }
+        }"#;
+
+        let value = extract_config_plugin_option_string(
+            source,
+            &json_path(),
+            &["expo", "plugins"],
+            "expo-router",
+            "root",
+        );
+
+        assert_eq!(value, Some("src/app".to_string()));
+    }
+
+    #[test]
+    fn extract_config_plugin_option_string_from_top_level_plugins() {
+        let source = r#"{
+            "plugins": [
+                ["expo-router", { "root": "./src/routes" }]
+            ]
+        }"#;
+
+        let value = extract_config_plugin_option_string_from_paths(
+            source,
+            &json_path(),
+            &[&["plugins"], &["expo", "plugins"]],
+            "expo-router",
+            "root",
+        );
+
+        assert_eq!(value, Some("./src/routes".to_string()));
+    }
+
+    #[test]
+    fn extract_config_plugin_option_string_from_ts_config() {
+        let source = r"
+            export default {
+                expo: {
+                    plugins: [
+                        ['expo-router', { root: './src/app' }]
+                    ]
+                }
+            };
+        ";
+
+        let value = extract_config_plugin_option_string(
+            source,
+            &ts_path(),
+            &["expo", "plugins"],
+            "expo-router",
+            "root",
+        );
+
+        assert_eq!(value, Some("./src/app".to_string()));
+    }
+
+    #[test]
+    fn extract_config_plugin_option_string_returns_none_when_plugin_missing() {
+        let source = r#"{
+            "expo": {
+                "plugins": [
+                    ["expo-font", {}]
+                ]
+            }
+        }"#;
+
+        let value = extract_config_plugin_option_string(
+            source,
+            &json_path(),
+            &["expo", "plugins"],
+            "expo-router",
+            "root",
+        );
+
+        assert_eq!(value, None);
     }
 
     #[test]

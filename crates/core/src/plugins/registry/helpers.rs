@@ -9,7 +9,7 @@ use rustc_hash::FxHashSet;
 
 use fallow_config::{ExternalPluginDef, PluginDetection};
 
-use super::super::{Plugin, PluginResult};
+use super::super::{PathRule, Plugin, PluginResult, UsedExportRule};
 use super::AggregatedPluginResult;
 
 /// Collect static patterns from a single plugin into the aggregated result.
@@ -24,10 +24,8 @@ pub fn process_static_patterns(
     result
         .entry_point_roles
         .insert(pname.clone(), plugin.entry_point_role());
-    for pat in plugin.entry_patterns() {
-        result
-            .entry_patterns
-            .push(((*pat).to_string(), pname.clone()));
+    for rule in plugin.entry_pattern_rules() {
+        result.entry_patterns.push((rule, pname.clone()));
     }
     for pat in plugin.config_patterns() {
         result.config_patterns.push((*pat).to_string());
@@ -35,11 +33,8 @@ pub fn process_static_patterns(
     for pat in plugin.always_used() {
         result.always_used.push(((*pat).to_string(), pname.clone()));
     }
-    for (file_pat, exports) in plugin.used_exports() {
-        result.used_exports.push((
-            file_pat.to_string(),
-            exports.iter().map(ToString::to_string).collect(),
-        ));
+    for rule in plugin.used_export_rules() {
+        result.used_exports.push(rule);
     }
     for dep in plugin.tooling_dependencies() {
         result.tooling_dependencies.push((*dep).to_string());
@@ -93,7 +88,7 @@ pub fn process_external_plugins(
             result.entry_patterns.extend(
                 ext.entry_points
                     .iter()
-                    .map(|p| (p.clone(), ext.name.clone())),
+                    .map(|p| (PathRule::new(p.clone()), ext.name.clone())),
             );
             // Track config patterns for introspection (not used for AST parsing —
             // external plugins cannot do resolve_config())
@@ -110,7 +105,7 @@ pub fn process_external_plugins(
             for ue in &ext.used_exports {
                 result
                     .used_exports
-                    .push((ue.pattern.clone(), ue.exports.clone()));
+                    .push(UsedExportRule::new(ue.pattern.clone(), ue.exports.clone()));
             }
         }
     }
@@ -189,7 +184,7 @@ pub fn process_config_result(
         plugin_result
             .entry_patterns
             .into_iter()
-            .map(|p| (p, pname.clone())),
+            .map(|rule| (rule, pname.clone())),
     );
     result.used_exports.extend(plugin_result.used_exports);
     result

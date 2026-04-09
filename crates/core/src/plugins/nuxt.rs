@@ -333,7 +333,7 @@ impl Plugin for NuxtPlugin {
             if let Some(normalized) = normalize_nuxt_path(&plugin, config_path, root, &src_dir) {
                 let pattern = script_entry_pattern(&normalized);
                 add_default_used_export(&mut result, &pattern);
-                result.entry_patterns.push(pattern);
+                result.push_entry_pattern(pattern);
             }
         }
 
@@ -353,7 +353,7 @@ impl Plugin for NuxtPlugin {
         {
             if let Some(pattern) = normalize_imports_dir_pattern(&dir, config_path, root, &src_dir)
             {
-                result.entry_patterns.push(pattern);
+                result.push_entry_pattern(pattern);
             }
         }
 
@@ -381,7 +381,7 @@ impl Plugin for NuxtPlugin {
             if let Some(normalized) = normalize_nuxt_path(&dir, config_path, root, &src_dir) {
                 let pattern = component_dir_pattern(&normalized);
                 add_default_used_export(&mut result, &pattern);
-                result.entry_patterns.push(pattern);
+                result.push_entry_pattern(pattern);
             }
         }
 
@@ -416,33 +416,33 @@ fn add_module_runtime_patterns(result: &mut PluginResult, root: &Path) {
     // Components (Vue SFCs and TS/JS)
     let components = format!("{runtime_dir}/components/**/*.{{{COMPONENT_ENTRY_GLOB}}}");
     add_default_used_export(result, &components);
-    result.entry_patterns.push(components);
+    result.push_entry_pattern(components);
 
     // Composables (top-level only, matching Nuxt convention)
     let composables = format!("{runtime_dir}/composables/*.{{{SCRIPT_ENTRY_GLOB}}}");
-    result.entry_patterns.push(composables);
+    result.push_entry_pattern(composables);
 
     // Utils (top-level only)
     let utils = format!("{runtime_dir}/utils/*.{{{SCRIPT_ENTRY_GLOB}}}");
-    result.entry_patterns.push(utils);
+    result.push_entry_pattern(utils);
 
     // Plugins
     let plugins = format!("{runtime_dir}/plugins/*.{{{SCRIPT_ENTRY_GLOB}}}");
     add_default_used_export(result, &plugins);
-    result.entry_patterns.push(plugins);
+    result.push_entry_pattern(plugins);
 
     // Locale files (common in i18n-aware modules like Nuxt UI)
     let locale_dir = root.join(runtime_dir).join("locale");
     if locale_dir.is_dir() {
         let locale = format!("{runtime_dir}/locale/*.{{{SCRIPT_ENTRY_GLOB}}}");
-        result.entry_patterns.push(locale);
+        result.push_entry_pattern(locale);
     }
 
     // Types directory (re-exported types)
     let types_dir = root.join(runtime_dir).join("types");
     if types_dir.is_dir() {
         let types = format!("{runtime_dir}/types/*.{{{SCRIPT_ENTRY_GLOB}}}");
-        result.entry_patterns.push(types);
+        result.push_entry_pattern(types);
     }
 
     // Vue-specific runtime directory: mirrors the main runtime structure with
@@ -451,7 +451,7 @@ fn add_module_runtime_patterns(result: &mut PluginResult, root: &Path) {
     if vue_dir.is_dir() {
         let vue_components = format!("{runtime_dir}/vue/**/*.{{{COMPONENT_ENTRY_GLOB}}}");
         add_default_used_export(result, &vue_components);
-        result.entry_patterns.push(vue_components);
+        result.push_entry_pattern(vue_components);
     }
 }
 
@@ -488,7 +488,11 @@ fn add_src_dir_support(result: &mut PluginResult, src_dir: &str) {
         return;
     }
 
-    extend_prefixed_patterns(&mut result.entry_patterns, src_dir, SRC_DIR_ENTRY_PATTERNS);
+    result.extend_entry_patterns(
+        SRC_DIR_ENTRY_PATTERNS
+            .iter()
+            .map(|pattern| prefix_with_src_dir(src_dir, pattern)),
+    );
     extend_prefixed_patterns(&mut result.always_used_files, src_dir, SRC_DIR_ALWAYS_USED);
     add_prefixed_default_used_exports(result, src_dir, SRC_DIR_DEFAULT_EXPORT_PATTERNS);
     add_default_used_export(
@@ -499,9 +503,7 @@ fn add_src_dir_support(result: &mut PluginResult, src_dir: &str) {
 }
 
 fn add_default_used_export(result: &mut PluginResult, pattern: impl Into<String>) {
-    result
-        .used_exports
-        .push((pattern.into(), vec!["default".to_string()]));
+    result.push_used_export_rule(pattern, ["default"]);
 }
 
 fn add_prefixed_default_used_exports(result: &mut PluginResult, prefix: &str, patterns: &[&str]) {
@@ -603,6 +605,22 @@ fn prefix_with_src_dir(src_dir: &str, path: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn has_entry_pattern(result: &PluginResult, pattern: &str) -> bool {
+        result
+            .entry_patterns
+            .iter()
+            .any(|entry_pattern| entry_pattern.pattern == pattern)
+    }
+
+    fn has_used_export_rule(result: &PluginResult, pattern: &str, exports: &[&str]) -> bool {
+        result.used_exports.iter().any(|rule| {
+            rule.path.pattern == pattern
+                && exports
+                    .iter()
+                    .all(|expected| rule.exports.iter().any(|actual| actual == expected))
+        })
+    }
 
     #[test]
     fn enabler_is_nuxt() {
@@ -922,21 +940,20 @@ mod tests {
                 .path_aliases
                 .contains(&("@/".to_string(), "app".to_string()))
         );
+        assert!(has_entry_pattern(
+            &result,
+            "app/custom/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"
+        ));
+        assert!(has_entry_pattern(
+            &result,
+            "app/feature-components/**/*.{vue,ts,tsx,js,jsx}"
+        ));
         assert!(
-            result
-                .entry_patterns
-                .contains(&"app/custom/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"app/feature-components/**/*.{vue,ts,tsx,js,jsx}".to_string())
-        );
-        assert!(
-            result.used_exports.contains(&(
-                "app/feature-components/**/*.{vue,ts,tsx,js,jsx}".to_string(),
-                vec!["default".to_string()],
-            )),
+            has_used_export_rule(
+                &result,
+                "app/feature-components/**/*.{vue,ts,tsx,js,jsx}",
+                &["default"],
+            ),
             "custom component dirs should contribute default-export used rules"
         );
         assert!(
@@ -969,14 +986,12 @@ mod tests {
             "app/runtime/object-plugin.{ts,js,mts,cts,mjs,cjs}",
         ] {
             assert!(
-                result.entry_patterns.contains(&pattern.to_string()),
+                has_entry_pattern(&result, pattern),
                 "expected configured plugin entry pattern {pattern}, got {:?}",
                 result.entry_patterns
             );
             assert!(
-                result
-                    .used_exports
-                    .contains(&(pattern.to_string(), vec!["default".to_string()])),
+                has_used_export_rule(&result, pattern, &["default"]),
                 "configured plugin pattern {pattern} should keep default exports alive"
             );
         }
@@ -1003,13 +1018,11 @@ mod tests {
 
         let expected = "app/feature/ui/**/*.{vue,ts,tsx,js,jsx}".to_string();
         assert!(
-            result.entry_patterns.contains(&expected),
+            has_entry_pattern(&result, &expected),
             "nested components.dirs object entries should add entry patterns"
         );
         assert!(
-            result
-                .used_exports
-                .contains(&(expected, vec!["default".to_string()])),
+            has_used_export_rule(&result, &expected, &["default"]),
             "nested components.dirs object entries should keep default component exports alive"
         );
     }
@@ -1073,16 +1086,14 @@ mod tests {
                 .contains(&("@/".to_string(), "src".to_string())),
             "srcDir should remap @/ to the configured source root"
         );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/custom/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/feature-components/**/*.{vue,ts,tsx,js,jsx}".to_string())
-        );
+        assert!(has_entry_pattern(
+            &result,
+            "src/custom/composables/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}"
+        ));
+        assert!(has_entry_pattern(
+            &result,
+            "src/feature-components/**/*.{vue,ts,tsx,js,jsx}"
+        ));
         for expected in [
             "src/middleware/**/*.{ts,js}",
             "src/plugins/*.{ts,tsx,js,jsx,mts,cts,mjs,cjs}",
@@ -1090,9 +1101,7 @@ mod tests {
             "src/components/**/*.{vue,ts,tsx,js,jsx}",
         ] {
             assert!(
-                result
-                    .used_exports
-                    .contains(&(expected.to_string(), vec!["default".to_string()])),
+                has_used_export_rule(&result, expected, &["default"]),
                 "{expected} should keep default exports alive under srcDir"
             );
         }

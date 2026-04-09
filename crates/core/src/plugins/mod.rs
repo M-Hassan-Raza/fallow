@@ -30,6 +30,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "docusaurus",
     "electron",
     "expo",
+    "expo-router",
     "gatsby",
     "nestjs",
     "next-intl",
@@ -71,14 +72,14 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
 #[derive(Debug, Default)]
 pub struct PluginResult {
     /// Additional entry point glob patterns discovered from config.
-    pub entry_patterns: Vec<String>,
+    pub entry_patterns: Vec<PathRule>,
     /// When true, `entry_patterns` from config replace the plugin's static
     /// `entry_patterns()` defaults instead of adding to them. Tools like Vitest
     /// and Jest treat their config's include/testMatch as a replacement for built-in
     /// defaults, so when the config is explicit the static patterns must be dropped.
     pub replace_entry_patterns: bool,
     /// Additional export-usage rules discovered from config.
-    pub used_exports: Vec<(String, Vec<String>)>,
+    pub used_exports: Vec<UsedExportRule>,
     /// Dependencies referenced in config files (should not be flagged as unused).
     pub referenced_dependencies: Vec<String>,
     /// Additional files that are always considered used.
@@ -92,6 +93,28 @@ pub struct PluginResult {
 }
 
 impl PluginResult {
+    pub fn push_entry_pattern(&mut self, pattern: impl Into<String>) {
+        self.entry_patterns.push(PathRule::new(pattern));
+    }
+
+    pub fn extend_entry_patterns<I, S>(&mut self, patterns: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.entry_patterns
+            .extend(patterns.into_iter().map(PathRule::new));
+    }
+
+    pub fn push_used_export_rule(
+        &mut self,
+        pattern: impl Into<String>,
+        exports: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        self.used_exports
+            .push(UsedExportRule::new(pattern, exports));
+    }
+
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.entry_patterns.is_empty()
@@ -101,6 +124,179 @@ impl PluginResult {
             && self.path_aliases.is_empty()
             && self.setup_files.is_empty()
             && self.fixture_patterns.is_empty()
+    }
+}
+
+/// A file-pattern rule with optional exclusion globs or full-path regexes.
+///
+/// Exclusion regexes are matched against the project-relative path and should be
+/// anchored when generated dynamically so they can be safely workspace-prefixed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PathRule {
+    pub pattern: String,
+    pub exclude_globs: Vec<String>,
+    pub exclude_regexes: Vec<String>,
+}
+
+impl PathRule {
+    #[must_use]
+    pub fn new(pattern: impl Into<String>) -> Self {
+        Self {
+            pattern: pattern.into(),
+            exclude_globs: Vec::new(),
+            exclude_regexes: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn from_static(pattern: &'static str) -> Self {
+        Self::new(pattern)
+    }
+
+    #[must_use]
+    pub fn with_excluded_globs<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.exclude_globs
+            .extend(patterns.into_iter().map(Into::into));
+        self
+    }
+
+    #[must_use]
+    pub fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.exclude_regexes
+            .extend(patterns.into_iter().map(Into::into));
+        self
+    }
+
+    #[must_use]
+    pub fn prefixed(&self, ws_prefix: &str) -> Self {
+        Self {
+            pattern: prefix_workspace_pattern(&self.pattern, ws_prefix),
+            exclude_globs: self
+                .exclude_globs
+                .iter()
+                .map(|pattern| prefix_workspace_pattern(pattern, ws_prefix))
+                .collect(),
+            exclude_regexes: self
+                .exclude_regexes
+                .iter()
+                .map(|pattern| prefix_workspace_regex(pattern, ws_prefix))
+                .collect(),
+        }
+    }
+}
+
+/// A used-export rule bound to a file-pattern rule.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UsedExportRule {
+    pub path: PathRule,
+    pub exports: Vec<String>,
+}
+
+impl UsedExportRule {
+    #[must_use]
+    pub fn new(
+        pattern: impl Into<String>,
+        exports: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            path: PathRule::new(pattern),
+            exports: exports.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn from_static(pattern: &'static str, exports: &'static [&'static str]) -> Self {
+        Self::new(pattern, exports.iter().copied())
+    }
+
+    #[must_use]
+    pub fn with_excluded_globs<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.path = self.path.with_excluded_globs(patterns);
+        self
+    }
+
+    #[must_use]
+    pub fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.path = self.path.with_excluded_regexes(patterns);
+        self
+    }
+
+    #[must_use]
+    pub fn prefixed(&self, ws_prefix: &str) -> Self {
+        Self {
+            path: self.path.prefixed(ws_prefix),
+            exports: self.exports.clone(),
+        }
+    }
+}
+
+fn prefix_workspace_pattern(pattern: &str, ws_prefix: &str) -> String {
+    if pattern.starts_with(ws_prefix) || pattern.starts_with('/') {
+        pattern.to_string()
+    } else {
+        format!("{ws_prefix}/{pattern}")
+    }
+}
+
+fn prefix_workspace_regex(pattern: &str, ws_prefix: &str) -> String {
+    if let Some(pattern) = pattern.strip_prefix('^') {
+        format!("^{}/{}", regex::escape(ws_prefix), pattern)
+    } else {
+        format!("^{}/(?:{})", regex::escape(ws_prefix), pattern)
+    }
+}
+
+impl From<String> for PathRule {
+    fn from(pattern: String) -> Self {
+        Self::new(pattern)
+    }
+}
+
+impl From<&str> for PathRule {
+    fn from(pattern: &str) -> Self {
+        Self::new(pattern)
+    }
+}
+
+impl std::ops::Deref for PathRule {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pattern
+    }
+}
+
+impl PartialEq<&str> for PathRule {
+    fn eq(&self, other: &&str) -> bool {
+        self.pattern == *other
+    }
+}
+
+impl PartialEq<str> for PathRule {
+    fn eq(&self, other: &str) -> bool {
+        self.pattern == other
+    }
+}
+
+impl PartialEq<String> for PathRule {
+    fn eq(&self, other: &String) -> bool {
+        &self.pattern == other
     }
 }
 
@@ -144,6 +340,14 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// Entry point rules with optional exclusions.
+    fn entry_pattern_rules(&self) -> Vec<PathRule> {
+        self.entry_patterns()
+            .iter()
+            .map(|pattern| PathRule::from_static(pattern))
+            .collect()
+    }
+
     /// How this plugin's entry patterns should contribute to coverage reachability.
     ///
     /// `Support` roots keep files alive for dead-code analysis but do not count
@@ -165,6 +369,14 @@ pub trait Plugin: Send + Sync {
     /// Exports that are always considered used for matching file patterns.
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
         vec![]
+    }
+
+    /// Used-export rules with optional exclusions.
+    fn used_export_rules(&self) -> Vec<UsedExportRule> {
+        self.used_exports()
+            .into_iter()
+            .map(|(pattern, exports)| UsedExportRule::from_static(pattern, exports))
+            .collect()
     }
 
     /// Glob patterns for test fixture files consumed by this framework.
@@ -478,6 +690,7 @@ mod drizzle;
 mod electron;
 mod eslint;
 mod expo;
+mod expo_router;
 mod gatsby;
 mod graphql_codegen;
 mod husky;
@@ -618,7 +831,7 @@ mod tests {
     #[test]
     fn plugin_result_not_empty_with_entry_patterns() {
         let r = PluginResult {
-            entry_patterns: vec!["*.ts".to_string()],
+            entry_patterns: vec!["*.ts".into()],
             ..Default::default()
         };
         assert!(!r.is_empty());

@@ -37,7 +37,7 @@ define_plugin! {
             config_path,
             &["source", "entry"],
         );
-        result.entry_patterns.extend(entries);
+        result.extend_entry_patterns(entries);
 
         // plugins -> extract plugin package names from imports
         // Rsbuild plugins are typically imported and passed to the plugins array,
@@ -58,6 +58,13 @@ define_plugin! {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn has_entry_pattern(result: &PluginResult, pattern: &str) -> bool {
+        result
+            .entry_patterns
+            .iter()
+            .any(|entry_pattern| entry_pattern.pattern == pattern)
+    }
 
     #[test]
     fn resolve_config_entry_string() {
@@ -95,16 +102,8 @@ mod tests {
             source,
             std::path::Path::new("/project"),
         );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"./src/main.tsx".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"./src/admin.tsx".to_string())
-        );
+        assert!(has_entry_pattern(&result, "./src/main.tsx"));
+        assert!(has_entry_pattern(&result, "./src/admin.tsx"));
     }
 
     #[test]

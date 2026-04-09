@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson};
 
-use super::Plugin;
+use super::{PathRule, Plugin, UsedExportRule};
 
 pub(crate) mod builtin;
 mod helpers;
@@ -28,8 +28,8 @@ pub struct PluginRegistry {
 /// Aggregated results from all active plugins for a project.
 #[derive(Debug, Default)]
 pub struct AggregatedPluginResult {
-    /// All entry point patterns from active plugins: (pattern, plugin_name).
-    pub entry_patterns: Vec<(String, String)>,
+    /// All entry point patterns from active plugins: (rule, plugin_name).
+    pub entry_patterns: Vec<(PathRule, String)>,
     /// Coverage role for each plugin contributing entry point patterns.
     pub entry_point_roles: rustc_hash::FxHashMap<String, EntryPointRole>,
     /// All config file patterns from active plugins.
@@ -37,7 +37,7 @@ pub struct AggregatedPluginResult {
     /// All always-used file patterns from active plugins: (pattern, plugin_name).
     pub always_used: Vec<(String, String)>,
     /// All used export rules from active plugins.
-    pub used_exports: Vec<(String, Vec<String>)>,
+    pub used_exports: Vec<UsedExportRule>,
     /// Dependencies referenced in config files (should not be flagged unused).
     pub referenced_dependencies: Vec<String>,
     /// Additional always-used files discovered from config parsing: (pattern, plugin_name).

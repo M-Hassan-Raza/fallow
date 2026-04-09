@@ -89,7 +89,7 @@ define_plugin! {
 
         // stories -> additional entry patterns (if string values)
         let stories = config_parser::extract_config_string_array(source, config_path, &["stories"]);
-        result.entry_patterns.extend(stories);
+        result.extend_entry_patterns(stories);
 
         // core.builder -> referenced dependency
         // Can be a string or an object with a `.name` property

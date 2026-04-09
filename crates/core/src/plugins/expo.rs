@@ -14,17 +14,37 @@ const ENTRY_PATTERNS: &[&str] = &[
 
 const ALWAYS_USED: &[&str] = &[
     "app.json",
-    "app.config.{ts,js}",
-    "metro.config.{ts,js}",
-    "babel.config.{ts,js}",
+    "app.config.{ts,js,mjs,cjs}",
+    "metro.config.{ts,js,mjs,cjs}",
+    "babel.config.{ts,js,mjs,cjs}",
 ];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["expo", "expo-cli", "@expo/webpack-config"];
 
-define_plugin! {
-    struct ExpoPlugin => "expo",
-    enablers: ENABLERS,
-    entry_patterns: ENTRY_PATTERNS,
-    always_used: ALWAYS_USED,
-    tooling_dependencies: TOOLING_DEPENDENCIES,
+pub struct ExpoPlugin;
+
+impl Plugin for ExpoPlugin {
+    fn name(&self) -> &'static str {
+        "expo"
+    }
+
+    fn enablers(&self) -> &'static [&'static str] {
+        ENABLERS
+    }
+
+    fn is_enabled_with_deps(&self, deps: &[String], _root: &std::path::Path) -> bool {
+        deps.iter().any(|dep| dep == "expo") && !deps.iter().any(|dep| dep == "expo-router")
+    }
+
+    fn entry_patterns(&self) -> &'static [&'static str] {
+        ENTRY_PATTERNS
+    }
+
+    fn always_used(&self) -> &'static [&'static str] {
+        ALWAYS_USED
+    }
+
+    fn tooling_dependencies(&self) -> &'static [&'static str] {
+        TOOLING_DEPENDENCIES
+    }
 }
