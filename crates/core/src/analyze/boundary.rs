@@ -137,36 +137,20 @@ mod tests {
     use crate::resolve::ResolvedModule;
     use crate::suppress::Suppression;
     use fallow_config::{
-        BoundaryConfig, BoundaryRule, BoundaryZone, DuplicatesConfig, FallowConfig, HealthConfig,
-        OutputFormat, ResolvedConfig, RulesConfig, Severity,
+        BoundaryConfig, BoundaryRule, BoundaryZone, FallowConfig, OutputFormat, ResolvedConfig,
+        RulesConfig, Severity,
     };
     use rustc_hash::FxHashSet;
     use std::path::PathBuf;
 
     fn make_config(root: PathBuf, boundaries: BoundaryConfig) -> ResolvedConfig {
         FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: DuplicatesConfig::default(),
-            health: HealthConfig::default(),
             rules: RulesConfig {
                 boundary_violation: Severity::Error,
                 ..RulesConfig::default()
             },
             boundaries,
-            production: false,
-            plugins: vec![],
-            dynamically_loaded: vec![],
-            overrides: vec![],
-            regression: None,
-            codeowners: None,
-            public_packages: vec![],
+            ..Default::default()
         }
         .resolve(root, OutputFormat::Human, 1, true, true)
     }

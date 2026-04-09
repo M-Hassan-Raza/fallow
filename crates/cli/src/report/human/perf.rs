@@ -107,33 +107,8 @@ pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> V
 
 #[cfg(test)]
 mod tests {
+    use super::super::plain;
     use super::*;
-
-    /// Strip ANSI escape sequences from a string, leaving only the printable text.
-    fn strip_ansi(s: &str) -> String {
-        let mut result = String::with_capacity(s.len());
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                for inner in chars.by_ref() {
-                    if inner == 'm' {
-                        break;
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        }
-        result
-    }
-
-    fn plain(lines: &[String]) -> String {
-        lines
-            .iter()
-            .map(|l| strip_ansi(l))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     #[test]
     fn performance_output_contains_all_pipeline_stages() {

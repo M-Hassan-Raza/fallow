@@ -420,38 +420,13 @@ pub(in crate::report) fn print_duplication_summary(
 
 #[cfg(test)]
 mod tests {
+    use super::super::plain;
     use super::*;
     use fallow_core::duplicates::{
         CloneFamily, CloneGroup, CloneInstance, DuplicationStats, RefactoringKind,
         RefactoringSuggestion,
     };
     use std::path::PathBuf;
-
-    /// Strip ANSI escape sequences from a string, leaving only the printable text.
-    fn strip_ansi(s: &str) -> String {
-        let mut result = String::with_capacity(s.len());
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                for inner in chars.by_ref() {
-                    if inner == 'm' {
-                        break;
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        }
-        result
-    }
-
-    fn plain(lines: &[String]) -> String {
-        lines
-            .iter()
-            .map(|l| strip_ansi(l))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     #[test]
     fn duplication_empty_report_produces_no_output() {

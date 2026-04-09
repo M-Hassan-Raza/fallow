@@ -145,25 +145,8 @@ fn type_only_dep_skips_ignored_deps() {
     let pkg = make_pkg(&["zod"], &[], &[]);
 
     let config = FallowConfig {
-        schema: None,
-        extends: vec![],
-        entry: vec![],
-        ignore_patterns: vec![],
-        framework: vec![],
-        workspaces: None,
         ignore_dependencies: vec!["zod".to_string()],
-        ignore_exports: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
-        rules: fallow_config::RulesConfig::default(),
-        boundaries: BoundaryConfig::default(),
-        production: false,
-        plugins: vec![],
-        dynamically_loaded: vec![],
-        overrides: vec![],
-        regression: None,
-        codeowners: None,
-        public_packages: vec![],
+        ..Default::default()
     }
     .resolve(
         PathBuf::from("/project"),

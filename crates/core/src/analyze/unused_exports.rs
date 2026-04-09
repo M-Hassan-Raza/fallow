@@ -552,28 +552,7 @@ mod tests {
 
     /// Build a default ResolvedConfig for tests.
     fn test_config() -> ResolvedConfig {
-        fallow_config::FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
-            rules: fallow_config::RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
-            production: false,
-            plugins: vec![],
-            dynamically_loaded: vec![],
-            overrides: vec![],
-            regression: None,
-            codeowners: None,
-            public_packages: vec![],
-        }
-        .resolve(
+        fallow_config::FallowConfig::default().resolve(
             PathBuf::from("/tmp/test"),
             fallow_config::OutputFormat::Human,
             1,
@@ -930,25 +909,8 @@ mod tests {
         rules: Vec<fallow_config::IgnoreExportRule>,
     ) -> ResolvedConfig {
         fallow_config::FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
             ignore_exports: rules,
-            duplicates: fallow_config::DuplicatesConfig::default(),
-            health: fallow_config::HealthConfig::default(),
-            rules: fallow_config::RulesConfig::default(),
-            boundaries: fallow_config::BoundaryConfig::default(),
-            production: false,
-            plugins: vec![],
-            dynamically_loaded: vec![],
-            overrides: vec![],
-            regression: None,
-            codeowners: None,
-            public_packages: vec![],
+            ..Default::default()
         }
         .resolve(
             PathBuf::from("/tmp/test"),

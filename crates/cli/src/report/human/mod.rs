@@ -270,7 +270,7 @@ pub(super) fn build_grouped_by_file<'a, T>(
 
 /// Strip ANSI escape sequences from a string, leaving only the printable text.
 #[cfg(test)]
-fn strip_ansi(s: &str) -> String {
+pub(super) fn strip_ansi(s: &str) -> String {
     let mut result = String::with_capacity(s.len());
     let mut chars = s.chars();
     while let Some(c) = chars.next() {
@@ -286,6 +286,16 @@ fn strip_ansi(s: &str) -> String {
         }
     }
     result
+}
+
+/// Join report lines into a single string with ANSI codes stripped.
+#[cfg(test)]
+pub(super) fn plain(lines: &[String]) -> String {
+    lines
+        .iter()
+        .map(|l| strip_ansi(l))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 #[cfg(test)]

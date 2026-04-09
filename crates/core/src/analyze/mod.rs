@@ -465,33 +465,13 @@ mod tests {
 
     mod orchestration {
         use super::super::*;
-        use fallow_config::{
-            BoundaryConfig, DuplicatesConfig, FallowConfig, HealthConfig, OutputFormat,
-            RulesConfig, Severity,
-        };
+        use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
         use std::path::PathBuf;
 
         fn make_config_with_rules(rules: RulesConfig) -> ResolvedConfig {
             FallowConfig {
-                schema: None,
-                extends: vec![],
-                entry: vec![],
-                ignore_patterns: vec![],
-                framework: vec![],
-                workspaces: None,
-                ignore_dependencies: vec![],
-                ignore_exports: vec![],
-                duplicates: DuplicatesConfig::default(),
-                health: HealthConfig::default(),
                 rules,
-                boundaries: BoundaryConfig::default(),
-                production: false,
-                plugins: vec![],
-                dynamically_loaded: vec![],
-                overrides: vec![],
-                regression: None,
-                codeowners: None,
-                public_packages: vec![],
+                ..Default::default()
             }
             .resolve(
                 PathBuf::from("/tmp/orchestration-test"),

@@ -13,7 +13,7 @@ pub const SNAPSHOT_SCHEMA_VERSION: u32 = 5;
 /// Metrics are `Option` when the data source was not available in the current run
 /// (e.g., `duplication_pct` is `None` unless the duplication pipeline was run,
 /// `hotspot_count` is `None` without git history).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct VitalSigns {
     /// Percentage of files not reachable from any entry point.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -84,7 +84,7 @@ pub struct RiskProfile {
 ///
 /// Stored alongside `VitalSigns` in snapshots so that Phase 2b trend reporting
 /// can decompose percentage changes into numerator vs denominator shifts.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct VitalSignsCounts {
     pub total_files: usize,
     pub total_exports: usize,

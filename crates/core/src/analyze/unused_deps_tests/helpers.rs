@@ -36,28 +36,7 @@ pub(super) use super::super::{
 
 /// Build a minimal ResolvedConfig for testing.
 pub(super) fn test_config(root: PathBuf) -> ResolvedConfig {
-    FallowConfig {
-        schema: None,
-        extends: vec![],
-        entry: vec![],
-        ignore_patterns: vec![],
-        framework: vec![],
-        workspaces: None,
-        ignore_dependencies: vec![],
-        ignore_exports: vec![],
-        duplicates: fallow_config::DuplicatesConfig::default(),
-        health: fallow_config::HealthConfig::default(),
-        rules: fallow_config::RulesConfig::default(),
-        boundaries: BoundaryConfig::default(),
-        production: false,
-        plugins: vec![],
-        dynamically_loaded: vec![],
-        overrides: vec![],
-        regression: None,
-        codeowners: None,
-        public_packages: vec![],
-    }
-    .resolve(root, OutputFormat::Human, 1, true, true)
+    FallowConfig::default().resolve(root, OutputFormat::Human, 1, true, true)
 }
 
 /// Build a PackageJson with specific dependency fields via JSON deserialization.

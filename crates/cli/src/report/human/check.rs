@@ -1306,38 +1306,12 @@ pub(in crate::report) fn print_check_summary(
 
 #[cfg(test)]
 mod tests {
+    use super::super::{plain, strip_ansi};
     use super::*;
     use fallow_config::{RulesConfig, Severity};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::*;
     use std::path::PathBuf;
-
-    /// Strip ANSI escape sequences from a string, leaving only the printable text.
-    fn strip_ansi(s: &str) -> String {
-        let mut result = String::with_capacity(s.len());
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                for inner in chars.by_ref() {
-                    if inner == 'm' {
-                        break;
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        }
-        result
-    }
-
-    /// Strip ANSI codes from all lines and join with newlines for easy assertion.
-    fn plain(lines: &[String]) -> String {
-        lines
-            .iter()
-            .map(|l| strip_ansi(l))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     /// Build sample results including optional deps (extends the shared helper).
     fn sample_results(root: &Path) -> AnalysisResults {

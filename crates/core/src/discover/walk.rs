@@ -311,25 +311,8 @@ mod tests {
         /// Create a minimal ResolvedConfig pointing at the given root directory.
         fn make_config(root: PathBuf, production: bool) -> ResolvedConfig {
             FallowConfig {
-                schema: None,
-                extends: vec![],
-                entry: vec![],
-                ignore_patterns: vec![],
-                framework: vec![],
-                workspaces: None,
-                ignore_dependencies: vec![],
-                ignore_exports: vec![],
-                duplicates: DuplicatesConfig::default(),
-                health: HealthConfig::default(),
-                rules: RulesConfig::default(),
-                boundaries: fallow_config::BoundaryConfig::default(),
                 production,
-                plugins: vec![],
-                dynamically_loaded: vec![],
-                overrides: vec![],
-                regression: None,
-                codeowners: None,
-                public_packages: vec![],
+                ..Default::default()
             }
             .resolve(root, OutputFormat::Human, 1, true, true)
         }

@@ -1010,26 +1010,20 @@ mod tests {
             dead_export_pct: Some(8.1),
             avg_cyclomatic: 4.7,
             p90_cyclomatic: 12,
-            duplication_pct: None,
             hotspot_count: Some(5),
             maintainability_avg: Some(72.4),
             unused_dep_count: Some(4),
             circular_dep_count: Some(2),
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
         let counts = VitalSignsCounts {
             total_files: 1200,
             total_exports: 5400,
             dead_files: 38,
             dead_exports: 437,
-            duplicated_lines: None,
-            total_lines: None,
             files_scored: Some(1150),
             total_deps: 42,
+            ..Default::default()
         };
         let health_score = compute_health_score(&vs, 1200);
         let snapshot = build_snapshot(vs, counts, root, false, Some(&health_score), None);
@@ -1054,31 +1048,11 @@ mod tests {
         let root = dir.path();
         let explicit = root.join("my-snapshot.json");
         let vs = VitalSigns {
-            dead_file_pct: None,
-            dead_export_pct: None,
             avg_cyclomatic: 1.0,
             p90_cyclomatic: 2,
-            duplication_pct: None,
-            hotspot_count: None,
-            maintainability_avg: None,
-            unused_dep_count: None,
-            circular_dep_count: None,
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
-        let counts = VitalSignsCounts {
-            total_files: 0,
-            total_exports: 0,
-            dead_files: 0,
-            dead_exports: 0,
-            duplicated_lines: None,
-            total_lines: None,
-            files_scored: None,
-            total_deps: 0,
-        };
+        let counts = VitalSignsCounts::default();
         let snapshot = build_snapshot(vs, counts, root, false, None, None);
         let saved = save_snapshot(&snapshot, root, Some(&explicit)).unwrap();
         assert_eq!(saved, explicit);
@@ -1091,31 +1065,11 @@ mod tests {
         let root = dir.path();
         let nested = root.join("a/b/c/snapshot.json");
         let vs = VitalSigns {
-            dead_file_pct: None,
-            dead_export_pct: None,
             avg_cyclomatic: 1.0,
             p90_cyclomatic: 2,
-            duplication_pct: None,
-            hotspot_count: None,
-            maintainability_avg: None,
-            unused_dep_count: None,
-            circular_dep_count: None,
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
-        let counts = VitalSignsCounts {
-            total_files: 0,
-            total_exports: 0,
-            dead_files: 0,
-            dead_exports: 0,
-            duplicated_lines: None,
-            total_lines: None,
-            files_scored: None,
-            total_deps: 0,
-        };
+        let counts = VitalSignsCounts::default();
         let snapshot = build_snapshot(vs, counts, root, false, None, None);
         let saved = save_snapshot(&snapshot, root, Some(&nested)).unwrap();
         assert_eq!(saved, nested);
@@ -1142,16 +1096,11 @@ mod tests {
             dead_export_pct: Some(0.0),
             avg_cyclomatic: 1.0,
             p90_cyclomatic: 2,
-            duplication_pct: None,
             hotspot_count: Some(0),
             maintainability_avg: Some(90.0),
             unused_dep_count: Some(0),
             circular_dep_count: Some(0),
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
         let score = compute_health_score(&vs, 100);
         assert!((score.score - 100.0).abs() < f64::EPSILON);
@@ -1162,20 +1111,9 @@ mod tests {
     fn health_score_no_optional_metrics() {
         // Only avg_cyclomatic and p90_cyclomatic are always present
         let vs = VitalSigns {
-            dead_file_pct: None,
-            dead_export_pct: None,
             avg_cyclomatic: 1.0,
             p90_cyclomatic: 2,
-            duplication_pct: None,
-            hotspot_count: None,
-            maintainability_avg: None,
-            unused_dep_count: None,
-            circular_dep_count: None,
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
         let score = compute_health_score(&vs, 0);
         // Only complexity penalties apply (both 0 since below thresholds)
@@ -1193,16 +1131,7 @@ mod tests {
             dead_export_pct: Some(30.0),
             avg_cyclomatic: 1.0,
             p90_cyclomatic: 2,
-            duplication_pct: None,
-            hotspot_count: None,
-            maintainability_avg: None,
-            unused_dep_count: None,
-            circular_dep_count: None,
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
         let score = compute_health_score(&vs, 100);
         // dead_file: min(50*0.2, 15) = 10
@@ -1215,20 +1144,9 @@ mod tests {
     #[test]
     fn health_score_complexity_penalty() {
         let vs = VitalSigns {
-            dead_file_pct: None,
-            dead_export_pct: None,
             avg_cyclomatic: 5.5,
             p90_cyclomatic: 15,
-            duplication_pct: None,
-            hotspot_count: None,
-            maintainability_avg: None,
-            unused_dep_count: None,
-            circular_dep_count: None,
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
         let score = compute_health_score(&vs, 100);
         // complexity: min((5.5-1.5)*5, 20) = 20
@@ -1245,16 +1163,11 @@ mod tests {
             dead_export_pct: Some(100.0),
             avg_cyclomatic: 10.0,
             p90_cyclomatic: 30,
-            duplication_pct: None,
             hotspot_count: Some(50),
             maintainability_avg: Some(20.0),
             unused_dep_count: Some(100),
             circular_dep_count: Some(50),
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
         let score = compute_health_score(&vs, 100);
         assert!((score.score).abs() < f64::EPSILON);
@@ -1264,20 +1177,10 @@ mod tests {
     #[test]
     fn health_score_hotspot_normalized_by_files() {
         let vs = VitalSigns {
-            dead_file_pct: None,
-            dead_export_pct: None,
             avg_cyclomatic: 1.0,
             p90_cyclomatic: 2,
-            duplication_pct: None,
             hotspot_count: Some(5),
-            maintainability_avg: None,
-            unused_dep_count: None,
-            circular_dep_count: None,
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
         // 5 hotspots in 100 files = 5% = 10 points
         let score_100 = compute_health_score(&vs, 100);
@@ -1411,26 +1314,20 @@ mod tests {
             dead_export_pct: Some(7.5),
             avg_cyclomatic: 4.1,
             p90_cyclomatic: 12,
-            duplication_pct: None,
             hotspot_count: Some(3),
             maintainability_avg: Some(75.0),
             unused_dep_count: Some(3),
             circular_dep_count: Some(1),
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         };
         let counts = VitalSignsCounts {
             total_files: 100,
             total_exports: 500,
             dead_files: 3,
             dead_exports: 38,
-            duplicated_lines: None,
-            total_lines: None,
             files_scored: Some(95),
             total_deps: 40,
+            ..Default::default()
         };
 
         let trend = compute_trend(&vs, &counts, Some(78.0), &[prev]).unwrap();
@@ -1492,16 +1389,11 @@ mod tests {
             dead_export_pct: Some(8.1),
             avg_cyclomatic: 4.2,
             p90_cyclomatic: 12,
-            duplication_pct: None,
             hotspot_count: Some(5),
             maintainability_avg: Some(72.4),
             unused_dep_count: Some(4),
             circular_dep_count: Some(2),
-            counts: None,
-            unit_size_profile: None,
-            unit_interfacing_profile: None,
-            p95_fan_in: None,
-            coupling_high_pct: None,
+            ..Default::default()
         }
     }
 
@@ -1511,10 +1403,9 @@ mod tests {
             total_exports: 500,
             dead_files: 3,
             dead_exports: 40,
-            duplicated_lines: None,
-            total_lines: None,
             files_scored: Some(95),
             total_deps: 42,
+            ..Default::default()
         }
     }
 
@@ -1531,26 +1422,20 @@ mod tests {
                 dead_export_pct: Some(8.1),
                 avg_cyclomatic: 4.7,
                 p90_cyclomatic: 12,
-                duplication_pct: None,
                 hotspot_count: Some(5),
                 maintainability_avg: Some(72.4),
                 unused_dep_count: Some(4),
                 circular_dep_count: Some(2),
-                counts: None,
-                unit_size_profile: None,
-                unit_interfacing_profile: None,
-                p95_fan_in: None,
-                coupling_high_pct: None,
+                ..Default::default()
             },
             counts: VitalSignsCounts {
                 total_files: 100,
                 total_exports: 500,
                 dead_files: 3,
                 dead_exports: 40,
-                duplicated_lines: None,
-                total_lines: None,
                 files_scored: Some(95),
                 total_deps: 42,
+                ..Default::default()
             },
             score,
             grade: score.map(|s| letter_grade(s).to_string()),

@@ -694,11 +694,8 @@ mod tests {
 
     use super::*;
     use crate::PackageJson;
-    use crate::config::boundaries::BoundaryConfig;
-    use crate::config::duplicates_config::DuplicatesConfig;
     use crate::config::format::OutputFormat;
-    use crate::config::health::HealthConfig;
-    use crate::config::rules::{RulesConfig, Severity};
+    use crate::config::rules::Severity;
 
     /// Create a panic-safe temp directory (RAII cleanup via `tempfile::TempDir`).
     fn test_dir(_name: &str) -> tempfile::TempDir {
@@ -744,27 +741,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
 
     #[test]
     fn fallow_config_resolve_default_ignores() {
-        let config = FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: DuplicatesConfig::default(),
-            health: HealthConfig::default(),
-            rules: RulesConfig::default(),
-            boundaries: BoundaryConfig::default(),
-            production: false,
-            plugins: vec![],
-            dynamically_loaded: vec![],
-            overrides: vec![],
-            regression: None,
-            codeowners: None,
-            public_packages: vec![],
-        };
+        let config = FallowConfig::default();
         let resolved = config.resolve(
             PathBuf::from("/tmp/test"),
             OutputFormat::Human,
@@ -786,25 +763,9 @@ ignoreDependencies = ["autoprefixer", "postcss"]
     #[test]
     fn fallow_config_resolve_custom_ignores() {
         let config = FallowConfig {
-            schema: None,
-            extends: vec![],
             entry: vec!["src/**/*.ts".to_string()],
             ignore_patterns: vec!["**/*.generated.ts".to_string()],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: DuplicatesConfig::default(),
-            health: HealthConfig::default(),
-            rules: RulesConfig::default(),
-            boundaries: BoundaryConfig::default(),
-            production: false,
-            plugins: vec![],
-            dynamically_loaded: vec![],
-            overrides: vec![],
-            regression: None,
-            codeowners: None,
-            public_packages: vec![],
+            ..Default::default()
         };
         let resolved = config.resolve(
             PathBuf::from("/tmp/test"),
@@ -822,27 +783,7 @@ ignoreDependencies = ["autoprefixer", "postcss"]
 
     #[test]
     fn fallow_config_resolve_cache_dir() {
-        let config = FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: DuplicatesConfig::default(),
-            health: HealthConfig::default(),
-            rules: RulesConfig::default(),
-            boundaries: BoundaryConfig::default(),
-            production: false,
-            plugins: vec![],
-            dynamically_loaded: vec![],
-            overrides: vec![],
-            regression: None,
-            codeowners: None,
-            public_packages: vec![],
-        };
+        let config = FallowConfig::default();
         let resolved = config.resolve(
             PathBuf::from("/tmp/project"),
             OutputFormat::Human,
@@ -2081,25 +2022,8 @@ minTokens = 100
     #[test]
     fn resolve_production_mode_disables_dev_deps() {
         let config = FallowConfig {
-            schema: None,
-            extends: vec![],
-            entry: vec![],
-            ignore_patterns: vec![],
-            framework: vec![],
-            workspaces: None,
-            ignore_dependencies: vec![],
-            ignore_exports: vec![],
-            duplicates: DuplicatesConfig::default(),
-            health: HealthConfig::default(),
-            rules: RulesConfig::default(),
-            boundaries: BoundaryConfig::default(),
             production: true,
-            plugins: vec![],
-            dynamically_loaded: vec![],
-            overrides: vec![],
-            regression: None,
-            codeowners: None,
-            public_packages: vec![],
+            ..Default::default()
         };
         let resolved = config.resolve(
             PathBuf::from("/tmp/test"),

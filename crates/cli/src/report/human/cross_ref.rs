@@ -96,36 +96,11 @@ pub(in crate::report) fn build_cross_reference_lines(
 
 #[cfg(test)]
 mod tests {
+    use super::super::plain;
     use super::*;
     use fallow_core::cross_reference::{CombinedFinding, CrossReferenceResult, DeadCodeKind};
     use fallow_core::duplicates::CloneInstance;
     use std::path::PathBuf;
-
-    /// Strip ANSI escape sequences from a string, leaving only the printable text.
-    fn strip_ansi(s: &str) -> String {
-        let mut result = String::with_capacity(s.len());
-        let mut chars = s.chars();
-        while let Some(c) = chars.next() {
-            if c == '\x1b' {
-                for inner in chars.by_ref() {
-                    if inner == 'm' {
-                        break;
-                    }
-                }
-            } else {
-                result.push(c);
-            }
-        }
-        result
-    }
-
-    fn plain(lines: &[String]) -> String {
-        lines
-            .iter()
-            .map(|l| strip_ansi(l))
-            .collect::<Vec<_>>()
-            .join("\n")
-    }
 
     #[test]
     fn cross_reference_empty_findings_produces_header_and_blanks() {
