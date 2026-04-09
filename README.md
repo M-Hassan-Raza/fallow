@@ -33,7 +33,7 @@ npx fallow
  Total       26 issues across 847 files                             53ms
 ```
 
-84 framework plugins. No Node.js runtime. No config file needed.
+85 framework plugins. No Node.js runtime. No config file needed.
 
 ## Install
 
@@ -217,11 +217,11 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 
 ## Framework plugins
 
-84 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
+85 built-in plugins detect entry points, convention exports, config-defined aliases, and template-visible usage for your framework automatically.
 
 | Category | Plugins |
 |---|---|
-| **Frameworks** | Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, NestJS, Expo, Electron, and more |
+| **Frameworks** | Next.js, Nuxt, Remix, SvelteKit, Gatsby, Astro, Angular, NestJS, Expo, Expo Router, Electron, and more |
 | **Bundlers** | Vite, Webpack, Rspack, Rsbuild, Rollup, Rolldown, Tsup, Tsdown, Parcel |
 | **Testing** | Vitest, Jest, Playwright, Cypress, Storybook, Mocha, Ava |
 | **Databases** | Prisma, Drizzle, Knex, TypeORM, Kysely |
