@@ -25,6 +25,7 @@ const resolveBinaryPath = async (
   const configPath = getLspPath();
   if (configPath) {
     if (fs.existsSync(configPath)) {
+      outputChannel?.appendLine(`Binary resolution: using fallow.lspPath setting: ${configPath}`);
       return configPath;
     }
     void vscode.window.showWarningMessage(
@@ -35,16 +36,21 @@ const resolveBinaryPath = async (
 
   const local = findLocalBinary("fallow-lsp");
   if (local) {
+    outputChannel?.appendLine(`Binary resolution: using local node_modules/.bin: ${local}`);
     return local;
   }
+  outputChannel?.appendLine("Binary resolution: no local node_modules/.bin/fallow-lsp found");
 
   const inPath = findBinaryInPath("fallow-lsp");
   if (inPath) {
+    outputChannel?.appendLine(`Binary resolution: using system PATH: ${inPath}`);
     return inPath;
   }
+  outputChannel?.appendLine("Binary resolution: fallow-lsp not found in PATH");
 
   const installed = getInstalledBinaryPath(context, outputChannel);
   if (installed) {
+    outputChannel?.appendLine(`Binary resolution: using previously downloaded binary: ${installed}`);
     return installed;
   }
 
