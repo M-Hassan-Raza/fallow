@@ -52,9 +52,7 @@ define_plugin! {
         let schema_paths =
             config_parser::extract_config_string_or_array(source, config_path, &["schema"]);
         for path in &schema_paths {
-            result
-                .entry_patterns
-                .extend(schema_path_to_entry_patterns(path));
+            result.extend_entry_patterns(schema_path_to_entry_patterns(path));
         }
 
         // Extract `out` field -> custom migration output directory.
@@ -63,7 +61,7 @@ define_plugin! {
         if let Some(out_dir) = config_parser::extract_config_string(source, config_path, &["out"]) {
             let out = out_dir.trim_start_matches("./").trim_end_matches('/');
             if out != "drizzle" {
-                result.entry_patterns.push(format!("{out}/**/*.{{ts,js}}"));
+                result.push_entry_pattern(format!("{out}/**/*.{{ts,js}}"));
             }
         }
 
@@ -119,6 +117,13 @@ fn schema_path_to_entry_patterns(path: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn has_entry_pattern(result: &PluginResult, pattern: &str) -> bool {
+        result
+            .entry_patterns
+            .iter()
+            .any(|entry_pattern| entry_pattern.pattern == pattern)
+    }
 
     #[test]
     fn schema_path_file() {
@@ -179,11 +184,7 @@ mod tests {
             source,
             Path::new("/project"),
         );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/db/schema.ts".to_string())
-        );
+        assert!(has_entry_pattern(&result, "src/db/schema.ts"));
         assert!(
             result
                 .referenced_dependencies
@@ -206,16 +207,8 @@ mod tests {
             source,
             Path::new("/project"),
         );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/db/users.ts".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/db/posts.ts".to_string())
-        );
+        assert!(has_entry_pattern(&result, "src/db/users.ts"));
+        assert!(has_entry_pattern(&result, "src/db/posts.ts"));
     }
 
     #[test]
@@ -232,11 +225,10 @@ mod tests {
             source,
             Path::new("/project"),
         );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/db/**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}".to_string())
-        );
+        assert!(has_entry_pattern(
+            &result,
+            "src/db/**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
+        ));
     }
 
     #[test]
@@ -253,7 +245,7 @@ mod tests {
             source,
             Path::new("/project"),
         );
-        assert!(result.entry_patterns.contains(&"src/db/*.ts".to_string()));
+        assert!(has_entry_pattern(&result, "src/db/*.ts"));
     }
 
     #[test]
@@ -271,16 +263,8 @@ mod tests {
             source,
             Path::new("/project"),
         );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/db/schema.ts".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"migrations/**/*.{ts,js}".to_string())
-        );
+        assert!(has_entry_pattern(&result, "src/db/schema.ts"));
+        assert!(has_entry_pattern(&result, "migrations/**/*.{ts,js}"));
     }
 
     #[test]
@@ -323,15 +307,10 @@ mod tests {
             source,
             Path::new("/project"),
         );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"src/db/schema/**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}".to_string())
-        );
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"migrations/**/*.{ts,js}".to_string())
-        );
+        assert!(has_entry_pattern(
+            &result,
+            "src/db/schema/**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
+        ));
+        assert!(has_entry_pattern(&result, "migrations/**/*.{ts,js}"));
     }
 }

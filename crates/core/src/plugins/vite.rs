@@ -80,7 +80,7 @@ impl Plugin for VitePlugin {
             config_path,
             &["build", "rollupOptions", "input"],
         );
-        result.entry_patterns.extend(rollup_input);
+        result.extend_entry_patterns(rollup_input);
 
         // build.lib.entry → entry points (string or array)
         let lib_entry = config_parser::extract_config_string_or_array(
@@ -88,7 +88,7 @@ impl Plugin for VitePlugin {
             config_path,
             &["build", "lib", "entry"],
         );
-        result.entry_patterns.extend(lib_entry);
+        result.extend_entry_patterns(lib_entry);
 
         // optimizeDeps.include → referenced dependencies
         let optimize_include = config_parser::extract_config_string_array(

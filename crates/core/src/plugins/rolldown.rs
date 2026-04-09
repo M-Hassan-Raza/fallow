@@ -32,7 +32,7 @@ define_plugin! {
 
         // input -> entry points (string, array, or object)
         let inputs = config_parser::extract_config_string_or_array(source, config_path, &["input"]);
-        result.entry_patterns.extend(inputs);
+        result.extend_entry_patterns(inputs);
 
         // external -> referenced dependencies (string array)
         let external =

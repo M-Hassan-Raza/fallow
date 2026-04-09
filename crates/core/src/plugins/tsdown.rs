@@ -31,7 +31,7 @@ define_plugin! {
 
         // entry -> source entry points for the library
         let entries = config_parser::extract_config_string_array(source, config_path, &["entry"]);
-        result.entry_patterns.extend(entries);
+        result.extend_entry_patterns(entries);
 
         result
     }

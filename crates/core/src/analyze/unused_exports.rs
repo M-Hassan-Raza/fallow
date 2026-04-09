@@ -15,7 +15,7 @@ use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 type IgnoreMatchers<'a> = Vec<(globset::GlobMatcher, &'a [String])>;
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
-type PluginMatchers<'a> = Vec<(globset::GlobMatcher, Vec<&'a str>)>;
+type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
 
 /// Compile config ignore_exports rules into glob matchers.
 fn compile_ignore_matchers(config: &ResolvedConfig) -> IgnoreMatchers<'_> {
@@ -41,17 +41,31 @@ fn compile_plugin_matchers(
     };
     pr.used_exports
         .iter()
-        .filter_map(|(file_pat, exports)| match globset::Glob::new(file_pat) {
-            Ok(g) => Some((
-                g.compile_matcher(),
-                exports.iter().map(String::as_str).collect::<Vec<_>>(),
-            )),
-            Err(e) => {
-                tracing::warn!("invalid used_exports pattern '{file_pat}': {e}");
-                None
-            }
-        })
+        .filter_map(compile_used_export_rule)
         .collect()
+}
+
+struct CompiledUsedExportRule<'a> {
+    path: crate::plugins::CompiledPathRule,
+    exports: Vec<&'a str>,
+}
+
+impl CompiledUsedExportRule<'_> {
+    fn matches(&self, path: &str) -> bool {
+        self.path.matches(path)
+    }
+}
+
+fn compile_used_export_rule(
+    rule: &crate::plugins::PluginUsedExportRule,
+) -> Option<CompiledUsedExportRule<'_>> {
+    Some(CompiledUsedExportRule {
+        path: crate::plugins::CompiledPathRule::for_used_export_rule(
+            &rule.rule.path,
+            "used_exports pattern",
+        )?,
+        exports: rule.rule.exports.iter().map(String::as_str).collect(),
+    })
 }
 
 /// Check whether a module should be skipped for unused-export analysis.
@@ -83,7 +97,7 @@ fn should_skip_module(module: &ModuleNode, has_plugin_used_exports: bool) -> boo
 fn is_export_ignored(
     export_name: &str,
     matching_ignore: &[&[String]],
-    matching_plugin: &[&Vec<&str>],
+    matching_plugin: &[&[&str]],
 ) -> bool {
     matching_ignore
         .iter()
@@ -131,10 +145,10 @@ pub fn find_unused_exports(
             .map(|(_, exports)| *exports)
             .collect();
 
-        let matching_plugin: Vec<&Vec<&str>> = plugin_matchers
+        let matching_plugin: Vec<&[&str]> = plugin_matchers
             .iter()
-            .filter(|(m, _)| m.is_match(file_str.as_ref()))
-            .map(|(_, exports)| exports)
+            .filter(|rule| rule.matches(file_str.as_ref()))
+            .map(|rule| rule.exports.as_slice())
             .collect();
 
         if should_skip_module(module, !matching_plugin.is_empty()) {
@@ -929,7 +943,15 @@ mod tests {
             entry_patterns: vec![],
             config_patterns: vec![],
             always_used: vec![],
-            used_exports,
+            used_exports: used_exports
+                .into_iter()
+                .map(|(pattern, exports)| {
+                    crate::plugins::PluginUsedExportRule::new(
+                        "test-plugin",
+                        crate::plugins::UsedExportRule::new(pattern, exports),
+                    )
+                })
+                .collect(),
             entry_point_roles: FxHashMap::default(),
             referenced_dependencies: vec![],
             discovered_always_used: vec![],

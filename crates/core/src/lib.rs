@@ -720,10 +720,10 @@ fn run_plugins(
             }
         };
 
-        for (pat, pname) in &ws_result.entry_patterns {
+        for (rule, pname) in &ws_result.entry_patterns {
             result
                 .entry_patterns
-                .push((prefix_if_needed(pat), pname.clone()));
+                .push((rule.prefixed(&ws_prefix), pname.clone()));
         }
         for (plugin_name, role) in ws_result.entry_point_roles {
             result.entry_point_roles.entry(plugin_name).or_insert(role);
@@ -743,10 +743,8 @@ fn run_plugins(
                 .fixture_patterns
                 .push((prefix_if_needed(pat), pname.clone()));
         }
-        for (file_pat, exports) in &ws_result.used_exports {
-            result
-                .used_exports
-                .push((prefix_if_needed(file_pat), exports.clone()));
+        for rule in &ws_result.used_exports {
+            result.used_exports.push(rule.prefixed(&ws_prefix));
         }
         // Merge active plugin names (deduplicated via HashSet)
         for plugin_name in ws_result.active_plugins {

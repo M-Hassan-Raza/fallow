@@ -381,8 +381,7 @@ impl FallowLspServer {
                 // used only for unlisted-dependency diagnostics (placed on its
                 // package.json). Previously this looped per-root, duplicating every
                 // diagnostic N times (#90).
-                let all_diagnostics =
-                    diagnostics::build_diagnostics(&results, &duplication, &root);
+                let all_diagnostics = diagnostics::build_diagnostics(&results, &duplication, &root);
                 self.publish_collected_diagnostics(all_diagnostics).await;
 
                 // Send summary stats to the client before storing results
@@ -608,8 +607,8 @@ mod tests {
 
     use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationStats};
     use fallow_core::results::{
-        BoundaryViolation, CircularDependency, ExportUsage, TestOnlyDependency,
-        UnlistedDependency, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+        BoundaryViolation, CircularDependency, ExportUsage, TestOnlyDependency, UnlistedDependency,
+        UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
     };
 
     // -----------------------------------------------------------------------

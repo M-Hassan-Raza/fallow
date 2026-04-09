@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{EntryPointRole, PackageJson};
+use regex::Regex;
 
 const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
     "ava",
@@ -30,6 +31,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "docusaurus",
     "electron",
     "expo",
+    "expo-router",
     "gatsby",
     "nestjs",
     "next-intl",
@@ -71,14 +73,17 @@ const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
 #[derive(Debug, Default)]
 pub struct PluginResult {
     /// Additional entry point glob patterns discovered from config.
-    pub entry_patterns: Vec<String>,
+    pub entry_patterns: Vec<PathRule>,
     /// When true, `entry_patterns` from config replace the plugin's static
     /// `entry_patterns()` defaults instead of adding to them. Tools like Vitest
     /// and Jest treat their config's include/testMatch as a replacement for built-in
     /// defaults, so when the config is explicit the static patterns must be dropped.
     pub replace_entry_patterns: bool,
+    /// When true, `used_exports` from config replace the plugin's static
+    /// `used_export_rules()` defaults instead of adding to them.
+    pub replace_used_export_rules: bool,
     /// Additional export-usage rules discovered from config.
-    pub used_exports: Vec<(String, Vec<String>)>,
+    pub used_exports: Vec<UsedExportRule>,
     /// Dependencies referenced in config files (should not be flagged as unused).
     pub referenced_dependencies: Vec<String>,
     /// Additional files that are always considered used.
@@ -92,6 +97,28 @@ pub struct PluginResult {
 }
 
 impl PluginResult {
+    pub fn push_entry_pattern(&mut self, pattern: impl Into<String>) {
+        self.entry_patterns.push(PathRule::new(pattern));
+    }
+
+    pub fn extend_entry_patterns<I, S>(&mut self, patterns: I)
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.entry_patterns
+            .extend(patterns.into_iter().map(PathRule::new));
+    }
+
+    pub fn push_used_export_rule(
+        &mut self,
+        pattern: impl Into<String>,
+        exports: impl IntoIterator<Item = impl Into<String>>,
+    ) {
+        self.used_exports
+            .push(UsedExportRule::new(pattern, exports));
+    }
+
     #[must_use]
     pub const fn is_empty(&self) -> bool {
         self.entry_patterns.is_empty()
@@ -101,6 +128,381 @@ impl PluginResult {
             && self.path_aliases.is_empty()
             && self.setup_files.is_empty()
             && self.fixture_patterns.is_empty()
+    }
+}
+
+/// A file-pattern rule with optional exclusion globs plus path-level or
+/// segment-level regex filters.
+///
+/// Exclusion regexes are matched against the project-relative path and should be
+/// anchored when generated dynamically so they can be safely workspace-prefixed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PathRule {
+    pub pattern: String,
+    pub exclude_globs: Vec<String>,
+    pub exclude_regexes: Vec<String>,
+    /// Regexes matched against individual path segments. These are not prefixed
+    /// for workspaces because they intentionally operate on segment names rather
+    /// than the full project-relative path.
+    pub exclude_segment_regexes: Vec<String>,
+}
+
+impl PathRule {
+    #[must_use]
+    pub fn new(pattern: impl Into<String>) -> Self {
+        Self {
+            pattern: pattern.into(),
+            exclude_globs: Vec::new(),
+            exclude_regexes: Vec::new(),
+            exclude_segment_regexes: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn from_static(pattern: &'static str) -> Self {
+        Self::new(pattern)
+    }
+
+    #[must_use]
+    pub fn with_excluded_globs<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.exclude_globs
+            .extend(patterns.into_iter().map(Into::into));
+        self
+    }
+
+    #[must_use]
+    pub fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.exclude_regexes
+            .extend(patterns.into_iter().map(Into::into));
+        self
+    }
+
+    #[must_use]
+    pub fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.exclude_segment_regexes
+            .extend(patterns.into_iter().map(Into::into));
+        self
+    }
+
+    #[must_use]
+    pub fn prefixed(&self, ws_prefix: &str) -> Self {
+        Self {
+            pattern: prefix_workspace_pattern(&self.pattern, ws_prefix),
+            exclude_globs: self
+                .exclude_globs
+                .iter()
+                .map(|pattern| prefix_workspace_pattern(pattern, ws_prefix))
+                .collect(),
+            exclude_regexes: self
+                .exclude_regexes
+                .iter()
+                .map(|pattern| prefix_workspace_regex(pattern, ws_prefix))
+                .collect(),
+            exclude_segment_regexes: self.exclude_segment_regexes.clone(),
+        }
+    }
+}
+
+/// A used-export rule bound to a file-pattern rule.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UsedExportRule {
+    pub path: PathRule,
+    pub exports: Vec<String>,
+}
+
+impl UsedExportRule {
+    #[must_use]
+    pub fn new(
+        pattern: impl Into<String>,
+        exports: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            path: PathRule::new(pattern),
+            exports: exports.into_iter().map(Into::into).collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn from_static(pattern: &'static str, exports: &'static [&'static str]) -> Self {
+        Self::new(pattern, exports.iter().copied())
+    }
+
+    #[must_use]
+    pub fn with_excluded_globs<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.path = self.path.with_excluded_globs(patterns);
+        self
+    }
+
+    #[must_use]
+    pub fn with_excluded_regexes<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.path = self.path.with_excluded_regexes(patterns);
+        self
+    }
+
+    #[must_use]
+    pub fn with_excluded_segment_regexes<I, S>(mut self, patterns: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.path = self.path.with_excluded_segment_regexes(patterns);
+        self
+    }
+
+    #[must_use]
+    pub fn prefixed(&self, ws_prefix: &str) -> Self {
+        Self {
+            path: self.path.prefixed(ws_prefix),
+            exports: self.exports.clone(),
+        }
+    }
+}
+
+/// A used-export rule tagged with the plugin that contributed it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginUsedExportRule {
+    pub plugin_name: String,
+    pub rule: UsedExportRule,
+}
+
+impl PluginUsedExportRule {
+    #[must_use]
+    pub fn new(plugin_name: impl Into<String>, rule: UsedExportRule) -> Self {
+        Self {
+            plugin_name: plugin_name.into(),
+            rule,
+        }
+    }
+
+    #[must_use]
+    pub fn prefixed(&self, ws_prefix: &str) -> Self {
+        Self {
+            plugin_name: self.plugin_name.clone(),
+            rule: self.rule.prefixed(ws_prefix),
+        }
+    }
+}
+
+/// A compiled path rule matcher shared by entry-point and used-export matching.
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledPathRule {
+    include: globset::GlobMatcher,
+    exclude_globs: Vec<globset::GlobMatcher>,
+    exclude_regexes: Vec<Regex>,
+    exclude_segment_regexes: Vec<Regex>,
+}
+
+impl CompiledPathRule {
+    pub(crate) fn for_entry_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
+        let include = match globset::GlobBuilder::new(&rule.pattern)
+            .literal_separator(true)
+            .build()
+        {
+            Ok(glob) => glob.compile_matcher(),
+            Err(err) => {
+                tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
+                return None;
+            }
+        };
+        Some(Self {
+            include,
+            exclude_globs: compile_excluded_globs(&rule.exclude_globs, rule_kind, &rule.pattern),
+            exclude_regexes: compile_excluded_regexes(
+                &rule.exclude_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+            exclude_segment_regexes: compile_excluded_segment_regexes(
+                &rule.exclude_segment_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+        })
+    }
+
+    pub(crate) fn for_used_export_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
+        let include = match globset::Glob::new(&rule.pattern) {
+            Ok(glob) => glob.compile_matcher(),
+            Err(err) => {
+                tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
+                return None;
+            }
+        };
+        Some(Self {
+            include,
+            exclude_globs: compile_excluded_globs(&rule.exclude_globs, rule_kind, &rule.pattern),
+            exclude_regexes: compile_excluded_regexes(
+                &rule.exclude_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+            exclude_segment_regexes: compile_excluded_segment_regexes(
+                &rule.exclude_segment_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+        })
+    }
+
+    #[must_use]
+    pub(crate) fn matches(&self, path: &str) -> bool {
+        self.include.is_match(path)
+            && !self.exclude_globs.iter().any(|glob| glob.is_match(path))
+            && !self
+                .exclude_regexes
+                .iter()
+                .any(|regex| regex.is_match(path))
+            && !matches_segment_regex(path, &self.exclude_segment_regexes)
+    }
+}
+
+fn prefix_workspace_pattern(pattern: &str, ws_prefix: &str) -> String {
+    if pattern.starts_with(ws_prefix) || pattern.starts_with('/') {
+        pattern.to_string()
+    } else {
+        format!("{ws_prefix}/{pattern}")
+    }
+}
+
+fn prefix_workspace_regex(pattern: &str, ws_prefix: &str) -> String {
+    if let Some(pattern) = pattern.strip_prefix('^') {
+        format!("^{}/{}", regex::escape(ws_prefix), pattern)
+    } else {
+        format!("^{}/(?:{})", regex::escape(ws_prefix), pattern)
+    }
+}
+
+fn compile_excluded_globs(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Vec<globset::GlobMatcher> {
+    patterns
+        .iter()
+        .filter_map(|pattern| {
+            match globset::GlobBuilder::new(pattern)
+                .literal_separator(true)
+                .build()
+            {
+                Ok(glob) => Some(glob.compile_matcher()),
+                Err(err) => {
+                    tracing::warn!(
+                        "skipping invalid excluded glob '{}' for {} '{}': {err}",
+                        pattern,
+                        rule_kind,
+                        rule_pattern
+                    );
+                    None
+                }
+            }
+        })
+        .collect()
+}
+
+fn compile_excluded_regexes(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Vec<Regex> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match Regex::new(pattern) {
+            Ok(regex) => Some(regex),
+            Err(err) => {
+                tracing::warn!(
+                    "skipping invalid excluded regex '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+fn compile_excluded_segment_regexes(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Vec<Regex> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match Regex::new(pattern) {
+            Ok(regex) => Some(regex),
+            Err(err) => {
+                tracing::warn!(
+                    "skipping invalid excluded segment regex '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+fn matches_segment_regex(path: &str, regexes: &[Regex]) -> bool {
+    path.split('/')
+        .any(|segment| regexes.iter().any(|regex| regex.is_match(segment)))
+}
+
+impl From<String> for PathRule {
+    fn from(pattern: String) -> Self {
+        Self::new(pattern)
+    }
+}
+
+impl From<&str> for PathRule {
+    fn from(pattern: &str) -> Self {
+        Self::new(pattern)
+    }
+}
+
+impl std::ops::Deref for PathRule {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pattern
+    }
+}
+
+impl PartialEq<&str> for PathRule {
+    fn eq(&self, other: &&str) -> bool {
+        self.pattern == *other
+    }
+}
+
+impl PartialEq<str> for PathRule {
+    fn eq(&self, other: &str) -> bool {
+        self.pattern == other
+    }
+}
+
+impl PartialEq<String> for PathRule {
+    fn eq(&self, other: &String) -> bool {
+        &self.pattern == other
     }
 }
 
@@ -144,6 +546,14 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
+    /// Entry point rules with optional exclusions.
+    fn entry_pattern_rules(&self) -> Vec<PathRule> {
+        self.entry_patterns()
+            .iter()
+            .map(|pattern| PathRule::from_static(pattern))
+            .collect()
+    }
+
     /// How this plugin's entry patterns should contribute to coverage reachability.
     ///
     /// `Support` roots keep files alive for dead-code analysis but do not count
@@ -165,6 +575,14 @@ pub trait Plugin: Send + Sync {
     /// Exports that are always considered used for matching file patterns.
     fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
         vec![]
+    }
+
+    /// Used-export rules with optional exclusions.
+    fn used_export_rules(&self) -> Vec<UsedExportRule> {
+        self.used_exports()
+            .into_iter()
+            .map(|(pattern, exports)| UsedExportRule::from_static(pattern, exports))
+            .collect()
     }
 
     /// Glob patterns for test fixture files consumed by this framework.
@@ -478,6 +896,7 @@ mod drizzle;
 mod electron;
 mod eslint;
 mod expo;
+mod expo_router;
 mod gatsby;
 mod graphql_codegen;
 mod husky;
@@ -618,7 +1037,7 @@ mod tests {
     #[test]
     fn plugin_result_not_empty_with_entry_patterns() {
         let r = PluginResult {
-            entry_patterns: vec!["*.ts".to_string()],
+            entry_patterns: vec!["*.ts".into()],
             ..Default::default()
         };
         assert!(!r.is_empty());

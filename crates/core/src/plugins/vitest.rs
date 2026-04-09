@@ -132,7 +132,7 @@ impl Plugin for VitestPlugin {
         if !root_includes.is_empty() {
             result.replace_entry_patterns = true;
         }
-        result.entry_patterns.extend(root_includes);
+        result.extend_entry_patterns(root_includes);
 
         // Also check test.projects[*].test.include (Vitest projects/workspaces)
         let project_includes = config_parser::extract_config_array_nested_string_or_array(
@@ -141,7 +141,7 @@ impl Plugin for VitestPlugin {
             &["test", "projects"],
             &["test", "include"],
         );
-        result.entry_patterns.extend(project_includes);
+        result.extend_entry_patterns(project_includes);
 
         // test.setupFiles → setup files (string or array)
         let mut setup_files = config_parser::extract_config_string_or_array(

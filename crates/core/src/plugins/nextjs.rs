@@ -343,7 +343,7 @@ impl Plugin for NextJsPlugin {
                 "src/instrumentation-client",
             ];
             for base in &base_patterns {
-                result.entry_patterns.push(format!("{base}.{{{ext_str}}}"));
+                result.push_entry_pattern(format!("{base}.{{{ext_str}}}"));
             }
         }
 

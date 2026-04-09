@@ -90,7 +90,7 @@ impl Plugin for NxPlugin {
         );
         for main in &mains {
             let path = main.trim_start_matches("./");
-            result.entry_patterns.push(path.to_string());
+            result.push_entry_pattern(path.to_string());
         }
 
         // project.json: targets.*.options.tsConfig → always used
@@ -112,6 +112,13 @@ impl Plugin for NxPlugin {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn has_entry_pattern(result: &PluginResult, pattern: &str) -> bool {
+        result
+            .entry_patterns
+            .iter()
+            .any(|entry_pattern| entry_pattern.pattern == pattern)
+    }
 
     #[test]
     fn resolve_config_extracts_executor() {
@@ -155,11 +162,7 @@ mod tests {
         let plugin = NxPlugin;
         let result =
             plugin.resolve_config(Path::new("project.json"), source, Path::new("/project"));
-        assert!(
-            result
-                .entry_patterns
-                .contains(&"apps/client/src/main.ts".to_string())
-        );
+        assert!(has_entry_pattern(&result, "apps/client/src/main.ts"));
     }
 
     #[test]

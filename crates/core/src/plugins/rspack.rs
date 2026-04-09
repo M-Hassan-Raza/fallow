@@ -50,7 +50,7 @@ define_plugin! {
         // entry -> entry points (string, array, or object with string values)
         let entries =
             config_parser::extract_config_string_or_array(source, config_path, &["entry"]);
-        result.entry_patterns.extend(entries);
+        result.extend_entry_patterns(entries);
 
         // require() calls for loaders/plugins in CJS configs
         let require_deps =

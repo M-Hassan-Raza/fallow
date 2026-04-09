@@ -135,7 +135,7 @@ fn extract_jest_setup_files(
     if !test_match.is_empty() {
         result.replace_entry_patterns = true;
     }
-    result.entry_patterns.extend(test_match);
+    result.extend_entry_patterns(test_match);
 
     // testRegex → convert to best-effort glob and replace defaults
     // Jest's testRegex restricts which files are tests. Common pattern: "src/.*\\.test\\.ts$"
@@ -146,7 +146,7 @@ fn extract_jest_setup_files(
         && let Some(glob) = test_regex_to_glob(&regex)
     {
         result.replace_entry_patterns = true;
-        result.entry_patterns.push(glob);
+        result.push_entry_pattern(glob);
     }
 }
 
