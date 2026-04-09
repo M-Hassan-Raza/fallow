@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.24.0] - 2026-04-09
+
+### Added
+
+- **Function size and parameter risk profiles** -- `fallow health` now computes risk distribution histograms for function size (1-15 / 16-30 / 31-60 / >60 LOC) and parameter count (0-2 / 3-4 / 5-6 / >=7 params). Profiles appear in JSON as `unit_size_profile` and `unit_interfacing_profile` on `vital_signs`, and in human output when approaching penalty thresholds.
+- **Parameter counting on functions** -- `FunctionComplexity` now includes `param_count` (excluding TypeScript's `this` parameter, including rest parameters). Available in health findings JSON output.
+- **Coupling concentration metrics** -- `p95_fan_in` and `coupling_high_pct` added to vital signs, tracking the 95th percentile of incoming dependencies and the percentage of highly-coupled files.
+- **Two new health score penalties** -- `unit_size` (max 10 points, activates when >5% of functions exceed 60 LOC) and `coupling` (max 5 points, activates when p95 fan-in exceeds 30). Conservatively calibrated: zero penalty on well-maintained projects.
+- **Trend schema version migration warning** -- when comparing against a snapshot from an older schema version, the trend output warns that score deltas may reflect formula changes rather than code changes.
+
+### Changed
+
+- **Conditional risk profile rendering** -- function size profiles only appear in human output when the very-high-risk bin reaches 3% (approaching the 5% penalty threshold). Parameter profiles only appear when high or very-high bins carry signal. Healthy projects see clean, noise-free output.
+- **Risk profiles visible during trend view** -- removed suppression of risk profiles when comparing against snapshots, so users can see absolute distributions alongside trend deltas.
+- **Snapshot schema v4** -- added risk profiles and coupling fields. Old v3 snapshots load seamlessly via serde defaults.
+
+### Fixed
+
+- **Baseline key portability** -- baseline keys now use relative paths for cross-machine consistency.
+- **Zero-match baseline warning** -- improved messaging when baselines match no current issues.
+- **Baseline stats in combined JSON** -- unified baseline key helpers across check/health/dupes.
+
 ## [2.23.1] - 2026-04-09
 
 ### Fixed
@@ -1121,7 +1143,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.23.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.24.0...HEAD
+[2.24.0]: https://github.com/fallow-rs/fallow/compare/v2.23.1...v2.24.0
 [2.23.1]: https://github.com/fallow-rs/fallow/compare/v2.23.0...v2.23.1
 [2.23.0]: https://github.com/fallow-rs/fallow/compare/v2.22.4...v2.23.0
 [2.22.4]: https://github.com/fallow-rs/fallow/compare/v2.22.3...v2.22.4
