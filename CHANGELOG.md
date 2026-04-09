@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.25.0] - 2026-04-09
+
+### Added
+
+- **Health: large function drill-down and duplication penalty** -- `fallow health` now shows the largest functions contributing to unit size risk and applies a score penalty when code duplication is detected. Progressive disclosure hints guide users to relevant flags (`--top`, duplication timing).
+- **SIG-aligned clippy lints and module coupling CI** -- added `too_many_lines` (150 LOC), `too_many_arguments` (7 params), and `cognitive_complexity` (25) thresholds aligned with SIG maintainability properties. New CI workflow tracks inter-module coupling metrics.
+
+### Fixed
+
+- **VS Code extension: raw ANSI escape codes in Output panel** -- the LSP server's tracing subscriber now disables ANSI color codes, matching the pattern already used by the MCP server. VS Code's Output panel does not render ANSI sequences. ([#89](https://github.com/fallow-rs/fallow/issues/89))
+
 ## [2.24.0] - 2026-04-09
 
 ### Added
@@ -1143,7 +1154,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.24.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.25.0...HEAD
+[2.25.0]: https://github.com/fallow-rs/fallow/compare/v2.24.0...v2.25.0
 [2.24.0]: https://github.com/fallow-rs/fallow/compare/v2.23.1...v2.24.0
 [2.23.1]: https://github.com/fallow-rs/fallow/compare/v2.23.0...v2.23.1
 [2.23.0]: https://github.com/fallow-rs/fallow/compare/v2.22.4...v2.23.0
