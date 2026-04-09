@@ -9,7 +9,7 @@ use rustc_hash::FxHashSet;
 
 use fallow_config::{ExternalPluginDef, PluginDetection};
 
-use super::super::{PathRule, Plugin, PluginResult, UsedExportRule};
+use super::super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, UsedExportRule};
 use super::AggregatedPluginResult;
 
 /// Collect static patterns from a single plugin into the aggregated result.
@@ -34,7 +34,9 @@ pub fn process_static_patterns(
         result.always_used.push(((*pat).to_string(), pname.clone()));
     }
     for rule in plugin.used_export_rules() {
-        result.used_exports.push(rule);
+        result
+            .used_exports
+            .push(PluginUsedExportRule::new(pname.clone(), rule));
     }
     for dep in plugin.tooling_dependencies() {
         result.tooling_dependencies.push((*dep).to_string());
@@ -105,7 +107,10 @@ pub fn process_external_plugins(
             for ue in &ext.used_exports {
                 result
                     .used_exports
-                    .push(UsedExportRule::new(ue.pattern.clone(), ue.exports.clone()));
+                    .push(PluginUsedExportRule::new(
+                        ext.name.clone(),
+                        UsedExportRule::new(ue.pattern.clone(), ue.exports.clone()),
+                    ));
             }
         }
     }
@@ -174,11 +179,14 @@ pub fn process_config_result(
     result: &mut AggregatedPluginResult,
 ) {
     let pname = plugin_name.to_string();
-    // When the config explicitly defines entry patterns (e.g. vitest test.include,
-    // jest testMatch), they replace the plugin's static defaults rather than adding
-    // to them. The tool treats its config as a full override of the defaults.
+    // When the config explicitly defines entry patterns or used-export rules,
+    // treat it as a full override of that plugin's static defaults instead of
+    // layering both sets together.
     if plugin_result.replace_entry_patterns && !plugin_result.entry_patterns.is_empty() {
         result.entry_patterns.retain(|(_, name)| name != &pname);
+    }
+    if plugin_result.replace_used_export_rules && !plugin_result.used_exports.is_empty() {
+        result.used_exports.retain(|rule| rule.plugin_name != pname);
     }
     result.entry_patterns.extend(
         plugin_result
@@ -186,7 +194,12 @@ pub fn process_config_result(
             .into_iter()
             .map(|rule| (rule, pname.clone())),
     );
-    result.used_exports.extend(plugin_result.used_exports);
+    result.used_exports.extend(
+        plugin_result
+            .used_exports
+            .into_iter()
+            .map(|rule| PluginUsedExportRule::new(pname.clone(), rule)),
+    );
     result
         .referenced_dependencies
         .extend(plugin_result.referenced_dependencies);

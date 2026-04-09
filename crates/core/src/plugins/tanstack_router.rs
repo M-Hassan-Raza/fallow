@@ -158,6 +158,7 @@ impl Plugin for TanstackRouterPlugin {
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let mut result = PluginResult {
             replace_entry_patterns: true,
+            replace_used_export_rules: true,
             ..PluginResult::default()
         };
 

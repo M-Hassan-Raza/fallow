@@ -12,6 +12,7 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{EntryPointRole, PackageJson};
+use regex::Regex;
 
 const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
     "ava",
@@ -78,6 +79,9 @@ pub struct PluginResult {
     /// and Jest treat their config's include/testMatch as a replacement for built-in
     /// defaults, so when the config is explicit the static patterns must be dropped.
     pub replace_entry_patterns: bool,
+    /// When true, `used_exports` from config replace the plugin's static
+    /// `used_export_rules()` defaults instead of adding to them.
+    pub replace_used_export_rules: bool,
     /// Additional export-usage rules discovered from config.
     pub used_exports: Vec<UsedExportRule>,
     /// Dependencies referenced in config files (should not be flagged as unused).
@@ -274,6 +278,101 @@ impl UsedExportRule {
     }
 }
 
+/// A used-export rule tagged with the plugin that contributed it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PluginUsedExportRule {
+    pub plugin_name: String,
+    pub rule: UsedExportRule,
+}
+
+impl PluginUsedExportRule {
+    #[must_use]
+    pub fn new(plugin_name: impl Into<String>, rule: UsedExportRule) -> Self {
+        Self {
+            plugin_name: plugin_name.into(),
+            rule,
+        }
+    }
+
+    #[must_use]
+    pub fn prefixed(&self, ws_prefix: &str) -> Self {
+        Self {
+            plugin_name: self.plugin_name.clone(),
+            rule: self.rule.prefixed(ws_prefix),
+        }
+    }
+}
+
+/// A compiled path rule matcher shared by entry-point and used-export matching.
+#[derive(Debug, Clone)]
+pub(crate) struct CompiledPathRule {
+    include: globset::GlobMatcher,
+    exclude_globs: Vec<globset::GlobMatcher>,
+    exclude_regexes: Vec<Regex>,
+    exclude_segment_regexes: Vec<Regex>,
+}
+
+impl CompiledPathRule {
+    pub(crate) fn for_entry_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
+        let include = match globset::GlobBuilder::new(&rule.pattern)
+            .literal_separator(true)
+            .build()
+        {
+            Ok(glob) => glob.compile_matcher(),
+            Err(err) => {
+                tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
+                return None;
+            }
+        };
+        Some(Self {
+            include,
+            exclude_globs: compile_excluded_globs(&rule.exclude_globs, rule_kind, &rule.pattern),
+            exclude_regexes: compile_excluded_regexes(
+                &rule.exclude_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+            exclude_segment_regexes: compile_excluded_segment_regexes(
+                &rule.exclude_segment_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+        })
+    }
+
+    pub(crate) fn for_used_export_rule(rule: &PathRule, rule_kind: &str) -> Option<Self> {
+        let include = match globset::Glob::new(&rule.pattern) {
+            Ok(glob) => glob.compile_matcher(),
+            Err(err) => {
+                tracing::warn!("invalid {rule_kind} '{}': {err}", rule.pattern);
+                return None;
+            }
+        };
+        Some(Self {
+            include,
+            exclude_globs: compile_excluded_globs(&rule.exclude_globs, rule_kind, &rule.pattern),
+            exclude_regexes: compile_excluded_regexes(
+                &rule.exclude_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+            exclude_segment_regexes: compile_excluded_segment_regexes(
+                &rule.exclude_segment_regexes,
+                rule_kind,
+                &rule.pattern,
+            ),
+        })
+    }
+
+    #[must_use]
+    pub(crate) fn matches(&self, path: &str) -> bool {
+        self.include.is_match(path)
+            && !self.exclude_globs.iter().any(|glob| glob.is_match(path))
+            && !self.exclude_regexes.iter().any(|regex| regex.is_match(path))
+            && !matches_segment_regex(path, &self.exclude_segment_regexes)
+    }
+}
+
 fn prefix_workspace_pattern(pattern: &str, ws_prefix: &str) -> String {
     if pattern.starts_with(ws_prefix) || pattern.starts_with('/') {
         pattern.to_string()
@@ -288,6 +387,80 @@ fn prefix_workspace_regex(pattern: &str, ws_prefix: &str) -> String {
     } else {
         format!("^{}/(?:{})", regex::escape(ws_prefix), pattern)
     }
+}
+
+fn compile_excluded_globs(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Vec<globset::GlobMatcher> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match globset::GlobBuilder::new(pattern)
+            .literal_separator(true)
+            .build()
+        {
+            Ok(glob) => Some(glob.compile_matcher()),
+            Err(err) => {
+                tracing::warn!(
+                    "skipping invalid excluded glob '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+fn compile_excluded_regexes(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Vec<Regex> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match Regex::new(pattern) {
+            Ok(regex) => Some(regex),
+            Err(err) => {
+                tracing::warn!(
+                    "skipping invalid excluded regex '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+fn compile_excluded_segment_regexes(
+    patterns: &[String],
+    rule_kind: &str,
+    rule_pattern: &str,
+) -> Vec<Regex> {
+    patterns
+        .iter()
+        .filter_map(|pattern| match Regex::new(pattern) {
+            Ok(regex) => Some(regex),
+            Err(err) => {
+                tracing::warn!(
+                    "skipping invalid excluded segment regex '{}' for {} '{}': {err}",
+                    pattern,
+                    rule_kind,
+                    rule_pattern
+                );
+                None
+            }
+        })
+        .collect()
+}
+
+fn matches_segment_regex(path: &str, regexes: &[Regex]) -> bool {
+    path.split('/')
+        .any(|segment| regexes.iter().any(|regex| regex.is_match(segment)))
 }
 
 impl From<String> for PathRule {

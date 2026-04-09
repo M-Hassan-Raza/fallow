@@ -1,4 +1,3 @@
-use regex::Regex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::ResolvedConfig;
@@ -47,134 +46,26 @@ fn compile_plugin_matchers(
 }
 
 struct CompiledUsedExportRule<'a> {
-    include: globset::GlobMatcher,
-    exclude_globs: Vec<globset::GlobMatcher>,
-    exclude_regexes: Vec<Regex>,
-    exclude_segment_regexes: Vec<Regex>,
+    path: crate::plugins::CompiledPathRule,
     exports: Vec<&'a str>,
 }
 
 impl CompiledUsedExportRule<'_> {
     fn matches(&self, path: &str) -> bool {
-        self.include.is_match(path)
-            && !self.exclude_globs.iter().any(|glob| glob.is_match(path))
-            && !self
-                .exclude_regexes
-                .iter()
-                .any(|regex| regex.is_match(path))
-            && !matches_segment_regex(path, &self.exclude_segment_regexes)
+        self.path.matches(path)
     }
 }
 
 fn compile_used_export_rule(
-    rule: &crate::plugins::UsedExportRule,
+    rule: &crate::plugins::PluginUsedExportRule,
 ) -> Option<CompiledUsedExportRule<'_>> {
-    let include = match globset::Glob::new(&rule.path.pattern) {
-        Ok(glob) => glob.compile_matcher(),
-        Err(err) => {
-            tracing::warn!(
-                "invalid used_exports pattern '{}': {err}",
-                rule.path.pattern
-            );
-            return None;
-        }
-    };
-    let exclude_globs =
-        compile_excluded_globs(&rule.path.exclude_globs, "used_exports", &rule.path.pattern)?;
-    let exclude_regexes = compile_excluded_regexes(
-        &rule.path.exclude_regexes,
-        "used_exports",
-        &rule.path.pattern,
-    )?;
-    let exclude_segment_regexes = compile_excluded_segment_regexes(
-        &rule.path.exclude_segment_regexes,
-        "used_exports",
-        &rule.path.pattern,
-    )?;
     Some(CompiledUsedExportRule {
-        include,
-        exclude_globs,
-        exclude_regexes,
-        exclude_segment_regexes,
-        exports: rule.exports.iter().map(String::as_str).collect(),
+        path: crate::plugins::CompiledPathRule::for_used_export_rule(
+            &rule.rule.path,
+            "used_exports pattern",
+        )?,
+        exports: rule.rule.exports.iter().map(String::as_str).collect(),
     })
-}
-
-fn compile_excluded_globs(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Option<Vec<globset::GlobMatcher>> {
-    let mut matchers = Vec::with_capacity(patterns.len());
-    for pattern in patterns {
-        let glob = match globset::Glob::new(pattern) {
-            Ok(glob) => glob,
-            Err(err) => {
-                tracing::warn!(
-                    "invalid excluded glob '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                return None;
-            }
-        };
-        matchers.push(glob.compile_matcher());
-    }
-    Some(matchers)
-}
-
-fn compile_excluded_regexes(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Option<Vec<Regex>> {
-    let mut regexes = Vec::with_capacity(patterns.len());
-    for pattern in patterns {
-        let regex = match Regex::new(pattern) {
-            Ok(regex) => regex,
-            Err(err) => {
-                tracing::warn!(
-                    "invalid excluded regex '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                return None;
-            }
-        };
-        regexes.push(regex);
-    }
-    Some(regexes)
-}
-
-fn compile_excluded_segment_regexes(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Option<Vec<Regex>> {
-    let mut regexes = Vec::with_capacity(patterns.len());
-    for pattern in patterns {
-        let regex = match Regex::new(pattern) {
-            Ok(regex) => regex,
-            Err(err) => {
-                tracing::warn!(
-                    "invalid excluded segment regex '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                return None;
-            }
-        };
-        regexes.push(regex);
-    }
-    Some(regexes)
-}
-
-fn matches_segment_regex(path: &str, regexes: &[Regex]) -> bool {
-    path.split('/')
-        .any(|segment| regexes.iter().any(|regex| regex.is_match(segment)))
 }
 
 /// Check whether a module should be skipped for unused-export analysis.
@@ -1054,7 +945,12 @@ mod tests {
             always_used: vec![],
             used_exports: used_exports
                 .into_iter()
-                .map(|(pattern, exports)| crate::plugins::UsedExportRule::new(pattern, exports))
+                .map(|(pattern, exports)| {
+                    crate::plugins::PluginUsedExportRule::new(
+                        "test-plugin",
+                        crate::plugins::UsedExportRule::new(pattern, exports),
+                    )
+                })
                 .collect(),
             entry_point_roles: FxHashMap::default(),
             referenced_dependencies: vec![],

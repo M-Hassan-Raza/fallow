@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{EntryPointRole, ExternalPluginDef, PackageJson};
 
-use super::{PathRule, Plugin, UsedExportRule};
+use super::{PathRule, Plugin, PluginUsedExportRule};
 
 pub(crate) mod builtin;
 mod helpers;
@@ -37,7 +37,7 @@ pub struct AggregatedPluginResult {
     /// All always-used file patterns from active plugins: (pattern, plugin_name).
     pub always_used: Vec<(String, String)>,
     /// All used export rules from active plugins.
-    pub used_exports: Vec<UsedExportRule>,
+    pub used_exports: Vec<PluginUsedExportRule>,
     /// Dependencies referenced in config files (should not be flagged unused).
     pub referenced_dependencies: Vec<String>,
     /// Additional always-used files discovered from config parsing: (pattern, plugin_name).

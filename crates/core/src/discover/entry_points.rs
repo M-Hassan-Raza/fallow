@@ -2,8 +2,6 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{EntryPointRole, PackageJson, ResolvedConfig};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-use regex::Regex;
-
 use super::parse_scripts::extract_script_file_refs;
 use super::walk::SOURCE_EXTENSIONS;
 
@@ -566,13 +564,16 @@ pub fn discover_plugin_entry_point_sets(
             .build()
         {
             builder.add(glob);
-            glob_meta.push(CompiledEntryRule {
-                exclude_globs: Vec::new(),
-                exclude_regexes: Vec::new(),
-                exclude_segment_regexes: Vec::new(),
-                plugin_name: pname,
-                role: EntryPointRole::Support,
-            });
+            if let Some(path) = crate::plugins::CompiledPathRule::for_entry_rule(
+                &crate::plugins::PathRule::new(pattern.clone()),
+                "support entry pattern",
+            ) {
+                glob_meta.push(CompiledEntryRule {
+                    path,
+                    plugin_name: pname,
+                    role: EntryPointRole::Support,
+                });
+            }
         }
     }
     if let Ok(glob_set) = builder.build()
@@ -695,21 +696,14 @@ pub fn discover_dynamically_loaded_entry_points(
 }
 
 struct CompiledEntryRule<'a> {
-    exclude_globs: Vec<globset::GlobMatcher>,
-    exclude_regexes: Vec<Regex>,
-    exclude_segment_regexes: Vec<Regex>,
+    path: crate::plugins::CompiledPathRule,
     plugin_name: &'a str,
     role: EntryPointRole,
 }
 
 impl CompiledEntryRule<'_> {
     fn matches(&self, path: &str) -> bool {
-        !self.exclude_globs.iter().any(|glob| glob.is_match(path))
-            && !self
-                .exclude_regexes
-                .iter()
-                .any(|regex| regex.is_match(path))
-            && !matches_segment_regex(path, &self.exclude_segment_regexes)
+        self.path.matches(path)
     }
 }
 
@@ -728,15 +722,6 @@ fn compile_entry_rule<'a>(
             return None;
         }
     };
-    let exclude_globs =
-        compile_excluded_globs(&rule.exclude_globs, "entry pattern", &rule.pattern)?;
-    let exclude_regexes =
-        compile_excluded_regexes(&rule.exclude_regexes, "entry pattern", &rule.pattern)?;
-    let exclude_segment_regexes = compile_excluded_segment_regexes(
-        &rule.exclude_segment_regexes,
-        "entry pattern",
-        &rule.pattern,
-    )?;
     let role = plugin_result
         .entry_point_roles
         .get(plugin_name)
@@ -745,93 +730,11 @@ fn compile_entry_rule<'a>(
     Some((
         include,
         CompiledEntryRule {
-            exclude_globs,
-            exclude_regexes,
-            exclude_segment_regexes,
+            path: crate::plugins::CompiledPathRule::for_entry_rule(rule, "entry pattern")?,
             plugin_name,
             role,
         },
     ))
-}
-
-fn compile_excluded_globs(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Option<Vec<globset::GlobMatcher>> {
-    let mut matchers = Vec::with_capacity(patterns.len());
-    for pattern in patterns {
-        let glob = match globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-        {
-            Ok(glob) => glob,
-            Err(err) => {
-                tracing::warn!(
-                    "invalid excluded glob '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                return None;
-            }
-        };
-        matchers.push(glob.compile_matcher());
-    }
-    Some(matchers)
-}
-
-fn compile_excluded_regexes(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Option<Vec<Regex>> {
-    let mut regexes = Vec::with_capacity(patterns.len());
-    for pattern in patterns {
-        let regex = match Regex::new(pattern) {
-            Ok(regex) => regex,
-            Err(err) => {
-                tracing::warn!(
-                    "invalid excluded regex '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                return None;
-            }
-        };
-        regexes.push(regex);
-    }
-    Some(regexes)
-}
-
-fn compile_excluded_segment_regexes(
-    patterns: &[String],
-    rule_kind: &str,
-    rule_pattern: &str,
-) -> Option<Vec<Regex>> {
-    let mut regexes = Vec::with_capacity(patterns.len());
-    for pattern in patterns {
-        let regex = match Regex::new(pattern) {
-            Ok(regex) => regex,
-            Err(err) => {
-                tracing::warn!(
-                    "invalid excluded segment regex '{}' for {} '{}': {err}",
-                    pattern,
-                    rule_kind,
-                    rule_pattern
-                );
-                return None;
-            }
-        };
-        regexes.push(regex);
-    }
-    Some(regexes)
-}
-
-fn matches_segment_regex(path: &str, regexes: &[Regex]) -> bool {
-    path.split('/')
-        .any(|segment| regexes.iter().any(|regex| regex.is_match(segment)))
 }
 
 /// Pre-compile a set of glob patterns for efficient matching against many paths.

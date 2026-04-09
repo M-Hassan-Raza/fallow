@@ -1,4 +1,4 @@
-use super::super::{PathRule, PluginResult, UsedExportRule};
+use super::super::{PathRule, PluginResult, PluginUsedExportRule, UsedExportRule};
 use super::*;
 use fallow_config::{ExternalPluginDef, ExternalUsedExport, PluginDetection};
 use helpers::{check_plugin_detection, discover_json_config_files, process_config_result};
@@ -31,6 +31,14 @@ fn path_rule(pattern: &str) -> PathRule {
 
 fn used_export_rule(pattern: &str, exports: &[&str]) -> UsedExportRule {
     UsedExportRule::new(pattern, exports.iter().copied())
+}
+
+fn plugin_used_export_rule(
+    plugin_name: &str,
+    pattern: &str,
+    exports: &[&str],
+) -> PluginUsedExportRule {
+    PluginUsedExportRule::new(plugin_name, used_export_rule(pattern, exports))
 }
 
 // ── Plugin detection via enablers ────────────────────────────
@@ -369,7 +377,8 @@ fn external_plugin_used_exports_aggregated() {
     let pkg = make_pkg(&["ue-dep"]);
     let result = registry.run(&pkg, Path::new("/project"), &[]);
     assert!(result.used_exports.iter().any(|rule| {
-        rule.path.pattern == "pages/**/*.tsx" && rule.exports.contains(&"default".to_string())
+        rule.rule.path.pattern == "pages/**/*.tsx"
+            && rule.rule.exports.contains(&"default".to_string())
     }));
 }
 
@@ -451,7 +460,7 @@ fn active_plugin_contributes_used_exports() {
         result
             .used_exports
             .iter()
-            .any(|rule| rule.exports.contains(&"default".to_string())),
+            .any(|rule| rule.rule.exports.contains(&"default".to_string())),
         "nextjs used_exports should include 'default'"
     );
 }
@@ -822,6 +831,7 @@ fn process_config_result_merges_all_fields() {
     let config_result = PluginResult {
         entry_patterns: vec![path_rule("src/routes/**/*.ts")],
         replace_entry_patterns: false,
+        replace_used_export_rules: false,
         used_exports: vec![used_export_rule("src/routes/**/*.ts", &["loader"])],
         referenced_dependencies: vec!["lodash".to_string(), "axios".to_string()],
         always_used_files: vec!["setup.ts".to_string()],
@@ -837,11 +847,15 @@ fn process_config_result_merges_all_fields() {
 
     assert_eq!(aggregated.used_exports.len(), 1);
     assert_eq!(
-        aggregated.used_exports[0].path.pattern,
+        aggregated.used_exports[0].plugin_name,
+        "test-plugin"
+    );
+    assert_eq!(
+        aggregated.used_exports[0].rule.path.pattern,
         "src/routes/**/*.ts"
     );
     assert_eq!(
-        aggregated.used_exports[0].exports,
+        aggregated.used_exports[0].rule.exports,
         vec!["loader".to_string()]
     );
 
@@ -876,6 +890,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
     let result1 = PluginResult {
         entry_patterns: vec![path_rule("a.ts")],
         replace_entry_patterns: false,
+        replace_used_export_rules: false,
         used_exports: vec![used_export_rule("a.ts", &["default"])],
         referenced_dependencies: vec!["dep-a".to_string()],
         always_used_files: vec![],
@@ -886,6 +901,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
     let result2 = PluginResult {
         entry_patterns: vec![path_rule("b.ts")],
         replace_entry_patterns: false,
+        replace_used_export_rules: false,
         used_exports: vec![used_export_rule("b.ts", &["loader"])],
         referenced_dependencies: vec!["dep-b".to_string()],
         always_used_files: vec!["c.ts".to_string()],
@@ -905,8 +921,10 @@ fn process_config_result_accumulates_across_multiple_calls() {
     assert_eq!(aggregated.entry_patterns[1].1, "plugin-b");
 
     assert_eq!(aggregated.used_exports.len(), 2);
-    assert_eq!(aggregated.used_exports[0].path.pattern, "a.ts");
-    assert_eq!(aggregated.used_exports[1].path.pattern, "b.ts");
+    assert_eq!(aggregated.used_exports[0].plugin_name, "plugin-a");
+    assert_eq!(aggregated.used_exports[0].rule.path.pattern, "a.ts");
+    assert_eq!(aggregated.used_exports[1].plugin_name, "plugin-b");
+    assert_eq!(aggregated.used_exports[1].rule.path.pattern, "b.ts");
 
     // Verify referenced dependencies from both calls
     assert_eq!(aggregated.referenced_dependencies.len(), 2);
@@ -1027,6 +1045,42 @@ fn process_config_result_replace_entry_patterns_removes_static_defaults() {
 }
 
 #[test]
+fn process_config_result_replace_used_export_rules_removes_static_defaults() {
+    let mut aggregated = AggregatedPluginResult::default();
+    aggregated
+        .used_exports
+        .push(plugin_used_export_rule("tanstack-router", "src/routes/**/*.tsx", &["Route"]));
+    aggregated.used_exports.push(plugin_used_export_rule(
+        "tanstack-router",
+        "app/routes/**/*.tsx",
+        &["Route"],
+    ));
+    aggregated
+        .used_exports
+        .push(plugin_used_export_rule("nextjs", "app/**/page.tsx", &["default"]));
+
+    let config_result = PluginResult {
+        replace_used_export_rules: true,
+        used_exports: vec![used_export_rule("app/pages/**/*.tsx", &["Route"])],
+        ..Default::default()
+    };
+
+    process_config_result("tanstack-router", config_result, &mut aggregated);
+
+    let tanstack_rules: Vec<_> = aggregated
+        .used_exports
+        .iter()
+        .filter(|rule| rule.plugin_name == "tanstack-router")
+        .collect();
+    assert_eq!(tanstack_rules.len(), 1);
+    assert_eq!(tanstack_rules[0].rule.path.pattern, "app/pages/**/*.tsx");
+
+    assert!(aggregated.used_exports.iter().any(|rule| {
+        rule.plugin_name == "nextjs" && rule.rule.path.pattern == "app/**/page.tsx"
+    }));
+}
+
+#[test]
 fn process_config_result_replace_entry_patterns_noop_when_empty() {
     let mut aggregated = AggregatedPluginResult::default();
     aggregated
@@ -1048,6 +1102,28 @@ fn process_config_result_replace_entry_patterns_noop_when_empty() {
         "static pattern should survive when config provides none"
     );
     assert_eq!(aggregated.entry_patterns[0].0, "**/*.test.ts");
+}
+
+#[test]
+fn process_config_result_replace_used_export_rules_noop_when_empty() {
+    let mut aggregated = AggregatedPluginResult::default();
+    aggregated
+        .used_exports
+        .push(plugin_used_export_rule("tanstack-router", "src/routes/**/*.tsx", &["Route"]));
+
+    let config_result = PluginResult {
+        replace_used_export_rules: true,
+        used_exports: vec![],
+        ..Default::default()
+    };
+
+    process_config_result("tanstack-router", config_result, &mut aggregated);
+
+    assert_eq!(aggregated.used_exports.len(), 1);
+    assert_eq!(
+        aggregated.used_exports[0].rule.path.pattern,
+        "src/routes/**/*.tsx"
+    );
 }
 
 // ── PluginResult::is_empty ───────────────────────────────────
@@ -1304,10 +1380,12 @@ fn external_plugin_multiple_used_exports() {
         "should have two used_export entries"
     );
     assert!(result.used_exports.iter().any(|rule| {
-        rule.path.pattern == "routes/**/*.ts" && rule.exports.contains(&"loader".to_string())
+        rule.rule.path.pattern == "routes/**/*.ts"
+            && rule.rule.exports.contains(&"loader".to_string())
     }));
     assert!(result.used_exports.iter().any(|rule| {
-        rule.path.pattern == "api/**/*.ts" && rule.exports.contains(&"GET".to_string())
+        rule.rule.path.pattern == "api/**/*.ts"
+            && rule.rule.exports.contains(&"GET".to_string())
     }));
 }
 
