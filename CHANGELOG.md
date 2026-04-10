@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.27.2] - 2026-04-10
+
+### Fixed
+
+- **SCSS partial resolution** -- `@use 'variables'` and `@import '../styles/variables'` now resolve to `_variables.scss` per SCSS convention. Extensionless bare specifiers in `.scss`/`.sass` files are normalized to relative paths, and the resolver tries the underscore-prefix fallback before npm package classification. Eliminates cascading false positives across unresolved imports, unlisted dependencies, and unused files. ([#95](https://github.com/fallow-rs/fallow/issues/95))
+- **Inheritance-aware class member detection** -- child class members accessed via `this.*` in parent class methods are no longer flagged as unused. Builds an inheritance map from `extends` clauses and propagates member accesses bidirectionally through the hierarchy. Reduces false positives from 7 to 1 in typical polymorphic dispatch patterns (the remaining case requires type inference). Also handles `export default class extends Foo` patterns. ([#96](https://github.com/fallow-rs/fallow/issues/96))
+
 ## [2.27.1] - 2026-04-10
 
 ### Fixed
@@ -1211,7 +1218,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.27.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.27.2...HEAD
+[2.27.2]: https://github.com/fallow-rs/fallow/compare/v2.27.1...v2.27.2
 [2.27.1]: https://github.com/fallow-rs/fallow/compare/v2.27.0...v2.27.1
 [2.27.0]: https://github.com/fallow-rs/fallow/compare/v2.26.1...v2.27.0
 [2.26.1]: https://github.com/fallow-rs/fallow/compare/v2.26.0...v2.26.1
