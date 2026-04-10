@@ -1,5 +1,7 @@
 use crate::params::CheckChangedParams;
 
+use super::{push_baseline, push_global, push_regression, push_scope};
+
 /// Build CLI arguments for the `check_changed` tool.
 pub fn build_check_changed_args(params: CheckChangedParams) -> Vec<String> {
     let mut args = vec![
@@ -12,48 +14,26 @@ pub fn build_check_changed_args(params: CheckChangedParams) -> Vec<String> {
         params.since,
     ];
 
-    if let Some(ref root) = params.root {
-        args.extend(["--root".to_string(), root.clone()]);
-    }
-    if let Some(ref config) = params.config {
-        args.extend(["--config".to_string(), config.clone()]);
-    }
-    if params.production == Some(true) {
-        args.push("--production".to_string());
-    }
-    if let Some(ref workspace) = params.workspace {
-        args.extend(["--workspace".to_string(), workspace.clone()]);
-    }
-    if let Some(ref baseline) = params.baseline {
-        args.extend(["--baseline".to_string(), baseline.clone()]);
-    }
-    if let Some(ref save_baseline) = params.save_baseline {
-        args.extend(["--save-baseline".to_string(), save_baseline.clone()]);
-    }
-    if params.fail_on_regression == Some(true) {
-        args.push("--fail-on-regression".to_string());
-    }
-    if let Some(ref tolerance) = params.tolerance {
-        args.extend(["--tolerance".to_string(), tolerance.clone()]);
-    }
-    if let Some(ref regression_baseline) = params.regression_baseline {
-        args.extend([
-            "--regression-baseline".to_string(),
-            regression_baseline.clone(),
-        ]);
-    }
-    if let Some(ref save_regression_baseline) = params.save_regression_baseline {
-        args.extend([
-            "--save-regression-baseline".to_string(),
-            save_regression_baseline.clone(),
-        ]);
-    }
-    if params.no_cache == Some(true) {
-        args.push("--no-cache".to_string());
-    }
-    if let Some(threads) = params.threads {
-        args.extend(["--threads".to_string(), threads.to_string()]);
-    }
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
+    push_scope(&mut args, params.production, params.workspace.as_deref());
+    push_baseline(
+        &mut args,
+        params.baseline.as_deref(),
+        params.save_baseline.as_deref(),
+    );
+    push_regression(
+        &mut args,
+        params.fail_on_regression,
+        params.tolerance.as_deref(),
+        params.regression_baseline.as_deref(),
+        params.save_regression_baseline.as_deref(),
+    );
 
     args
 }

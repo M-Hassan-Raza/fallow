@@ -1,5 +1,7 @@
 use crate::params::HealthParams;
 
+use super::{push_baseline, push_global, push_scope};
+
 /// Build CLI arguments for the `check_health` tool.
 pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     let mut args = vec![
@@ -10,12 +12,15 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
         "--explain".to_string(),
     ];
 
-    if let Some(ref root) = params.root {
-        args.extend(["--root".to_string(), root.clone()]);
-    }
-    if let Some(ref config) = params.config {
-        args.extend(["--config".to_string(), config.clone()]);
-    }
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
+    push_scope(&mut args, params.production, params.workspace.as_deref());
+
     if let Some(max_cyclomatic) = params.max_cyclomatic {
         args.extend(["--max-cyclomatic".to_string(), max_cyclomatic.to_string()]);
     }
@@ -58,12 +63,6 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if let Some(min_commits) = params.min_commits {
         args.extend(["--min-commits".to_string(), min_commits.to_string()]);
     }
-    if let Some(ref workspace) = params.workspace {
-        args.extend(["--workspace".to_string(), workspace.clone()]);
-    }
-    if params.production == Some(true) {
-        args.push("--production".to_string());
-    }
     if let Some(ref path) = params.save_snapshot {
         if path.is_empty() {
             args.push("--save-snapshot".to_string());
@@ -71,18 +70,11 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
             args.extend(["--save-snapshot".to_string(), path.clone()]);
         }
     }
-    if let Some(ref baseline) = params.baseline {
-        args.extend(["--baseline".to_string(), baseline.clone()]);
-    }
-    if let Some(ref save_baseline) = params.save_baseline {
-        args.extend(["--save-baseline".to_string(), save_baseline.clone()]);
-    }
-    if params.no_cache == Some(true) {
-        args.push("--no-cache".to_string());
-    }
-    if let Some(threads) = params.threads {
-        args.extend(["--threads".to_string(), threads.to_string()]);
-    }
+    push_baseline(
+        &mut args,
+        params.baseline.as_deref(),
+        params.save_baseline.as_deref(),
+    );
     if params.trend == Some(true) {
         args.push("--trend".to_string());
     }

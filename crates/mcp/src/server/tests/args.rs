@@ -71,6 +71,9 @@ fn analyze_args_with_all_options() {
             "/my/project",
             "--config",
             "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "4",
             "--production",
             "--workspace",
             "@my/pkg",
@@ -89,9 +92,6 @@ fn analyze_args_with_all_options() {
             "new-reg.json",
             "--group-by",
             "owner",
-            "--no-cache",
-            "--threads",
-            "4",
         ]
     );
 }
@@ -214,6 +214,9 @@ fn check_changed_args_with_all_options() {
             "/app",
             "--config",
             "custom.json",
+            "--no-cache",
+            "--threads",
+            "2",
             "--production",
             "--workspace",
             "frontend",
@@ -228,9 +231,6 @@ fn check_changed_args_with_all_options() {
             "reg.json",
             "--save-regression-baseline",
             "new-reg.json",
-            "--no-cache",
-            "--threads",
-            "2",
         ]
     );
 }
@@ -281,6 +281,9 @@ fn find_dupes_args_with_all_options() {
             "/repo",
             "--config",
             "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "8",
             "--workspace",
             "@my/lib",
             "--mode",
@@ -299,9 +302,6 @@ fn find_dupes_args_with_all_options() {
             "base.json",
             "--save-baseline",
             "new.json",
-            "--no-cache",
-            "--threads",
-            "8",
             "--changed-since",
             "main",
         ]
@@ -399,12 +399,12 @@ fn fix_preview_args_with_all_options() {
             "/app",
             "--config",
             "config.json",
-            "--production",
-            "--workspace",
-            "frontend",
             "--no-cache",
             "--threads",
             "4",
+            "--production",
+            "--workspace",
+            "frontend",
         ]
     );
 }
@@ -432,12 +432,12 @@ fn fix_apply_args_with_all_options() {
             "/app",
             "--config",
             "config.json",
-            "--production",
-            "--workspace",
-            "frontend",
             "--no-cache",
             "--threads",
             "4",
+            "--production",
+            "--workspace",
+            "frontend",
         ]
     );
 }
@@ -474,13 +474,13 @@ fn project_info_args_with_all_options() {
             "/workspace",
             "--config",
             "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "2",
             "--entry-points",
             "--files",
             "--plugins",
             "--boundaries",
-            "--no-cache",
-            "--threads",
-            "2",
         ]
     );
 }
@@ -538,6 +538,12 @@ fn health_args_with_all_options() {
             "/src",
             "--config",
             "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "4",
+            "--production",
+            "--workspace",
+            "packages/ui",
             "--max-cyclomatic",
             "25",
             "--max-cognitive",
@@ -556,16 +562,10 @@ fn health_args_with_all_options() {
             "6m",
             "--min-commits",
             "5",
-            "--workspace",
-            "packages/ui",
-            "--production",
             "--baseline",
             "base.json",
             "--save-baseline",
             "new.json",
-            "--no-cache",
-            "--threads",
-            "4",
             "--effort",
             "high",
             "--summary",

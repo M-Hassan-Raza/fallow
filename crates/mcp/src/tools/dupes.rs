@@ -1,6 +1,6 @@
 use crate::params::FindDupesParams;
 
-use super::VALID_DUPES_MODES;
+use super::{VALID_DUPES_MODES, push_baseline, push_global};
 
 /// Build CLI arguments for the `find_dupes` tool.
 /// Returns `Err(message)` if an invalid mode is provided.
@@ -13,12 +13,13 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
         "--explain".to_string(),
     ];
 
-    if let Some(ref root) = params.root {
-        args.extend(["--root".to_string(), root.clone()]);
-    }
-    if let Some(ref config) = params.config {
-        args.extend(["--config".to_string(), config.clone()]);
-    }
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
     if let Some(ref workspace) = params.workspace {
         args.extend(["--workspace".to_string(), workspace.clone()]);
     }
@@ -48,18 +49,11 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
     if let Some(top) = params.top {
         args.extend(["--top".to_string(), top.to_string()]);
     }
-    if let Some(ref baseline) = params.baseline {
-        args.extend(["--baseline".to_string(), baseline.clone()]);
-    }
-    if let Some(ref save_baseline) = params.save_baseline {
-        args.extend(["--save-baseline".to_string(), save_baseline.clone()]);
-    }
-    if params.no_cache == Some(true) {
-        args.push("--no-cache".to_string());
-    }
-    if let Some(threads) = params.threads {
-        args.extend(["--threads".to_string(), threads.to_string()]);
-    }
+    push_baseline(
+        &mut args,
+        params.baseline.as_deref(),
+        params.save_baseline.as_deref(),
+    );
     if let Some(ref since) = params.changed_since {
         args.push("--changed-since".to_string());
         args.push(since.clone());

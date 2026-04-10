@@ -1,26 +1,6 @@
 use crate::params::FixParams;
 
-/// Append shared fix flags to the argument list.
-fn push_fix_common(args: &mut Vec<String>, params: &FixParams) {
-    if let Some(ref root) = params.root {
-        args.extend(["--root".to_string(), root.clone()]);
-    }
-    if let Some(ref config) = params.config {
-        args.extend(["--config".to_string(), config.clone()]);
-    }
-    if params.production == Some(true) {
-        args.push("--production".to_string());
-    }
-    if let Some(ref workspace) = params.workspace {
-        args.extend(["--workspace".to_string(), workspace.clone()]);
-    }
-    if params.no_cache == Some(true) {
-        args.push("--no-cache".to_string());
-    }
-    if let Some(threads) = params.threads {
-        args.extend(["--threads".to_string(), threads.to_string()]);
-    }
-}
+use super::{push_global, push_scope};
 
 /// Build CLI arguments for the `fix_preview` tool.
 pub fn build_fix_preview_args(params: &FixParams) -> Vec<String> {
@@ -31,7 +11,14 @@ pub fn build_fix_preview_args(params: &FixParams) -> Vec<String> {
         "json".to_string(),
         "--quiet".to_string(),
     ];
-    push_fix_common(&mut args, params);
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
+    push_scope(&mut args, params.production, params.workspace.as_deref());
     args
 }
 
@@ -44,6 +31,13 @@ pub fn build_fix_apply_args(params: &FixParams) -> Vec<String> {
         "json".to_string(),
         "--quiet".to_string(),
     ];
-    push_fix_common(&mut args, params);
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
+    push_scope(&mut args, params.production, params.workspace.as_deref());
     args
 }

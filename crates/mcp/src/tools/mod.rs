@@ -26,6 +26,70 @@ use tokio::process::Command;
 /// Default subprocess timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
+/// Push root directory and config file flags (shared by all tools).
+fn push_global(
+    args: &mut Vec<String>,
+    root: Option<&str>,
+    config: Option<&str>,
+    no_cache: Option<bool>,
+    threads: Option<usize>,
+) {
+    if let Some(root) = root {
+        args.extend(["--root".to_string(), root.to_string()]);
+    }
+    if let Some(config) = config {
+        args.extend(["--config".to_string(), config.to_string()]);
+    }
+    if no_cache == Some(true) {
+        args.push("--no-cache".to_string());
+    }
+    if let Some(threads) = threads {
+        args.extend(["--threads".to_string(), threads.to_string()]);
+    }
+}
+
+/// Push production mode and workspace scope flags.
+fn push_scope(args: &mut Vec<String>, production: Option<bool>, workspace: Option<&str>) {
+    if production == Some(true) {
+        args.push("--production".to_string());
+    }
+    if let Some(workspace) = workspace {
+        args.extend(["--workspace".to_string(), workspace.to_string()]);
+    }
+}
+
+/// Push baseline comparison flags.
+fn push_baseline(args: &mut Vec<String>, baseline: Option<&str>, save_baseline: Option<&str>) {
+    if let Some(baseline) = baseline {
+        args.extend(["--baseline".to_string(), baseline.to_string()]);
+    }
+    if let Some(save_baseline) = save_baseline {
+        args.extend(["--save-baseline".to_string(), save_baseline.to_string()]);
+    }
+}
+
+/// Push regression comparison flags.
+fn push_regression(
+    args: &mut Vec<String>,
+    fail: Option<bool>,
+    tolerance: Option<&str>,
+    baseline: Option<&str>,
+    save: Option<&str>,
+) {
+    if fail == Some(true) {
+        args.push("--fail-on-regression".to_string());
+    }
+    if let Some(t) = tolerance {
+        args.extend(["--tolerance".to_string(), t.to_string()]);
+    }
+    if let Some(b) = baseline {
+        args.extend(["--regression-baseline".to_string(), b.to_string()]);
+    }
+    if let Some(s) = save {
+        args.extend(["--save-regression-baseline".to_string(), s.to_string()]);
+    }
+}
+
 /// Issue type flag names mapped to their CLI flags.
 pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ("unused-files", "--unused-files"),

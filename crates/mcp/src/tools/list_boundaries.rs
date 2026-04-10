@@ -1,5 +1,7 @@
 use crate::params::ListBoundariesParams;
 
+use super::push_global;
+
 pub fn build_list_boundaries_args(params: &ListBoundariesParams) -> Vec<String> {
     let mut args = vec![
         "list".to_string(),
@@ -9,21 +11,13 @@ pub fn build_list_boundaries_args(params: &ListBoundariesParams) -> Vec<String> 
         "--quiet".to_string(),
     ];
 
-    if let Some(ref root) = params.root {
-        args.push("--root".to_string());
-        args.push(root.clone());
-    }
-    if let Some(ref config) = params.config {
-        args.push("--config".to_string());
-        args.push(config.clone());
-    }
-    if params.no_cache == Some(true) {
-        args.push("--no-cache".to_string());
-    }
-    if let Some(threads) = params.threads {
-        args.push("--threads".to_string());
-        args.push(threads.to_string());
-    }
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
 
     args
 }

@@ -1,5 +1,7 @@
 use crate::params::ProjectInfoParams;
 
+use super::push_global;
+
 /// Build CLI arguments for the `project_info` tool.
 pub fn build_project_info_args(params: &ProjectInfoParams) -> Vec<String> {
     let mut args = vec![
@@ -9,12 +11,13 @@ pub fn build_project_info_args(params: &ProjectInfoParams) -> Vec<String> {
         "--quiet".to_string(),
     ];
 
-    if let Some(ref root) = params.root {
-        args.extend(["--root".to_string(), root.clone()]);
-    }
-    if let Some(ref config) = params.config {
-        args.extend(["--config".to_string(), config.clone()]);
-    }
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
     if params.entry_points == Some(true) {
         args.push("--entry-points".to_string());
     }
@@ -26,12 +29,6 @@ pub fn build_project_info_args(params: &ProjectInfoParams) -> Vec<String> {
     }
     if params.boundaries == Some(true) {
         args.push("--boundaries".to_string());
-    }
-    if params.no_cache == Some(true) {
-        args.push("--no-cache".to_string());
-    }
-    if let Some(threads) = params.threads {
-        args.extend(["--threads".to_string(), threads.to_string()]);
     }
 
     args

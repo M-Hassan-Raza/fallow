@@ -1,6 +1,6 @@
 use crate::params::AnalyzeParams;
 
-use super::ISSUE_TYPE_FLAGS;
+use super::{ISSUE_TYPE_FLAGS, push_baseline, push_global, push_regression, push_scope};
 
 /// Build CLI arguments for the `analyze` tool.
 /// Returns `Err(message)` if an invalid issue type is provided.
@@ -13,18 +13,15 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
         "--explain".to_string(),
     ];
 
-    if let Some(ref root) = params.root {
-        args.extend(["--root".to_string(), root.clone()]);
-    }
-    if let Some(ref config) = params.config {
-        args.extend(["--config".to_string(), config.clone()]);
-    }
-    if params.production == Some(true) {
-        args.push("--production".to_string());
-    }
-    if let Some(ref workspace) = params.workspace {
-        args.extend(["--workspace".to_string(), workspace.clone()]);
-    }
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
+    push_scope(&mut args, params.production, params.workspace.as_deref());
+
     // Add boundary_violations convenience param only if issue_types doesn't
     // already include it — clap rejects duplicate boolean flags.
     let types_has_boundaries = params
@@ -48,38 +45,20 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
             }
         }
     }
-    if let Some(ref baseline) = params.baseline {
-        args.extend(["--baseline".to_string(), baseline.clone()]);
-    }
-    if let Some(ref save_baseline) = params.save_baseline {
-        args.extend(["--save-baseline".to_string(), save_baseline.clone()]);
-    }
-    if params.fail_on_regression == Some(true) {
-        args.push("--fail-on-regression".to_string());
-    }
-    if let Some(ref tolerance) = params.tolerance {
-        args.extend(["--tolerance".to_string(), tolerance.clone()]);
-    }
-    if let Some(ref regression_baseline) = params.regression_baseline {
-        args.extend([
-            "--regression-baseline".to_string(),
-            regression_baseline.clone(),
-        ]);
-    }
-    if let Some(ref save_regression_baseline) = params.save_regression_baseline {
-        args.extend([
-            "--save-regression-baseline".to_string(),
-            save_regression_baseline.clone(),
-        ]);
-    }
+    push_baseline(
+        &mut args,
+        params.baseline.as_deref(),
+        params.save_baseline.as_deref(),
+    );
+    push_regression(
+        &mut args,
+        params.fail_on_regression,
+        params.tolerance.as_deref(),
+        params.regression_baseline.as_deref(),
+        params.save_regression_baseline.as_deref(),
+    );
     if let Some(ref gb) = params.group_by {
         args.extend(["--group-by".to_string(), gb.clone()]);
-    }
-    if params.no_cache == Some(true) {
-        args.push("--no-cache".to_string());
-    }
-    if let Some(threads) = params.threads {
-        args.extend(["--threads".to_string(), threads.to_string()]);
     }
 
     Ok(args)

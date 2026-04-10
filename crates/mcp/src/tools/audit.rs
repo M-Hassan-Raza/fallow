@@ -1,5 +1,7 @@
 use crate::params::AuditParams;
 
+use super::{push_global, push_scope};
+
 /// Build CLI arguments for the `audit` tool.
 pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
     let mut args = vec![
@@ -10,27 +12,17 @@ pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
         "--explain".to_string(),
     ];
 
-    if let Some(ref root) = params.root {
-        args.extend(["--root".to_string(), root.clone()]);
-    }
-    if let Some(ref config) = params.config {
-        args.extend(["--config".to_string(), config.clone()]);
-    }
+    push_global(
+        &mut args,
+        params.root.as_deref(),
+        params.config.as_deref(),
+        params.no_cache,
+        params.threads,
+    );
     if let Some(ref base) = params.base {
         args.extend(["--base".to_string(), base.clone()]);
     }
-    if params.production == Some(true) {
-        args.push("--production".to_string());
-    }
-    if let Some(ref workspace) = params.workspace {
-        args.extend(["--workspace".to_string(), workspace.clone()]);
-    }
-    if params.no_cache == Some(true) {
-        args.push("--no-cache".to_string());
-    }
-    if let Some(threads) = params.threads {
-        args.extend(["--threads".to_string(), threads.to_string()]);
-    }
+    push_scope(&mut args, params.production, params.workspace.as_deref());
 
     args
 }
