@@ -87,6 +87,8 @@ pub struct CachedExport {
     pub span_end: u32,
     /// Members of this export (for enums and classes).
     pub members: Vec<CachedMember>,
+    /// The local name of the parent class from `extends` clause, if any.
+    pub super_class: Option<String>,
 }
 
 /// Cached import data for a single import declaration.

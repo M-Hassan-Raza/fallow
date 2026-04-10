@@ -10,7 +10,9 @@ use oxc_ast::ast::{
 
 use crate::{DynamicImportInfo, ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo};
 
-use super::helpers::{extract_class_members, has_angular_class_decorator};
+use super::helpers::{
+    extract_class_members, extract_super_class_name, has_angular_class_decorator,
+};
 use super::{MemberAccess, ModuleInfoExtractor, extract_destructured_names};
 
 impl ModuleInfoExtractor {
@@ -41,6 +43,7 @@ impl ModuleInfoExtractor {
                             is_public: false,
                             span: id.span,
                             members: vec![],
+                            super_class: None,
                         });
                     }
                 }
@@ -48,6 +51,7 @@ impl ModuleInfoExtractor {
             Declaration::ClassDeclaration(class) => {
                 if let Some(id) = class.id.as_ref() {
                     let members = extract_class_members(class, has_angular_class_decorator(class));
+                    let super_class = extract_super_class_name(class);
                     self.exports.push(ExportInfo {
                         name: ExportName::Named(id.name.to_string()),
                         local_name: Some(id.name.to_string()),
@@ -55,6 +59,7 @@ impl ModuleInfoExtractor {
                         is_public: false,
                         span: id.span,
                         members,
+                        super_class,
                     });
                 }
             }
@@ -92,6 +97,7 @@ impl ModuleInfoExtractor {
                     is_public: false,
                     span: enumd.id.span,
                     members,
+                    super_class: None,
                 });
             }
             Declaration::TSModuleDeclaration(module) => {
@@ -108,6 +114,7 @@ impl ModuleInfoExtractor {
                             is_public: false,
                             span: id.span,
                             members: vec![],
+                            super_class: None,
                         });
                     }
                     TSModuleDeclarationName::StringLiteral(lit) => {
@@ -118,6 +125,7 @@ impl ModuleInfoExtractor {
                             is_public: false,
                             span: lit.span,
                             members: vec![],
+                            super_class: None,
                         });
                     }
                 }
@@ -139,6 +147,7 @@ impl ModuleInfoExtractor {
                 is_public: false,
                 span: id.span,
                 members: vec![],
+                super_class: None,
             });
         }
     }

@@ -61,6 +61,7 @@ fn graph_re_export_chain_propagates_references() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             re_exports: vec![ResolvedReExport {
                 info: fallow_types::extract::ReExportInfo {
@@ -84,6 +85,7 @@ fn graph_re_export_chain_propagates_references() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         },
@@ -170,6 +172,7 @@ fn barrel_re_export_creates_export_symbol() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         },
@@ -280,6 +283,7 @@ fn barrel_unused_re_export_has_no_references() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
@@ -288,6 +292,7 @@ fn barrel_unused_re_export_has_no_references() {
                     is_public: false,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -393,6 +398,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("UnusedType".to_string()),
@@ -401,6 +407,7 @@ fn type_only_re_export_creates_type_only_export_symbol() {
                     is_public: false,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -500,6 +507,7 @@ fn default_re_export_creates_default_export_symbol() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         },
@@ -615,6 +623,7 @@ fn multi_level_re_export_chain_propagation() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         },
@@ -718,6 +727,7 @@ fn entry_point_named_re_export_propagates_to_source() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 30),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("hydrate".to_string()),
@@ -726,6 +736,7 @@ fn entry_point_named_re_export_propagates_to_source() {
                     is_public: false,
                     span: oxc_span::Span::new(35, 65),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -807,6 +818,7 @@ fn entry_point_star_re_export_propagates_to_source() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
@@ -815,6 +827,7 @@ fn entry_point_star_re_export_propagates_to_source() {
                     is_public: false,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -892,6 +905,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Default,
@@ -900,6 +914,7 @@ fn entry_point_star_re_export_does_not_mark_default_as_used() {
                     is_public: false,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -999,6 +1014,7 @@ fn entry_point_multi_level_named_re_export_chain() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         },
@@ -1125,6 +1141,7 @@ fn star_re_export_through_multiple_barrel_layers() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("bar".to_string()),
@@ -1133,6 +1150,7 @@ fn star_re_export_through_multiple_barrel_layers() {
                     is_public: false,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -1237,6 +1255,7 @@ fn named_re_export_with_rename() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         },
@@ -1317,6 +1336,7 @@ fn entry_point_star_re_export_source_has_only_default() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         },
@@ -1462,6 +1482,7 @@ fn star_re_export_cycle_terminates() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 10),
                 members: vec![],
+                super_class: None,
             }],
             re_exports: vec![ResolvedReExport {
                 info: fallow_types::extract::ReExportInfo {
@@ -1621,6 +1642,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("baz".to_string()),
@@ -1629,6 +1651,7 @@ fn mixed_star_and_named_re_exports_from_same_source() {
                     is_public: false,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -1724,6 +1747,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 30),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("destroy".to_string()),
@@ -1732,6 +1756,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     is_public: false,
                     span: oxc_span::Span::new(35, 65),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("internal_helper".to_string()),
@@ -1740,6 +1765,7 @@ fn entry_point_named_re_export_no_in_graph_consumers_multiple_exports() {
                     is_public: false,
                     span: oxc_span::Span::new(70, 100),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -1829,6 +1855,7 @@ fn entry_point_star_re_export_skips_default() {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: ExportName::Named("named".to_string()),
@@ -1837,6 +1864,7 @@ fn entry_point_star_re_export_skips_default() {
                     is_public: false,
                     span: oxc_span::Span::new(25, 45),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -1913,6 +1941,7 @@ fn no_re_exports_skips_chain_resolution() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         },
@@ -2020,6 +2049,7 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             },
             fallow_types::extract::ExportInfo {
                 name: ExportName::Named("other".to_string()),
@@ -2028,6 +2058,7 @@ fn star_re_export_many_consumers_no_quadratic_blowup() {
                 is_public: false,
                 span: oxc_span::Span::new(25, 45),
                 members: vec![],
+                super_class: None,
             },
         ],
         ..Default::default()

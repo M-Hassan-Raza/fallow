@@ -91,6 +91,7 @@ impl ModuleInfoExtractor {
             is_public: false,
             span,
             members: vec![],
+            super_class: None,
         });
     }
 

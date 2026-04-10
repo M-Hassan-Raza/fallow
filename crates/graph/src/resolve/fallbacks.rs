@@ -67,6 +67,64 @@ pub(super) fn try_path_alias_fallback(
     None
 }
 
+/// Try SCSS partial resolution: `_filename` convention.
+///
+/// SCSS resolves `@use 'variables'` to `_variables.scss` (or `variables.scss`)
+/// in the same directory. This fallback prepends `_` to the filename component
+/// and retries resolution. Handles both relative (`../styles/variables`) and
+/// bare (`variables`) specifiers that were normalized to `./variables` during extraction.
+pub(super) fn try_scss_partial_fallback(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    // SCSS built-in modules (`sass:math`) should not be retried
+    if specifier.contains(':') {
+        return None;
+    }
+
+    let spec_path = Path::new(specifier);
+    let filename = spec_path.file_name()?.to_str()?;
+
+    // Already has underscore prefix
+    if filename.starts_with('_') {
+        return None;
+    }
+
+    // Build partial specifier: prepend _ to the filename
+    let partial_filename = format!("_{filename}");
+    let partial_specifier = if let Some(parent) = spec_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        format!("{}/{partial_filename}", parent.display())
+    } else {
+        partial_filename
+    };
+
+    // Try resolving the partial specifier
+    try_resolve_scss(ctx, from_file, &partial_specifier)
+}
+
+/// Attempt to resolve a single SCSS specifier and map to an internal module.
+fn try_resolve_scss(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    let resolved = ctx.resolver.resolve_file(from_file, specifier).ok()?;
+    let resolved_path = resolved.path();
+
+    if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
+        return Some(ResolveResult::InternalModule(file_id));
+    }
+    if let Ok(canonical) = dunce::canonicalize(resolved_path)
+        && let Some(&file_id) = ctx.path_to_id.get(canonical.as_path())
+    {
+        return Some(ResolveResult::InternalModule(file_id));
+    }
+    None
+}
+
 /// Try to map a resolved output path (e.g., `packages/ui/dist/utils.js`) back to
 /// the corresponding source file (e.g., `packages/ui/src/utils.ts`).
 ///

@@ -1472,6 +1472,7 @@ mod tests {
                 is_public: false,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         }];
@@ -1746,6 +1747,7 @@ mod tests {
                 is_public: false,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                super_class: None,
             }],
             ..Default::default()
         }];
@@ -2001,6 +2003,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: fallow_core::extract::ExportName::Named("bar".into()),
@@ -2009,6 +2012,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -2038,6 +2042,7 @@ mod tests {
                 is_public: false,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                super_class: None,
             },
             fallow_types::extract::ExportInfo {
                 name: fallow_core::extract::ExportName::Named("bar".into()),
@@ -2046,6 +2051,7 @@ mod tests {
                 is_public: false,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                super_class: None,
             },
         ];
         let modules = vec![module];
@@ -2127,6 +2133,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: fallow_core::extract::ExportName::Named("bar".into()),
@@ -2135,6 +2142,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    super_class: None,
                 },
                 // Simulates a synthesized export from re-export chain resolution
                 // (in real code these have Span(0,0) sentinel)
@@ -2145,6 +2153,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::new(0, 0),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()
@@ -2174,6 +2183,7 @@ mod tests {
                 is_public: false,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                super_class: None,
             },
             fallow_types::extract::ExportInfo {
                 name: fallow_core::extract::ExportName::Named("bar".into()),
@@ -2182,6 +2192,7 @@ mod tests {
                 is_public: false,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                super_class: None,
             },
         ];
         let modules = vec![module];
@@ -2339,6 +2350,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: fallow_core::extract::ExportName::Named("b".into()),
@@ -2347,6 +2359,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
                     name: fallow_core::extract::ExportName::Named("T".into()),
@@ -2355,6 +2368,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    super_class: None,
                 },
             ],
             ..Default::default()

@@ -699,6 +699,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 }],
                 ..Default::default()
             },
@@ -766,6 +767,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        super_class: None,
                     },
                     fallow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
@@ -774,6 +776,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
+                        super_class: None,
                     },
                 ],
                 ..Default::default()
@@ -850,6 +853,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        super_class: None,
                     },
                     fallow_types::extract::ExportInfo {
                         name: ExportName::Named("bar".to_string()),
@@ -858,6 +862,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
+                        super_class: None,
                     },
                 ],
                 ..Default::default()
@@ -926,6 +931,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        super_class: None,
                     },
                     fallow_types::extract::ExportInfo {
                         name: ExportName::Named("secondary".to_string()),
@@ -934,6 +940,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
+                        super_class: None,
                     },
                 ],
                 ..Default::default()
@@ -1007,6 +1014,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 }],
                 ..Default::default()
             },

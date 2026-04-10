@@ -28,6 +28,7 @@ Non-obvious implementation details for each detection feature. These are NOT dis
 - **React Native platform extensions**: `.web.ts`, `.ios.ts`, `.android.ts`, `.native.ts` resolved alongside standard extensions
 - **HTML root-relative paths**: `/src/main.tsx` in HTML `<script src>` resolved against project root (Vite/Parcel convention). Converts to `./src/main.tsx` and resolves from `ctx.root`. HTML-only; in JS/TS, `/foo` remains an absolute filesystem path.
 - **Tsconfig path aliases**: per-file discovery resolves `@/utils` by finding nearest tsconfig.json per file
+- **SCSS partial resolution**: `@use 'variables'` and `@import '../styles/variables'` resolve to `_variables.scss` per SCSS convention. Extensionless bare specifiers in `.scss`/`.sass` files (excluding `sass:*` built-ins) are normalized to relative paths at extraction time. Resolution fallback prepends `_` to the filename and retries. Prevents false unresolved-imports, unlisted-dependencies, and unused-files from SCSS partial references.
 
 ## Graph-level
 - **Type-only cycle filtering**: `import type` edges carry `is_type_only` through `ImportedSymbol` to cycle detection. Edges where all symbols are type-only are excluded from Tarjan's SCC successor list, preventing false circular dependency reports from type-only bidirectional imports.
@@ -37,6 +38,7 @@ Non-obvious implementation details for each detection feature. These are NOT dis
 ## Analysis-level
 - **Duplicate export common-importer filter**: duplicate exports are only reported when at least two files sharing the same export name also share a common importer in the module graph. Unrelated leaf files (e.g., SvelteKit route modules in different directories) that coincidentally export the same name are not flagged.
 - **Decorated class members**: members with decorators (NestJS `@Get()`, Angular `@Input()`, TypeORM `@Column()`) not reported unused
+- **Inheritance-aware class members**: `extends` clauses are extracted to build an inheritance map. Parent class `this.*` accesses propagate to child class overrides (e.g., `BaseShape.describe()` calling `this.getArea()` credits `Circle.getArea()`). External member accesses propagate bidirectionally through the hierarchy. Only simple identifier extends are tracked (`class Foo extends Bar`), not mixin patterns. Methods called through parent-typed parameters remain unattributed (requires type inference, out of scope per ADR-001).
 - **JSDoc `@public` tag**: exports annotated with `/** @public */` never reported unused. Only `/** */` block comments recognized.
 - **Infrastructure entry points**: Dockerfiles, Procfiles, fly.toml scanned for source file refs. Searches root and config/docker/deploy subdirs.
 - **TypeScript project references**: tsconfig.json `references` field discovered as workspaces (additive with npm/pnpm workspaces)

@@ -6,7 +6,7 @@ use oxc_resolver::{ResolveOptions, Resolver};
 
 use super::fallbacks::{
     extract_package_name_from_node_modules_path, try_path_alias_fallback,
-    try_pnpm_workspace_fallback, try_source_fallback,
+    try_pnpm_workspace_fallback, try_scss_partial_fallback, try_source_fallback,
 };
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
@@ -176,6 +176,16 @@ pub(super) fn resolve_specifier(
             }
         }
         Err(_) => {
+            // SCSS partial fallback: `@use 'variables'` → `_variables.scss`.
+            // Try the underscore-prefix convention before npm/alias fallbacks.
+            if from_file
+                .extension()
+                .is_some_and(|e| e == "scss" || e == "sass")
+                && let Some(result) = try_scss_partial_fallback(ctx, from_file, specifier)
+            {
+                return result;
+            }
+
             if is_alias || matches_plugin_alias {
                 // Try plugin-provided path aliases before giving up.
                 // This covers both built-in alias shapes (`~/`, `@/`, `#foo`) and

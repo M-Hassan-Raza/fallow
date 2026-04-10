@@ -860,6 +860,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    super_class: None,
                 }],
                 ..Default::default()
             },
@@ -900,6 +901,7 @@ mod tests {
                 is_public: false,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
+                super_class: None,
             }],
             re_exports: vec![crate::resolve::ResolvedReExport {
                 info: fallow_types::extract::ReExportInfo {

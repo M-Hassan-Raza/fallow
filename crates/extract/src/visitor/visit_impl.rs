@@ -13,7 +13,8 @@ use crate::{
 };
 
 use super::helpers::{
-    extract_angular_component_metadata, extract_concat_parts, is_meta_url_arg,
+    extract_angular_component_metadata, extract_class_members, extract_concat_parts,
+    extract_super_class_name, has_angular_class_decorator, is_meta_url_arg,
     regex_pattern_to_suffix,
 };
 use super::{ModuleInfoExtractor, try_extract_dynamic_import, try_extract_require};
@@ -118,6 +119,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     is_public: false,
                     span: spec.span,
                     members: vec![],
+                    super_class: None,
                 });
             }
         }
@@ -138,13 +140,25 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_export_default_declaration(&mut self, decl: &ExportDefaultDeclaration<'a>) {
+        // Extract members and super_class for default-exported classes
+        let (members, super_class) =
+            if let ExportDefaultDeclarationKind::ClassDeclaration(class) = &decl.declaration {
+                (
+                    extract_class_members(class, has_angular_class_decorator(class)),
+                    extract_super_class_name(class),
+                )
+            } else {
+                (vec![], None)
+            };
+
         self.exports.push(ExportInfo {
             name: ExportName::Default,
             local_name: None,
             is_type_only: false,
             is_public: false,
             span: decl.span,
-            members: vec![],
+            members,
+            super_class,
         });
 
         walk::walk_export_default_declaration(self, decl);
@@ -447,6 +461,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                                     is_public: false,
                                     span: p.span,
                                     members: vec![],
+                                    super_class: None,
                                 });
                             }
                         }
@@ -461,6 +476,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         is_public: false,
                         span: expr.span,
                         members: vec![],
+                        super_class: None,
                     });
                 }
             } else if let Expression::StaticMemberExpression(inner) = &member.object
@@ -477,6 +493,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     is_public: false,
                     span: expr.span,
                     members: vec![],
+                    super_class: None,
                 });
             }
             // Capture `this.member = ...` assignment patterns within class bodies.

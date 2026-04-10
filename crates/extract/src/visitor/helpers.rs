@@ -351,6 +351,18 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
     members
 }
 
+/// Extract the parent class name from an `extends` clause, if present.
+///
+/// Returns `Some("ParentClass")` for `class Foo extends ParentClass { ... }`.
+/// Only handles simple identifier references — complex expressions like
+/// `extends mixin(Base)` return `None`.
+pub fn extract_super_class_name(class: &Class<'_>) -> Option<String> {
+    match class.super_class.as_ref()? {
+        Expression::Identifier(ident) => Some(ident.name.to_string()),
+        _ => None,
+    }
+}
+
 /// Check if an argument expression is `import.meta.url`.
 pub(super) fn is_meta_url_arg(arg: &Argument<'_>) -> bool {
     if let Argument::StaticMemberExpression(member) = arg

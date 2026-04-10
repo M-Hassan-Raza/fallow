@@ -196,6 +196,10 @@ pub struct ExportInfo {
     /// Members of this export (for enums, classes, and namespaces).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub members: Vec<MemberInfo>,
+    /// The local name of the parent class from `extends` clause, if any.
+    /// Used to build inheritance maps for unused class member detection.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub super_class: Option<String>,
 }
 
 /// A member of an enum, class, or namespace.
@@ -366,7 +370,7 @@ pub enum ImportedName {
 // iterated during graph construction and analysis. Keeping them compact
 // improves cache locality on large projects with thousands of files.
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ExportInfo>() == 88);
+const _: () = assert!(std::mem::size_of::<ExportInfo>() == 112);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportInfo>() == 96);
 #[cfg(target_pointer_width = "64")]

@@ -141,6 +141,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        super_class: None,
                     }],
                     re_exports: vec![],
                     resolved_imports: imports,

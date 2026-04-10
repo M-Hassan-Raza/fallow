@@ -90,11 +90,22 @@ fn scss_import_without_dot_slash_normalized() {
 }
 
 #[test]
-fn scss_import_bare_extensionless_stays_bare() {
-    // Extensionless imports like Tailwind should stay bare
+fn scss_import_bare_extensionless_normalized_to_relative() {
+    // In SCSS, extensionless imports are partial references (local files),
+    // not npm packages. They get ./ prepended so the resolver can try
+    // the SCSS partial (_filename) convention. Actual npm packages will
+    // fall through the partial fallback to npm classification in the resolver.
     let info = parse_css(r#"@import "some-package";"#, "styles.scss");
     assert_eq!(info.imports.len(), 1);
-    assert_eq!(info.imports[0].source, "some-package");
+    assert_eq!(info.imports[0].source, "./some-package");
+}
+
+#[test]
+fn scss_builtin_module_stays_bare() {
+    // SCSS built-in modules (sass:math, sass:color) should stay bare
+    let info = parse_css(r#"@use "sass:math";"#, "styles.scss");
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.imports[0].source, "sass:math");
 }
 
 #[test]

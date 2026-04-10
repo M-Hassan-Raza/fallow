@@ -51,6 +51,7 @@ pub fn cached_to_module(
                     has_decorator: m.has_decorator,
                 })
                 .collect(),
+            super_class: e.super_class.clone(),
         })
         .collect();
 
@@ -189,6 +190,7 @@ pub fn module_to_cached(
                         has_decorator: m.has_decorator,
                     })
                     .collect(),
+                super_class: e.super_class.clone(),
             })
             .collect(),
         imports: module

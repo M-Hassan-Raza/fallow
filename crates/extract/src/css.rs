@@ -75,9 +75,11 @@ fn is_css_url_import(source: &str) -> bool {
 /// Normalize a CSS/SCSS import path to use `./` prefix for relative paths.
 /// CSS/SCSS resolve imports without `./` prefix as relative by default,
 /// unlike JS where unprefixed specifiers are bare (npm) specifiers.
-/// Only applies to paths with CSS/SCSS extensions — extensionless imports
-/// like `@import "tailwindcss"` are actual npm package imports.
-fn normalize_css_import_path(path: String) -> String {
+///
+/// When `is_scss` is true, extensionless specifiers that are not SCSS built-in
+/// modules (`sass:*`) are treated as relative imports (SCSS partial convention).
+/// This handles `@use 'variables'` resolving to `./_variables.scss`.
+fn normalize_css_import_path(path: String, is_scss: bool) -> String {
     if path.starts_with('.') || path.starts_with('/') || path.contains("://") {
         return path;
     }
@@ -94,7 +96,16 @@ fn normalize_css_import_path(path: String) -> String {
         {
             format!("./{path}")
         }
-        _ => path,
+        _ => {
+            // In SCSS, extensionless bare specifiers like `@use 'variables'` are
+            // local partials, not npm packages. SCSS built-in modules (`sass:math`,
+            // `sass:color`) use a colon prefix and should stay bare.
+            if is_scss && !path.contains(':') {
+                format!("./{path}")
+            } else {
+                path
+            }
+        }
     }
 }
 
@@ -124,6 +135,7 @@ pub fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
                     is_public: false,
                     span: Span::default(),
                     members: Vec::new(),
+                    super_class: None,
                 });
             }
         }
@@ -162,7 +174,7 @@ pub(crate) fn parse_css_to_module(
         {
             // CSS/SCSS @import resolves relative paths without ./ prefix,
             // so normalize to ./ to avoid bare-specifier misclassification
-            let src = normalize_css_import_path(src);
+            let src = normalize_css_import_path(src, is_scss);
             imports.push(ImportInfo {
                 source: src,
                 imported_name: ImportedName::SideEffect,
@@ -179,7 +191,7 @@ pub(crate) fn parse_css_to_module(
         for cap in SCSS_USE_RE.captures_iter(&stripped) {
             if let Some(m) = cap.get(1) {
                 imports.push(ImportInfo {
-                    source: normalize_css_import_path(m.as_str().to_string()),
+                    source: normalize_css_import_path(m.as_str().to_string(), true),
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
@@ -488,7 +500,7 @@ mod tests {
     #[test]
     fn normalize_relative_dot_path_unchanged() {
         assert_eq!(
-            normalize_css_import_path("./reset.css".to_string()),
+            normalize_css_import_path("./reset.css".to_string(), false),
             "./reset.css"
         );
     }
@@ -496,7 +508,7 @@ mod tests {
     #[test]
     fn normalize_parent_relative_path_unchanged() {
         assert_eq!(
-            normalize_css_import_path("../shared.scss".to_string()),
+            normalize_css_import_path("../shared.scss".to_string(), false),
             "../shared.scss"
         );
     }
@@ -504,7 +516,7 @@ mod tests {
     #[test]
     fn normalize_absolute_path_unchanged() {
         assert_eq!(
-            normalize_css_import_path("/styles/main.css".to_string()),
+            normalize_css_import_path("/styles/main.css".to_string(), false),
             "/styles/main.css"
         );
     }
@@ -512,7 +524,7 @@ mod tests {
     #[test]
     fn normalize_url_unchanged() {
         assert_eq!(
-            normalize_css_import_path("https://example.com/style.css".to_string()),
+            normalize_css_import_path("https://example.com/style.css".to_string(), false),
             "https://example.com/style.css"
         );
     }
@@ -520,7 +532,7 @@ mod tests {
     #[test]
     fn normalize_bare_css_gets_dot_slash() {
         assert_eq!(
-            normalize_css_import_path("app.css".to_string()),
+            normalize_css_import_path("app.css".to_string(), false),
             "./app.css"
         );
     }
@@ -528,7 +540,7 @@ mod tests {
     #[test]
     fn normalize_bare_scss_gets_dot_slash() {
         assert_eq!(
-            normalize_css_import_path("vars.scss".to_string()),
+            normalize_css_import_path("vars.scss".to_string(), false),
             "./vars.scss"
         );
     }
@@ -536,7 +548,7 @@ mod tests {
     #[test]
     fn normalize_bare_sass_gets_dot_slash() {
         assert_eq!(
-            normalize_css_import_path("main.sass".to_string()),
+            normalize_css_import_path("main.sass".to_string(), false),
             "./main.sass"
         );
     }
@@ -544,24 +556,59 @@ mod tests {
     #[test]
     fn normalize_bare_less_gets_dot_slash() {
         assert_eq!(
-            normalize_css_import_path("theme.less".to_string()),
+            normalize_css_import_path("theme.less".to_string(), false),
             "./theme.less"
-        );
-    }
-
-    #[test]
-    fn normalize_bare_extensionless_stays_bare() {
-        assert_eq!(
-            normalize_css_import_path("tailwindcss".to_string()),
-            "tailwindcss"
         );
     }
 
     #[test]
     fn normalize_bare_js_extension_stays_bare() {
         assert_eq!(
-            normalize_css_import_path("module.js".to_string()),
+            normalize_css_import_path("module.js".to_string(), false),
             "module.js"
+        );
+    }
+
+    // ── SCSS partial normalization ───────────────────────────────
+
+    #[test]
+    fn normalize_scss_bare_partial_gets_dot_slash() {
+        assert_eq!(
+            normalize_css_import_path("variables".to_string(), true),
+            "./variables"
+        );
+    }
+
+    #[test]
+    fn normalize_scss_bare_partial_with_subdir_gets_dot_slash() {
+        assert_eq!(
+            normalize_css_import_path("base/reset".to_string(), true),
+            "./base/reset"
+        );
+    }
+
+    #[test]
+    fn normalize_scss_builtin_stays_bare() {
+        assert_eq!(
+            normalize_css_import_path("sass:math".to_string(), true),
+            "sass:math"
+        );
+    }
+
+    #[test]
+    fn normalize_scss_relative_path_unchanged() {
+        assert_eq!(
+            normalize_css_import_path("../styles/variables".to_string(), true),
+            "../styles/variables"
+        );
+    }
+
+    #[test]
+    fn normalize_css_bare_extensionless_stays_bare() {
+        // In CSS context (not SCSS), extensionless imports are npm packages
+        assert_eq!(
+            normalize_css_import_path("tailwindcss".to_string(), false),
+            "tailwindcss"
         );
     }
 

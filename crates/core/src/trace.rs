@@ -503,6 +503,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        super_class: None,
                     },
                     ExportInfo {
                         name: ExportName::Named("bar".to_string()),
@@ -511,6 +512,7 @@ mod tests {
                         is_public: false,
                         span: oxc_span::Span::new(21, 40),
                         members: vec![],
+                        super_class: None,
                     },
                 ],
                 ..Default::default()
@@ -525,6 +527,7 @@ mod tests {
                     is_public: false,
                     span: oxc_span::Span::new(0, 15),
                     members: vec![],
+                    super_class: None,
                 }],
                 ..Default::default()
             },

@@ -1,0 +1,9 @@
+@use './styles/variables' as vars;
+@use './styles/mixins' as mix;
+@import './styles/theme';
+
+.app {
+  @include mix.card-style;
+  color: vars.$primary-color;
+  font-size: vars.$font-size-base;
+}

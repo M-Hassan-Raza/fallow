@@ -344,6 +344,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                         is_public: false,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        super_class: None,
                     },
                     ExportInfo {
                         name: ExportName::Named(format!("fn{e}")),
@@ -352,6 +353,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                         is_public: false,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
+                        super_class: None,
                     },
                 ]
             })
@@ -428,6 +430,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                         has_decorator: false,
                     },
                 ],
+                super_class: None,
             },
             ExportInfo {
                 name: ExportName::Named("Status".to_string()),
@@ -455,6 +458,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                         has_decorator: false,
                     },
                 ],
+                super_class: None,
             },
             ExportInfo {
                 name: ExportName::Default,
@@ -463,6 +467,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 is_public: false,
                 span: oxc_span::Span::new(800, 1200),
                 members: vec![],
+                super_class: None,
             },
             ExportInfo {
                 name: ExportName::Named("Props".to_string()),
@@ -471,6 +476,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 is_public: false,
                 span: oxc_span::Span::new(10, 80),
                 members: vec![],
+                super_class: None,
             },
             ExportInfo {
                 name: ExportName::Named("formatName".to_string()),
@@ -479,6 +485,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 is_public: false,
                 span: oxc_span::Span::new(720, 780),
                 members: vec![],
+                super_class: None,
             },
         ],
         imports: vec![
