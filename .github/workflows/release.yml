@@ -372,6 +372,9 @@ jobs:
             fs.writeFileSync('editors/vscode/package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
 
+      - name: Copy LICENSE into extension directory
+        run: cp LICENSE editors/vscode/LICENSE
+
       - name: Build and package extension
         run: |
           cd editors/vscode

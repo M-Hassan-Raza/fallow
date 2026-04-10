@@ -50,6 +50,8 @@ quality/
 # VS Code extension build artifacts
 *.vsix
 editors/vscode/.test-dist/
+# Copied from root LICENSE by prepackage script; do not commit
+editors/vscode/LICENSE
 
 # IDE
 .vscode/
