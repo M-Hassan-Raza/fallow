@@ -58,7 +58,6 @@ pub struct ScriptCommand {
 /// devDependency usage, not the production dependency graph.
 #[must_use]
 #[expect(
-    clippy::implicit_hasher,
     clippy::disallowed_types,
     reason = "API matches serde-deserialized HashMap from package.json"
 )]
@@ -100,7 +99,6 @@ fn is_production_script(name: &str) -> bool {
 /// package names), `--config` file paths, and positional file path arguments.
 #[must_use]
 #[expect(
-    clippy::implicit_hasher,
     clippy::disallowed_types,
     reason = "API matches serde-deserialized HashMap from package.json"
 )]

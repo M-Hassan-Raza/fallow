@@ -2,7 +2,7 @@
 pub use fallow_types::suppress::{IssueKind, Suppression};
 
 // Re-export parsing functions from fallow-extract
-pub use fallow_extract::suppress::{parse_suppressions, parse_suppressions_from_source};
+pub use fallow_extract::suppress::parse_suppressions_from_source;
 
 /// Check if a specific issue at a given line should be suppressed.
 #[must_use]
@@ -216,6 +216,7 @@ mod tests {
 
     #[test]
     fn parse_oxc_comments() {
+        use fallow_extract::suppress::parse_suppressions;
         use oxc_allocator::Allocator;
         use oxc_parser::Parser;
         use oxc_span::SourceType;

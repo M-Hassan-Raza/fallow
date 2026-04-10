@@ -27,11 +27,11 @@ use unused_members::find_unused_members;
 
 /// Pre-computed line offset tables indexed by `FileId`, built during parse and
 /// carried through the cache. Eliminates redundant file reads during analysis.
-pub(crate) type LineOffsetsMap<'a> = FxHashMap<FileId, &'a [u32]>;
+pub type LineOffsetsMap<'a> = FxHashMap<FileId, &'a [u32]>;
 
 /// Convert a byte offset to (line, col) using pre-computed line offsets.
 /// Falls back to `(1, byte_offset)` when no line table is available.
-pub(crate) fn byte_offset_to_line_col(
+pub fn byte_offset_to_line_col(
     line_offsets_map: &LineOffsetsMap<'_>,
     file_id: FileId,
     byte_offset: u32,
@@ -77,31 +77,6 @@ fn is_cross_package_cycle(
         }
     }
     false
-}
-
-/// Find all dead code in the project.
-#[must_use]
-pub fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisResults {
-    find_dead_code_with_resolved(graph, config, &[], None)
-}
-
-/// Find all dead code, with optional resolved module data and plugin context.
-#[must_use]
-pub fn find_dead_code_with_resolved(
-    graph: &ModuleGraph,
-    config: &ResolvedConfig,
-    resolved_modules: &[ResolvedModule],
-    plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
-) -> AnalysisResults {
-    find_dead_code_full(
-        graph,
-        config,
-        resolved_modules,
-        plugin_result,
-        &[],
-        &[],
-        false,
-    )
 }
 
 /// Find all dead code, with optional resolved module data, plugin context, and workspace info.
@@ -467,6 +442,10 @@ mod tests {
         use super::super::*;
         use fallow_config::{FallowConfig, OutputFormat, RulesConfig, Severity};
         use std::path::PathBuf;
+
+        fn find_dead_code(graph: &ModuleGraph, config: &ResolvedConfig) -> AnalysisResults {
+            find_dead_code_full(graph, config, &[], None, &[], &[], false)
+        }
 
         fn make_config_with_rules(rules: RulesConfig) -> ResolvedConfig {
             FallowConfig {

@@ -6,7 +6,7 @@ use std::path::PathBuf;
     clippy::enum_variant_names,
     reason = "Error suffix is intentional for error variants"
 )]
-pub(crate) enum FallowErrorKind {
+pub enum FallowErrorKind {
     /// Failed to read a source file.
     FileReadError {
         path: PathBuf,

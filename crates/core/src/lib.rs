@@ -1,15 +1,15 @@
-pub mod analyze;
+pub(crate) mod analyze;
 pub mod cache;
 pub mod churn;
 pub mod cross_reference;
 pub mod discover;
 pub mod duplicates;
-pub mod errors;
+pub(crate) mod errors;
 pub mod extract;
 pub mod plugins;
-pub mod progress;
+pub(crate) mod progress;
 pub mod results;
-pub mod scripts;
+pub(crate) mod scripts;
 pub mod suppress;
 pub mod trace;
 

@@ -38,29 +38,6 @@ impl AnalysisProgress {
         pb
     }
 
-    /// Create a progress bar for file processing.
-    ///
-    /// # Panics
-    ///
-    /// Panics if the progress template string is invalid (compile-time constant).
-    #[must_use]
-    pub fn file_progress(&self, total: u64, message: &str) -> ProgressBar {
-        if !self.enabled {
-            return ProgressBar::hidden();
-        }
-
-        let pb = self.multi.add(ProgressBar::new(total));
-        pb.set_style(
-            ProgressStyle::with_template(
-                "{spinner:.cyan} {msg} [{bar:30.cyan/dim}] {pos}/{len} ({eta})",
-            )
-            .expect("valid progress template")
-            .progress_chars("━━╸━"),
-        );
-        pb.set_message(message.to_string());
-        pb
-    }
-
     /// Finish all progress bars.
     pub fn finish(&self) {
         let _ = self.multi.clear();
