@@ -35,7 +35,7 @@ vi.mock("vscode", () => ({
   },
 }));
 
-import { getInstalledBinaryPath, getBinaryVersion } from "../src/download.js";
+import { getInstalledBinaryPath, getBinaryVersion, writeVersionMarker, readVersionMarker } from "../src/download.js";
 
 const fakeContext = {
   globalStorageUri: { fsPath: "/storage" },
@@ -45,6 +45,31 @@ const binDir = path.join("/storage", "bin");
 const lspPath = path.join(binDir, "fallow-lsp");
 const cliPath = path.join(binDir, "fallow");
 const versionPath = path.join(binDir, ".fallow-version");
+
+describe("writeVersionMarker / readVersionMarker", () => {
+  beforeEach(() => {
+    mockFiles = {};
+  });
+
+  it("round-trips a version string", () => {
+    writeVersionMarker(binDir, "2.26.1");
+    expect(readVersionMarker(binDir)).toBe("2.26.1");
+  });
+
+  it("returns null when no marker exists", () => {
+    expect(readVersionMarker(binDir)).toBeNull();
+  });
+
+  it("trims whitespace from marker content", () => {
+    mockFiles[versionPath] = "  2.26.1\n";
+    expect(readVersionMarker(binDir)).toBe("2.26.1");
+  });
+
+  it("returns null for empty marker file", () => {
+    mockFiles[versionPath] = "  ";
+    expect(readVersionMarker(binDir)).toBeNull();
+  });
+});
 
 describe("getBinaryVersion", () => {
   beforeEach(() => {

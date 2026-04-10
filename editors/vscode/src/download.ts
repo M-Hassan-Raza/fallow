@@ -110,7 +110,7 @@ const getInstallDir = (context: vscode.ExtensionContext): string => {
   return dir;
 };
 
-const writeVersionMarker = (dir: string, version: string): void => {
+export const writeVersionMarker = (dir: string, version: string): void => {
   try {
     fs.writeFileSync(path.join(dir, VERSION_FILE), version, "utf-8");
   } catch {
@@ -118,7 +118,7 @@ const writeVersionMarker = (dir: string, version: string): void => {
   }
 };
 
-const readVersionMarker = (dir: string): string | null => {
+export const readVersionMarker = (dir: string): string | null => {
   try {
     return fs.readFileSync(path.join(dir, VERSION_FILE), "utf-8").trim() || null;
   } catch {
