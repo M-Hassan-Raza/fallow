@@ -1,4 +1,4 @@
-use fallow_types::extract::ExportName;
+use fallow_types::extract::{ExportName, ImportedName};
 
 use crate::tests::parse_ts as parse_source;
 
@@ -380,4 +380,158 @@ fn export_without_jsdoc_not_public() {
     let info = parse_source("export const plain = 42;");
     assert_eq!(info.exports.len(), 1);
     assert!(!info.exports[0].is_public);
+}
+
+// ---- JSDoc import() type expression extraction tests ----
+
+#[test]
+fn jsdoc_import_type_in_param_recorded_as_type_import() {
+    let info = parse_source(
+        "/**\n * @param foo {import('./types.js').Foo}\n */\nfunction bar(foo) { return foo; }",
+    );
+    let imp = info
+        .imports
+        .iter()
+        .find(|i| i.source == "./types.js")
+        .expect("JSDoc import() should produce an ImportInfo");
+    assert!(imp.is_type_only);
+    assert_eq!(imp.imported_name, ImportedName::Named("Foo".to_string()));
+    assert!(imp.local_name.is_empty());
+}
+
+#[test]
+fn jsdoc_import_type_double_quoted_path() {
+    let info = parse_source("/**\n * @type {import(\"./types\").Foo}\n */\nlet x;");
+    let imp = info.imports.iter().find(|i| i.source == "./types");
+    assert!(imp.is_some());
+    assert_eq!(
+        imp.unwrap().imported_name,
+        ImportedName::Named("Foo".to_string())
+    );
+}
+
+#[test]
+fn jsdoc_import_type_returns_tag() {
+    let info = parse_source(
+        "/**\n * @returns {import('./types').Bar}\n */\nfunction make() { return null; }",
+    );
+    let imp = info.imports.iter().find(|i| i.source == "./types");
+    assert!(imp.is_some());
+    assert_eq!(
+        imp.unwrap().imported_name,
+        ImportedName::Named("Bar".to_string())
+    );
+}
+
+#[test]
+fn jsdoc_import_type_typedef_tag() {
+    let info =
+        parse_source("/**\n * @typedef {import('./lib').Config} Cfg\n */\nexport const v = 1;");
+    let imp = info.imports.iter().find(|i| i.source == "./lib");
+    assert!(imp.is_some());
+    assert_eq!(
+        imp.unwrap().imported_name,
+        ImportedName::Named("Config".to_string())
+    );
+}
+
+#[test]
+fn jsdoc_multiple_import_types_in_one_comment() {
+    let info = parse_source(
+        "/**\n * @param a {import('./a').A}\n * @param b {import('./b').B}\n */\nfunction f(a, b) { return [a, b]; }",
+    );
+    let a = info.imports.iter().find(|i| i.source == "./a");
+    let b = info.imports.iter().find(|i| i.source == "./b");
+    assert!(a.is_some());
+    assert!(b.is_some());
+    assert_eq!(
+        a.unwrap().imported_name,
+        ImportedName::Named("A".to_string())
+    );
+    assert_eq!(
+        b.unwrap().imported_name,
+        ImportedName::Named("B".to_string())
+    );
+}
+
+#[test]
+fn jsdoc_import_types_union_in_one_annotation() {
+    let info = parse_source(
+        "/**\n * @param x {import('./a').A | import('./b').B}\n */\nfunction f(x) { return x; }",
+    );
+    assert!(info.imports.iter().any(|i| i.source == "./a"));
+    assert!(info.imports.iter().any(|i| i.source == "./b"));
+}
+
+#[test]
+fn jsdoc_import_type_bare_specifier() {
+    let info = parse_source(
+        "/**\n * @param c {import('@scope/pkg').Client}\n */\nfunction f(c) { return c; }",
+    );
+    let imp = info.imports.iter().find(|i| i.source == "@scope/pkg");
+    assert!(imp.is_some());
+    assert_eq!(
+        imp.unwrap().imported_name,
+        ImportedName::Named("Client".to_string())
+    );
+    assert!(imp.unwrap().is_type_only);
+}
+
+#[test]
+fn jsdoc_import_type_relative_parent() {
+    let info = parse_source("/**\n * @type {import('../lib/types.js').Foo}\n */\nlet y;");
+    let imp = info.imports.iter().find(|i| i.source == "../lib/types.js");
+    assert!(imp.is_some());
+}
+
+#[test]
+fn jsdoc_import_type_nested_member_uses_first_segment() {
+    let info = parse_source(
+        "/**\n * @param x {import('./types').ns.Foo}\n */\nfunction f(x) { return x; }",
+    );
+    let imp = info.imports.iter().find(|i| i.source == "./types");
+    assert!(imp.is_some());
+    assert_eq!(
+        imp.unwrap().imported_name,
+        ImportedName::Named("ns".to_string())
+    );
+}
+
+#[test]
+fn jsdoc_import_without_member_recorded_as_side_effect() {
+    let info =
+        parse_source("/**\n * @param x {import('./types')}\n */\nfunction f(x) { return x; }");
+    let imp = info.imports.iter().find(|i| i.source == "./types");
+    assert!(imp.is_some());
+    assert_eq!(imp.unwrap().imported_name, ImportedName::SideEffect);
+    assert!(imp.unwrap().is_type_only);
+}
+
+#[test]
+fn jsdoc_import_type_not_extracted_from_plain_comment() {
+    // `/*` (single-star) is not a JSDoc block; the scanner should skip it.
+    let info =
+        parse_source("/* @param foo {import('./types').Foo} */\nfunction bar() { return 1; }");
+    assert!(info.imports.iter().all(|i| i.source != "./types"));
+}
+
+#[test]
+fn jsdoc_import_type_coexists_with_public_tag() {
+    let info = parse_source(
+        "/**\n * @public\n * @param foo {import('./types').Foo}\n */\nexport function bar(foo) { return foo; }",
+    );
+    let imp = info.imports.iter().find(|i| i.source == "./types");
+    assert!(imp.is_some());
+    let exp = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == "bar"))
+        .unwrap();
+    assert!(exp.is_public);
+}
+
+#[test]
+fn jsdoc_import_type_empty_path_ignored() {
+    let info = parse_source("/**\n * @param x {import('').Foo}\n */\nfunction f(x) { return x; }");
+    assert!(info.imports.is_empty());
 }

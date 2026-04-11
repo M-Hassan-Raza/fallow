@@ -37,6 +37,8 @@ mod framework_convention_coverage_vitepress;
 mod frameworks;
 #[path = "integration_test/html_entry.rs"]
 mod html_entry;
+#[path = "integration_test/jsx_assets_and_jsdoc.rs"]
+mod jsx_assets_and_jsdoc;
 #[path = "integration_test/member_detection.rs"]
 mod member_detection;
 #[path = "integration_test/rules_config.rs"]

@@ -1349,16 +1349,20 @@ fn specifier_html_root_relative_deep_path_unresolvable() {
 }
 
 #[test]
-fn specifier_root_relative_in_ts_file_is_not_html_path() {
-    // Root-relative paths in non-HTML files should NOT take the HTML branch.
-    // In JS/TS, `/foo` is an absolute filesystem path.
+fn specifier_root_relative_in_ts_file_unresolvable_when_missing() {
+    // After issue #105, root-relative paths in TS/JS/JSX/TSX files are treated
+    // as web-root-relative (same as HTML) to support SSR frameworks like Hono
+    // that emit `<link href="/static/..." />` from JSX templates. When the
+    // target is not a registered file, the result is `Unresolvable`, never a
+    // spurious npm package or external file.
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
         let result = specifier::resolve_specifier(ctx, file, "/usr/local/lib/something");
 
-        // Should go through the normal resolution path, not the HTML path.
-        // Since it's not a bare specifier and resolution fails, it should be Unresolvable.
-        assert!(matches!(result, ResolveResult::Unresolvable(_)));
+        assert!(matches!(
+            result,
+            ResolveResult::Unresolvable(ref s) if s == "/usr/local/lib/something"
+        ));
     });
 }
 

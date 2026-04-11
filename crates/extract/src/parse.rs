@@ -124,6 +124,12 @@ pub fn parse_source_to_module(
                 &retry_return.program.comments,
                 source,
             );
+            // Extract JSDoc `import()` type references from the retry parse's comments
+            extract_jsdoc_import_types(
+                &mut retry_extractor.imports,
+                &retry_return.program.comments,
+                source,
+            );
             extractor = retry_extractor;
             used_retry = true;
         }
@@ -133,6 +139,11 @@ pub fn parse_source_to_module(
     if !used_retry {
         apply_jsdoc_public_tags(
             &mut extractor.exports,
+            &parser_return.program.comments,
+            source,
+        );
+        extract_jsdoc_import_types(
+            &mut extractor.imports,
             &parser_return.program.comments,
             source,
         );
@@ -212,6 +223,135 @@ fn apply_jsdoc_public_tags(exports: &mut [ExportInfo], comments: &[Comment], sou
 /// Check if a byte is an identifier-continuation character (alphanumeric or `_`).
 const fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_'
+}
+
+/// Scan JSDoc comments for `import('./path').Member` type expressions and push
+/// them onto `imports` as type-only imports.
+///
+/// JSDoc supports referencing types from other modules via `import()` expressions
+/// embedded in tag annotations, e.g.:
+///
+/// ```js
+/// /**
+///  * @param foo {import('./types.js').Foo}
+///  * @returns {import('./types').Bar}
+///  */
+/// ```
+///
+/// Without this scanner, the referenced export (`Foo`, `Bar`) is flagged as
+/// unused because no ES `import` statement binds it. The synthesized
+/// `ImportInfo` has `is_type_only: true` and an empty `local_name` so it does
+/// not interfere with `compute_unused_import_bindings` (which skips imports
+/// with empty local names) and does not add a cyclic-dependency edge.
+///
+/// All JSDoc tag contexts (`@param`, `@returns`, `@type`, `@typedef`,
+/// `@callback`, etc.) use the same `{type}` annotation syntax, so scanning
+/// the full comment body covers every call site in a single pass.
+fn extract_jsdoc_import_types(imports: &mut Vec<ImportInfo>, comments: &[Comment], source: &str) {
+    if comments.is_empty() {
+        return;
+    }
+
+    for comment in comments {
+        if !comment.is_jsdoc() {
+            continue;
+        }
+        let content_span = comment.content_span();
+        let start = content_span.start as usize;
+        let end = (content_span.end as usize).min(source.len());
+        if start >= end {
+            continue;
+        }
+        scan_jsdoc_imports_in(&source[start..end], imports);
+    }
+}
+
+/// Parse a single JSDoc comment body for `import('...').Member` expressions.
+///
+/// Matches both single and double quoted path literals and extracts the first
+/// identifier segment after `)\.` as the imported member name. Nested member
+/// access (`import('./x').ns.Foo`) yields `ns` as the imported name, which is
+/// correct for fallow's syntactic analysis since the resolver still adds the
+/// edge to the target module.
+fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
+    let bytes = body.as_bytes();
+    let mut cursor = 0;
+    while let Some(rel) = body[cursor..].find("import(") {
+        let open = cursor + rel + "import(".len();
+        cursor = open;
+        if open >= bytes.len() {
+            break;
+        }
+        // Skip whitespace between `(` and the quote.
+        let mut i = open;
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() {
+            break;
+        }
+        let quote = bytes[i];
+        if quote != b'\'' && quote != b'"' {
+            continue;
+        }
+        let path_start = i + 1;
+        let Some(rel_close) = body[path_start..].find(quote as char) else {
+            break;
+        };
+        let path_end = path_start + rel_close;
+        let path = &body[path_start..path_end];
+        if path.is_empty() {
+            cursor = path_end + 1;
+            continue;
+        }
+        // Walk past the closing quote, optional whitespace, and the `)`.
+        let mut j = path_end + 1;
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j >= bytes.len() || bytes[j] != b')' {
+            cursor = path_end + 1;
+            continue;
+        }
+        j += 1;
+        // Optional whitespace before `.`.
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        cursor = j;
+        if j >= bytes.len() || bytes[j] != b'.' {
+            // `import('./x')` with no member access: treat as side-effect-style
+            // reachability hint (still useful to keep the file reachable).
+            imports.push(ImportInfo {
+                source: path.to_string(),
+                imported_name: fallow_types::extract::ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: true,
+                span: oxc_span::Span::default(),
+                source_span: oxc_span::Span::default(),
+            });
+            continue;
+        }
+        j += 1;
+        // Parse the member identifier (first segment only).
+        let name_start = j;
+        while j < bytes.len() && is_ident_char(bytes[j]) {
+            j += 1;
+        }
+        if name_start == j {
+            continue;
+        }
+        let member = &body[name_start..j];
+        cursor = j;
+        imports.push(ImportInfo {
+            source: path.to_string(),
+            imported_name: fallow_types::extract::ImportedName::Named(member.to_string()),
+            local_name: String::new(),
+            is_type_only: true,
+            span: oxc_span::Span::default(),
+            source_span: oxc_span::Span::default(),
+        });
+    }
 }
 
 /// Check if a JSDoc comment body contains a `@public` or `@api public` tag.

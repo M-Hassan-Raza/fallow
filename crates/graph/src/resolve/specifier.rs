@@ -127,17 +127,33 @@ pub(super) fn resolve_specifier(
         return ResolveResult::ExternalFile(PathBuf::from(specifier));
     }
 
-    // In HTML files, root-relative paths (`/src/main.tsx`) are a web convention meaning
-    // "relative to the project/workspace root". Vite, Parcel, and other dev servers
-    // resolve them this way. In monorepos, each workspace member has its own Vite root,
-    // so `site/index.html` referencing `/src/main.tsx` should resolve to `site/src/main.tsx`,
-    // not `<monorepo-root>/src/main.tsx`. Use the HTML file's parent directory as the base,
-    // which is correct for both workspace members (HTML at workspace root) and single projects.
-    // Scoped to HTML files only — in JS/TS, `/foo` is an absolute filesystem path.
-    if specifier.starts_with('/') && from_file.extension().is_some_and(|e| e == "html") {
+    // Root-relative paths (`/src/main.tsx`, `/static/style.css`) are a web
+    // convention meaning "relative to the project/workspace root". Vite,
+    // Parcel, and other dev servers resolve them this way. In monorepos, each
+    // workspace member has its own Vite root, so `site/index.html` referencing
+    // `/src/main.tsx` should resolve to `site/src/main.tsx`, not
+    // `<monorepo-root>/src/main.tsx`. Use the source file's parent directory as
+    // the base, which is correct for both workspace members and single projects.
+    //
+    // Applied to web-facing source files: HTML, JSX/TSX, and plain JS/TS. The
+    // JSX/TSX case covers SSR frameworks like Hono where JSX templates emit
+    // `<link href="/static/style.css" />`: these paths cannot be AST-resolved
+    // and have the same web-root semantics as HTML. See issue #105 (till's
+    // comment). Applied unconditionally to JS/TS too because the JSX visitor
+    // emits `ImportInfo` with the raw attribute value, and the file extension
+    // after JSX retry may not reflect the original source (`.js` files with
+    // JSX still parse as JSX and get their asset refs recorded here).
+    if specifier.starts_with('/')
+        && from_file.extension().is_some_and(|e| {
+            matches!(
+                e.to_str(),
+                Some("html" | "jsx" | "tsx" | "js" | "ts" | "mjs" | "cjs" | "mts" | "cts")
+            )
+        })
+    {
         let relative = format!(".{specifier}");
-        let html_dir = from_file.parent().unwrap_or(ctx.root);
-        if let Ok(resolved) = ctx.resolver.resolve(html_dir, &relative) {
+        let source_dir = from_file.parent().unwrap_or(ctx.root);
+        if let Ok(resolved) = ctx.resolver.resolve(source_dir, &relative) {
             let resolved_path = resolved.path();
             if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
                 return ResolveResult::InternalModule(file_id);
@@ -153,9 +169,10 @@ pub(super) fn resolve_specifier(
                 }
             }
         }
-        // Fall back to project root for non-workspace setups where HTML may be
-        // in a subdirectory (e.g., `public/index.html` referencing `/src/main.tsx`).
-        if html_dir != ctx.root
+        // Fall back to project root for non-workspace setups where the source
+        // file may be in a subdirectory (e.g., `public/index.html` referencing
+        // `/src/main.tsx`, or a Hono JSX layout in `src/` referencing `/static/style.css`).
+        if source_dir != ctx.root
             && let Ok(resolved) = ctx.resolver.resolve(ctx.root, &relative)
         {
             let resolved_path = resolved.path();

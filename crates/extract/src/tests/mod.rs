@@ -21,3 +21,8 @@ pub fn parse_ts(source: &str) -> ModuleInfo {
 pub fn parse_ts_with_complexity(source: &str) -> ModuleInfo {
     parse_source_to_module(FileId(0), Path::new("test.ts"), source, 0, true)
 }
+
+/// Shared test helper: parse TSX source and return `ModuleInfo`.
+pub fn parse_tsx(source: &str) -> ModuleInfo {
+    parse_source_to_module(FileId(0), Path::new("test.tsx"), source, 0, false)
+}

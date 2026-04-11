@@ -57,7 +57,7 @@ pub(crate) fn is_html_file(path: &Path) -> bool {
 }
 
 /// Returns true if an HTML asset reference is a remote URL that should be skipped.
-fn is_remote_url(src: &str) -> bool {
+pub(crate) fn is_remote_url(src: &str) -> bool {
     src.starts_with("http://")
         || src.starts_with("https://")
         || src.starts_with("//")
