@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.29.0] - 2026-04-12
+
+### Added
+
+- **Inline suppression for health complexity findings** -- `// fallow-ignore-next-line complexity` and `// fallow-ignore-file complexity` now suppress individual functions or entire files from the health command's complexity findings. The blanket `// fallow-ignore-next-line` (without a kind) also works. Useful for intentionally complex code like generated parsers or configuration dispatch functions that you don't want to refactor but don't want cluttering health output. File scores, vital signs, and hotspot rankings are unaffected by suppressions since they reflect actual complexity, not alerting. The `IssueKind::Complexity` variant (discriminant 18) integrates with the existing suppression system used by all other issue types. Human output now shows a suppress hint in the findings footer when 3+ functions exceed thresholds. ([#108](https://github.com/fallow-rs/fallow/issues/108))
+- **Standalone plugin schema** -- `fallow config-schema --plugins` emits a JSON schema describing all built-in plugin names, useful for editor autocompletion in config files. ([#109](https://github.com/fallow-rs/fallow/pull/109))
+
 ## [2.28.2] - 2026-04-11
 
 ### Fixed
@@ -1283,7 +1290,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.28.2...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.29.0...HEAD
+[2.29.0]: https://github.com/fallow-rs/fallow/compare/v2.28.2...v2.29.0
 [2.28.2]: https://github.com/fallow-rs/fallow/compare/v2.28.1...v2.28.2
 [2.28.1]: https://github.com/fallow-rs/fallow/compare/v2.28.0...v2.28.1
 [2.28.0]: https://github.com/fallow-rs/fallow/compare/v2.27.6...v2.28.0
