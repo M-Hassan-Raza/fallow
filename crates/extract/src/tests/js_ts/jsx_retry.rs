@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::ModuleInfo;
+use fallow_types::extract::{ModuleInfo, VisibilityTag};
 
 use crate::parse::parse_source_to_module;
 
@@ -56,8 +56,9 @@ export const Button = ({ children }) => <button className="btn">{children}</butt
         !info.exports.is_empty(),
         "JSX retry should extract Button export"
     );
-    assert!(
-        info.exports[0].is_public,
+    assert_eq!(
+        info.exports[0].visibility,
+        VisibilityTag::Public,
         "@public JSDoc tag must be recognized on JSX exports in .js files"
     );
 }

@@ -15,7 +15,7 @@ use crate::mdx::{is_mdx_file, parse_mdx_to_module};
 use crate::sfc::{is_sfc_file, parse_sfc_to_module};
 use crate::visitor::ModuleInfoExtractor;
 use fallow_types::discover::FileId;
-use fallow_types::extract::ImportInfo;
+use fallow_types::extract::{ImportInfo, VisibilityTag};
 
 /// Parse source text into a [`ModuleInfo`].
 ///
@@ -118,8 +118,8 @@ pub fn parse_source_to_module(
             // Re-parse suppressions from the retry's comments (not the original failed parse)
             suppressions =
                 crate::suppress::parse_suppressions(&retry_return.program.comments, source);
-            // Apply @public tags from the retry parse's comments (not the original failed parse)
-            apply_jsdoc_public_tags(
+            // Apply visibility tags from the retry parse's comments (not the original failed parse)
+            apply_jsdoc_visibility_tags(
                 &mut retry_extractor.exports,
                 &retry_return.program.comments,
                 source,
@@ -135,9 +135,9 @@ pub fn parse_source_to_module(
         }
     }
 
-    // Apply JSDoc @public tags from the original parse (skip if retry was used above)
+    // Apply JSDoc visibility tags from the original parse (skip if retry was used above)
     if !used_retry {
-        apply_jsdoc_public_tags(
+        apply_jsdoc_visibility_tags(
             &mut extractor.exports,
             &parser_return.program.comments,
             source,
@@ -158,36 +158,51 @@ pub fn parse_source_to_module(
     info
 }
 
-/// Apply JSDoc `@public` tags to exports by matching leading JSDoc comments.
+/// Apply JSDoc visibility tags (`@public`, `@internal`, `@alpha`, `@beta`) to exports by
+/// matching leading JSDoc comments.
 ///
 /// `Comment.attached_to` points to the `export` keyword byte offset, while
 /// `ExportInfo.span` stores the identifier byte offset (e.g., `foo` in
-/// `export const foo`). This function bridges the gap: it collects `@public`
-/// comment attachment offsets, then for each export finds the nearest preceding
-/// attachment point and validates it's part of the same export statement.
-fn apply_jsdoc_public_tags(exports: &mut [ExportInfo], comments: &[Comment], source: &str) {
+/// `export const foo`). This function bridges the gap: it collects visibility
+/// comment attachment offsets with their tag, then for each export finds the
+/// nearest preceding attachment point and validates it's part of the same
+/// export statement.
+fn apply_jsdoc_visibility_tags(exports: &mut [ExportInfo], comments: &[Comment], source: &str) {
     if exports.is_empty() || comments.is_empty() {
         return;
     }
 
-    // Collect byte offsets where @public JSDoc comments attach
-    let mut public_offsets: Vec<u32> = Vec::new();
+    // Collect byte offsets where visibility JSDoc comments attach, with tag.
+    // Priority: Public > Internal > Alpha > Beta (if multiple tags on one comment).
+    let mut tag_offsets: Vec<(u32, VisibilityTag)> = Vec::new();
     for comment in comments {
         if comment.is_jsdoc() {
             let content_span = comment.content_span();
             let start = content_span.start as usize;
             let end = (content_span.end as usize).min(source.len());
-            if start < end && has_public_tag(&source[start..end]) {
-                public_offsets.push(comment.attached_to);
+            if start < end {
+                let text = &source[start..end];
+                let tag = if has_public_tag(text) {
+                    VisibilityTag::Public
+                } else if has_internal_tag(text) {
+                    VisibilityTag::Internal
+                } else if has_alpha_tag(text) {
+                    VisibilityTag::Alpha
+                } else if has_beta_tag(text) {
+                    VisibilityTag::Beta
+                } else {
+                    continue;
+                };
+                tag_offsets.push((comment.attached_to, tag));
             }
         }
     }
 
-    if public_offsets.is_empty() {
+    if tag_offsets.is_empty() {
         return;
     }
 
-    public_offsets.sort_unstable();
+    tag_offsets.sort_unstable_by_key(|&(offset, _)| offset);
 
     for export in exports.iter_mut() {
         // Skip synthetic exports (re-export entries with span 0..0)
@@ -196,15 +211,16 @@ fn apply_jsdoc_public_tags(exports: &mut [ExportInfo], comments: &[Comment], sou
         }
 
         // Check for exact match first (e.g., `export default` where span = decl span)
-        if public_offsets.binary_search(&export.span.start).is_ok() {
-            export.is_public = true;
+        if let Ok(idx) = tag_offsets.binary_search_by_key(&export.span.start, |&(o, _)| o) {
+            export.visibility = tag_offsets[idx].1;
             continue;
         }
 
-        // Find the largest @public offset that is <= this export's span start
-        let idx = public_offsets.partition_point(|&o| o <= export.span.start);
+        // Find the largest tagged offset that is <= this export's span start
+        let idx = tag_offsets.partition_point(|&(o, _)| o <= export.span.start);
         if idx > 0 {
-            let offset = public_offsets[idx - 1] as usize;
+            let (offset, tag) = tag_offsets[idx - 1];
+            let offset = offset as usize;
             let export_start = export.span.start as usize;
             if offset < export_start && export_start <= source.len() {
                 let between = &source[offset..export_start];
@@ -213,11 +229,44 @@ fn apply_jsdoc_public_tags(exports: &mut [ExportInfo], comments: &[Comment], sou
                 // statement boundaries separating them.
                 if between.starts_with("export") && !between.contains(';') && !between.contains('}')
                 {
-                    export.is_public = true;
+                    export.visibility = tag;
                 }
             }
         }
     }
+}
+
+/// Check if a JSDoc comment body contains an `@internal` tag.
+fn has_internal_tag(comment_text: &str) -> bool {
+    for (i, _) in comment_text.match_indices("@internal") {
+        let after = i + "@internal".len();
+        if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a JSDoc comment body contains a `@beta` tag.
+fn has_beta_tag(comment_text: &str) -> bool {
+    for (i, _) in comment_text.match_indices("@beta") {
+        let after = i + "@beta".len();
+        if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Check if a JSDoc comment body contains an `@alpha` tag.
+fn has_alpha_tag(comment_text: &str) -> bool {
+    for (i, _) in comment_text.match_indices("@alpha") {
+        let after = i + "@alpha".len();
+        if after >= comment_text.len() || !is_ident_char(comment_text.as_bytes()[after]) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Check if a byte is an identifier-continuation character (alphanumeric or `_`).
@@ -426,7 +475,9 @@ pub fn compute_unused_import_bindings(
 
 #[cfg(test)]
 mod tests {
-    use super::{has_public_tag, scan_jsdoc_imports_in};
+    use super::{
+        has_alpha_tag, has_beta_tag, has_internal_tag, has_public_tag, scan_jsdoc_imports_in,
+    };
     use fallow_types::extract::{ImportInfo, ImportedName};
 
     // ── has_public_tag ────────────────────────────────────────────
@@ -454,6 +505,62 @@ mod tests {
     #[test]
     fn has_public_tag_rejects_missing_at() {
         assert!(!has_public_tag(" * public"));
+    }
+
+    // ── has_internal_tag ──────────────────────────────────────────
+
+    #[test]
+    fn has_internal_tag_matches_bare_tag() {
+        assert!(has_internal_tag(" * @internal"));
+    }
+
+    #[test]
+    fn has_internal_tag_rejects_partial_word() {
+        assert!(!has_internal_tag(" * @internalizer"));
+    }
+
+    #[test]
+    fn has_internal_tag_rejects_missing_at() {
+        assert!(!has_internal_tag(" * internal"));
+    }
+
+    // ── has_beta_tag ─────────────────────────────────────────────
+
+    #[test]
+    fn has_beta_tag_matches_bare_tag() {
+        assert!(has_beta_tag(" * @beta"));
+    }
+
+    #[test]
+    fn has_beta_tag_rejects_partial_word() {
+        assert!(!has_beta_tag(" * @betaware"));
+    }
+
+    #[test]
+    fn has_beta_tag_rejects_missing_at() {
+        assert!(!has_beta_tag(" * beta"));
+    }
+
+    // ── has_alpha_tag ─────────────────────────────────────────────
+
+    #[test]
+    fn alpha_tag_standalone() {
+        assert!(has_alpha_tag("@alpha"));
+    }
+
+    #[test]
+    fn alpha_tag_with_text() {
+        assert!(has_alpha_tag("@alpha Some description"));
+    }
+
+    #[test]
+    fn alpha_tag_not_prefix() {
+        assert!(!has_alpha_tag("@alphabet"));
+    }
+
+    #[test]
+    fn has_alpha_tag_rejects_missing_at() {
+        assert!(!has_alpha_tag(" * alpha"));
     }
 
     // ── scan_jsdoc_imports_in ─────────────────────────────────────

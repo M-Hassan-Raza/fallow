@@ -93,6 +93,8 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
             trace_opts: &trace_opts,
             explain: opts.explain,
             top: None,
+            file: &[],
+            include_entry_exports: false,
             summary: opts.summary,
             regression_opts: opts.regression_opts,
         };

@@ -8,7 +8,10 @@ use oxc_ast::ast::{
     TSModuleDeclarationName, VariableDeclarator,
 };
 
-use crate::{DynamicImportInfo, ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo};
+use crate::{
+    DynamicImportInfo, ExportInfo, ExportName, MemberInfo, MemberKind, RequireCallInfo,
+    VisibilityTag,
+};
 
 use super::helpers::{
     extract_class_members, extract_super_class_name, has_angular_class_decorator,
@@ -40,7 +43,7 @@ impl ModuleInfoExtractor {
                             name,
                             local_name: Some(id.name.to_string()),
                             is_type_only,
-                            is_public: false,
+                            visibility: VisibilityTag::None,
                             span: id.span,
                             members: vec![],
                             super_class: None,
@@ -56,7 +59,7 @@ impl ModuleInfoExtractor {
                         name: ExportName::Named(id.name.to_string()),
                         local_name: Some(id.name.to_string()),
                         is_type_only,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: id.span,
                         members,
                         super_class,
@@ -94,7 +97,7 @@ impl ModuleInfoExtractor {
                     name: ExportName::Named(enumd.id.name.to_string()),
                     local_name: Some(enumd.id.name.to_string()),
                     is_type_only,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: enumd.id.span,
                     members,
                     super_class: None,
@@ -111,7 +114,7 @@ impl ModuleInfoExtractor {
                             name: ExportName::Named(id.name.to_string()),
                             local_name: Some(id.name.to_string()),
                             is_type_only: ns_type_only,
-                            is_public: false,
+                            visibility: VisibilityTag::None,
                             span: id.span,
                             members: vec![],
                             super_class: None,
@@ -122,7 +125,7 @@ impl ModuleInfoExtractor {
                             name: ExportName::Named(lit.value.to_string()),
                             local_name: Some(lit.value.to_string()),
                             is_type_only: ns_type_only,
-                            is_public: false,
+                            visibility: VisibilityTag::None,
                             span: lit.span,
                             members: vec![],
                             super_class: None,
@@ -144,7 +147,7 @@ impl ModuleInfoExtractor {
                 name: ExportName::Named(id.name.to_string()),
                 local_name: Some(id.name.to_string()),
                 is_type_only,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: id.span,
                 members: vec![],
                 super_class: None,

@@ -134,6 +134,10 @@ pub struct CheckOptions<'a> {
     pub trace_opts: &'a TraceOptions,
     pub explain: bool,
     pub top: Option<usize>,
+    /// Only report issues in these file(s). Empty means no file filter.
+    pub file: &'a [std::path::PathBuf],
+    /// Report unused exports in entry files instead of auto-marking them as used.
+    pub include_entry_exports: bool,
     /// When true, emit a condensed summary instead of full item-level output.
     /// Read by combined mode; not yet consumed by standalone check.
     #[allow(
@@ -157,10 +161,14 @@ pub struct CheckResult {
 }
 
 /// Run analysis, filtering, and baseline handling. Returns results without printing.
+#[expect(
+    clippy::too_many_lines,
+    reason = "orchestration function: analysis + filtering + baseline + regression; split candidate"
+)]
 pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
-    let config = load_config(
+    let mut config = load_config(
         opts.root,
         opts.config_path,
         opts.output,
@@ -169,6 +177,11 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         opts.production,
         opts.quiet,
     )?;
+
+    // Thread --include-entry-exports flag into config for analysis layer
+    if opts.include_entry_exports {
+        config.include_entry_exports = true;
+    }
 
     // Workspace filter resolution
     let ws_root = if let Some(ws_name) = opts.workspace {
@@ -232,6 +245,39 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     // Changed-file filtering
     if let Some(ref changed) = changed_files {
         filtering::filter_changed_files(&mut results, changed);
+    }
+
+    // Single-file filtering (--file)
+    if !opts.file.is_empty() {
+        let file_set: rustc_hash::FxHashSet<std::path::PathBuf> = opts
+            .file
+            .iter()
+            .map(|p| {
+                if p.is_absolute() {
+                    p.clone()
+                } else {
+                    opts.root.join(p)
+                }
+            })
+            .collect();
+        // Warn about paths that don't exist on disk (show resolved path for clarity)
+        for (original, resolved) in opts.file.iter().zip(file_set.iter()) {
+            if !resolved.exists() {
+                eprintln!(
+                    "Warning: --file '{}' (resolved to '{}') was not found in the project",
+                    original.display(),
+                    resolved.display()
+                );
+            }
+        }
+        filtering::filter_changed_files(&mut results, &file_set);
+        // Suppress project-wide dependency issues in single-file mode.
+        // Users expect --file to scope ALL output to the specified file(s).
+        results.unused_dependencies.clear();
+        results.unused_dev_dependencies.clear();
+        results.unused_optional_dependencies.clear();
+        results.type_only_dependencies.clear();
+        results.test_only_dependencies.clear();
     }
 
     // Rules application

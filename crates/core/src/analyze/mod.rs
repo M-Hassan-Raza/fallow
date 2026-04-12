@@ -548,7 +548,7 @@ mod tests {
         #[test]
         fn find_dead_code_full_collect_usages_flag() {
             use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-            use crate::extract::ExportName;
+            use crate::extract::{ExportName, VisibilityTag};
             use crate::graph::{ExportSymbol, ModuleGraph};
             use crate::resolve::ResolvedModule;
             use oxc_span::Span;
@@ -580,7 +580,7 @@ mod tests {
             graph.modules[0].exports = vec![ExportSymbol {
                 name: ExportName::Named("myExport".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: Span::new(10, 30),
                 references: vec![],
                 members: vec![],

@@ -186,7 +186,9 @@ fn bench_full_pipeline_1000(c: &mut Criterion) {
 )]
 fn bench_resolve_re_export_chains(c: &mut Criterion) {
     use fallow_core::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_core::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo};
+    use fallow_core::extract::{
+        ExportInfo, ExportName, ImportInfo, ImportedName, ReExportInfo, VisibilityTag,
+    };
     use fallow_core::resolve::{ResolveResult, ResolvedImport, ResolvedModule, ResolvedReExport};
 
     // Build a graph with multiple re-export chains:
@@ -344,7 +346,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                         name: ExportName::Named(format!("value{e}")),
                         local_name: Some(format!("value{e}")),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,
@@ -353,7 +355,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
                         name: ExportName::Named(format!("fn{e}")),
                         local_name: Some(format!("fn{e}")),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
                         super_class: None,
@@ -398,7 +400,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
     use fallow_core::discover::FileId;
     use fallow_core::extract::{
         DynamicImportInfo, ExportInfo, ExportName, ImportInfo, ImportedName, MemberAccess,
-        MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo,
+        MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
     };
 
     // Build a representative ModuleInfo with realistic data:
@@ -411,7 +413,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 name: ExportName::Named("UserService".to_string()),
                 local_name: Some("UserService".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(100, 500),
                 members: vec![
                     MemberInfo {
@@ -439,7 +441,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 name: ExportName::Named("Status".to_string()),
                 local_name: Some("Status".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(550, 700),
                 members: vec![
                     MemberInfo {
@@ -467,7 +469,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 name: ExportName::Default,
                 local_name: None,
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(800, 1200),
                 members: vec![],
                 super_class: None,
@@ -476,7 +478,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 name: ExportName::Named("Props".to_string()),
                 local_name: Some("Props".to_string()),
                 is_type_only: true,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(10, 80),
                 members: vec![],
                 super_class: None,
@@ -485,7 +487,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
                 name: ExportName::Named("formatName".to_string()),
                 local_name: Some("formatName".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(720, 780),
                 members: vec![],
                 super_class: None,

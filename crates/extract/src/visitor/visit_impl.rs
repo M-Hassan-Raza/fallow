@@ -9,7 +9,7 @@ use oxc_ast_visit::walk;
 
 use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
-    MemberAccess, ReExportInfo, RequireCallInfo,
+    MemberAccess, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 
 use crate::asset_url::normalize_asset_url;
@@ -20,7 +20,10 @@ use super::helpers::{
     extract_super_class_name, has_angular_class_decorator, is_meta_url_arg,
     regex_pattern_to_suffix,
 };
-use super::{ModuleInfoExtractor, try_extract_dynamic_import, try_extract_require};
+use super::{
+    ModuleInfoExtractor, try_extract_arrow_wrapped_import, try_extract_dynamic_import,
+    try_extract_require,
+};
 
 impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
@@ -159,7 +162,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         name: ExportName::Named(spec.exported.name().to_string()),
                         local_name: Some(spec.local.name().to_string()),
                         is_type_only: spec_type_only,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: spec.span,
                         members: vec![],
                         super_class: None,
@@ -199,7 +202,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             name: ExportName::Default,
             local_name: None,
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: decl.span,
             members,
             super_class,
@@ -458,6 +461,19 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             }
         }
 
+        // Detect arrow-wrapped dynamic imports in call arguments:
+        // `React.lazy(() => import('./Foo'))`, `loadable(() => import('./X'))`, etc.
+        // Lazy loading wrappers always consume the default export.
+        if let Some((import_expr, source)) = try_extract_arrow_wrapped_import(&expr.arguments) {
+            self.dynamic_imports.push(DynamicImportInfo {
+                source: source.to_string(),
+                span: import_expr.span,
+                destructured_names: vec!["default".to_string()],
+                local_name: None,
+            });
+            self.handled_import_spans.insert(import_expr.span);
+        }
+
         walk::walk_call_expression(self, expr);
     }
 
@@ -503,7 +519,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                                     name: ExportName::Named(name.to_string()),
                                     local_name: None,
                                     is_type_only: false,
-                                    is_public: false,
+                                    visibility: VisibilityTag::None,
                                     span: p.span,
                                     members: vec![],
                                     super_class: None,
@@ -518,7 +534,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         name: ExportName::Named(member.property.name.to_string()),
                         local_name: None,
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: expr.span,
                         members: vec![],
                         super_class: None,
@@ -535,7 +551,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     name: ExportName::Named(member.property.name.to_string()),
                     local_name: None,
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: expr.span,
                     members: vec![],
                     super_class: None,

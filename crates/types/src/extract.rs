@@ -176,6 +176,40 @@ pub struct DynamicImportPattern {
     pub span: Span,
 }
 
+/// Visibility tag from JSDoc/TSDoc comments.
+///
+/// Controls whether an export is reported as unused. All non-`None` variants
+/// suppress unused-export detection, but preserve the semantic distinction
+/// for API surface reporting and filtering.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+#[repr(u8)]
+pub enum VisibilityTag {
+    /// No visibility tag present.
+    #[default]
+    None = 0,
+    /// `@public` or `@api public` -- part of the public API surface.
+    Public = 1,
+    /// `@internal` -- exported for internal use (sister packages, build tools).
+    Internal = 2,
+    /// `@beta` -- public but unstable, may change without notice.
+    Beta = 3,
+    /// `@alpha` -- early preview, may change drastically without notice.
+    Alpha = 4,
+}
+
+impl VisibilityTag {
+    /// Whether this tag suppresses unused-export detection.
+    pub const fn suppresses_unused(self) -> bool {
+        !matches!(self, Self::None)
+    }
+
+    /// For serde `skip_serializing_if`.
+    pub fn is_none(&self) -> bool {
+        matches!(self, Self::None)
+    }
+}
+
 /// An export declaration.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct ExportInfo {
@@ -185,11 +219,10 @@ pub struct ExportInfo {
     pub local_name: Option<String>,
     /// Whether this is a type-only export (`export type`).
     pub is_type_only: bool,
-    /// Whether this export has a `@public` JSDoc/TSDoc tag.
-    /// Exports marked `@public` are never reported as unused — they are
-    /// assumed to be consumed by external consumers (library API surface).
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub is_public: bool,
+    /// Visibility tag from JSDoc/TSDoc comment (`@public`, `@internal`, `@alpha`, `@beta`).
+    /// Exports with any visibility tag are never reported as unused.
+    #[serde(default, skip_serializing_if = "VisibilityTag::is_none")]
+    pub visibility: VisibilityTag,
     /// Source span of the export declaration.
     #[serde(serialize_with = "serialize_span")]
     pub span: Span,

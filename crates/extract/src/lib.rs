@@ -32,7 +32,7 @@ use fallow_types::discover::{DiscoveredFile, FileId};
 pub use fallow_types::extract::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
     MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult, ReExportInfo, RequireCallInfo,
-    compute_line_offsets,
+    VisibilityTag, compute_line_offsets,
 };
 
 // Re-export extraction functions for internal use and fuzzing

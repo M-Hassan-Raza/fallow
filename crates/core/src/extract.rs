@@ -8,7 +8,7 @@
 pub use fallow_extract::{
     ANGULAR_TPL_SENTINEL, DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName,
     ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind, ModuleInfo, ParseResult,
-    ReExportInfo, RequireCallInfo,
+    ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 
 // Re-export extraction functions

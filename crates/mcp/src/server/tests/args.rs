@@ -21,6 +21,7 @@ fn check_changed(since: &str) -> CheckChangedParams {
         tolerance: None,
         regression_baseline: None,
         save_regression_baseline: None,
+        include_entry_exports: None,
         no_cache: None,
         threads: None,
     }
@@ -56,6 +57,8 @@ fn analyze_args_with_all_options() {
         regression_baseline: Some("reg.json".to_string()),
         save_regression_baseline: Some("new-reg.json".to_string()),
         group_by: Some("owner".to_string()),
+        file: None,
+        include_entry_exports: None,
         no_cache: Some(true),
         threads: Some(4),
     };
@@ -197,6 +200,7 @@ fn check_changed_args_with_all_options() {
         tolerance: Some("5".to_string()),
         regression_baseline: Some("reg.json".to_string()),
         save_regression_baseline: Some("new-reg.json".to_string()),
+        include_entry_exports: None,
         no_cache: Some(true),
         threads: Some(2),
     };
@@ -754,6 +758,7 @@ fn no_cache_false_is_omitted_across_all_tools() {
         tolerance: None,
         regression_baseline: None,
         save_regression_baseline: None,
+        include_entry_exports: None,
         threads: None,
     });
     assert!(!check_changed.contains(&"--no-cache".to_string()));

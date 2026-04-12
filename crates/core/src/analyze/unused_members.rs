@@ -390,7 +390,7 @@ mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
     use crate::extract::{
-        ExportName, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind,
+        ExportName, ImportInfo, ImportedName, MemberAccess, MemberInfo, MemberKind, VisibilityTag,
     };
     use crate::graph::{ExportSymbol, ModuleGraph, SymbolReference};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
@@ -459,7 +459,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             references,
             members,

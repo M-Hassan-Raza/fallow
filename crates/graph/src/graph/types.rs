@@ -4,7 +4,7 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::ExportName;
+use fallow_types::extract::{ExportName, VisibilityTag};
 
 /// A single module in the graph.
 ///
@@ -160,9 +160,9 @@ pub struct ExportSymbol {
     pub name: ExportName,
     /// Whether this is a type-only export.
     pub is_type_only: bool,
-    /// Whether this export has a `@public` JSDoc/TSDoc tag.
-    /// Exports marked `@public` are never reported as unused.
-    pub is_public: bool,
+    /// Visibility tag from JSDoc/TSDoc comment (`@public`, `@internal`, `@alpha`, `@beta`).
+    /// Exports with any visibility tag are never reported as unused.
+    pub visibility: VisibilityTag,
     /// Source span of the export declaration.
     pub span: oxc_span::Span,
     /// Which files reference this export.
@@ -341,14 +341,14 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Named("myFunction".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 50),
             references: vec![],
             members: vec![],
         };
         assert!(matches!(sym.name, ExportName::Named(ref n) if n == "myFunction"));
         assert!(!sym.is_type_only);
-        assert!(!sym.is_public);
+        assert_eq!(sym.visibility, VisibilityTag::None);
     }
 
     #[test]
@@ -356,7 +356,7 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 20),
             references: vec![],
             members: vec![],
@@ -369,12 +369,12 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Named("api".to_string()),
             is_type_only: false,
-            is_public: true,
+            visibility: VisibilityTag::Public,
             span: oxc_span::Span::new(0, 10),
             references: vec![],
             members: vec![],
         };
-        assert!(sym.is_public);
+        assert_eq!(sym.visibility, VisibilityTag::Public);
     }
 
     #[test]
@@ -382,7 +382,7 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Named("MyInterface".to_string()),
             is_type_only: true,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 30),
             references: vec![],
             members: vec![],
@@ -395,7 +395,7 @@ mod tests {
         let sym = ExportSymbol {
             name: ExportName::Named("helper".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 20),
             references: vec![
                 SymbolReference {
@@ -480,7 +480,7 @@ mod tests {
             exports: vec![ExportSymbol {
                 name: ExportName::Named("localFn".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 references: vec![],
                 members: vec![],

@@ -7,7 +7,7 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version — bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 37;
+pub(super) const CACHE_VERSION: u32 = 39;
 
 /// Maximum cache file size to deserialize (256 MB).
 pub(super) const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
@@ -77,8 +77,8 @@ pub struct CachedExport {
     pub is_default: bool,
     /// Whether this is a type-only export.
     pub is_type_only: bool,
-    /// Whether this export has a `@public` `JSDoc` tag.
-    pub is_public: bool,
+    /// Visibility tag discriminant (0=None, 1=Public, 2=Internal, 3=Beta, 4=Alpha).
+    pub visibility: u8,
     /// The local binding name, if different.
     pub local_name: Option<String>,
     /// Byte offset of the export span start.

@@ -60,6 +60,14 @@ pub fn build_analyze_args(params: &AnalyzeParams) -> Result<Vec<String>, String>
     if let Some(ref gb) = params.group_by {
         args.extend(["--group-by".to_string(), gb.clone()]);
     }
+    if let Some(ref files) = params.file {
+        for f in files {
+            args.extend(["--file".to_string(), f.clone()]);
+        }
+    }
+    if params.include_entry_exports == Some(true) {
+        args.push("--include-entry-exports".to_string());
+    }
 
     Ok(args)
 }

@@ -448,7 +448,7 @@ mod tests {
     use super::*;
 
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use crate::extract::{ExportInfo, ExportName, ImportInfo, ImportedName};
+    use crate::extract::{ExportInfo, ExportName, ImportInfo, ImportedName, VisibilityTag};
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 
     fn build_test_graph() -> ModuleGraph {
@@ -500,7 +500,7 @@ mod tests {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,
@@ -509,7 +509,7 @@ mod tests {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(21, 40),
                         members: vec![],
                         super_class: None,
@@ -524,7 +524,7 @@ mod tests {
                     name: ExportName::Named("baz".to_string()),
                     local_name: Some("baz".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 15),
                     members: vec![],
                     super_class: None,

@@ -4,14 +4,16 @@ mod declarations;
 mod helpers;
 mod visit_impl;
 
-use oxc_ast::ast::{Argument, CallExpression, Expression, ImportExpression, ObjectPattern};
+use oxc_ast::ast::{
+    Argument, CallExpression, Expression, ImportExpression, ObjectPattern, Statement,
+};
 use oxc_span::Span;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::Suppression;
 use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, MemberAccess,
-    MemberInfo, ModuleInfo, ReExportInfo, RequireCallInfo,
+    MemberInfo, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 
 /// AST visitor that extracts all import/export information in a single pass.
@@ -88,7 +90,7 @@ impl ModuleInfoExtractor {
             name: ExportName::Named(name.to_string()),
             local_name: Some(name.to_string()),
             is_type_only: true,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span,
             members: vec![],
             super_class: None,
@@ -194,6 +196,73 @@ fn try_extract_dynamic_import<'a, 'b>(
         return None;
     };
     Some((import_expr, &lit.value))
+}
+
+/// Try to extract a dynamic `import()` expression wrapped in an arrow function
+/// that appears as an argument to a call expression. This covers patterns like:
+///
+/// - `React.lazy(() => import('./Foo'))`
+/// - `loadable(() => import('./Component'))`
+/// - `defineAsyncComponent(() => import('./View'))`
+///
+/// Returns `(import_expr, source_string)` on success.
+fn try_extract_arrow_wrapped_import<'a, 'b>(
+    arguments: &'b [Argument<'a>],
+) -> Option<(&'b ImportExpression<'a>, &'b str)> {
+    for arg in arguments {
+        let import_expr = match arg {
+            Argument::ArrowFunctionExpression(arrow) => {
+                if arrow.expression {
+                    // Expression body: `() => import('./x')`
+                    let Some(Statement::ExpressionStatement(expr_stmt)) =
+                        arrow.body.statements.first()
+                    else {
+                        continue;
+                    };
+                    let Expression::ImportExpression(imp) = &expr_stmt.expression else {
+                        continue;
+                    };
+                    imp
+                } else {
+                    // Block body: `() => { return import('./x'); }`
+                    let Some(imp) = extract_import_from_return_body(&arrow.body.statements) else {
+                        continue;
+                    };
+                    imp
+                }
+            }
+            Argument::FunctionExpression(func) => {
+                // `function() { return import('./x'); }`
+                let Some(body) = &func.body else {
+                    continue;
+                };
+                let Some(imp) = extract_import_from_return_body(&body.statements) else {
+                    continue;
+                };
+                imp
+            }
+            _ => continue,
+        };
+        let Expression::StringLiteral(lit) = &import_expr.source else {
+            continue;
+        };
+        return Some((import_expr, &lit.value));
+    }
+    None
+}
+
+/// Extract an `import()` expression from a block body's return statement.
+fn extract_import_from_return_body<'a, 'b>(
+    stmts: &'b [Statement<'a>],
+) -> Option<&'b ImportExpression<'a>> {
+    for stmt in stmts.iter().rev() {
+        if let Statement::ReturnStatement(ret) = stmt
+            && let Some(Expression::ImportExpression(imp)) = &ret.argument
+        {
+            return Some(imp);
+        }
+    }
+    None
 }
 
 #[cfg(all(test, not(miri)))]

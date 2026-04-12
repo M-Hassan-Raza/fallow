@@ -81,6 +81,9 @@ pub struct ResolvedConfig {
     pub public_packages: Vec<String>,
     /// Feature flag detection configuration.
     pub flags: FlagsConfig,
+    /// When true, entry file exports are subject to unused-export detection
+    /// instead of being automatically marked as used. Set via CLI `--include-entry-exports`.
+    pub include_entry_exports: bool,
 }
 
 impl FallowConfig {
@@ -215,6 +218,7 @@ impl FallowConfig {
             codeowners: self.codeowners,
             public_packages: self.public_packages,
             flags: self.flags,
+            include_entry_exports: false,
         }
     }
 }

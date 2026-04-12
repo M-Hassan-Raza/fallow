@@ -190,3 +190,88 @@ fn dynamic_import_concat_prefix_and_suffix() {
         Some(".vue".to_string())
     );
 }
+
+// ── Arrow-wrapped dynamic imports ────────────────────────────
+
+#[test]
+fn arrow_wrapped_import_expression_body() {
+    let info = parse_source("const Foo = React.lazy(() => import('./Foo'));");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./Foo");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn arrow_wrapped_import_block_body() {
+    let info = parse_source("const Foo = lazy(() => { return import('./Foo'); });");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./Foo");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn arrow_wrapped_import_function_expression() {
+    let info = parse_source("const Foo = loadable(function() { return import('./Foo'); });");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./Foo");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn arrow_wrapped_import_vue_define_async() {
+    let info = parse_source("const Comp = defineAsyncComponent(() => import('./MyComp'));");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./MyComp");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn arrow_wrapped_import_no_duplicate() {
+    // Should NOT produce a duplicate side-effect import alongside the arrow-wrapped one
+    let info = parse_source("React.lazy(() => import('./Foo'));");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn non_import_arrow_not_extracted() {
+    // Arrow that doesn't contain an import() should not produce a dynamic import
+    let info = parse_source("const result = someFunc(() => doSomething());");
+    assert_eq!(info.dynamic_imports.len(), 0);
+}
+
+#[test]
+fn arrow_wrapped_import_second_argument() {
+    // Import callback is the second argument, not the first
+    let info = parse_source("const Foo = createLazy(config, () => import('./Foo'));");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./Foo");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn arrow_wrapped_import_async_arrow() {
+    let info = parse_source("const Foo = lazy(async () => import('./Foo'));");
+    // Async arrow's body is still an expression containing import()
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./Foo");
+}
+
+#[test]
+fn arrow_wrapped_import_with_non_import_first_arg() {
+    // First arg is not an import arrow, second arg IS
+    let info = parse_source("const Foo = wrapper('options', () => import('./Foo'));");
+    assert_eq!(info.dynamic_imports.len(), 1);
+    assert_eq!(info.dynamic_imports[0].source, "./Foo");
+    assert_eq!(info.dynamic_imports[0].destructured_names, vec!["default"]);
+}
+
+#[test]
+fn arrow_wrapped_template_literal_source() {
+    // Template literal source in arrow — should NOT produce a DynamicImportInfo
+    // (it's a dynamic pattern, not a static import)
+    let info = parse_source("const Foo = lazy(() => import(`./pages/${name}`));");
+    assert_eq!(info.dynamic_imports.len(), 0);
+    // But it should produce a dynamic_import_pattern
+    assert_eq!(info.dynamic_import_patterns.len(), 1);
+}

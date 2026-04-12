@@ -30,6 +30,18 @@ const ENV_WRAPPERS: &[&str] = &["cross-env", "dotenv", "env"];
 /// Node.js runners whose first non-flag argument is a file path, not a binary name.
 const NODE_RUNNERS: &[&str] = &["node", "ts-node", "tsx", "babel-node", "bun"];
 
+/// Script multiplexer commands whose positional arguments are script names, not binaries.
+/// `concurrently "npm:dev"` and `run-p server worker` reference other package.json scripts.
+const SCRIPT_MULTIPLEXERS: &[&str] = &[
+    "concurrently",
+    "npm-run-all",
+    "npm-run-all2",
+    "run-s",
+    "run-p",
+    "run-s2",
+    "run-p2",
+];
+
 /// Result of analyzing all package.json scripts.
 #[derive(Debug, Default)]
 pub struct ScriptAnalysis {
@@ -224,6 +236,18 @@ fn parse_command_segment(segment: &str) -> Option<ScriptCommand> {
     let idx = shell::advance_past_package_manager(&tokens, idx)?;
 
     let binary = tokens[idx].to_string();
+
+    // Script multiplexers (concurrently, run-s, run-p, npm-run-all):
+    // their positional arguments are script names, not binaries or file paths.
+    // Only the multiplexer binary itself is a used package.
+    if SCRIPT_MULTIPLEXERS.contains(&binary.as_str()) {
+        return Some(ScriptCommand {
+            binary,
+            config_args: Vec::new(),
+            file_args: Vec::new(),
+        });
+    }
+
     let is_node_runner = NODE_RUNNERS.contains(&binary.as_str());
     let (file_args, config_args) = extract_args_for_binary(&tokens, idx + 1, is_node_runner);
 
@@ -1007,6 +1031,93 @@ mod tests {
         let cmds = parse_script("bun exec vitest run");
         assert_eq!(cmds.len(), 1);
         assert_eq!(cmds[0].binary, "vitest");
+    }
+
+    // --- script multiplexers ---
+
+    #[test]
+    fn concurrently_with_npm_prefix() {
+        let scripts = HashMap::from([(
+            "dev".to_string(),
+            "concurrently \"npm:server\" \"npm:worker\"".to_string(),
+        )]);
+        let result = analyze_scripts(&scripts, Path::new("/fake"));
+        // concurrently itself should be detected as a used package
+        assert!(result.used_packages.contains("concurrently"));
+        // npm:server and npm:worker are script references, not packages
+        assert!(!result.used_packages.contains("server"));
+        assert!(!result.used_packages.contains("worker"));
+        assert!(!result.used_packages.contains("npm:server"));
+    }
+
+    #[test]
+    fn run_p_with_bare_script_names() {
+        let scripts = HashMap::from([("dev".to_string(), "run-p server worker".to_string())]);
+        let result = analyze_scripts(&scripts, Path::new("/fake"));
+        // run-p maps to npm-run-all package
+        assert!(result.used_packages.contains("npm-run-all"));
+        // server and worker are script names, not packages
+        assert!(!result.used_packages.contains("server"));
+        assert!(!result.used_packages.contains("worker"));
+    }
+
+    #[test]
+    fn run_s_with_bare_script_names() {
+        let scripts = HashMap::from([("build".to_string(), "run-s clean compile".to_string())]);
+        let result = analyze_scripts(&scripts, Path::new("/fake"));
+        assert!(result.used_packages.contains("npm-run-all"));
+        assert!(!result.used_packages.contains("clean"));
+        assert!(!result.used_packages.contains("compile"));
+    }
+
+    #[test]
+    fn npm_run_all_with_script_names() {
+        let scripts = HashMap::from([(
+            "dev".to_string(),
+            "npm-run-all --parallel server worker".to_string(),
+        )]);
+        let result = analyze_scripts(&scripts, Path::new("/fake"));
+        assert!(result.used_packages.contains("npm-run-all"));
+        assert!(!result.used_packages.contains("server"));
+        assert!(!result.used_packages.contains("worker"));
+    }
+
+    #[test]
+    fn concurrently_with_flags_before_args() {
+        let scripts = HashMap::from([(
+            "dev".to_string(),
+            "concurrently --kill-others \"npm:server\" \"npm:worker\"".to_string(),
+        )]);
+        let result = analyze_scripts(&scripts, Path::new("/fake"));
+        assert!(result.used_packages.contains("concurrently"));
+        assert!(!result.used_packages.contains("server"));
+        assert!(!result.used_packages.contains("worker"));
+        // --kill-others should not be treated as a package
+        assert!(!result.used_packages.contains("kill-others"));
+    }
+
+    #[test]
+    fn concurrently_unquoted_npm_prefix() {
+        let scripts = HashMap::from([(
+            "dev".to_string(),
+            "concurrently npm:dev npm:test".to_string(),
+        )]);
+        let result = analyze_scripts(&scripts, Path::new("/fake"));
+        assert!(result.used_packages.contains("concurrently"));
+        assert!(!result.used_packages.contains("dev"));
+        assert!(!result.used_packages.contains("test"));
+        assert!(!result.used_packages.contains("npm:dev"));
+    }
+
+    #[test]
+    fn run_p_with_npm_prefix() {
+        let scripts = HashMap::from([(
+            "dev".to_string(),
+            "run-p \"npm:server\" \"npm:worker\"".to_string(),
+        )]);
+        let result = analyze_scripts(&scripts, Path::new("/fake"));
+        assert!(result.used_packages.contains("npm-run-all"));
+        assert!(!result.used_packages.contains("server"));
     }
 
     mod proptests {

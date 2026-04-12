@@ -223,6 +223,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: fallow_config::FlagsConfig::default(),
+            include_entry_exports: false,
         }
     }
 

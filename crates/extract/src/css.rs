@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 
 use oxc_span::Span;
 
-use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo};
+use crate::{ExportInfo, ExportName, ImportInfo, ImportedName, ModuleInfo, VisibilityTag};
 use fallow_types::discover::FileId;
 
 /// Regex to extract CSS @import sources.
@@ -141,7 +141,7 @@ pub fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
                     name: ExportName::Named(class_name),
                     local_name: None,
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: Span::default(),
                     members: Vec::new(),
                     super_class: None,

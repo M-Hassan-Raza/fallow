@@ -4,7 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
-use fallow_types::extract::{ExportName, ImportedName};
+use fallow_types::extract::{ExportName, ImportedName, VisibilityTag};
 
 use super::narrowing::attach_symbol_reference;
 use super::types::ModuleNode;
@@ -166,7 +166,7 @@ fn build_module_node(
                 .map(|e| ExportSymbol {
                     name: e.name.clone(),
                     is_type_only: e.is_type_only,
-                    is_public: e.is_public,
+                    visibility: e.visibility,
                     span: e.span,
                     references: Vec::new(),
                     members: e.members.clone(),
@@ -204,7 +204,7 @@ fn build_module_node(
             exports.push(ExportSymbol {
                 name: export_name,
                 is_type_only: re.info.is_type_only,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 // Use the real span from the visitor when available; falls back
                 // to (0, 0) for re-exports synthesized inside the graph layer.
                 span: re.info.span,
@@ -863,7 +863,7 @@ mod tests {
                     name: ExportName::Named("helper".to_string()),
                     local_name: Some("helper".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -904,7 +904,7 @@ mod tests {
                 name: ExportName::Named("foo".to_string()),
                 local_name: Some("foo".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 20),
                 members: vec![],
                 super_class: None,

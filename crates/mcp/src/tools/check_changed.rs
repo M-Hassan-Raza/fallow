@@ -35,5 +35,9 @@ pub fn build_check_changed_args(params: CheckChangedParams) -> Vec<String> {
         params.save_regression_baseline.as_deref(),
     );
 
+    if params.include_entry_exports == Some(true) {
+        args.push("--include-entry-exports".to_string());
+    }
+
     args
 }

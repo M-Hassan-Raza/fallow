@@ -92,7 +92,7 @@ fn has_reachable_export_reference(file_id: FileId, graph: &ModuleGraph) -> bool 
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
-    use crate::extract::ExportName;
+    use crate::extract::{ExportName, VisibilityTag};
     use crate::graph::{ExportSymbol, ModuleGraph, ReferenceKind, SymbolReference};
     use crate::resolve::ResolvedModule;
     use oxc_span::Span;
@@ -183,7 +183,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("helper".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             references: vec![SymbolReference {
                 from_file: FileId(2),
@@ -206,7 +206,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("helper".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             references: vec![SymbolReference {
                 from_file: FileId(0),

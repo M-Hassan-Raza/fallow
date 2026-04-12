@@ -227,7 +227,7 @@ mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_types::extract::{ExportName, ImportInfo, ImportedName};
+    use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
     use std::path::PathBuf;
 
     // Helper to build a simple module graph
@@ -276,7 +276,7 @@ mod tests {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,
@@ -285,7 +285,7 @@ mod tests {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
                         super_class: None,
@@ -403,7 +403,7 @@ mod tests {
                     name: ExportName::Named("runtimeOnly".to_string()),
                     local_name: Some("runtimeOnly".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -449,7 +449,7 @@ mod tests {
                     name: ExportName::Named("covered".to_string()),
                     local_name: Some("covered".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -562,7 +562,7 @@ mod tests {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -634,7 +634,7 @@ mod tests {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -648,7 +648,7 @@ mod tests {
                     name: ExportName::Named("orphan".to_string()),
                     local_name: Some("orphan".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -899,7 +899,7 @@ mod tests {
                     name: ExportName::Default,
                     local_name: None,
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -964,7 +964,7 @@ mod tests {
                     name: ExportName::Named("primaryColor".to_string()),
                     local_name: Some("primaryColor".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -1043,7 +1043,7 @@ mod tests {
                     name: ExportName::Named("helper".to_string()),
                     local_name: Some("helper".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,

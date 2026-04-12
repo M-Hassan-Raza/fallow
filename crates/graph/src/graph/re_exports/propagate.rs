@@ -6,7 +6,7 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::ExportName;
+use fallow_types::extract::{ExportName, VisibilityTag};
 
 use crate::graph::types::{ExportSymbol, ModuleNode, ReferenceKind, SymbolReference};
 use crate::graph::{Edge, ImportedName};
@@ -120,7 +120,7 @@ pub(in crate::graph) fn propagate_star_re_export(
             source.exports.push(ExportSymbol {
                 name: export_name,
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 0),
                 references: refs.clone(),
                 members: Vec::new(),

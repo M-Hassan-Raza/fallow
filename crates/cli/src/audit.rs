@@ -327,6 +327,8 @@ fn run_audit_check<'a>(
         trace_opts: &trace_opts,
         explain: opts.explain,
         top: None,
+        file: &[],
+        include_entry_exports: false,
         summary: false,
         regression_opts: crate::regression::RegressionOpts {
             fail_on_regression: false,

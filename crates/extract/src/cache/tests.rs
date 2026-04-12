@@ -138,7 +138,7 @@ fn module_to_cached_roundtrip_named_export() {
             name: ExportName::Named("foo".to_string()),
             local_name: Some("foo".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(10, 20),
             members: vec![],
             super_class: None,
@@ -181,7 +181,7 @@ fn module_to_cached_roundtrip_default_export() {
             name: ExportName::Default,
             local_name: None,
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             members: vec![],
             super_class: None,
@@ -379,7 +379,7 @@ fn module_to_cached_roundtrip_members() {
             name: ExportName::Named("Color".to_string()),
             local_name: Some("Color".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(0, 50),
             members: vec![
                 MemberInfo {
@@ -923,14 +923,14 @@ fn module_to_cached_roundtrip_suppressions_with_kinds() {
 }
 
 #[test]
-fn module_to_cached_roundtrip_is_public() {
+fn module_to_cached_roundtrip_visibility() {
     let module = ModuleInfo {
         file_id: FileId(0),
         exports: vec![ExportInfo {
             name: ExportName::Named("publicFoo".to_string()),
             local_name: Some("publicFoo".to_string()),
             is_type_only: false,
-            is_public: true,
+            visibility: VisibilityTag::Public,
             span: Span::new(0, 10),
             members: vec![],
             super_class: None,
@@ -954,7 +954,112 @@ fn module_to_cached_roundtrip_is_public() {
     let cached = module_to_cached(&module, 0, 0);
     let restored = cached_to_module(&cached, FileId(0));
 
-    assert!(restored.exports[0].is_public);
+    assert_eq!(restored.exports[0].visibility, VisibilityTag::Public);
+}
+
+#[test]
+fn module_to_cached_roundtrip_visibility_internal() {
+    let module = ModuleInfo {
+        file_id: FileId(0),
+        exports: vec![ExportInfo {
+            name: ExportName::Named("internalHelper".to_string()),
+            local_name: Some("internalHelper".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::Internal,
+            span: Span::new(0, 20),
+            members: vec![],
+            super_class: None,
+        }],
+        imports: vec![],
+        re_exports: vec![],
+        dynamic_imports: vec![],
+        require_calls: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        dynamic_import_patterns: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: vec![],
+        content_hash: 0,
+        suppressions: vec![],
+        line_offsets: vec![],
+        complexity: Vec::new(),
+        flag_uses: Vec::new(),
+    };
+
+    let cached = module_to_cached(&module, 0, 0);
+    assert_eq!(cached.exports[0].visibility, 2);
+    let restored = cached_to_module(&cached, FileId(0));
+    assert_eq!(restored.exports[0].visibility, VisibilityTag::Internal);
+}
+
+#[test]
+fn module_to_cached_roundtrip_visibility_beta() {
+    let module = ModuleInfo {
+        file_id: FileId(0),
+        exports: vec![ExportInfo {
+            name: ExportName::Named("betaFeature".to_string()),
+            local_name: Some("betaFeature".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::Beta,
+            span: Span::new(0, 20),
+            members: vec![],
+            super_class: None,
+        }],
+        imports: vec![],
+        re_exports: vec![],
+        dynamic_imports: vec![],
+        require_calls: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        dynamic_import_patterns: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: vec![],
+        content_hash: 0,
+        suppressions: vec![],
+        line_offsets: vec![],
+        complexity: Vec::new(),
+        flag_uses: Vec::new(),
+    };
+
+    let cached = module_to_cached(&module, 0, 0);
+    assert_eq!(cached.exports[0].visibility, 3);
+    let restored = cached_to_module(&cached, FileId(0));
+    assert_eq!(restored.exports[0].visibility, VisibilityTag::Beta);
+}
+
+#[test]
+fn module_to_cached_roundtrip_visibility_alpha() {
+    let module = ModuleInfo {
+        file_id: FileId(0),
+        exports: vec![ExportInfo {
+            name: ExportName::Named("alphaFeature".to_string()),
+            local_name: Some("alphaFeature".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::Alpha,
+            span: Span::new(0, 20),
+            members: vec![],
+            super_class: None,
+        }],
+        imports: vec![],
+        re_exports: vec![],
+        dynamic_imports: vec![],
+        require_calls: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        dynamic_import_patterns: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: vec![],
+        content_hash: 0,
+        suppressions: vec![],
+        line_offsets: vec![],
+        complexity: Vec::new(),
+        flag_uses: Vec::new(),
+    };
+
+    let cached = module_to_cached(&module, 0, 0);
+    assert_eq!(cached.exports[0].visibility, 4);
+    let restored = cached_to_module(&cached, FileId(0));
+    assert_eq!(restored.exports[0].visibility, VisibilityTag::Alpha);
 }
 
 #[test]
@@ -1213,7 +1318,7 @@ fn module_to_cached_roundtrip_member_decorators() {
             name: ExportName::Named("Svc".to_string()),
             local_name: Some("Svc".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(0, 100),
             members: vec![MemberInfo {
                 name: "handler".to_string(),

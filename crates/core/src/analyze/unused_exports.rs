@@ -76,8 +76,12 @@ fn compile_used_export_rule(
 /// (those are already caught by `find_unused_files`). Unreachable modules with
 /// *some* referenced exports are NOT skipped — their individually unused exports
 /// would otherwise slip through both detectors.
-fn should_skip_module(module: &ModuleNode, has_plugin_used_exports: bool) -> bool {
-    if module.is_entry_point() && !has_plugin_used_exports {
+fn should_skip_module(
+    module: &ModuleNode,
+    has_plugin_used_exports: bool,
+    include_entry_exports: bool,
+) -> bool {
+    if module.is_entry_point() && !has_plugin_used_exports && !include_entry_exports {
         return true;
     }
     if !module.is_reachable() {
@@ -151,7 +155,11 @@ pub fn find_unused_exports(
             .map(|rule| rule.exports.as_slice())
             .collect();
 
-        if should_skip_module(module, !matching_plugin.is_empty()) {
+        if should_skip_module(
+            module,
+            !matching_plugin.is_empty(),
+            config.include_entry_exports,
+        ) {
             continue;
         }
 
@@ -178,7 +186,7 @@ pub fn find_unused_exports(
                     .iter()
                     .any(|r| reachable_files.contains(&r.from_file.0))
             };
-            if export.is_public || is_referenced {
+            if export.visibility.suppresses_unused() || is_referenced {
                 continue;
             }
 
@@ -526,7 +534,7 @@ pub fn collect_export_usages(
 mod tests {
     use super::*;
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use crate::extract::ExportName;
+    use crate::extract::{ExportName, VisibilityTag};
     use crate::graph::{ExportSymbol, ModuleGraph, ReExportEdge, SymbolReference};
     use crate::resolve::ResolvedModule;
     use oxc_span::Span;
@@ -592,7 +600,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(span_start, span_end),
             references: vec![],
             members: vec![],
@@ -608,7 +616,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(span_start, span_end),
             references: vec![SymbolReference {
                 from_file: FileId(from),
@@ -671,7 +679,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(10, 20),
             references: vec![],
             members: vec![],
@@ -680,7 +688,7 @@ mod tests {
         graph.modules[2].exports = vec![ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(10, 20),
             references: vec![],
             members: vec![],
@@ -986,7 +994,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: true,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(span_start, span_end),
             references: vec![],
             members: vec![],
@@ -1049,7 +1057,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("publicFn".to_string()),
             is_type_only: false,
-            is_public: true,
+            visibility: VisibilityTag::Public,
             span: Span::new(10, 20),
             references: vec![],
             members: vec![],
@@ -1617,7 +1625,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("usedByUnreachable".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: Span::new(10, 30),
                 references: vec![SymbolReference {
                     from_file: FileId(2), // setup.ts — also unreachable
@@ -1661,7 +1669,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: ExportName::Named("usedByReachable".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: Span::new(10, 28),
             references: vec![SymbolReference {
                 from_file: FileId(0), // entry.ts — reachable (entry point)
@@ -1680,5 +1688,126 @@ mod tests {
             "export referenced by reachable module should not be flagged"
         );
         assert!(types.is_empty());
+    }
+
+    // -- VisibilityTag suppression --
+
+    #[test]
+    fn unused_exports_skips_internal_visibility() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![ExportSymbol {
+            name: ExportName::Named("internalHelper".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::Internal,
+            span: Span::new(10, 30),
+            references: vec![],
+            members: vec![],
+        }];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(
+            exports.is_empty(),
+            "@internal export should not be flagged as unused"
+        );
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_skips_beta_visibility() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![ExportSymbol {
+            name: ExportName::Named("betaFeature".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::Beta,
+            span: Span::new(10, 30),
+            references: vec![],
+            members: vec![],
+        }];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(
+            exports.is_empty(),
+            "@beta export should not be flagged as unused"
+        );
+        assert!(types.is_empty());
+    }
+
+    #[test]
+    fn unused_exports_skips_alpha_visibility() {
+        let mut graph = build_graph(&[
+            ("/tmp/test/src/entry.ts", true),
+            ("/tmp/test/src/utils.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![ExportSymbol {
+            name: ExportName::Named("alphaFeature".to_string()),
+            is_type_only: false,
+            visibility: VisibilityTag::Alpha,
+            span: Span::new(10, 30),
+            references: vec![],
+            members: vec![],
+        }];
+        let config = test_config();
+        let suppressions = FxHashMap::default();
+        let (exports, types) =
+            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        assert!(
+            exports.is_empty(),
+            "@alpha export should not be flagged as unused"
+        );
+        assert!(types.is_empty());
+    }
+
+    // -- include_entry_exports --
+
+    #[test]
+    fn unused_exports_include_entry_exports_flag() {
+        // With include_entry_exports = false (default), entry point exports are skipped
+        let mut graph = build_graph(&[("/tmp/test/src/entry.ts", true)]);
+        graph.modules[0].exports = vec![make_export("main", 10, 20)];
+
+        let config_off = test_config();
+        assert!(!config_off.include_entry_exports);
+        let suppressions = FxHashMap::default();
+        let (exports_off, _) = find_unused_exports(
+            &graph,
+            &config_off,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
+        assert!(
+            exports_off.is_empty(),
+            "entry export should be skipped when include_entry_exports is false"
+        );
+
+        // With include_entry_exports = true, entry point exports ARE checked
+        let mut config_on = test_config();
+        config_on.include_entry_exports = true;
+        let (exports_on, _) = find_unused_exports(
+            &graph,
+            &config_on,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
+        assert_eq!(
+            exports_on.len(),
+            1,
+            "entry export should be flagged when include_entry_exports is true"
+        );
+        assert_eq!(exports_on[0].export_name, "main");
     }
 }

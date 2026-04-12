@@ -258,6 +258,17 @@ enum Command {
         /// Show only the top N items per category
         #[arg(long)]
         top: Option<usize>,
+
+        /// Only report issues in the specified file(s). Accepts multiple values.
+        /// The full project graph is still built, but only issues in matching files
+        /// are reported. Useful for lint-staged pre-commit hooks.
+        #[arg(long, value_name = "PATH")]
+        file: Vec<std::path::PathBuf>,
+
+        /// Report unused exports in entry files instead of auto-marking them as used.
+        /// Catches typos in framework exports (e.g., `meatdata` instead of `metadata`).
+        #[arg(long)]
+        include_entry_exports: bool,
     },
 
     /// Watch for changes and re-run analysis
@@ -1051,6 +1062,8 @@ fn dispatch_subcommand(
             trace_file,
             trace_dependency,
             top,
+            file,
+            include_entry_exports,
         } => {
             let (output, quiet, fail_on_issues) = apply_ci_defaults(
                 cli.ci,
@@ -1098,6 +1111,8 @@ fn dispatch_subcommand(
                 trace_opts: &trace_opts,
                 explain: cli.explain,
                 top,
+                file: &file,
+                include_entry_exports,
                 summary: cli.summary,
                 regression_opts: build_regression_opts(
                     cli.fail_on_regression,
@@ -1105,7 +1120,7 @@ fn dispatch_subcommand(
                     cli.regression_baseline.as_deref(),
                     save_regression_file,
                     save_to_config,
-                    cli.changed_since.is_some() || cli.workspace.is_some(),
+                    cli.changed_since.is_some() || cli.workspace.is_some() || !file.is_empty(),
                     quiet,
                 ),
             })

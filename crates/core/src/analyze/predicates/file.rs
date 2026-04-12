@@ -389,6 +389,7 @@ mod tests {
     // ---------------------------------------------------------------
 
     use crate::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
+    use crate::extract::VisibilityTag;
     use crate::graph::{ExportSymbol, ModuleGraph, ReExportEdge};
     use crate::resolve::ResolvedModule;
 
@@ -465,7 +466,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: crate::extract::ExportName::Named("localFn".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(10, 50),
             references: vec![],
             members: vec![],
@@ -514,7 +515,7 @@ mod tests {
         graph.modules[1].exports = vec![ExportSymbol {
             name: crate::extract::ExportName::Named("helper".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 0),
             references: vec![],
             members: vec![],

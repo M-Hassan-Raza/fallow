@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::resolve::ResolvedModule;
 use fallow_types::discover::FileId;
-use fallow_types::extract::ImportedName;
+use fallow_types::extract::{ImportedName, VisibilityTag};
 
 use super::types::{ExportSymbol, ReExportEdge, ReferenceKind, SymbolReference};
 use super::{ImportedSymbol, ModuleNode};
@@ -122,7 +122,7 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
         exports.push(ExportSymbol {
             name: export_name,
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 0),
             references: vec![SymbolReference {
                 from_file: source_id,
@@ -329,7 +329,7 @@ mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_types::discover::{DiscoveredFile, FileId};
-    use fallow_types::extract::ExportName;
+    use fallow_types::extract::{ExportName, VisibilityTag};
 
     use super::super::ModuleGraph;
 
@@ -440,7 +440,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("a".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 5),
                 references: Vec::new(),
                 members: Vec::new(),
@@ -448,7 +448,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("b".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(10, 15),
                 references: Vec::new(),
                 members: Vec::new(),
@@ -470,7 +470,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Named("a".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: vec![SymbolReference {
                 from_file: FileId(5),
@@ -497,7 +497,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("foo".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 5),
                 references: Vec::new(),
                 members: Vec::new(),
@@ -505,7 +505,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("bar".to_string()),
                 is_type_only: false,
-                is_public: false,
+                visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(10, 15),
                 references: Vec::new(),
                 members: Vec::new(),
@@ -533,7 +533,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Named("existing".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
             members: Vec::new(),
@@ -699,7 +699,7 @@ mod tests {
                     name: ExportName::Named("foo".to_string()),
                     local_name: Some("foo".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -767,7 +767,7 @@ mod tests {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,
@@ -776,7 +776,7 @@ mod tests {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
                         super_class: None,
@@ -853,7 +853,7 @@ mod tests {
                         name: ExportName::Named("foo".to_string()),
                         local_name: Some("foo".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,
@@ -862,7 +862,7 @@ mod tests {
                         name: ExportName::Named("bar".to_string()),
                         local_name: Some("bar".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
                         super_class: None,
@@ -931,7 +931,7 @@ mod tests {
                         name: ExportName::Named("primary".to_string()),
                         local_name: Some("primary".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,
@@ -940,7 +940,7 @@ mod tests {
                         name: ExportName::Named("secondary".to_string()),
                         local_name: Some("secondary".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
                         super_class: None,
@@ -1014,7 +1014,7 @@ mod tests {
                     name: ExportName::Default,
                     local_name: Some("Component".to_string()),
                     is_type_only: false,
-                    is_public: false,
+                    visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
                     super_class: None,
@@ -1076,7 +1076,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
             members: Vec::new(),
@@ -1098,7 +1098,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Named("foo".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: vec![SymbolReference {
                 from_file: FileId(0),
@@ -1125,7 +1125,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Named("foo".to_string()),
             is_type_only: false,
-            is_public: false,
+            visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
             members: Vec::new(),

@@ -47,6 +47,14 @@ pub struct AnalyzeParams {
     /// Group results by owner (from CODEOWNERS) or directory. Values: "owner", "directory".
     pub group_by: Option<String>,
 
+    /// Only report issues in the specified file(s). Useful for lint-staged pre-commit hooks.
+    /// Dependency-level issues are suppressed in file mode.
+    pub file: Option<Vec<String>>,
+
+    /// Report unused exports in entry files instead of auto-marking them as used.
+    /// Catches typos in framework exports (e.g., `meatdata` instead of `metadata`).
+    pub include_entry_exports: Option<bool>,
+
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,
 
@@ -89,6 +97,9 @@ pub struct CheckChangedParams {
 
     /// Save current results as a regression baseline file for future comparisons.
     pub save_regression_baseline: Option<String>,
+
+    /// Report unused exports in entry files instead of auto-marking them as used.
+    pub include_entry_exports: Option<bool>,
 
     /// Disable the incremental parse cache. Forces a full re-parse of all files.
     pub no_cache: Option<bool>,

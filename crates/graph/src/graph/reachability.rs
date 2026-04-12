@@ -87,7 +87,7 @@ mod tests {
     use crate::graph::ModuleGraph;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_types::extract::{ExportName, ImportInfo, ImportedName};
+    use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
 
     /// Build a graph with separate runtime and test entry point sets.
     ///
@@ -138,7 +138,7 @@ mod tests {
                         name: ExportName::Named("x".to_string()),
                         local_name: Some("x".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,

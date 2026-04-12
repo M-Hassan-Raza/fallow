@@ -386,7 +386,7 @@ mod tests {
     use crate::graph::types::ModuleNode;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
-    use fallow_types::extract::{ExportName, ImportInfo, ImportedName};
+    use fallow_types::extract::{ExportName, ImportInfo, ImportedName, VisibilityTag};
 
     use super::{
         ModuleGraph, SuccessorMap, canonical_cycle, dfs_find_cycles_from,
@@ -432,7 +432,7 @@ mod tests {
                         name: ExportName::Named("x".to_string()),
                         local_name: Some("x".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,
@@ -1550,7 +1550,7 @@ mod tests {
                         name: ExportName::Named("x".to_string()),
                         local_name: Some("x".to_string()),
                         is_type_only: false,
-                        is_public: false,
+                        visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
                         super_class: None,
