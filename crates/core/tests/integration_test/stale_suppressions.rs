@@ -34,8 +34,7 @@ fn active_suppression_not_reported_stale() {
     // unusedHelper has `// fallow-ignore-next-line unused-export` and IS unused
     // Its suppression should NOT be stale
     let stale_for_unused_helper = results.stale_suppressions.iter().any(|s| {
-        s.path.ends_with("utils.ts")
-            && s.line == 6 // comment_line of the suppression for unusedHelper
+        s.path.ends_with("utils.ts") && s.line == 6 // comment_line of the suppression for unusedHelper
     });
 
     assert!(
@@ -164,6 +163,10 @@ fn total_stale_suppressions_count() {
         results.stale_suppressions.len(),
         4,
         "Expected 4 stale suppressions: 2 comment (next-line on usedHelper, blanket on anotherUsedExport), 1 file-level (unused-file on file-level.ts), 1 jsdoc tag (@expected-unused on usedExport). Found: {:?}",
-        results.stale_suppressions.iter().map(|s| format!("{}:{}", s.path.display(), s.line)).collect::<Vec<_>>()
+        results
+            .stale_suppressions
+            .iter()
+            .map(|s| format!("{}:{}", s.path.display(), s.line))
+            .collect::<Vec<_>>()
     );
 }
