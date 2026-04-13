@@ -15,7 +15,7 @@ use crate::suppress::{IssueKind, SuppressionContext};
 
 use super::package_json_utils::{find_dep_line_in_json, read_pkg_json_content};
 use super::predicates::{
-    is_builtin_module, is_implicit_dependency, is_path_alias, is_virtual_module,
+    is_builtin_module, is_config_file, is_implicit_dependency, is_path_alias, is_virtual_module,
 };
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -408,14 +408,17 @@ pub fn find_test_only_dependencies(
             continue;
         }
 
-        // Check if ALL importing files are test/dev files
+        // Check if ALL importing files are test/dev/config files.
+        // Test/story files are matched by glob patterns from PRODUCTION_EXCLUDE_PATTERNS.
+        // Config files use the curated `is_config_file` predicate which avoids false
+        // matches on application config files like `app.config.ts` (see #111, #112).
         let all_test_only = file_ids.iter().all(|id| {
             graph.modules.get(id.0 as usize).is_some_and(|module| {
                 let relative = module
                     .path
                     .strip_prefix(&config.root)
                     .unwrap_or(&module.path);
-                test_globs.is_match(relative)
+                test_globs.is_match(relative) || is_config_file(&module.path)
             })
         });
 
