@@ -1,10 +1,80 @@
 use std::ffi::OsStr;
+use std::path::Path;
+use std::sync::Mutex;
 
 use fallow_config::ResolvedConfig;
 use fallow_types::discover::{DiscoveredFile, FileId};
 use ignore::WalkBuilder;
 
 use super::ALLOWED_HIDDEN_DIRS;
+
+/// Per-thread file collector for the parallel walker.
+struct FileVisitor<'a> {
+    root: &'a Path,
+    ignore_patterns: &'a globset::GlobSet,
+    production_excludes: &'a Option<globset::GlobSet>,
+    shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
+    local: Vec<(std::path::PathBuf, u64)>,
+}
+
+impl ignore::ParallelVisitor for FileVisitor<'_> {
+    fn visit(&mut self, result: Result<ignore::DirEntry, ignore::Error>) -> ignore::WalkState {
+        let Ok(entry) = result else {
+            return ignore::WalkState::Continue;
+        };
+        if entry.file_type().is_some_and(|ft| ft.is_dir()) {
+            return ignore::WalkState::Continue;
+        }
+        let relative = entry
+            .path()
+            .strip_prefix(self.root)
+            .unwrap_or_else(|_| entry.path());
+        if self.ignore_patterns.is_match(relative) {
+            return ignore::WalkState::Continue;
+        }
+        if self
+            .production_excludes
+            .as_ref()
+            .is_some_and(|excludes| excludes.is_match(relative))
+        {
+            return ignore::WalkState::Continue;
+        }
+        let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        self.local.push((entry.into_path(), size_bytes));
+        ignore::WalkState::Continue
+    }
+}
+
+impl Drop for FileVisitor<'_> {
+    fn drop(&mut self) {
+        if !self.local.is_empty() {
+            self.shared
+                .lock()
+                .expect("walk collector lock poisoned")
+                .append(&mut self.local);
+        }
+    }
+}
+
+/// Builder that creates per-thread `FileVisitor` instances for the parallel walker.
+struct FileVisitorBuilder<'a> {
+    root: &'a Path,
+    ignore_patterns: &'a globset::GlobSet,
+    production_excludes: &'a Option<globset::GlobSet>,
+    shared: &'a Mutex<Vec<(std::path::PathBuf, u64)>>,
+}
+
+impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
+    fn build(&mut self) -> Box<dyn ignore::ParallelVisitor + 's> {
+        Box::new(FileVisitor {
+            root: self.root,
+            ignore_patterns: self.ignore_patterns,
+            production_excludes: self.production_excludes,
+            shared: self.shared,
+            local: Vec::new(),
+        })
+    }
+}
 
 pub const SOURCE_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro", "mdx", "css",
@@ -113,49 +183,37 @@ pub fn discover_files(config: &ResolvedConfig) -> Vec<DiscoveredFile> {
         None
     };
 
-    let walker = walk_builder.build();
-
-    let mut files: Vec<DiscoveredFile> = walker
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_some_and(|ft| !ft.is_dir()))
-        .filter(|entry| {
-            let relative = entry
-                .path()
-                .strip_prefix(&config.root)
-                .unwrap_or_else(|_| entry.path());
-            !config.ignore_patterns.is_match(relative)
-        })
-        .filter(|entry| {
-            // In production mode, exclude test/story/dev files
-            production_excludes.as_ref().is_none_or(|excludes| {
-                let relative = entry
-                    .path()
-                    .strip_prefix(&config.root)
-                    .unwrap_or_else(|_| entry.path());
-                !excludes.is_match(relative)
-            })
-        })
-        .enumerate()
-        .map(|(idx, entry)| {
-            let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
-            DiscoveredFile {
-                id: FileId(idx as u32),
-                path: entry.into_path(),
-                size_bytes,
-            }
-        })
-        .collect();
+    // Parallel filesystem walk — uses work-stealing across config.threads threads.
+    // `build_parallel()` honors the `.threads()` setting (unlike sequential `build()`).
+    // Each thread collects results into a local buffer, flushed on drop to avoid
+    // per-entry Mutex contention.
+    let collected: Mutex<Vec<(std::path::PathBuf, u64)>> = Mutex::new(Vec::new());
+    let mut visitor_builder = FileVisitorBuilder {
+        root: &config.root,
+        ignore_patterns: &config.ignore_patterns,
+        production_excludes: &production_excludes,
+        shared: &collected,
+    };
+    walk_builder.build_parallel().visit(&mut visitor_builder);
 
     // Sort by path for stable, deterministic FileId assignment.
     // The same set of files always produces the same IDs regardless of file
     // size changes, which is the foundation for incremental analysis and
     // cross-run graph caching.
-    files.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    let mut raw = collected
+        .into_inner()
+        .expect("walk collector lock poisoned");
+    raw.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-    // Re-assign IDs after sorting
-    for (idx, file) in files.iter_mut().enumerate() {
-        file.id = FileId(idx as u32);
-    }
+    let files: Vec<DiscoveredFile> = raw
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (path, size_bytes))| DiscoveredFile {
+            id: FileId(idx as u32),
+            path,
+            size_bytes,
+        })
+        .collect();
 
     files
 }
