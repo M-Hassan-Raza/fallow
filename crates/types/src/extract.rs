@@ -205,7 +205,10 @@ impl VisibilityTag {
     /// `ExpectedUnused` is handled separately (conditionally suppresses,
     /// reports stale when the export becomes used).
     pub const fn suppresses_unused(self) -> bool {
-        matches!(self, Self::Public | Self::Internal | Self::Beta | Self::Alpha)
+        matches!(
+            self,
+            Self::Public | Self::Internal | Self::Beta | Self::Alpha
+        )
     }
 
     /// For serde `skip_serializing_if`.

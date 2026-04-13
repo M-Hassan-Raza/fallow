@@ -75,7 +75,7 @@
     "CheckOutput": {
       "title": "fallow dead-code --format json",
       "type": "object",
-      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "test_only_dependencies", "circular_dependencies", "boundary_violations"],
+      "required": ["schema_version", "version", "elapsed_ms", "total_issues", "unused_files", "unused_exports", "unused_types", "unused_dependencies", "unused_dev_dependencies", "unused_optional_dependencies", "unused_enum_members", "unused_class_members", "unresolved_imports", "unlisted_dependencies", "duplicate_exports", "type_only_dependencies", "test_only_dependencies", "circular_dependencies", "boundary_violations", "stale_suppressions"],
       "properties": {
         "schema_version": { "$ref": "#/definitions/SchemaVersion" },
         "version": { "$ref": "#/definitions/ToolVersion" },
@@ -143,6 +143,10 @@
         "boundary_violations": {
           "type": "array",
           "items": { "$ref": "#/definitions/BoundaryViolation" }
+        },
+        "stale_suppressions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/StaleSuppression" }
         },
         "entry_points": {
           "$ref": "#/definitions/EntryPoints",
@@ -267,6 +271,10 @@
         "boundary_violations": {
           "type": "array",
           "items": { "$ref": "#/definitions/BoundaryViolation" }
+        },
+        "stale_suppressions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/StaleSuppression" }
         }
       }
     },
@@ -1456,6 +1464,48 @@
       }
     },
 
+    "StaleSuppression": {
+      "type": "object",
+      "required": ["path", "line", "col", "origin"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Relative path to the file containing the stale suppression."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the suppression comment or JSDoc tag."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "origin": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": { "const": "comment" },
+                "issue_kind": { "type": "string", "description": "The issue kind token (e.g. 'unused-exports'). Absent for blanket suppressions." },
+                "is_file_level": { "type": "boolean", "description": "True for fallow-ignore-file, false for fallow-ignore-next-line." }
+              },
+              "description": "A stale inline suppression comment."
+            },
+            {
+              "type": "object",
+              "required": ["type", "export_name"],
+              "properties": {
+                "type": { "const": "jsdoc_tag" },
+                "export_name": { "type": "string", "description": "Name of the export that was tagged @expected-unused." }
+              },
+              "description": "A stale @expected-unused JSDoc tag (the export is now used)."
+            }
+          ]
+        }
+      }
+    },
+
     "CloneGroup": {
       "type": "object",
       "required": ["instances", "token_count", "line_count"],
@@ -1657,7 +1707,8 @@
         "unlisted_dependencies": { "type": "integer" },
         "duplicate_exports": { "type": "integer" },
         "circular_dependencies": { "type": "integer" },
-        "boundary_violations": { "type": "integer" }
+        "boundary_violations": { "type": "integer" },
+        "stale_suppressions": { "type": "integer" }
       }
     },
 

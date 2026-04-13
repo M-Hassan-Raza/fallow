@@ -333,7 +333,9 @@ pub fn find_dead_code_full(
 
     // Detect stale suppression comments (must run after all detectors)
     if config.rules.stale_suppressions != Severity::Off {
-        results.stale_suppressions.extend(suppressions.find_stale(graph));
+        results
+            .stale_suppressions
+            .extend(suppressions.find_stale(graph));
     }
 
     // Sort all result arrays for deterministic output ordering.
