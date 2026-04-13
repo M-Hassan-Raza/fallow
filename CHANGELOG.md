@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.32.1] - 2026-04-13
+
+### Fixed
+
+- **Test-only dependency detection now recognizes workspace-level config files** -- after #111 narrowed config file exclusion patterns to root-only, `find_test_only_dependencies` no longer matched nested config files like `packages/foo/vitest.config.ts`. Now uses the curated `is_config_file()` predicate alongside glob patterns, correctly identifying workspace-level tooling configs without false-matching application configs like `app.config.ts`. ([#112](https://github.com/fallow-rs/fallow/issues/112))
+
 ## [2.32.0] - 2026-04-13
 
 ### Added
@@ -1334,7 +1340,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.32.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.32.1...HEAD
+[2.32.1]: https://github.com/fallow-rs/fallow/compare/v2.32.0...v2.32.1
 [2.32.0]: https://github.com/fallow-rs/fallow/compare/v2.31.0...v2.32.0
 [2.31.0]: https://github.com/fallow-rs/fallow/compare/v2.30.0...v2.31.0
 [2.30.0]: https://github.com/fallow-rs/fallow/compare/v2.29.1...v2.30.0
