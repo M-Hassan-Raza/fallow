@@ -218,7 +218,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             }
         }
     } else if opts.retain_modules_for_health {
-        match fallow_core::analyze_retaining_modules(&config, true, false) {
+        match fallow_core::analyze_retaining_modules(&config, true, true) {
             Ok(output) => (
                 output.results,
                 output.graph,
@@ -372,7 +372,20 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     }
 
     let shared_parse = match (retained_modules, retained_files) {
-        (Some(modules), Some(files)) => Some(crate::health::SharedParseData { files, modules }),
+        (Some(modules), Some(files)) => {
+            let analysis_output = trace_graph.map(|graph| fallow_core::AnalysisOutput {
+                results: results.clone(),
+                timings: None,
+                graph: Some(graph),
+                modules: None,
+                files: None,
+            });
+            Some(crate::health::SharedParseData {
+                files,
+                modules,
+                analysis_output,
+            })
+        }
         _ => None,
     };
 

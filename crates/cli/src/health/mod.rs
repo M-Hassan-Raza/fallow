@@ -19,10 +19,12 @@ use crate::vital_signs;
 use hotspots::compute_hotspots;
 use scoring::compute_file_scores;
 
-/// Pre-parsed data from the dead-code pipeline, shared with health to avoid re-parsing.
+/// Pre-parsed data from the dead-code pipeline, shared with health to avoid re-analysis.
 pub struct SharedParseData {
     pub files: Vec<fallow_types::discover::DiscoveredFile>,
     pub modules: Vec<fallow_types::extract::ModuleInfo>,
+    /// Full analysis output (graph + results) for file scoring.
+    pub analysis_output: Option<fallow_core::AnalysisOutput>,
 }
 use targets::{TargetAuxData, compute_refactoring_targets};
 
@@ -94,7 +96,16 @@ pub fn execute_health_with_shared_parse(
         opts.production,
         opts.quiet,
     )?;
-    execute_health_inner(opts, config, shared.files, shared.modules, 0.0, 0.0, 0.0)
+    execute_health_inner(
+        opts,
+        config,
+        shared.files,
+        shared.modules,
+        0.0,
+        0.0,
+        0.0,
+        shared.analysis_output,
+    )
 }
 
 pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode> {
@@ -132,6 +143,7 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
         config_ms,
         discover_ms,
         parse_ms,
+        None,
     )
 }
 
@@ -143,6 +155,10 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     clippy::needless_pass_by_value,
     reason = "owned files/modules transferred from shared parse or local parse"
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "inner function receives all pipeline state from two entry points"
+)]
 fn execute_health_inner(
     opts: &HealthOptions<'_>,
     config: ResolvedConfig,
@@ -151,6 +167,7 @@ fn execute_health_inner(
     config_ms: f64,
     discover_ms: f64,
     parse_ms: f64,
+    pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
 ) -> Result<HealthResult, ExitCode> {
     let start = Instant::now();
 
@@ -253,6 +270,7 @@ fn execute_health_inner(
                 &ignore_set,
                 opts.output,
                 istanbul_coverage.as_ref(),
+                pre_computed_analysis,
             );
             let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
             let churn = churn_handle.join().expect("churn thread panicked");
@@ -270,6 +288,7 @@ fn execute_health_inner(
                 &ignore_set,
                 opts.output,
                 istanbul_coverage.as_ref(),
+                pre_computed_analysis,
             )
         } else {
             Ok((None, None, None))
@@ -489,9 +508,14 @@ fn compute_filtered_file_scores(
     ignore_set: &globset::GlobSet,
     output: OutputFormat,
     istanbul_coverage: Option<&scoring::IstanbulCoverage>,
+    pre_computed: Option<fallow_core::AnalysisOutput>,
 ) -> Result<FileScoreResult, ExitCode> {
-    let analysis_output = fallow_core::analyze_with_parse_result(config, modules)
-        .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, output))?;
+    let analysis_output = if let Some(pre) = pre_computed {
+        pre
+    } else {
+        fallow_core::analyze_with_parse_result(config, modules)
+            .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, output))?
+    };
     match compute_file_scores(
         modules,
         file_paths,
