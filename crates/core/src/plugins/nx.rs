@@ -57,6 +57,16 @@ define_plugin!(
             }
         }
 
+        // Compute project root relative to workspace root for Nx token expansion.
+        // `{projectRoot}` is the directory containing project.json relative to
+        // the workspace root. `{workspaceRoot}` is the workspace root itself.
+        // All path-valued fields below may use these tokens. See issue #114.
+        let project_root_rel = config_path
+            .parent()
+            .and_then(|p| p.strip_prefix(_root).ok())
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+
         // project.json: targets.*.options.main → entry point
         let mains = config_parser::extract_config_object_nested_strings(
             source,
@@ -65,7 +75,8 @@ define_plugin!(
             &["options", "main"],
         );
         for main in &mains {
-            let path = main.trim_start_matches("./");
+            let expanded = expand_nx_tokens(main, &project_root_rel);
+            let path = expanded.trim_start_matches("./");
             result.push_entry_pattern(path.to_string());
         }
 
@@ -77,7 +88,8 @@ define_plugin!(
             &["options", "tsConfig"],
         );
         for tsconfig in &tsconfigs {
-            let path = tsconfig.trim_start_matches("./");
+            let expanded = expand_nx_tokens(tsconfig, &project_root_rel);
+            let path = expanded.trim_start_matches("./");
             result.always_used_files.push(path.to_string());
         }
 
@@ -92,14 +104,6 @@ define_plugin!(
             &["targets"],
             &["options", "stylePreprocessorOptions", "includePaths"],
         );
-        // Compute project root relative to workspace root for Nx token expansion.
-        // `{projectRoot}` is the directory containing project.json relative to
-        // the workspace root. `{workspaceRoot}` is the workspace root itself.
-        let project_root_rel = config_path
-            .parent()
-            .and_then(|p| p.strip_prefix(_root).ok())
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_default();
         for entry in &include_paths {
             let expanded = expand_nx_tokens(entry, &project_root_rel);
             let absolute = _root.join(expanded.trim_start_matches("./"));
@@ -247,6 +251,53 @@ mod tests {
             plugin.resolve_config(Path::new("project.json"), source, Path::new("/project"));
         assert!(result.referenced_dependencies.is_empty());
         assert!(result.entry_patterns.is_empty());
+    }
+
+    #[test]
+    fn resolve_config_expands_project_root_in_main() {
+        let source = r#"{
+            "targets": {
+                "build": {
+                    "executor": "@angular/build:application",
+                    "options": {
+                        "main": "{projectRoot}/src/main.ts"
+                    }
+                }
+            }
+        }"#;
+        let plugin = NxPlugin;
+        // project.json at apps/myapp/, so {projectRoot} = "apps/myapp"
+        let result = plugin.resolve_config(
+            Path::new("/workspace/apps/myapp/project.json"),
+            source,
+            Path::new("/workspace"),
+        );
+        assert!(has_entry_pattern(&result, "apps/myapp/src/main.ts"));
+    }
+
+    #[test]
+    fn resolve_config_expands_project_root_in_tsconfig() {
+        let source = r#"{
+            "targets": {
+                "build": {
+                    "executor": "@angular/build:application",
+                    "options": {
+                        "tsConfig": "{projectRoot}/tsconfig.app.json"
+                    }
+                }
+            }
+        }"#;
+        let plugin = NxPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/workspace/apps/myapp/project.json"),
+            source,
+            Path::new("/workspace"),
+        );
+        assert!(
+            result
+                .always_used_files
+                .contains(&"apps/myapp/tsconfig.app.json".to_string())
+        );
     }
 
     #[test]
