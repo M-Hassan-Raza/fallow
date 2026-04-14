@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.35.0] - 2026-04-14
+
+### Added
+
+- **Severity tiers on health findings** -- each complexity finding now has a `severity` field (`moderate`, `high`, `critical`) based on how far above thresholds. Default thresholds: cognitive 25/40, cyclomatic 30/50 (asymmetric because cognitive maps more directly to comprehension difficulty). Summary includes `severity_critical_count`, `severity_high_count`, `severity_moderate_count`. Human output shows `CRITICAL` and `HIGH` badges on findings. All 6 output formats updated. ([#119](https://github.com/fallow-rs/fallow/issues/119))
+- **`--min-severity` CLI flag** -- only exit with error for findings at or above the specified severity level (`moderate`, `high`, `critical`). Use `--min-severity critical` to ignore moderate/high findings in CI.
+
+### Fixed
+
+- **Maintainability Index formula distorted for small files** -- the MI formula used `complexity_density = cyclomatic / LOC` as its dominant term, causing a 5-line type-guard function to score worse than a 192-line function with 57 cyclomatic complexity. Added a LOC dampening factor `min(lines/50, 1.0)` that proportionally reduces the density weight for files under 50 lines. `SNAPSHOT_SCHEMA_VERSION` bumped to 7. ([#118](https://github.com/fallow-rs/fallow/issues/118))
+- **Integration test fixture for bin-script dependency resolution** tracked in git.
+
 ## [2.34.0] - 2026-04-14
 
 ### Added
@@ -1369,7 +1381,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.34.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.35.0...HEAD
+[2.35.0]: https://github.com/fallow-rs/fallow/compare/v2.34.0...v2.35.0
 [2.34.0]: https://github.com/fallow-rs/fallow/compare/v2.33.0...v2.34.0
 [2.33.0]: https://github.com/fallow-rs/fallow/compare/v2.32.1...v2.33.0
 [2.32.1]: https://github.com/fallow-rs/fallow/compare/v2.32.0...v2.32.1
