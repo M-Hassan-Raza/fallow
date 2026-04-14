@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Config discovery now walks past `package.json` in monorepos** -- config search previously stopped at the first `package.json`, silently preventing monorepo sub-packages (pnpm/npm/yarn workspaces, Nx) from inheriting the root `.fallowrc.json`. Discovery now stops only at VCS boundaries (`.git`, `.hg`, `.svn`), matching Prettier/ESLint/Biome behavior. This fixes silent config loss in the VS Code extension, LSP, and CLI when invoked from a workspace sub-package. A sub-package with its own `.fallowrc.json` still wins (first-match-wins). ([#113](https://github.com/fallow-rs/fallow/issues/113))
+
 ## [2.35.0] - 2026-04-14
 
 ### Added

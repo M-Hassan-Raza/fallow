@@ -91,6 +91,17 @@ pub(super) fn parse_config_to_value(path: &Path) -> Result<serde_json::Value, mi
     }
 }
 
+/// Return `true` if `dir` contains a VCS marker indicating a repository root.
+///
+/// Used as the walk-up stop condition for config discovery. Matches `.git`
+/// (directory for normal repos, file for git submodules/worktrees), `.hg`
+/// (Mercurial), and `.svn` (Subversion). We intentionally do NOT treat
+/// `package.json` as a stop boundary so monorepo sub-packages can inherit a
+/// root config. This matches Prettier/ESLint/Biome behavior.
+fn is_repo_root(dir: &Path) -> bool {
+    dir.join(".git").exists() || dir.join(".hg").exists() || dir.join(".svn").exists()
+}
+
 /// Verify that `resolved` stays within `base_dir` after canonicalization.
 ///
 /// Prevents path traversal attacks where a subpath or `package.json` field
@@ -642,7 +653,7 @@ impl FallowConfig {
                     return Some(candidate);
                 }
             }
-            if dir.join(".git").exists() || dir.join("package.json").exists() {
+            if is_repo_root(dir) {
                 break;
             }
             dir = dir.parent()?;
@@ -669,8 +680,10 @@ impl FallowConfig {
                     }
                 }
             }
-            // Stop at project root indicators
-            if dir.join(".git").exists() || dir.join("package.json").exists() {
+            // Stop at project root indicators (VCS markers). We intentionally
+            // do NOT stop at `package.json` so that monorepo sub-packages
+            // inherit a root config placed alongside the workspace root.
+            if is_repo_root(dir) {
                 break;
             }
             dir = match dir.parent() {
@@ -1943,11 +1956,83 @@ unknown_field = true
     }
 
     #[test]
-    fn find_and_load_stops_at_package_json() {
-        let dir = test_dir("find-pkg-stop");
-        std::fs::write(dir.path().join("package.json"), r#"{"name":"test"}"#).unwrap();
+    fn find_and_load_walks_past_package_json_in_monorepo() {
+        // Simulate a pnpm/npm/yarn workspace: root has `.git` + `.fallowrc.json`,
+        // sub-package has its own `package.json`. Config search from the
+        // sub-package must walk past its `package.json` and find the root config.
+        let dir = test_dir("find-monorepo");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["src/index.ts"]}"#,
+        )
+        .unwrap();
 
-        let result = FallowConfig::find_and_load(dir.path()).unwrap();
+        let sub = dir.path().join("packages").join("app");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("package.json"), r#"{"name": "@scope/app"}"#).unwrap();
+
+        let (config, path) = FallowConfig::find_and_load(&sub).unwrap().unwrap();
+        assert_eq!(config.entry, vec!["src/index.ts"]);
+        assert_eq!(path, dir.path().join(".fallowrc.json"));
+    }
+
+    #[test]
+    fn find_and_load_sub_package_config_wins_over_root() {
+        // Regression guard: if a monorepo sub-package has its own config,
+        // it must be preferred over the root config (first-match-wins).
+        let dir = test_dir("find-monorepo-override");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["src/root.ts"]}"#,
+        )
+        .unwrap();
+
+        let sub = dir.path().join("packages").join("app");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("package.json"), r#"{"name": "@scope/app"}"#).unwrap();
+        std::fs::write(sub.join(".fallowrc.json"), r#"{"entry": ["src/sub.ts"]}"#).unwrap();
+
+        let (config, path) = FallowConfig::find_and_load(&sub).unwrap().unwrap();
+        assert_eq!(config.entry, vec!["src/sub.ts"]);
+        assert_eq!(path, sub.join(".fallowrc.json"));
+    }
+
+    #[test]
+    fn find_and_load_stops_at_git_file_submodule() {
+        // Git submodules / worktrees have `.git` as a file (not a directory)
+        // pointing to the real gitdir. `.exists()` matches both, so submodule
+        // roots correctly stop the walk — config in the parent repo should
+        // NOT leak into a vendored submodule.
+        let dir = test_dir("find-git-file");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["src/parent.ts"]}"#,
+        )
+        .unwrap();
+
+        let submodule = dir.path().join("vendor").join("lib");
+        std::fs::create_dir_all(&submodule).unwrap();
+        // Simulate submodule: `.git` as a file pointing to parent's .git/modules
+        std::fs::write(submodule.join(".git"), "gitdir: ../../.git/modules/lib\n").unwrap();
+
+        let result = FallowConfig::find_and_load(&submodule).unwrap();
+        assert!(
+            result.is_none(),
+            "submodule boundary should stop config walk",
+        );
+    }
+
+    #[test]
+    fn find_and_load_stops_at_hg_dir() {
+        let dir = test_dir("find-hg-stop");
+        let sub = dir.path().join("sub");
+        std::fs::create_dir(&sub).unwrap();
+        std::fs::create_dir(dir.path().join(".hg")).unwrap();
+
+        let result = FallowConfig::find_and_load(&sub).unwrap();
         assert!(result.is_none());
     }
 
@@ -2222,12 +2307,21 @@ minTokens = 100
     }
 
     #[test]
-    fn find_config_path_stops_at_package_json() {
-        let dir = test_dir("find-path-pkg-stop");
-        std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#).unwrap();
+    fn find_config_path_walks_past_package_json_in_monorepo() {
+        let dir = test_dir("find-path-monorepo");
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"entry": ["src/index.ts"]}"#,
+        )
+        .unwrap();
 
-        let path = FallowConfig::find_config_path(dir.path());
-        assert!(path.is_none());
+        let sub = dir.path().join("packages").join("app");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("package.json"), r#"{"name": "@scope/app"}"#).unwrap();
+
+        let path = FallowConfig::find_config_path(&sub).unwrap();
+        assert_eq!(path, dir.path().join(".fallowrc.json"));
     }
 
     // ── TOML extends support ────────────────────────────────────────
