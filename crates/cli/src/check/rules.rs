@@ -334,6 +334,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: fallow_config::FlagsConfig::default(),
+            sealed: false,
         }
         .resolve(
             PathBuf::from("/project"),
@@ -587,6 +588,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: fallow_config::FlagsConfig::default(),
+            sealed: false,
             overrides: vec![fallow_config::ConfigOverride {
                 files: vec!["**/*.test.ts".to_string()],
                 rules: fallow_config::PartialRulesConfig {

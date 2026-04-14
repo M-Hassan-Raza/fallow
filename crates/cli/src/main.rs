@@ -15,6 +15,7 @@ mod baseline;
 mod check;
 mod codeowners;
 mod combined;
+mod config;
 mod dupes;
 mod error;
 mod explain;
@@ -313,6 +314,19 @@ enum Command {
 
     /// Print the JSON Schema for external plugin files
     PluginSchema,
+
+    /// Show the resolved config and which config file was loaded
+    ///
+    /// Walks up from the project root looking for `.fallowrc.json`,
+    /// `fallow.toml`, or `.fallow.toml`, resolves `extends`, and prints
+    /// the final config as JSON. Use `--path` to print only the config
+    /// file path (useful in shell scripts). Exit code 0 if a config was
+    /// found, 3 if only defaults are in effect.
+    Config {
+        /// Print only the config file path (one line, no JSON)
+        #[arg(long)]
+        path: bool,
+    },
 
     /// List discovered entry points and files
     List {
@@ -657,6 +671,17 @@ fn build_ownership_resolver(
 
 // ── Config loading ───────────────────────────────────────────────
 
+/// Emit a terse "loaded config: <path>" line on stderr so users can verify
+/// which config was picked up. Suppressed for non-human output formats (so
+/// JSON/SARIF/markdown consumers get clean machine-readable output) and when
+/// `--quiet` is set.
+fn log_config_loaded(path: &std::path::Path, output: fallow_config::OutputFormat, quiet: bool) {
+    if quiet || !matches!(output, fallow_config::OutputFormat::Human) {
+        return;
+    }
+    eprintln!("loaded config: {}", path.display());
+}
+
 #[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
 fn load_config(
     root: &std::path::Path,
@@ -670,7 +695,10 @@ fn load_config(
     let user_config = if let Some(path) = config_path {
         // Explicit --config: propagate errors
         match FallowConfig::load(path) {
-            Ok(c) => Some(c),
+            Ok(c) => {
+                log_config_loaded(path, output, quiet);
+                Some(c)
+            }
             Err(e) => {
                 let msg = format!("failed to load config '{}': {e}", path.display());
                 return Err(emit_error(&msg, 2, output));
@@ -678,7 +706,11 @@ fn load_config(
         }
     } else {
         match FallowConfig::find_and_load(root) {
-            Ok(found) => found.map(|(c, _)| c),
+            Ok(Some((config, found_path))) => {
+                log_config_loaded(&found_path, output, quiet);
+                Some(config)
+            }
+            Ok(None) => None,
             Err(e) => {
                 return Err(emit_error(&e, 2, output));
             }
@@ -910,6 +942,7 @@ fn main() -> ExitCode {
                     | Command::ConfigSchema
                     | Command::PluginSchema
                     | Command::Schema
+                    | Command::Config { .. }
                     | Command::List { .. }
                     | Command::Flags { .. }
                     | Command::Migrate { .. }
@@ -1175,6 +1208,7 @@ fn dispatch_subcommand(
         }),
         Command::ConfigSchema => init::run_config_schema(),
         Command::PluginSchema => init::run_plugin_schema(),
+        Command::Config { path } => config::run_config(root, cli.config.as_deref(), path),
         Command::List {
             entry_points,
             files,

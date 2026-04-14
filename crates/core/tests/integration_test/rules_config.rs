@@ -98,6 +98,7 @@ fn ignore_exports_wildcard() {
         codeowners: None,
         public_packages: vec![],
         flags: fallow_config::FlagsConfig::default(),
+        sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, true, true);
 
@@ -147,6 +148,7 @@ fn ignore_exports_specific() {
         codeowners: None,
         public_packages: vec![],
         flags: fallow_config::FlagsConfig::default(),
+        sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, true, true);
 
@@ -195,6 +197,7 @@ fn ignore_dependencies_config() {
         codeowners: None,
         public_packages: vec![],
         flags: fallow_config::FlagsConfig::default(),
+        sealed: false,
     }
     .resolve(root, OutputFormat::Human, 4, true, true);
 

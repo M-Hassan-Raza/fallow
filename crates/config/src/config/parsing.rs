@@ -564,10 +564,35 @@ fn resolve_extends_file(
     }
 
     let config_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let sealed = value
+        .get("sealed")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    // Canonicalize the config directory once when sealed; reused inside the
+    // loop for each `extends` confinement check.
+    let sealed_dir_canonical = if sealed {
+        Some(dunce::canonicalize(config_dir).map_err(|e| {
+            miette::miette!(
+                "Sealed config directory '{}' could not be canonicalized: {e}",
+                config_dir.display()
+            )
+        })?)
+    } else {
+        None
+    };
     let mut merged = serde_json::Value::Object(serde_json::Map::new());
 
     for extend_path_str in &extends {
         let base = if extend_path_str.starts_with(HTTPS_PREFIX) {
+            if sealed {
+                return Err(miette::miette!(
+                    "'sealed: true' config at {} rejects URL extends '{}'. \
+                     Sealed configs only allow file-relative extends within \
+                     the config's directory",
+                    path.display(),
+                    extend_path_str
+                ));
+            }
             resolve_url_extends(extend_path_str, visited, depth + 1)?
         } else if extend_path_str.starts_with(HTTP_PREFIX) {
             return Err(miette::miette!(
@@ -577,6 +602,15 @@ fn resolve_extends_file(
                 path.display()
             ));
         } else if let Some(npm_specifier) = extend_path_str.strip_prefix(NPM_PREFIX) {
+            if sealed {
+                return Err(miette::miette!(
+                    "'sealed: true' config at {} rejects npm extends '{}'. \
+                     Sealed configs only allow file-relative extends within \
+                     the config's directory",
+                    path.display(),
+                    extend_path_str
+                ));
+            }
             let npm_path = resolve_npm_package(config_dir, npm_specifier, path)?;
             resolve_extends_file(&npm_path, visited, depth + 1)?
         } else {
@@ -594,6 +628,24 @@ fn resolve_extends_file(
                     p.display(),
                     path.display()
                 ));
+            }
+            if let Some(dir_canonical) = &sealed_dir_canonical {
+                let p_canonical = dunce::canonicalize(&p).map_err(|e| {
+                    miette::miette!(
+                        "Sealed config extends path '{}' could not be canonicalized: {e}",
+                        p.display()
+                    )
+                })?;
+                if !p_canonical.starts_with(dir_canonical) {
+                    return Err(miette::miette!(
+                        "'sealed: true' config at {} rejects extends '{}' which resolves \
+                         outside the config's directory ({}). Sealed configs only allow \
+                         extends within the config's directory",
+                        path.display(),
+                        extend_path_str,
+                        p_canonical.display()
+                    ));
+                }
             }
             resolve_extends_file(&p, visited, depth + 1)?
         };
@@ -1180,6 +1232,136 @@ unknown_field = true
             err_msg.contains("not found"),
             "Expected not found error, got: {err_msg}"
         );
+    }
+
+    // ── sealed: true tests ──────────────────────────────────────────
+
+    #[test]
+    fn sealed_allows_in_directory_extends() {
+        let dir = test_dir("sealed-allows-local");
+        std::fs::write(
+            dir.path().join("base.json"),
+            r#"{"ignorePatterns": ["gen/**"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"sealed": true, "extends": ["./base.json"]}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert!(config.sealed);
+        assert_eq!(config.ignore_patterns, vec!["gen/**"]);
+    }
+
+    #[test]
+    fn sealed_rejects_extends_escaping_directory() {
+        let dir = test_dir("sealed-rejects-escape");
+        let sub = dir.path().join("packages").join("app");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        // Base config above the sealed config's directory
+        std::fs::write(
+            dir.path().join("base.json"),
+            r#"{"ignorePatterns": ["dist/**"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sub.join(".fallowrc.json"),
+            r#"{"sealed": true, "extends": ["../../base.json"]}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&sub.join(".fallowrc.json"));
+        assert!(
+            result.is_err(),
+            "Expected sealed config to reject escaping extends"
+        );
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("sealed"),
+            "Error must mention sealed: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("outside the config's directory"),
+            "Error must explain the constraint: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn sealed_rejects_https_extends() {
+        let dir = test_dir("sealed-rejects-https");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"sealed": true, "extends": ["https://example.com/base.json"]}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("sealed"),
+            "Error must mention sealed: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("URL extends"),
+            "Error must mention URL: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn sealed_rejects_npm_extends() {
+        let dir = test_dir("sealed-rejects-npm");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"sealed": true, "extends": ["npm:@scope/config"]}"#,
+        )
+        .unwrap();
+
+        let result = FallowConfig::load(&dir.path().join(".fallowrc.json"));
+        assert!(result.is_err());
+        let err_msg = format!("{}", result.unwrap_err());
+        assert!(
+            err_msg.contains("sealed"),
+            "Error must mention sealed: {err_msg}"
+        );
+        assert!(
+            err_msg.contains("npm extends"),
+            "Error must mention npm: {err_msg}"
+        );
+    }
+
+    #[test]
+    fn sealed_default_is_false() {
+        let dir = test_dir("sealed-default");
+        std::fs::write(dir.path().join(".fallowrc.json"), "{}").unwrap();
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json")).unwrap();
+        assert!(!config.sealed);
+    }
+
+    #[test]
+    fn sealed_false_allows_escaping_extends() {
+        // Without sealed (or sealed: false), escaping extends works fine
+        let dir = test_dir("sealed-false-allows");
+        let sub = dir.path().join("packages").join("app");
+        std::fs::create_dir_all(&sub).unwrap();
+
+        std::fs::write(
+            dir.path().join("base.json"),
+            r#"{"ignorePatterns": ["dist/**"]}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            sub.join(".fallowrc.json"),
+            r#"{"extends": ["../../base.json"]}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&sub.join(".fallowrc.json")).unwrap();
+        assert!(!config.sealed);
+        assert_eq!(config.ignore_patterns, vec!["dist/**"]);
     }
 
     #[test]

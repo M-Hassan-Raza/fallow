@@ -352,16 +352,35 @@ impl FallowLspServer {
         let join_result = tokio::task::spawn_blocking(move || {
             let mut merged_results = AnalysisResults::default();
             let mut merged_duplication = DuplicationReport::default();
+            // Collect "loaded config: ..." messages alongside results so the
+            // async caller can surface them via log_message without doing
+            // blocking I/O on the async executor or calling find_and_load
+            // twice per project root.
+            let mut config_messages = Vec::with_capacity(project_roots.len());
             for project_root in &project_roots {
                 if let Ok(results) = fallow_core::analyze_project(project_root) {
                     merge_results(&mut merged_results, results);
                 }
 
-                let dupes_config = fallow_config::FallowConfig::find_and_load(project_root)
-                    .ok()
-                    .flatten()
-                    .map(|(c, _)| c.duplicates)
-                    .unwrap_or_default();
+                let (dupes_config, message) =
+                    match fallow_config::FallowConfig::find_and_load(project_root) {
+                        Ok(Some((c, path))) => {
+                            let msg = format!("loaded config: {}", path.display());
+                            (c.duplicates, msg)
+                        }
+                        Ok(None) => (
+                            fallow_config::DuplicatesConfig::default(),
+                            format!(
+                                "no config file found for {}, using defaults",
+                                project_root.display()
+                            ),
+                        ),
+                        Err(e) => (
+                            fallow_config::DuplicatesConfig::default(),
+                            format!("config error for {}: {e}", project_root.display()),
+                        ),
+                    };
+                config_messages.push(message);
 
                 let duplication = fallow_core::duplicates::find_duplicates_in_project(
                     project_root,
@@ -370,12 +389,20 @@ impl FallowLspServer {
                 merge_duplication(&mut merged_duplication, duplication);
             }
 
-            (merged_results, merged_duplication)
+            (merged_results, merged_duplication, config_messages)
         })
         .await;
 
         match join_result {
-            Ok((results, duplication)) => {
+            Ok((results, duplication, config_messages)) => {
+                // Surface which config was loaded for each project root so users
+                // can verify their config is picked up (addresses silent
+                // config-loss UX). Emitted from the async context after the
+                // blocking task returns.
+                for msg in config_messages {
+                    self.client.log_message(MessageType::INFO, msg).await;
+                }
+
                 // Build diagnostics once from the merged results.
                 // Each result item already carries its own file path, so a single
                 // `build_diagnostics` call covers all roots. The workspace root is

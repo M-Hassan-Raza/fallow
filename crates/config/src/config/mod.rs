@@ -175,6 +175,17 @@ pub struct FallowConfig {
     /// Populated by `--save-regression-baseline` (no path), read by `--fail-on-regression`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regression: Option<RegressionConfig>,
+
+    /// Mark this config as sealed: `extends` paths must be file-relative and
+    /// resolve within this config's own directory. `npm:` and `https:` extends
+    /// are rejected. Useful for library publishers and monorepo sub-packages
+    /// that want to guarantee their config is self-contained and not subject
+    /// to ancestor configs being injected via `extends`.
+    ///
+    /// Discovery is unaffected (first-match-wins already stops the directory
+    /// walk at the nearest config). This only constrains `extends`.
+    #[serde(default)]
+    pub sealed: bool,
 }
 
 /// Regression baseline counts, embedded in the config file.

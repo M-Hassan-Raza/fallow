@@ -299,6 +299,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            sealed: false,
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -341,6 +342,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            sealed: false,
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -399,6 +401,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            sealed: false,
         };
         let resolved = config.resolve(
             PathBuf::from("/project"),
@@ -441,6 +444,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
+            sealed: false,
         }
     }
 

@@ -23,7 +23,7 @@ These interfaces are covered by semver — breaking changes only happen in major
 
 ### CLI interface
 
-- **Subcommands**: `dead-code` (legacy alias: `check`), `dupes`, `health`, `audit`, `fix`, `watch`, `init`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`
+- **Subcommands**: `dead-code` (legacy alias: `check`), `dupes`, `health`, `audit`, `fix`, `watch`, `init`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`, `config`
 - **Default behavior**: bare `fallow` (no subcommand) runs dead-code + dupes + health combined
 - **Exit codes**: 0 (success/no errors), 1 (issues with error severity found), 2 (runtime error)
 - **Global flags**: `--format`, `--config`, `--workspace`, `--production`, `--baseline`, `--save-baseline`, `--no-cache`, `--threads`, `--changed-since` (alias: `--base`), `--performance`, `--explain`, `--ci`, `--fail-on-issues`, `--sarif-file`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline`, `--summary`, `--group-by` (owner, directory, package)

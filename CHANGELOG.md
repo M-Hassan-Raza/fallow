@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`fallow config` subcommand** -- prints the loaded config path on the first line followed by the JSON-serialized config (with `extends` resolved). Use `--path` to print only the path (scriptable). Exit code 0 if a config was found, 3 if only defaults are in effect. Mirrors `eslint --print-config` and `dprint output-resolved-config`.
+- **`loaded config: <path>` line on stderr** -- the CLI now prints which config file was picked up at the start of every human-format run (suppressed by `--quiet` and non-human formats). Closes the silent-config-loss UX gap where users could not tell whether their `.fallowrc.json` was being applied. The LSP emits the same information as a `window/logMessage` per project root, visible in the editor's Output panel.
+- **`sealed: true` config field** -- marks a config as self-contained so `extends` paths must be file-relative and resolve within the config's own directory. `npm:` and `https:` extends are rejected. Useful for library publishers and monorepo sub-packages that want to guarantee their config cannot be modified by ancestor configs being injected via `extends`.
+
 ### Fixed
 
 - **Config discovery now walks past `package.json` in monorepos** -- config search previously stopped at the first `package.json`, silently preventing monorepo sub-packages (pnpm/npm/yarn workspaces, Nx) from inheriting the root `.fallowrc.json`. Discovery now stops only at VCS boundaries (`.git`, `.hg`, `.svn`), matching Prettier/ESLint/Biome behavior. This fixes silent config loss in the VS Code extension, LSP, and CLI when invoked from a workspace sub-package. A sub-package with its own `.fallowrc.json` still wins (first-match-wins). ([#113](https://github.com/fallow-rs/fallow/issues/113))

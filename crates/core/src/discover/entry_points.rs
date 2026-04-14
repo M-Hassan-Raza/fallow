@@ -916,6 +916,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: fallow_config::FlagsConfig::default(),
+            sealed: false,
         }
         .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
 
@@ -1037,6 +1038,7 @@ mod tests {
             codeowners: None,
             public_packages: vec![],
             flags: fallow_config::FlagsConfig::default(),
+            sealed: false,
         }
         .resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
 

@@ -713,6 +713,7 @@ mod tests {
                 codeowners: None,
                 public_packages: vec![],
                 flags: FlagsConfig::default(),
+                sealed: false,
             }
             .resolve(root, OutputFormat::Human, 1, true, true)
         }

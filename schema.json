@@ -198,6 +198,11 @@
           "type": "null"
         }
       ]
+    },
+    "sealed": {
+      "description": "Mark this config as sealed: `extends` paths must be file-relative and\nresolve within this config's own directory. `npm:` and `https:` extends\nare rejected. Useful for library publishers and monorepo sub-packages\nthat want to guarantee their config is self-contained and not subject\nto ancestor configs being injected via `extends`.\n\nDiscovery is unaffected (first-match-wins already stops the directory\nwalk at the nearest config). This only constrains `extends`.",
+      "type": "boolean",
+      "default": false
     }
   },
   "additionalProperties": false,
