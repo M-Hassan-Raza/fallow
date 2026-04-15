@@ -8,10 +8,7 @@
 //!
 //! # Public key
 //!
-//! The Ed25519 verification key is compiled in at [`PUBLIC_KEY_BYTES`]. The
-//! current value is the local development key used by the companion
-//! `fallow-cloud` repo for localhost smoke tests. Replace it with the operator
-//! managed production key before any non-local release.
+//! The Ed25519 verification key is compiled in at [`PUBLIC_KEY_BYTES`].
 
 use std::io::Read;
 use std::path::PathBuf;
@@ -25,12 +22,10 @@ use fallow_license::{
 };
 use serde::Deserialize;
 
-/// Local development Ed25519 verification key for localhost smoke tests.
-///
-/// Replace this with the production key before any non-local release.
+/// Ed25519 verification key for fallow license JWT validation.
 pub const PUBLIC_KEY_BYTES: [u8; 32] = [
-    217, 220, 167, 133, 192, 195, 230, 26, 168, 181, 109, 144, 184, 50, 150, 166, 140, 39, 135,
-    239, 135, 60, 5, 197, 36, 120, 158, 18, 251, 177, 156, 123,
+    179, 203, 218, 13, 98, 63, 103, 172, 91, 108, 23, 122, 27, 101, 200, 182, 174, 117, 160, 41,
+    167, 151, 66, 171, 13, 61, 148, 65, 181, 144, 24, 120,
 ];
 const DEFAULT_API_URL: &str = "https://api.fallow.cloud";
 const NETWORK_EXIT_CODE: u8 = 7;
