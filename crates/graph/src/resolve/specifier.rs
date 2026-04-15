@@ -6,8 +6,8 @@ use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
 
 use super::fallbacks::{
     extract_package_name_from_node_modules_path, try_path_alias_fallback,
-    try_pnpm_workspace_fallback, try_scss_include_path_fallback, try_scss_partial_fallback,
-    try_source_fallback, try_workspace_package_fallback,
+    try_pnpm_workspace_fallback, try_scss_include_path_fallback, try_scss_node_modules_fallback,
+    try_scss_partial_fallback, try_source_fallback, try_workspace_package_fallback,
 };
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
@@ -114,6 +114,41 @@ fn warn_once_tsconfig(ctx: &ResolveContext<'_>, err: &ResolveError) {
              (e.g., `@/...`) will not. Fix the extends/references chain to restore alias support."
         );
     }
+}
+
+/// Try the SCSS-specific resolution fallbacks in order: local partial,
+/// framework-supplied include paths, and `node_modules/`.
+///
+/// Only applies to `.scss` / `.sass` importers. Returns `None` when the
+/// importer is not an SCSS file or when none of the fallbacks produce a hit,
+/// so the outer error path continues to the generic alias / bare / workspace
+/// fallbacks.
+fn try_scss_fallbacks(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !from_file
+        .extension()
+        .is_some_and(|e| e == "scss" || e == "sass")
+    {
+        return None;
+    }
+    // 1. Local partial convention: `@use 'variables'` → `_variables.scss`.
+    if let Some(result) = try_scss_partial_fallback(ctx, from_file, specifier) {
+        return Some(result);
+    }
+    // 2. Framework-supplied SCSS include paths (Angular's
+    //    `stylePreprocessorOptions.includePaths`, Nx equivalent). See #103.
+    if let Some(result) = try_scss_include_path_fallback(ctx, from_file, specifier) {
+        return Some(result);
+    }
+    // 3. `node_modules/` search (Sass's own resolution algorithm):
+    //    `@import 'bootstrap/scss/functions'` →
+    //    `node_modules/bootstrap/scss/_functions.scss`. Returns
+    //    `ResolveResult::NpmPackage` so unused-/unlisted-dependency detection
+    //    stays accurate. See #125.
+    try_scss_node_modules_fallback(ctx, from_file, specifier)
 }
 
 /// Resolve a single import specifier to a target.
@@ -299,21 +334,8 @@ pub(super) fn resolve_specifier(
             }
         }
         Err(_) => {
-            // SCSS partial fallback: `@use 'variables'` → `_variables.scss`.
-            // Try the underscore-prefix convention before npm/alias fallbacks.
-            if from_file
-                .extension()
-                .is_some_and(|e| e == "scss" || e == "sass")
-            {
-                if let Some(result) = try_scss_partial_fallback(ctx, from_file, specifier) {
-                    return result;
-                }
-                // Framework-supplied SCSS include paths (Angular's
-                // stylePreprocessorOptions.includePaths, etc.): retry the bare
-                // specifier against each additional search directory. See #103.
-                if let Some(result) = try_scss_include_path_fallback(ctx, from_file, specifier) {
-                    return result;
-                }
+            if let Some(result) = try_scss_fallbacks(ctx, from_file, specifier) {
+                return result;
             }
 
             if is_alias || matches_plugin_alias {

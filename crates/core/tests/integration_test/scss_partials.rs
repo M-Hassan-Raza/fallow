@@ -102,3 +102,63 @@ fn angular_style_preprocessor_include_paths_resolve_bare_scss_imports() {
         "_mixins.scss should be reachable via includePaths: {unused_file_names:?}"
     );
 }
+
+#[test]
+fn scss_bare_specifiers_resolve_from_node_modules() {
+    // Issue #125: Sass's `@import` / `@use` resolution searches `node_modules/`
+    // for bare specifiers. `@import 'bootstrap/scss/functions'` should resolve
+    // to `node_modules/bootstrap/scss/_functions.scss` (partial convention) and
+    // `@import 'animate.css/animate.min'` should resolve to
+    // `node_modules/animate.css/animate.min.css` (CSS extension append).
+    let root = fixture_path("scss-node-modules-resolution");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.specifier.as_str())
+        .collect();
+
+    assert!(
+        !unresolved_specs
+            .iter()
+            .any(|s| s.contains("bootstrap/scss/functions")),
+        "@import 'bootstrap/scss/functions' should resolve via node_modules: {unresolved_specs:?}"
+    );
+    assert!(
+        !unresolved_specs
+            .iter()
+            .any(|s| s.contains("bootstrap/scss/variables")),
+        "@import 'bootstrap/scss/variables' should resolve via node_modules: {unresolved_specs:?}"
+    );
+    assert!(
+        !unresolved_specs
+            .iter()
+            .any(|s| s.contains("bootstrap/scss/mixins")),
+        "@use 'bootstrap/scss/mixins' should resolve via node_modules: {unresolved_specs:?}"
+    );
+    assert!(
+        !unresolved_specs
+            .iter()
+            .any(|s| s.contains("animate.css/animate.min")),
+        "@import 'animate.css/animate.min' should resolve via node_modules \
+         (CSS extension append): {unresolved_specs:?}"
+    );
+
+    // Packages resolved via node_modules must be tracked as used so that
+    // `unused-dependencies` does not flag them.
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"bootstrap"),
+        "bootstrap imported via SCSS must not be reported as unused: {unused_dep_names:?}"
+    );
+    assert!(
+        !unused_dep_names.contains(&"animate.css"),
+        "animate.css imported via SCSS must not be reported as unused: {unused_dep_names:?}"
+    );
+}

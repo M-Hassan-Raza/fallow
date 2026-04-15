@@ -1,3 +1,5 @@
+use fallow_config::{FallowConfig, OutputFormat, RulesConfig};
+
 use super::common::{create_config, fixture_path};
 
 // ── Unlisted dependencies integration ──────────────────────────
@@ -119,5 +121,73 @@ fn subpath_imports_resolve_correctly() {
     assert!(
         unused_export_names.contains(&"unused"),
         "unused export should still be detected, got: {unused_export_names:?}"
+    );
+}
+
+// ── Issue #124: ignorePatterns applied to workspace package.json discovery ──
+
+#[test]
+fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
+    // Issue #124: when `.fallowrc.json` excludes `**/dist/**`, fallow must also
+    // skip `packages/*/dist/package.json` (build artifacts from ng-packagr, tsc,
+    // Rollup, etc.) during unused-dependency scanning. Without the fix, every
+    // dep listed in the build-artifact package.json is reported as unused.
+    let root = fixture_path("ignore-patterns-workspace-package-json");
+    let config = FallowConfig {
+        schema: None,
+        extends: vec![],
+        entry: vec![],
+        ignore_patterns: vec!["**/dist/**".to_string()],
+        framework: vec![],
+        workspaces: None,
+        ignore_dependencies: vec![],
+        ignore_exports: vec![],
+        used_class_members: vec![],
+        duplicates: fallow_config::DuplicatesConfig::default(),
+        health: fallow_config::HealthConfig::default(),
+        rules: RulesConfig::default(),
+        boundaries: fallow_config::BoundaryConfig::default(),
+        production: false,
+        plugins: vec![],
+        dynamically_loaded: vec![],
+        overrides: vec![],
+        regression: None,
+        codeowners: None,
+        public_packages: vec![],
+        flags: fallow_config::FlagsConfig::default(),
+        sealed: false,
+    }
+    .resolve(root, OutputFormat::Human, 4, true, true);
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    // Every unused-dep finding whose path leads through a `dist/` directory is
+    // a false positive — that package.json should have been ignored entirely.
+    let dist_findings: Vec<String> = results
+        .unused_dependencies
+        .iter()
+        .filter(|d| {
+            d.path
+                .components()
+                .any(|c| matches!(c, std::path::Component::Normal(s) if s == "dist"))
+        })
+        .map(|d| format!("{} -> {}", d.package_name, d.path.display()))
+        .collect();
+    assert!(
+        dist_findings.is_empty(),
+        "deps from dist/package.json must not be reported when dist/ is ignored: {dist_findings:?}"
+    );
+
+    // `is-odd` is only declared in `packages/my-lib/package.json` and never
+    // imported — it should still be reported. This guards against a regression
+    // where the ignore check accidentally skips real workspace package.json files.
+    let reported: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.package_name.as_str())
+        .collect();
+    assert!(
+        reported.contains(&"is-odd"),
+        "real unused dep `is-odd` should still be reported, got: {reported:?}"
     );
 }

@@ -276,6 +276,133 @@ fn lookup_scss_path(candidate: &Path, ctx: &ResolveContext<'_>) -> Option<FileId
     None
 }
 
+/// Try SCSS `node_modules` fallback: resolve a bare specifier by walking up
+/// from the importing file and probing each ancestor's `node_modules/` dir.
+///
+/// Sass's `@import` / `@use` resolution algorithm searches `node_modules/` for
+/// bare specifiers after the file-local and `includePaths` searches fail.
+/// `@import 'bootstrap/scss/functions'` resolves to
+/// `node_modules/bootstrap/scss/_functions.scss` via the standard partial
+/// convention; `@import 'animate.css/animate.min'` resolves to
+/// `node_modules/animate.css/animate.min.css` via the CSS-extension fallback.
+///
+/// Files inside `node_modules/` are not in fallow's file index (the default
+/// ignore patterns exclude them), so this function returns
+/// `ResolveResult::NpmPackage` when a candidate exists on disk. That ensures
+/// (1) the `@import` is not reported as unresolved and (2) the npm package is
+/// marked as a used dependency so `unused-dependencies` / `unlisted-dependencies`
+/// stay accurate.
+///
+/// The specifier arrives with a `./` prefix because `normalize_css_import_path`
+/// rewrites bare extensionless SCSS specifiers to relative ones. Parent-relative
+/// specifiers are skipped — they explicitly escape the importing file and must
+/// not be silently redirected to `node_modules`. See issue #125.
+pub(super) fn try_scss_node_modules_fallback(
+    _ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    // SCSS built-in modules (`sass:math`) should not be retried
+    if specifier.contains(':') {
+        return None;
+    }
+    if !from_file
+        .extension()
+        .is_some_and(|e| e == "scss" || e == "sass")
+    {
+        return None;
+    }
+    // Only bare (normalized) specifiers should search node_modules. Explicit
+    // parent-relative paths (`../shared/vars`) are intentional and must not be
+    // redirected.
+    let bare = specifier.strip_prefix("./")?;
+    if bare.starts_with("..") || bare.starts_with('/') {
+        return None;
+    }
+    // The first segment of a bare specifier is the package name (or the start
+    // of a scoped package name). Require it before probing node_modules to
+    // avoid spurious syscalls on malformed specifiers.
+    if bare.is_empty() {
+        return None;
+    }
+
+    // Walk up from the importing file's parent directory to the filesystem
+    // root, matching Node.js / Sass `node_modules` resolution. Covers all
+    // common layouts: flat single project, non-hoisted monorepo, and hoisted
+    // monorepo where `node_modules` lives above the fallow project root
+    // (e.g., fallow run on `/monorepo/packages/my-lib` needs to reach
+    // `/monorepo/node_modules`). The walk is bounded by `Path::parent()`
+    // returning `None` at the filesystem root.
+    let mut dir = from_file.parent()?;
+    loop {
+        let nm_dir = dir.join("node_modules");
+        if nm_dir.is_dir()
+            && let Some(path) = find_scss_in_node_modules(&nm_dir, bare)
+            && let Some(pkg_name) = extract_package_name_from_node_modules_path(&path)
+        {
+            return Some(ResolveResult::NpmPackage(pkg_name));
+        }
+        let Some(parent) = dir.parent() else {
+            break;
+        };
+        dir = parent;
+    }
+    None
+}
+
+/// Probe candidate filesystem paths for a bare SCSS specifier inside a single
+/// `node_modules/` directory, applying Sass resolution conventions.
+///
+/// Candidate order:
+/// 1. `<bare>.scss` / `<bare>.sass` / `<bare>.css` (extension append)
+/// 2. `<parent>/_<stem>.scss` / `<parent>/_<stem>.sass` (partial convention)
+/// 3. `<bare>/_index.scss` / `<bare>/index.scss` (and `.sass` variants)
+/// 4. `<bare>` (exact, for specifiers that already carry an extension)
+fn find_scss_in_node_modules(nm_dir: &Path, bare: &str) -> Option<PathBuf> {
+    let bare_path = Path::new(bare);
+    let file_name = bare_path.file_name()?.to_str()?;
+    let parent = bare_path.parent();
+    let join_with_parent = |name: &str| -> PathBuf {
+        parent.map_or_else(|| nm_dir.join(name), |p| nm_dir.join(p).join(name))
+    };
+
+    // 1. Append extension. Covers both SCSS partials (with ext .scss/.sass
+    // added via the separate partial probe below) and CSS files where Sass
+    // appends `.css` to an extensionless specifier like `animate.css/animate.min`.
+    for ext in &["scss", "sass", "css"] {
+        let candidate = join_with_parent(&format!("{file_name}.{ext}"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    // 2. SCSS partial: prepend underscore to the file name component only.
+    // Skip `.css` here — CSS has no partial convention.
+    for ext in &["scss", "sass"] {
+        let candidate = join_with_parent(&format!("_{file_name}.{ext}"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    // 3. Directory index: `<bare>/_index.<ext>` or `<bare>/index.<ext>`.
+    for ext in &["scss", "sass"] {
+        let idx_partial = nm_dir.join(bare).join(format!("_index.{ext}"));
+        if idx_partial.is_file() {
+            return Some(idx_partial);
+        }
+        let idx_plain = nm_dir.join(bare).join(format!("index.{ext}"));
+        if idx_plain.is_file() {
+            return Some(idx_plain);
+        }
+    }
+    // 4. Exact file — covers specifiers that already carry an extension
+    // (e.g., `bootstrap/dist/css/bootstrap.min.css`).
+    let exact = nm_dir.join(bare);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    None
+}
+
 /// Try to map a resolved output path (e.g., `packages/ui/dist/utils.js`) back to
 /// the corresponding source file (e.g., `packages/ui/src/utils.ts`).
 ///

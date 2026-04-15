@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`ignorePatterns` now excludes workspace `package.json` discovery** -- `.fallowrc.json` with `"ignorePatterns": ["**/dist/**"]` correctly excludes source files from analysis but previously still scanned `dist/package.json` (build artifacts from ng-packagr, tsc, Rollup) for unused-/unlisted-dependency detection, producing a false positive for every dependency listed there. Workspace `package.json` discovery now consults the same glob filter used by the source walker. ([#124](https://github.com/fallow-rs/fallow/issues/124))
+- **SCSS `@import` / `@use` bare specifiers now resolve from `node_modules/`** -- `@import 'bootstrap/scss/functions'` previously failed with `./bootstrap/scss/functions` unresolved because the resolver searched only the importing file's directory and framework-supplied `includePaths`. Matches Sass's own resolution: walks up from the importer to the filesystem root, probing each ancestor's `node_modules/` for `<pkg>/<path>.{scss,sass,css}`, partial convention (`_<name>.{scss,sass}`), and directory index (`<path>/{_index,index}.{scss,sass}`). Handles both SCSS partials (`bootstrap/scss/functions` → `_functions.scss`) and CSS fallback (`animate.css/animate.min` → `animate.min.css`). Matched packages are tracked as used so dependency analysis stays accurate. ([#125](https://github.com/fallow-rs/fallow/issues/125))
+
 ## [2.36.0] - 2026-04-14
 
 ### Added
