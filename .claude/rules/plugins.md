@@ -25,7 +25,7 @@ paths:
 - **Drizzle**: schema field (string/array/glob/directory → entry points), out directory
 - **Angular**: angular.json projects.*.architect.build.options → entry points; peer dep awareness
 - **Vitest**: test.include, setupFiles, globalSetup, environment, reporters, coverage.provider, typecheck.checker, browser.provider; projects[*] nested extraction
-- **Nx**: project.json targets.*.executor → deps; targets.*.options.{main, tsConfig} → entry points
+- **Nx**: project.json targets.*.executor → deps; targets.*.options.{main, browser, styles, scripts, tsConfig} → entry points; targets.*.options.stylePreprocessorOptions.includePaths → SCSS include paths (with `{projectRoot}`/`{workspaceRoot}` token expansion)
 
 ## Plugin trait extensions
 - `path_aliases()` for framework-specific alias resolution (Nuxt `~/`, Next.js `@/`)

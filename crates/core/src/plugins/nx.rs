@@ -67,17 +67,43 @@ define_plugin!(
             .map(|p| p.to_string_lossy().into_owned())
             .unwrap_or_default();
 
-        // project.json: targets.*.options.main → entry point
-        let mains = config_parser::extract_config_object_nested_strings(
-            source,
-            config_path,
-            &["targets"],
-            &["options", "main"],
-        );
-        for main in &mains {
-            let expanded = expand_nx_tokens(main, &project_root_rel);
-            let path = expanded.trim_start_matches("./");
-            result.push_entry_pattern(path.to_string());
+        // project.json: targets.*.options.{main,browser} → entry point.
+        // The Angular CLI's newer `@angular/build:application` executor uses
+        // `browser` instead of `main`; both forms appear in real Nx projects,
+        // so extract either as an entry point. Mirrors `angular.rs`.
+        for field in &["main", "browser"] {
+            let mains = config_parser::extract_config_object_nested_strings(
+                source,
+                config_path,
+                &["targets"],
+                &["options", field],
+            );
+            for main in &mains {
+                let expanded = expand_nx_tokens(main, &project_root_rel);
+                let path = expanded.trim_start_matches("./");
+                result.push_entry_pattern(path.to_string());
+            }
+        }
+
+        // project.json: targets.*.options.{styles,scripts} → entry patterns.
+        // Global stylesheets and scripts declared for the Angular build
+        // executor are real entry points (bundled into the app output); they
+        // must be marked reachable or their contents get false-flagged as
+        // unused files / unused imports. Mirrors the angular.json handling
+        // in `angular.rs`. See issue #125 (follow-up) — Nx projects using
+        // `project.json` previously lost this coverage.
+        for field in &["styles", "scripts"] {
+            let entries = config_parser::extract_config_object_nested_string_or_array(
+                source,
+                config_path,
+                &["targets"],
+                &["options", field],
+            );
+            for entry in &entries {
+                let expanded = expand_nx_tokens(entry, &project_root_rel);
+                let path = expanded.trim_start_matches("./");
+                result.push_entry_pattern(path.to_string());
+            }
         }
 
         // project.json: targets.*.options.tsConfig → always used
@@ -193,6 +219,93 @@ mod tests {
         let result =
             plugin.resolve_config(Path::new("project.json"), source, Path::new("/project"));
         assert!(has_entry_pattern(&result, "apps/client/src/main.ts"));
+    }
+
+    #[test]
+    fn resolve_config_extracts_browser_as_entry() {
+        // @angular/build:application (new Angular 17+ builder used via Nx)
+        // uses `browser` instead of `main`. The Nx plugin must treat both
+        // as entry points so the referenced source file is reachable.
+        let source = r#"{
+            "targets": {
+                "build": {
+                    "executor": "@angular/build:application",
+                    "options": {
+                        "browser": "apps/client/src/main.ts"
+                    }
+                }
+            }
+        }"#;
+        let plugin = NxPlugin;
+        let result =
+            plugin.resolve_config(Path::new("project.json"), source, Path::new("/project"));
+        assert!(has_entry_pattern(&result, "apps/client/src/main.ts"));
+    }
+
+    #[test]
+    fn resolve_config_extracts_styles_as_entry() {
+        // project.json's `styles` array declares global stylesheets that the
+        // Angular build executor bundles into the application. They are
+        // reachable entry points; without this extraction they are reported
+        // as unused files. See issue #125 follow-up.
+        let source = r#"{
+            "targets": {
+                "build": {
+                    "executor": "@angular/build:application",
+                    "options": {
+                        "styles": [
+                            "src/styles.scss",
+                            "apps/client/src/theme.css"
+                        ]
+                    }
+                }
+            }
+        }"#;
+        let plugin = NxPlugin;
+        let result =
+            plugin.resolve_config(Path::new("project.json"), source, Path::new("/project"));
+        assert!(has_entry_pattern(&result, "src/styles.scss"));
+        assert!(has_entry_pattern(&result, "apps/client/src/theme.css"));
+    }
+
+    #[test]
+    fn resolve_config_extracts_scripts_as_entry() {
+        let source = r#"{
+            "targets": {
+                "build": {
+                    "executor": "@angular/build:application",
+                    "options": {
+                        "scripts": ["src/analytics.ts"]
+                    }
+                }
+            }
+        }"#;
+        let plugin = NxPlugin;
+        let result =
+            plugin.resolve_config(Path::new("project.json"), source, Path::new("/project"));
+        assert!(has_entry_pattern(&result, "src/analytics.ts"));
+    }
+
+    #[test]
+    fn resolve_config_expands_project_root_in_styles() {
+        // `{projectRoot}` tokens must be expanded in `styles` entries just
+        // like they are in `main`, `browser`, and include paths.
+        let source = r#"{
+            "targets": {
+                "build": {
+                    "options": {
+                        "styles": ["{projectRoot}/src/styles.scss"]
+                    }
+                }
+            }
+        }"#;
+        let plugin = NxPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/repo/apps/client/project.json"),
+            source,
+            Path::new("/repo"),
+        );
+        assert!(has_entry_pattern(&result, "apps/client/src/styles.scss"));
     }
 
     #[test]
