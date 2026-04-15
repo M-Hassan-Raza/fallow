@@ -678,6 +678,10 @@ pub fn build_health_sarif(
         ));
     }
 
+    if let Some(ref production) = report.production_coverage {
+        append_production_coverage_sarif_results(&mut sarif_results, production, root);
+    }
+
     // Refactoring targets as SARIF results (warning level — advisory recommendations)
     for target in &report.targets {
         let uri = relative_uri(&target.path, root);
@@ -784,6 +788,45 @@ pub fn build_health_sarif(
             "results": sarif_results
         }]
     })
+}
+
+fn append_production_coverage_sarif_results(
+    sarif_results: &mut Vec<serde_json::Value>,
+    production: &crate::health_types::ProductionCoverageReport,
+    root: &Path,
+) {
+    for finding in &production.findings {
+        let uri = relative_uri(&finding.path, root);
+        let rule_id = match finding.state {
+            crate::health_types::ProductionCoverageState::NeverCalled => {
+                "fallow/production-never-called"
+            }
+            crate::health_types::ProductionCoverageState::CoverageUnavailable => {
+                "fallow/production-coverage-unavailable"
+            }
+            crate::health_types::ProductionCoverageState::Called
+            | crate::health_types::ProductionCoverageState::Unknown => "fallow/production-coverage",
+        };
+        let level = if matches!(
+            finding.state,
+            crate::health_types::ProductionCoverageState::NeverCalled
+        ) {
+            "warning"
+        } else {
+            "note"
+        };
+        let message = format!(
+            "'{}' production coverage state: {:?} ({} invocations)",
+            finding.function, finding.state, finding.invocations
+        );
+        sarif_results.push(sarif_result(
+            rule_id,
+            level,
+            &message,
+            &uri,
+            finding.line.map(|line| (line, 1)),
+        ));
+    }
 }
 
 pub(super) fn print_health_sarif(

@@ -1,10 +1,10 @@
 //! `fallow license` subcommand: activate, status, refresh, deactivate.
 //!
-//! All five entry points are dispatched from [`run`]. Network-bound flows
-//! (`refresh`, `--trial`) are stubbed in this scaffold and emit a clear TODO
-//! that points at the unfinished `api.fallow.cloud` integration. Local flows
-//! (`activate <jwt>`, `status`, `deactivate`) are fully wired against
-//! [`fallow_license`].
+//! All entry points are dispatched from [`run`]. Network-bound flows
+//! (`refresh`, `activate --trial`) fetch a JWT from `api.fallow.cloud` and
+//! then pass it through the same offline verifier used by the local activation
+//! path. Local flows (`activate <jwt>`, `status`, `deactivate`) are fully
+//! wired against [`fallow_license`].
 //!
 //! # Public key
 //!
@@ -17,12 +17,14 @@
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::time::Duration;
 
 use ed25519_dalek::VerifyingKey;
 use fallow_license::{
     DEFAULT_HARD_FAIL_DAYS, Feature, LicenseError, LicenseStatus, current_unix_seconds,
     default_license_path, normalize_jwt, verify_jwt,
 };
+use serde::Deserialize;
 
 /// Placeholder Ed25519 verification key. **Replace before first GA release.**
 ///
@@ -30,6 +32,10 @@ use fallow_license::{
 /// here as a 32-byte binary file. Until then, every signed JWT fails
 /// verification, which is the safe default.
 pub const PUBLIC_KEY_BYTES: [u8; 32] = [0; 32];
+const DEFAULT_API_URL: &str = "https://api.fallow.cloud";
+const NETWORK_EXIT_CODE: u8 = 7;
+const CONNECT_TIMEOUT_SECS: u64 = 5;
+const TOTAL_TIMEOUT_SECS: u64 = 10;
 
 /// Subcommands for `fallow license`.
 #[derive(Debug)]
@@ -57,6 +63,16 @@ pub struct ActivateArgs {
     pub trial: bool,
     /// Email used for the trial flow (required when `trial = true`).
     pub email: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct TrialRequest<'a> {
+    email: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct JwtResponse {
+    jwt: String,
 }
 
 /// Dispatch a `fallow license <sub>` invocation.
@@ -134,11 +150,16 @@ fn run_status() -> ExitCode {
 }
 
 fn run_refresh() -> ExitCode {
-    eprintln!(
-        "fallow license refresh: TODO. POST to https://api.fallow.cloud/v1/auth/license/refresh \
-         not yet wired. Track in spec-production-coverage-phase-2.md."
-    );
-    ExitCode::from(7)
+    match refresh_active_license() {
+        Ok(status) => {
+            print_status(&status);
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("fallow license refresh: {message}");
+            ExitCode::from(NETWORK_EXIT_CODE)
+        }
+    }
 }
 
 fn run_trial(email: Option<&str>) -> ExitCode {
@@ -146,12 +167,16 @@ fn run_trial(email: Option<&str>) -> ExitCode {
         eprintln!("fallow license activate --trial requires --email <addr>");
         return ExitCode::from(2);
     };
-    eprintln!(
-        "fallow license activate --trial --email {email}: TODO. POST to \
-         https://api.fallow.cloud/v1/auth/license/trial not yet wired. Track in \
-         spec-production-coverage-phase-2.md."
-    );
-    ExitCode::from(7)
+    match activate_trial(email) {
+        Ok(status) => {
+            print_status(&status);
+            ExitCode::SUCCESS
+        }
+        Err(message) => {
+            eprintln!("fallow license activate --trial: {message}");
+            ExitCode::from(NETWORK_EXIT_CODE)
+        }
+    }
 }
 
 fn run_deactivate() -> ExitCode {
@@ -194,6 +219,12 @@ fn read_jwt(args: &ActivateArgs) -> Result<String, String> {
 }
 
 fn persist_jwt(jwt: &str) -> Result<(), String> {
+    let path = write_jwt(jwt)?;
+    println!("fallow license: stored at {}", path.display());
+    Ok(())
+}
+
+fn write_jwt(jwt: &str) -> Result<PathBuf, String> {
     let path = default_license_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)
@@ -201,8 +232,7 @@ fn persist_jwt(jwt: &str) -> Result<(), String> {
     }
     std::fs::write(&path, jwt)
         .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
-    println!("fallow license: stored at {}", path.display());
-    Ok(())
+    Ok(path)
 }
 
 /// Construct the compiled-in Ed25519 verification key.
@@ -212,6 +242,115 @@ fn persist_jwt(jwt: &str) -> Result<(), String> {
 pub fn verifying_key() -> Result<VerifyingKey, String> {
     VerifyingKey::from_bytes(&PUBLIC_KEY_BYTES)
         .map_err(|err| format!("invalid compiled-in public key: {err}"))
+}
+
+pub fn activate_trial(email: &str) -> Result<LicenseStatus, String> {
+    let mut response = api_agent()
+        .post(&api_url("/v1/auth/license/trial"))
+        .send_json(TrialRequest { email })
+        .map_err(|err| format!("failed to request a trial: {err}"))?;
+    if !response.status().is_success() {
+        return Err(http_status_message(&mut response, "trial"));
+    }
+    store_verified_jwt(&mut response, "trial")
+}
+
+pub fn refresh_active_license() -> Result<LicenseStatus, String> {
+    let current = load_current_jwt()?;
+    let mut response = api_agent()
+        .post(&api_url("/v1/auth/license/refresh"))
+        .header("Authorization", &format!("Bearer {current}"))
+        .send_empty()
+        .map_err(|err| format!("failed to refresh the current license: {err}"))?;
+    if !response.status().is_success() {
+        return Err(http_status_message(&mut response, "refresh"));
+    }
+    store_verified_jwt(&mut response, "refresh")
+}
+
+fn api_agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(CONNECT_TIMEOUT_SECS)))
+        .timeout_global(Some(Duration::from_secs(TOTAL_TIMEOUT_SECS)))
+        .http_status_as_error(false)
+        .build()
+        .new_agent()
+}
+
+fn api_url(path: &str) -> String {
+    let base = std::env::var("FALLOW_API_URL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_API_URL.to_owned());
+    format!("{}{path}", base.trim_end_matches('/'))
+}
+
+fn load_current_jwt() -> Result<String, String> {
+    match fallow_license::load_raw_jwt() {
+        Ok(Some(jwt)) => Ok(jwt),
+        Ok(None) => Err(
+            "no license found. Run: fallow license activate --trial --email you@company.com"
+                .to_owned(),
+        ),
+        Err(err) => Err(format!("failed to read the current license: {err}")),
+    }
+}
+
+fn store_verified_jwt(
+    response: &mut impl ResponseBodyReader,
+    operation: &str,
+) -> Result<LicenseStatus, String> {
+    let payload: JwtResponse = response
+        .read_json()
+        .map_err(|err| format!("failed to parse {operation} response: {err}"))?;
+
+    let jwt = normalize_jwt(&payload.jwt);
+    let status = verify_downloaded_jwt(&jwt)?;
+    let path = write_jwt(&jwt)?;
+    println!("fallow license: stored at {}", path.display());
+    Ok(status)
+}
+
+fn http_status_message(response: &mut impl ResponseBodyReader, operation: &str) -> String {
+    let status = response.status();
+    let body = response.read_to_string().unwrap_or_else(|_| String::new());
+    let body_suffix = if body.trim().is_empty() {
+        String::new()
+    } else {
+        format!(": {}", body.trim())
+    };
+    format!("{operation} request failed with HTTP {status}{body_suffix}")
+}
+
+trait ResponseBodyReader {
+    fn status(&self) -> u16;
+    fn read_json(&mut self) -> Result<JwtResponse, ureq::Error>;
+    fn read_to_string(&mut self) -> Result<String, ureq::Error>;
+}
+
+impl ResponseBodyReader for http::Response<ureq::Body> {
+    fn status(&self) -> u16 {
+        self.status().as_u16()
+    }
+
+    fn read_json(&mut self) -> Result<JwtResponse, ureq::Error> {
+        self.body_mut().read_json()
+    }
+
+    fn read_to_string(&mut self) -> Result<String, ureq::Error> {
+        self.body_mut().read_to_string()
+    }
+}
+
+fn verify_downloaded_jwt(jwt: &str) -> Result<LicenseStatus, String> {
+    let key = verifying_key()?;
+    match verify_jwt(jwt, &key, current_unix_seconds(), DEFAULT_HARD_FAIL_DAYS) {
+        Ok(status) => Ok(status),
+        Err(LicenseError::Truncated { .. }) => {
+            Err(format!("{}", LicenseError::Truncated { actual: jwt.len() }))
+        }
+        Err(err) => Err(format!("failed to verify JWT: {err}")),
+    }
 }
 
 fn print_status(status: &LicenseStatus) {

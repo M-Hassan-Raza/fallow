@@ -511,6 +511,14 @@ enum Command {
         /// pass --coverage-root /home/runner/work/myapp.
         #[arg(long, value_name = "PATH")]
         coverage_root: Option<PathBuf>,
+
+        /// File or directory containing V8 / Istanbul coverage JSON
+        #[arg(long, value_name = "PATH")]
+        production_coverage: Option<PathBuf>,
+
+        /// Threshold for hot-path classification
+        #[arg(long, default_value_t = 100)]
+        min_invocations_hot: u64,
     },
 
     /// Detect feature flag patterns in the codebase
@@ -611,7 +619,15 @@ enum LicenseCli {
 #[derive(clap::Subcommand)]
 enum CoverageCli {
     /// Resumable first-run setup: license + sidecar + recipe + analysis.
-    Setup,
+    Setup {
+        /// Accept all prompts automatically.
+        #[arg(short = 'y', long)]
+        yes: bool,
+
+        /// Print instructions instead of prompting.
+        #[arg(long)]
+        non_interactive: bool,
+    },
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -1396,6 +1412,8 @@ fn dispatch_subcommand(
             trend,
             coverage,
             coverage_root,
+            production_coverage,
+            min_invocations_hot,
         } => {
             // Resolve coverage: CLI flag > FALLOW_COVERAGE env var
             let coverage =
@@ -1431,6 +1449,8 @@ fn dispatch_subcommand(
                 trend,
                 coverage.as_deref(),
                 coverage_root.as_deref(),
+                production_coverage.as_deref(),
+                min_invocations_hot,
             )
         }
         Command::Flags { top } => flags::run_flags(&flags::FlagsOptions {
@@ -1467,7 +1487,9 @@ fn dispatch_subcommand(
             from,
         } => migrate::run_migrate(root, toml, dry_run, from.as_deref()),
         Command::License { subcommand } => license::run(&map_license_subcommand(subcommand)),
-        Command::Coverage { subcommand } => coverage::run(map_coverage_subcommand(&subcommand)),
+        Command::Coverage { subcommand } => {
+            coverage::run(map_coverage_subcommand(&subcommand), root)
+        }
     }
 }
 
@@ -1494,7 +1516,13 @@ fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {
 
 fn map_coverage_subcommand(sub: &CoverageCli) -> coverage::CoverageSubcommand {
     match sub {
-        CoverageCli::Setup => coverage::CoverageSubcommand::Setup,
+        CoverageCli::Setup {
+            yes,
+            non_interactive,
+        } => coverage::CoverageSubcommand::Setup(coverage::SetupArgs {
+            yes: *yes,
+            non_interactive: *non_interactive,
+        }),
     }
 }
 
@@ -1530,6 +1558,8 @@ fn dispatch_health(
     trend: bool,
     coverage: Option<&std::path::Path>,
     coverage_root: Option<&std::path::Path>,
+    production_coverage: Option<&std::path::Path>,
+    min_invocations_hot: u64,
 ) -> ExitCode {
     let (output, quiet, _fail_on_issues) = apply_ci_defaults(
         cli.ci,
@@ -1557,6 +1587,14 @@ fn dispatch_health(
     let eff_hotspots = if any_section { hotspots } else { true } || force_full;
     let eff_complexity = if any_section { complexity } else { true };
     let eff_targets = if any_section { targets } else { true };
+    let production_coverage = if let Some(path) = production_coverage {
+        match health::coverage::prepare_options(path, min_invocations_hot, output) {
+            Ok(options) => Some(options),
+            Err(code) => return code,
+        }
+    } else {
+        None
+    };
     health::run_health(&HealthOptions {
         root,
         config_path: &cli.config,
@@ -1598,6 +1636,7 @@ fn dispatch_health(
         coverage,
         coverage_root,
         performance: cli.performance,
+        production_coverage,
     })
 }
 

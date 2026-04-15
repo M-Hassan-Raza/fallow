@@ -441,6 +441,7 @@ fn run_audit_health<'a>(
         coverage_root: None,
         performance: false,
         min_severity: None,
+        production_coverage: None,
     }) {
         Ok(r) => Ok(Some(r)),
         Err(code) => Err(code),

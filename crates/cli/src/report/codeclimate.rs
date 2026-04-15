@@ -539,6 +539,51 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
         ));
     }
 
+    if let Some(ref production) = report.production_coverage {
+        for finding in &production.findings {
+            let path = cc_path(&finding.path, root);
+            let check_name = match finding.state {
+                crate::health_types::ProductionCoverageState::NeverCalled => {
+                    "fallow/production-never-called"
+                }
+                crate::health_types::ProductionCoverageState::CoverageUnavailable => {
+                    "fallow/production-coverage-unavailable"
+                }
+                crate::health_types::ProductionCoverageState::Called
+                | crate::health_types::ProductionCoverageState::Unknown => {
+                    "fallow/production-coverage"
+                }
+            };
+            let description = format!(
+                "'{}' production coverage state: {:?} ({} invocations)",
+                finding.function, finding.state, finding.invocations
+            );
+            let severity = if matches!(
+                finding.state,
+                crate::health_types::ProductionCoverageState::NeverCalled
+            ) {
+                "major"
+            } else {
+                "info"
+            };
+            let fp = fingerprint_hash(&[
+                check_name,
+                &path,
+                &finding.line.unwrap_or(0).to_string(),
+                &finding.function,
+            ]);
+            issues.push(cc_issue(
+                check_name,
+                &description,
+                severity,
+                "ProductionCoverage",
+                &path,
+                finding.line,
+                &fp,
+            ));
+        }
+    }
+
     if let Some(ref gaps) = report.coverage_gaps {
         for item in &gaps.files {
             let path = cc_path(&item.path, root);

@@ -24,6 +24,7 @@ pub(in crate::report) fn print_health_human(
         && report.coverage_gaps.is_none()
         && report.hotspots.is_empty()
         && report.targets.is_empty()
+        && report.production_coverage.is_none()
         && !has_score
     {
         if !quiet {
@@ -69,6 +70,12 @@ pub(in crate::report) fn print_health_human(
             };
             parts.push(format!("maintainability {avg:.1} ({label})"));
         }
+        if let Some(ref production) = report.production_coverage {
+            parts.push(format!(
+                "{} never called in production",
+                production.summary.functions_never_called
+            ));
+        }
         eprintln!(
             "{}",
             format!(
@@ -97,6 +104,7 @@ pub(in crate::report) fn build_health_human_lines(
     let mut lines = Vec::new();
     render_health_score(&mut lines, report);
     render_health_trend(&mut lines, report);
+    render_production_coverage(&mut lines, report, root);
     render_vital_signs(&mut lines, report);
     render_risk_profiles(&mut lines, report);
     render_large_functions(&mut lines, report, root);
@@ -106,6 +114,89 @@ pub(in crate::report) fn build_health_human_lines(
     render_hotspots(&mut lines, report, root);
     render_refactoring_targets(&mut lines, report, root);
     lines
+}
+
+fn render_production_coverage(
+    lines: &mut Vec<String>,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    let Some(ref production) = report.production_coverage else {
+        return;
+    };
+
+    let verdict = match production.verdict {
+        crate::health_types::ProductionCoverageVerdict::Clean => "clean",
+        crate::health_types::ProductionCoverageVerdict::HotPathChangesNeeded => {
+            "hot path changes needed"
+        }
+        crate::health_types::ProductionCoverageVerdict::ColdCodeDetected => "cold code detected",
+        crate::health_types::ProductionCoverageVerdict::LicenseExpiredGrace => {
+            "license expired grace"
+        }
+        crate::health_types::ProductionCoverageVerdict::Unknown => "unknown",
+    };
+    lines.push(format!(
+        "{} {} {}",
+        "\u{25cf}".cyan(),
+        "Production coverage:".cyan().bold(),
+        verdict
+    ));
+    lines.push(format!(
+        "  {} tracked, {} called, {} never called, {} unavailable ({:.1}% dead)",
+        thousands(production.summary.functions_total),
+        thousands(production.summary.functions_called),
+        thousands(production.summary.functions_never_called),
+        thousands(production.summary.functions_coverage_unavailable),
+        production.summary.percent_dead_in_production,
+    ));
+    if matches!(
+        production.watermark,
+        Some(crate::health_types::ProductionCoverageWatermark::LicenseExpiredGrace)
+    ) {
+        lines.push(
+            "  license expired grace active; refresh with `fallow license refresh`".to_owned(),
+        );
+    }
+    let shown_findings = production.findings.len().min(MAX_FLAT_ITEMS);
+    for finding in &production.findings[..shown_findings] {
+        let relative = format_path(&relative_path(&finding.path, root).display().to_string());
+        let line = finding.line.unwrap_or(0);
+        let state = match finding.state {
+            crate::health_types::ProductionCoverageState::NeverCalled => "never-called",
+            crate::health_types::ProductionCoverageState::CoverageUnavailable => {
+                "coverage-unavailable"
+            }
+            crate::health_types::ProductionCoverageState::Called => "called",
+            crate::health_types::ProductionCoverageState::Unknown => "unknown",
+        };
+        lines.push(format!(
+            "  {relative}:{line} {} [{} invocations, {state}]",
+            finding.function, finding.invocations
+        ));
+    }
+    if production.findings.len() > MAX_FLAT_ITEMS {
+        lines.push(format!(
+            "  ... and {} more production findings (--format json for full list)",
+            production.findings.len() - MAX_FLAT_ITEMS
+        ));
+    }
+    if !production.hot_paths.is_empty() {
+        lines.push("  hot paths:".to_owned());
+        for entry in production.hot_paths.iter().take(5) {
+            let relative = format_path(&relative_path(&entry.path, root).display().to_string());
+            let line = entry.line.unwrap_or(0);
+            lines.push(format!(
+                "    {relative}:{line} {} ({})",
+                entry.function,
+                thousands(entry.invocations as usize)
+            ));
+        }
+    }
+    for warning in &production.warnings {
+        lines.push(format!("  warning [{}]: {}", warning.code, warning.message));
+    }
+    lines.push(String::new());
 }
 
 // ── Section renderers ────
@@ -1358,6 +1449,16 @@ pub(in crate::report) fn print_health_summary(
             } else {
                 "exports"
             },
+        );
+    }
+    if let Some(ref production) = report.production_coverage {
+        println!(
+            "  {:>6}  Never called in production",
+            production.summary.functions_never_called,
+        );
+        println!(
+            "  {:>6}  Coverage unavailable in production",
+            production.summary.functions_coverage_unavailable,
         );
     }
 

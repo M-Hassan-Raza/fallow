@@ -143,6 +143,10 @@ pub(super) fn print_grouped_compact(groups: &[ResultGroup], root: &Path) {
     }
 }
 
+#[expect(
+    clippy::too_many_lines,
+    reason = "health compact formatter stitches many optional sections into one stream"
+)]
 pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, root: &Path) {
     if let Some(ref hs) = report.health_score {
         println!("health-score:{:.1}:{}", hs.score, hs.grade);
@@ -224,6 +228,9 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             );
         }
     }
+    if let Some(ref production) = report.production_coverage {
+        print_production_coverage_compact(production, root);
+    }
     for entry in &report.hotspots {
         let relative = normalize_uri(&relative_path(&entry.path, root).display().to_string());
         let ownership_suffix = entry
@@ -290,6 +297,42 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             effort,
             confidence,
             target.recommendation,
+        );
+    }
+}
+
+fn print_production_coverage_compact(
+    production: &crate::health_types::ProductionCoverageReport,
+    root: &Path,
+) {
+    println!(
+        "production-coverage-summary:functions_total={},functions_called={},functions_never_called={},functions_coverage_unavailable={},percent_dead_in_production={:.1}",
+        production.summary.functions_total,
+        production.summary.functions_called,
+        production.summary.functions_never_called,
+        production.summary.functions_coverage_unavailable,
+        production.summary.percent_dead_in_production,
+    );
+    for finding in &production.findings {
+        let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+        println!(
+            "production-coverage:{}:{}:{}:state={:?},invocations={},confidence={:?}",
+            relative,
+            finding.line.unwrap_or(0),
+            finding.function,
+            finding.state,
+            finding.invocations,
+            finding.confidence,
+        );
+    }
+    for entry in &production.hot_paths {
+        let relative = normalize_uri(&relative_path(&entry.path, root).display().to_string());
+        println!(
+            "production-hot-path:{}:{}:{}:invocations={}",
+            relative,
+            entry.line.unwrap_or(0),
+            entry.function,
+            entry.invocations,
         );
     }
 }

@@ -669,6 +669,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         coverage_root: None,
         performance: opts.performance,
         min_severity: None,
+        production_coverage: None,
     }
 }
 

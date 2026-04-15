@@ -450,6 +450,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         && report.coverage_gaps.is_none()
         && report.hotspots.is_empty()
         && report.targets.is_empty()
+        && report.production_coverage.is_none()
     {
         if report.vital_signs.is_none() {
             let _ = write!(
@@ -465,6 +466,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     }
 
     write_findings_section(&mut out, report, root);
+    write_production_coverage_section(&mut out, report, root);
     write_coverage_gaps_section(&mut out, report, root);
     write_file_scores_section(&mut out, report, root);
     write_hotspots_section(&mut out, report, root);
@@ -472,6 +474,63 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     write_metric_legend(&mut out, report);
 
     out
+}
+
+fn write_production_coverage_section(
+    out: &mut String,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+) {
+    let Some(ref production) = report.production_coverage else {
+        return;
+    };
+    let _ = writeln!(
+        out,
+        "## Production Coverage\n\n- Verdict: {:?}\n- Tracked functions: {}\n- Called: {}\n- Never called: {}\n- Coverage unavailable: {}\n- Percent dead in production: {:.1}%\n",
+        production.verdict,
+        production.summary.functions_total,
+        production.summary.functions_called,
+        production.summary.functions_never_called,
+        production.summary.functions_coverage_unavailable,
+        production.summary.percent_dead_in_production,
+    );
+    if let Some(watermark) = production.watermark {
+        let _ = writeln!(out, "- Watermark: {watermark:?}\n");
+    }
+    if !production.findings.is_empty() {
+        out.push_str("| Path | Function | State | Invocations | Confidence |\n");
+        out.push_str("|:-----|:---------|:------|------------:|:-----------|\n");
+        for finding in &production.findings {
+            let relative = relative_path(&finding.path, root).display();
+            let _ = writeln!(
+                out,
+                "| {}:{} | {} | {:?} | {} | {:?} |",
+                relative,
+                finding.line.unwrap_or(0),
+                finding.function,
+                finding.state,
+                finding.invocations,
+                finding.confidence,
+            );
+        }
+        out.push('\n');
+    }
+    if !production.hot_paths.is_empty() {
+        out.push_str("| Hot path | Function | Invocations |\n");
+        out.push_str("|:---------|:---------|------------:|\n");
+        for entry in &production.hot_paths {
+            let relative = relative_path(&entry.path, root).display();
+            let _ = writeln!(
+                out,
+                "| {}:{} | {} | {} |",
+                relative,
+                entry.line.unwrap_or(0),
+                entry.function,
+                entry.invocations,
+            );
+        }
+        out.push('\n');
+    }
 }
 
 /// Write the trend comparison table to the output.

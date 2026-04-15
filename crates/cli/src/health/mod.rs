@@ -1,3 +1,4 @@
+pub mod coverage;
 mod hotspots;
 pub mod ownership;
 mod scoring;
@@ -9,7 +10,10 @@ use std::time::{Duration, Instant};
 use colored::Colorize;
 use fallow_config::{OutputFormat, ResolvedConfig};
 
-use crate::baseline::{HealthBaselineData, filter_new_health_findings, filter_new_health_targets};
+use crate::baseline::{
+    HealthBaselineData, filter_new_health_findings, filter_new_health_targets,
+    filter_new_production_coverage_findings,
+};
 use crate::check::{get_changed_files, resolve_workspace_filter};
 use crate::error::emit_error;
 pub use crate::health_types::*;
@@ -28,6 +32,13 @@ pub struct SharedParseData {
     pub analysis_output: Option<fallow_core::AnalysisOutput>,
 }
 use targets::{TargetAuxData, compute_refactoring_targets};
+
+pub struct ProductionCoverageOptions {
+    pub path: std::path::PathBuf,
+    pub min_invocations_hot: u64,
+    pub license_jwt: String,
+    pub watermark: Option<crate::health_types::ProductionCoverageWatermark>,
+}
 
 /// Sort criteria for complexity output.
 #[derive(Clone, clap::ValueEnum)]
@@ -95,6 +106,8 @@ pub struct HealthOptions<'a> {
     pub performance: bool,
     /// Only exit with error for findings at or above this severity level.
     pub min_severity: Option<FindingSeverity>,
+    /// Paid production coverage sidecar input.
+    pub production_coverage: Option<ProductionCoverageOptions>,
 }
 
 /// Run health analysis using pre-parsed modules from the dead-code pipeline.
@@ -395,10 +408,58 @@ fn execute_health_inner(
     );
     let targets_ms = t.elapsed().as_secs_f64() * 1000.0;
 
+    let mut production_coverage = if let Some(ref production_options) = opts.production_coverage {
+        Some(coverage::analyze(
+            production_options,
+            &config.root,
+            &modules,
+            &file_paths,
+            &ignore_set,
+            changed_files.as_ref(),
+            ws_root.as_deref(),
+            opts.top,
+            opts.quiet,
+            opts.output,
+        )?)
+    } else {
+        None
+    };
+    if let (Some(report), Some(baseline)) = (production_coverage.as_mut(), loaded_baseline.as_ref())
+    {
+        report.findings = filter_new_production_coverage_findings(
+            std::mem::take(&mut report.findings),
+            baseline,
+            &config.root,
+        );
+        report.summary.functions_never_called = report
+            .findings
+            .iter()
+            .filter(|finding| {
+                matches!(
+                    finding.state,
+                    crate::health_types::ProductionCoverageState::NeverCalled
+                )
+            })
+            .count();
+        report.summary.functions_coverage_unavailable = report
+            .findings
+            .iter()
+            .filter(|finding| {
+                matches!(
+                    finding.state,
+                    crate::health_types::ProductionCoverageState::CoverageUnavailable
+                )
+            })
+            .count();
+    }
+
     if let Some(save_path) = opts.save_baseline {
         save_health_baseline(
             save_path,
             &findings,
+            production_coverage
+                .as_ref()
+                .map_or(&[], |report| report.findings.as_slice()),
             &targets,
             &config.root,
             opts.quiet,
@@ -497,6 +558,7 @@ fn execute_health_inner(
         target_thresholds,
         health_trend,
         istanbul_coverage.is_some(),
+        production_coverage,
         large_functions,
         sev_critical,
         sev_high,
@@ -824,6 +886,7 @@ fn assemble_health_report(
     target_thresholds: Option<TargetThresholds>,
     health_trend: Option<crate::health_types::HealthTrend>,
     has_istanbul_coverage: bool,
+    production_coverage: Option<crate::health_types::ProductionCoverageReport>,
     large_functions: Vec<LargeFunctionEntry>,
     sev_critical: usize,
     sev_high: usize,
@@ -931,6 +994,7 @@ fn assemble_health_report(
         } else {
             report_hotspot_summary
         },
+        production_coverage,
         large_functions: if opts.score_only_output {
             Vec::new()
         } else {
@@ -1102,12 +1166,18 @@ fn collect_findings(
 fn save_health_baseline(
     save_path: &std::path::Path,
     findings: &[HealthFinding],
+    production_coverage_findings: &[crate::health_types::ProductionCoverageFinding],
     targets: &[RefactoringTarget],
     config_root: &std::path::Path,
     quiet: bool,
     output: OutputFormat,
 ) -> Result<(), ExitCode> {
-    let baseline = HealthBaselineData::from_findings(findings, targets, config_root);
+    let baseline = HealthBaselineData::from_findings(
+        findings,
+        production_coverage_findings,
+        targets,
+        config_root,
+    );
     match serde_json::to_string_pretty(&baseline) {
         Ok(json) => {
             if let Err(e) = std::fs::write(save_path, json) {
@@ -1249,7 +1319,20 @@ pub fn print_health_result(
     } else {
         !result.report.findings.is_empty()
     };
-    if has_failing_findings {
+    let has_failing_production_coverage =
+        result
+            .report
+            .production_coverage
+            .as_ref()
+            .is_some_and(|report| {
+                report.findings.iter().any(|finding| {
+                    matches!(
+                        finding.state,
+                        crate::health_types::ProductionCoverageState::NeverCalled
+                    )
+                })
+            });
+    if has_failing_findings || has_failing_production_coverage {
         return ExitCode::from(1);
     }
 

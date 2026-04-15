@@ -1797,6 +1797,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
         targets: vec![],
         target_thresholds: None,
         health_trend: None,
+        production_coverage: None,
     }
 }
 
@@ -1829,6 +1830,7 @@ const fn empty_health_report() -> HealthReport {
         targets: vec![],
         target_thresholds: None,
         health_trend: None,
+        production_coverage: None,
     }
 }
 

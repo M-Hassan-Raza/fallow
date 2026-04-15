@@ -492,6 +492,8 @@ pub fn recompute_stats(report: &DuplicationReport) -> fallow_core::duplicates::D
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct HealthBaselineData {
     pub findings: Vec<String>,
+    #[serde(default)]
+    pub production_coverage_findings: Vec<String>,
     /// Refactoring target keys: `relative_path:category`.
     #[serde(default)]
     pub target_keys: Vec<String>,
@@ -501,6 +503,7 @@ impl HealthBaselineData {
     /// Build a health baseline from findings and targets.
     pub fn from_findings(
         findings: &[crate::health_types::HealthFinding],
+        production_coverage_findings: &[crate::health_types::ProductionCoverageFinding],
         targets: &[crate::health_types::RefactoringTarget],
         root: &Path,
     ) -> Self {
@@ -508,6 +511,10 @@ impl HealthBaselineData {
             findings: findings
                 .iter()
                 .map(|f| health_finding_key(f, root))
+                .collect(),
+            production_coverage_findings: production_coverage_findings
+                .iter()
+                .map(|f| production_coverage_finding_key(f, root))
                 .collect(),
             target_keys: targets
                 .iter()
@@ -536,6 +543,19 @@ fn health_finding_key(finding: &crate::health_types::HealthFinding, root: &Path)
     )
 }
 
+fn production_coverage_finding_key(
+    finding: &crate::health_types::ProductionCoverageFinding,
+    root: &Path,
+) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        relative_path(&finding.path, root),
+        finding.function,
+        finding.line.unwrap_or(0),
+        serde_json::to_string(&finding.state).unwrap_or_else(|_| "\"unknown\"".to_owned())
+    )
+}
+
 /// Filter health findings to only include those not present in the baseline.
 pub fn filter_new_health_findings(
     mut findings: Vec<crate::health_types::HealthFinding>,
@@ -545,6 +565,23 @@ pub fn filter_new_health_findings(
     let baseline_keys: FxHashSet<&str> = baseline.findings.iter().map(String::as_str).collect();
     findings.retain(|f| {
         let key = health_finding_key(f, root);
+        !baseline_keys.contains(key.as_str())
+    });
+    findings
+}
+
+pub fn filter_new_production_coverage_findings(
+    mut findings: Vec<crate::health_types::ProductionCoverageFinding>,
+    baseline: &HealthBaselineData,
+    root: &Path,
+) -> Vec<crate::health_types::ProductionCoverageFinding> {
+    let baseline_keys: FxHashSet<&str> = baseline
+        .production_coverage_findings
+        .iter()
+        .map(String::as_str)
+        .collect();
+    findings.retain(|finding| {
+        let key = production_coverage_finding_key(finding, root);
         !baseline_keys.contains(key.as_str())
     });
     findings
@@ -1004,7 +1041,7 @@ mod tests {
     fn health_baseline_roundtrip() {
         let root = PathBuf::from("/project");
         let findings = vec![make_health_finding(&root, "parseExpression", 42)];
-        let baseline = HealthBaselineData::from_findings(&findings, &[], &root);
+        let baseline = HealthBaselineData::from_findings(&findings, &[], &[], &root);
         let json = serde_json::to_string(&baseline).unwrap();
         let deserialized: HealthBaselineData = serde_json::from_str(&json).unwrap();
         assert_eq!(deserialized.findings, baseline.findings);
@@ -1018,7 +1055,7 @@ mod tests {
             make_health_finding(&root, "parseExpression", 42),
             make_health_finding(&root, "newFunction", 100),
         ];
-        let baseline = HealthBaselineData::from_findings(&findings[..1], &[], &root);
+        let baseline = HealthBaselineData::from_findings(&findings[..1], &[], &[], &root);
         let filtered = filter_new_health_findings(findings, &baseline, &root);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "newFunction");
@@ -1031,6 +1068,7 @@ mod tests {
         let baseline = HealthBaselineData {
             findings: vec![],
             target_keys: vec![],
+            production_coverage_findings: vec![],
         };
         let filtered = filter_new_health_findings(findings, &baseline, &root);
         assert_eq!(filtered.len(), 1);
@@ -1333,7 +1371,7 @@ mod tests {
                 evidence: None,
             },
         ];
-        let baseline = HealthBaselineData::from_findings(&[], &targets[..1], &root);
+        let baseline = HealthBaselineData::from_findings(&[], &[], &targets[..1], &root);
         let filtered = filter_new_health_targets(targets, &baseline, &root);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].path, root.join("src/new-issue.ts"));
