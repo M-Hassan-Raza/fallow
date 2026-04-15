@@ -21,6 +21,8 @@ Key modules:
 - `list.rs` — Show active plugins, entry points, files, boundary zones/rules (`--boundaries`)
 - `schema.rs` — `schema`, `config-schema`, `plugin-schema` commands
 - `config.rs` — `config` subcommand: prints loaded config path + JSON resolved config (or `--path` only). Honors global `--config <path>`.
+- `license/` — `license activate|status|refresh|deactivate` subcommands. `activate` accepts JWT via positional arg, `--from-file`, or stdin (`-`); `--trial --email <addr>` issues a 30-day trial in one step. `refresh` and `--trial` network calls are stubbed (exit 7) until the API client lands. Wraps `fallow-license` (offline Ed25519 verify, alg pinned, RS256/none rejected, 7/30/hard-fail grace ladder).
+- `coverage/` — `coverage setup` resumable first-run state inspector for production coverage. Today: license + sidecar discovery report. Future: framework-aware recipe + auto-resume to analysis.
 - `explain.rs` — Metric/rule definitions, JSON `_meta` builders, SARIF `fullDescription`/`helpUri` source, docs URLs
 - `validate.rs` — Input validation (control characters, path sanitization)
 - `regression/` — Regression testing: `tolerance.rs` (thresholds), `counts.rs` (baselines), `outcome.rs` (verdict), `baseline.rs` (save/load/compare)
@@ -30,6 +32,9 @@ Key modules:
 - `FALLOW_QUIET` — suppress progress bars
 - `FALLOW_BIN` — binary path for MCP server
 - `FALLOW_COVERAGE` — path to Istanbul coverage data for accurate CRAP scores
+- `FALLOW_LICENSE` — license JWT (full string). First-class storage path; intended for shared CI runners.
+- `FALLOW_LICENSE_PATH` — file path containing the license JWT.
+- `FALLOW_COV_BIN` — explicit override for the closed-source `fallow-cov` sidecar binary (wins over PATH and `~/.fallow/bin/`).
 
 ## JSON error format
 Structured JSON errors on stdout when `--format json` is active: `{"error": true, "message": "...", "exit_code": 2}`

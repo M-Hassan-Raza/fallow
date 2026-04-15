@@ -10,12 +10,16 @@ crates/
   types/    — Shared type definitions (discover, extract, results, suppress, serde_path)
   extract/  — AST extraction engine (visitor.rs, complexity.rs, sfc.rs, astro.rs, mdx.rs, css.rs, parse.rs, cache.rs, suppress.rs, tests/)
   graph/    — Module graph construction (graph/), import resolution (resolve.rs), project state (project.rs)
+  license/  — Offline Ed25519 JWT verification for paid features (alg pinned, file+env load precedence, 7/30/hard-fail grace ladder)
+  v8-coverage/ — V8 ScriptCoverage parser + byte-offset-to-line/col mapper + Istanbul normalizer (open-source layer of Phase-2 production coverage)
   core/     — Analysis orchestration: discovery, plugins, scripts, duplicates, cross-reference, caching, progress
     analyze/    — Dead code detection (mod.rs orchestration, predicates.rs, unused_files/exports/deps/members.rs)
     plugins/    — Plugin system + tooling.rs (general tooling dependency detection)
     duplicates/ — Clone detection (families, normalize, tokenize)
   cli/      — CLI binary, split into per-command modules
     audit.rs, check.rs, dupes.rs, health/, watch.rs, fix/, init.rs, list.rs, schema.rs, validate.rs, regression/
+    license/    — `fallow license {activate, status, refresh, deactivate}` (offline JWT verify; refresh/trial network calls TODO)
+    coverage/   — `fallow coverage setup` first-run state inspector (full state machine deferred)
     report/     — Output formatting (mod.rs dispatch, human/, json.rs, sarif.rs, compact.rs, markdown.rs)
     migrate/    — Config migration (mod.rs, knip.rs, jscpd.rs)
   lsp/      — LSP server, split into modules

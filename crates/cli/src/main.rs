@@ -16,6 +16,7 @@ mod check;
 mod codeowners;
 mod combined;
 mod config;
+mod coverage;
 mod dupes;
 mod error;
 mod explain;
@@ -24,6 +25,7 @@ mod flags;
 mod health;
 mod health_types;
 mod init;
+mod license;
 mod list;
 mod migrate;
 mod regression;
@@ -548,6 +550,68 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         from: Option<PathBuf>,
     },
+
+    /// Manage paid-feature license (Phase 2 production coverage).
+    ///
+    /// Verification is offline against an Ed25519 public key compiled into
+    /// the binary. The license file lives at `~/.fallow/license.jwt` (or
+    /// `$FALLOW_LICENSE_PATH`); `$FALLOW_LICENSE` env var takes precedence
+    /// and is the recommended path for shared CI runners.
+    License {
+        #[command(subcommand)]
+        subcommand: LicenseCli,
+    },
+
+    /// Production coverage workflow.
+    ///
+    /// `setup` is the resumable single-entry-point first-run flow: license
+    /// check → sidecar install → coverage recipe → analysis. Spec:
+    /// `.internal/spec-production-coverage-phase-2.md` (private repo).
+    Coverage {
+        #[command(subcommand)]
+        subcommand: CoverageCli,
+    },
+}
+
+#[derive(clap::Subcommand)]
+enum LicenseCli {
+    /// Activate a license JWT.
+    ///
+    /// JWT input precedence: positional arg > `--from-file` > stdin (`-`).
+    /// All paths normalize whitespace before crypto verification.
+    Activate {
+        /// JWT as a positional argument.
+        #[arg(value_name = "JWT")]
+        jwt: Option<String>,
+
+        /// Path to a file containing the JWT.
+        #[arg(long, value_name = "PATH")]
+        from_file: Option<PathBuf>,
+
+        /// Read JWT from stdin.
+        #[arg(long, conflicts_with_all = ["jwt", "from_file"])]
+        stdin: bool,
+
+        /// Start a 30-day email-gated trial in one step.
+        #[arg(long, requires = "email")]
+        trial: bool,
+
+        /// Email address for the trial flow.
+        #[arg(long, value_name = "ADDR")]
+        email: Option<String>,
+    },
+    /// Show the active license tier, seats, features, and days remaining.
+    Status,
+    /// Fetch a fresh JWT from `api.fallow.cloud` (network-only).
+    Refresh,
+    /// Remove the local license file.
+    Deactivate,
+}
+
+#[derive(clap::Subcommand)]
+enum CoverageCli {
+    /// Resumable first-run setup: license + sidecar + recipe + analysis.
+    Setup,
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -985,6 +1049,8 @@ fn main() -> ExitCode {
                     | Command::List { .. }
                     | Command::Flags { .. }
                     | Command::Migrate { .. }
+                    | Command::License { .. }
+                    | Command::Coverage { .. }
             )
         )
     {
@@ -1400,6 +1466,35 @@ fn dispatch_subcommand(
             dry_run,
             from,
         } => migrate::run_migrate(root, toml, dry_run, from.as_deref()),
+        Command::License { subcommand } => license::run(&map_license_subcommand(subcommand)),
+        Command::Coverage { subcommand } => coverage::run(map_coverage_subcommand(&subcommand)),
+    }
+}
+
+fn map_license_subcommand(sub: LicenseCli) -> license::LicenseSubcommand {
+    match sub {
+        LicenseCli::Activate {
+            jwt,
+            from_file,
+            stdin,
+            trial,
+            email,
+        } => license::LicenseSubcommand::Activate(license::ActivateArgs {
+            raw_jwt: jwt,
+            from_file,
+            from_stdin: stdin,
+            trial,
+            email,
+        }),
+        LicenseCli::Status => license::LicenseSubcommand::Status,
+        LicenseCli::Refresh => license::LicenseSubcommand::Refresh,
+        LicenseCli::Deactivate => license::LicenseSubcommand::Deactivate,
+    }
+}
+
+fn map_coverage_subcommand(sub: &CoverageCli) -> coverage::CoverageSubcommand {
+    match sub {
+        CoverageCli::Setup => coverage::CoverageSubcommand::Setup,
     }
 }
 

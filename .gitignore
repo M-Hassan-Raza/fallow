@@ -11,6 +11,10 @@ reference/
 
 # Coverage reports
 coverage/
+# But allow the CLI's `fallow coverage` subcommand module
+!crates/cli/src/coverage/
+# And allow the v8-coverage normalizer crate
+!crates/v8-coverage/
 
 # Benchmark fixtures (generated/downloaded for local benchmarking)
 benchmarks/fixtures
