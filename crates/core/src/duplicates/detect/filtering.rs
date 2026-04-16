@@ -73,7 +73,7 @@ impl IntervalIndex {
 /// group's spans. Groups must arrive sorted by length descending.
 fn remove_token_subsets(mut raw_groups: Vec<RawGroup>, num_files: usize) -> Vec<RawGroup> {
     let raw_count = raw_groups.len();
-    raw_groups.sort_by(|a, b| b.length.cmp(&a.length));
+    raw_groups.sort_by_key(|b| std::cmp::Reverse(b.length));
 
     let mut covered = IntervalIndex::new(num_files);
     let mut surviving = Vec::new();

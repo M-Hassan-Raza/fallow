@@ -51,8 +51,9 @@ jobs:
         # dependencies even with --no-fns, producing false positives.
         # Cycle detection is handled by fallow's own --circular-deps instead.
         run: |
+          CARGO_MODULES_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/cargo-modules"
           for crate in fallow-config fallow-types fallow-extract fallow-graph fallow-core fallow-cli; do
-            cargo modules dependencies --lib -p "$crate" \
+            "$CARGO_MODULES_BIN" dependencies --lib -p "$crate" \
               --no-externs --no-fns --no-sysroot --no-traits --no-types --no-owns 2>/dev/null
           done > coupling-dot.txt
 

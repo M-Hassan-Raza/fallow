@@ -208,12 +208,11 @@ pub fn is_shallow_clone(root: &Path) -> bool {
         .args(["rev-parse", "--is-shallow-repository"])
         .current_dir(root)
         .output()
-        .map(|o| {
+        .is_ok_and(|o| {
             String::from_utf8_lossy(&o.stdout)
                 .trim()
                 .eq_ignore_ascii_case("true")
         })
-        .unwrap_or(false)
 }
 
 /// Check if the directory is inside a git repository.
@@ -225,8 +224,7 @@ pub fn is_git_repo(root: &Path) -> bool {
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+        .is_ok_and(|s| s.success())
 }
 
 // ── Churn cache ──────────────────────────────────────────────────

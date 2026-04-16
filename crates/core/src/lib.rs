@@ -67,16 +67,14 @@ fn update_cache(
 
 /// Extract mtime (seconds since epoch) and file size from a path.
 fn file_mtime_and_size(path: &std::path::Path) -> (u64, u64) {
-    std::fs::metadata(path)
-        .map(|m| {
-            let mt = m
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-                .map_or(0, |d| d.as_secs());
-            (mt, m.len())
-        })
-        .unwrap_or((0, 0))
+    std::fs::metadata(path).map_or((0, 0), |m| {
+        let mt = m
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+            .map_or(0, |d| d.as_secs());
+        (mt, m.len())
+    })
 }
 
 /// Run the full analysis pipeline.
@@ -888,7 +886,5 @@ pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
 }
 
 fn num_cpus() -> usize {
-    std::thread::available_parallelism()
-        .map(std::num::NonZeroUsize::get)
-        .unwrap_or(4)
+    std::thread::available_parallelism().map_or(4, std::num::NonZeroUsize::get)
 }

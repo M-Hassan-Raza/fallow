@@ -39,7 +39,7 @@ impl ignore::ParallelVisitor for FileVisitor<'_> {
         {
             return ignore::WalkState::Continue;
         }
-        let size_bytes = entry.metadata().map(|m| m.len()).unwrap_or(0);
+        let size_bytes = entry.metadata().map_or(0, |m| m.len());
         self.local.push((entry.into_path(), size_bytes));
         ignore::WalkState::Continue
     }

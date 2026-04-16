@@ -35,7 +35,7 @@
 
 use std::path::Path;
 
-use globset::{Glob, GlobSet, GlobSetBuilder};
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use xxhash_rust::xxh3::xxh3_64;
 
 use fallow_config::EmailMode;
@@ -80,7 +80,9 @@ pub struct OwnershipContext<'a> {
 pub fn compile_bot_globs(patterns: &[String]) -> Result<GlobSet, globset::Error> {
     let mut builder = GlobSetBuilder::new();
     for p in patterns {
-        builder.add(Glob::new(p)?);
+        let mut glob = GlobBuilder::new(p);
+        glob.backslash_escape(true);
+        builder.add(glob.build()?);
     }
     builder.build()
 }

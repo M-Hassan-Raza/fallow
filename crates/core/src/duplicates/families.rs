@@ -230,7 +230,7 @@ pub fn detect_mirrored_directories(
     }
 
     // Sort mirrors by total lines descending
-    mirrors.sort_by(|a, b| b.total_lines.cmp(&a.total_lines));
+    mirrors.sort_by_key(|b| std::cmp::Reverse(b.total_lines));
 
     mirrors
 }
