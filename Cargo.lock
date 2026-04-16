@@ -789,6 +789,7 @@ dependencies = [
  "fallow-cov-protocol",
  "fallow-license",
  "fallow-types",
+ "fallow-v8-coverage",
  "globset",
  "http",
  "insta",
@@ -803,11 +804,13 @@ dependencies = [
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",
+ "srcmap-sourcemap",
  "tempfile",
  "toml",
  "tracing",
  "tracing-subscriber",
  "ureq",
+ "url",
  "xxhash-rust",
 ]
 
@@ -2986,6 +2989,33 @@ checksum = "d91ed6c858b01f942cd56b37a94b3e0a1798290327d1236e4d9cf4eaca44d29d"
 dependencies = [
  "base64ct",
  "der",
+]
+
+[[package]]
+name = "srcmap-codec"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12f32046d6b88620ca091671e1c5683606d5f42d2c4b890c624bda2473d89f4c"
+
+[[package]]
+name = "srcmap-scopes"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "26dfa4dec927a305440ad19f68a89c7c6841a7dbd95eae85dc1597603eba0341"
+dependencies = [
+ "srcmap-codec",
+]
+
+[[package]]
+name = "srcmap-sourcemap"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c5a53167f5e77d92d9585e60e1cb90eb7a45daefa5699125624c8dc12c3e547"
+dependencies = [
+ "serde",
+ "serde_json",
+ "srcmap-codec",
+ "srcmap-scopes",
 ]
 
 [[package]]

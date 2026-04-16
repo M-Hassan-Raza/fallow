@@ -34,6 +34,10 @@ pub struct SetupArgs {
 enum FrameworkKind {
     NextJs,
     NestJs,
+    Nuxt,
+    SvelteKit,
+    Astro,
+    Remix,
     PlainNode,
     Other,
 }
@@ -43,8 +47,120 @@ impl FrameworkKind {
         match self {
             Self::NextJs => "Next.js project",
             Self::NestJs => "NestJS project",
-            Self::PlainNode => "plain Node project",
+            Self::Nuxt => "Nuxt app",
+            Self::SvelteKit => "SvelteKit app",
+            Self::Astro => "Astro app",
+            Self::Remix => "Remix app",
+            Self::PlainNode => "Node service",
             Self::Other => "custom project",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackageManager {
+    Npm,
+    Pnpm,
+    Yarn,
+    Bun,
+}
+
+impl PackageManager {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Npm => "npm",
+            Self::Pnpm => "pnpm",
+            Self::Yarn => "yarn",
+            Self::Bun => "bun",
+        }
+    }
+
+    const fn install_args(self) -> (&'static str, &'static [&'static str]) {
+        match self {
+            Self::Npm => ("npm", &["install", "--save-dev", "@fallow-cli/fallow-cov"]),
+            Self::Pnpm => ("pnpm", &["add", "-D", "@fallow-cli/fallow-cov"]),
+            Self::Yarn => ("yarn", &["add", "-D", "@fallow-cli/fallow-cov"]),
+            Self::Bun => ("bun", &["add", "-d", "@fallow-cli/fallow-cov"]),
+        }
+    }
+
+    fn install_command(self) -> String {
+        let (program, args) = self.install_args();
+        format!("{program} {}", args.join(" "))
+    }
+
+    fn run_script(self, script: &str) -> String {
+        match self {
+            Self::Npm => format!("npm run {script}"),
+            Self::Pnpm => format!("pnpm {script}"),
+            Self::Yarn => format!("yarn {script}"),
+            Self::Bun => format!("bun run {script}"),
+        }
+    }
+
+    fn exec_binary(self, binary: &str, args: &[&str]) -> String {
+        let suffix = if args.is_empty() {
+            String::new()
+        } else {
+            format!(" {}", args.join(" "))
+        };
+        match self {
+            Self::Npm => format!("npx {binary}{suffix}"),
+            Self::Pnpm => format!("pnpm exec {binary}{suffix}"),
+            Self::Yarn => format!("yarn {binary}{suffix}"),
+            Self::Bun => format!("bunx {binary}{suffix}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct CoverageSetupContext {
+    framework: FrameworkKind,
+    package_manager: Option<PackageManager>,
+    has_build_script: bool,
+    has_start_script: bool,
+    has_preview_script: bool,
+}
+
+impl CoverageSetupContext {
+    fn script_runner(&self) -> PackageManager {
+        self.package_manager.unwrap_or(PackageManager::Npm)
+    }
+
+    fn build_command(&self) -> Option<String> {
+        if self.has_build_script {
+            return Some(self.script_runner().run_script("build"));
+        }
+        match self.framework {
+            FrameworkKind::NextJs => Some(self.script_runner().exec_binary("next", &["build"])),
+            FrameworkKind::Nuxt => Some(self.script_runner().exec_binary("nuxi", &["build"])),
+            FrameworkKind::Astro => Some(self.script_runner().exec_binary("astro", &["build"])),
+            FrameworkKind::Remix => Some(self.script_runner().exec_binary("remix", &["build"])),
+            FrameworkKind::SvelteKit => Some(self.script_runner().exec_binary("vite", &["build"])),
+            FrameworkKind::NestJs | FrameworkKind::PlainNode | FrameworkKind::Other => None,
+        }
+    }
+
+    fn run_command(&self) -> String {
+        if self.has_preview_script
+            && matches!(
+                self.framework,
+                FrameworkKind::Nuxt | FrameworkKind::SvelteKit | FrameworkKind::Astro
+            )
+        {
+            return self.script_runner().run_script("preview");
+        }
+        if self.has_start_script {
+            return self.script_runner().run_script("start");
+        }
+        match self.framework {
+            FrameworkKind::NextJs => self.script_runner().exec_binary("next", &["start"]),
+            FrameworkKind::Nuxt => self.script_runner().exec_binary("nuxi", &["preview"]),
+            FrameworkKind::Astro => self.script_runner().exec_binary("astro", &["preview"]),
+            FrameworkKind::SvelteKit => self.script_runner().exec_binary("vite", &["preview"]),
+            FrameworkKind::Remix => "node ./build/index.js".to_owned(),
+            FrameworkKind::NestJs => "node dist/main.js".to_owned(),
+            FrameworkKind::PlainNode | FrameworkKind::Other => "node dist/server.js".to_owned(),
         }
     }
 }
@@ -81,12 +197,13 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
         return exit;
     }
 
-    if let Some(exit) = handle_sidecar_step(args) {
+    let context = detect_setup_context(root);
+
+    if let Some(exit) = handle_sidecar_step(root, args, context.package_manager) {
         return exit;
     }
 
-    let framework = detect_framework(root);
-    let recipe_path = match write_recipe(root, framework) {
+    let recipe_path = match write_recipe(root, &context) {
         Ok(path) => path,
         Err(message) => {
             eprintln!("fallow coverage setup: {message}");
@@ -107,11 +224,11 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
     }
 
     println!("Step 3/4: Collecting coverage for your app.");
-    println!("  -> Detected: {}.", framework.label());
+    println!("  -> Detected: {}.", context.framework.label());
     println!(
         "  -> Wrote {} with the {} recipe.",
         display_relative(root, &recipe_path),
-        framework.label()
+        context.framework.label()
     );
     println!("  -> Run your app with the instrumentation on, then re-run this command.");
     ExitCode::SUCCESS
@@ -188,19 +305,31 @@ fn start_trial_if_needed(root: &Path, args: SetupArgs) -> Option<ExitCode> {
     }
 }
 
-fn handle_sidecar_step(args: SetupArgs) -> Option<ExitCode> {
-    match production_coverage::discover_sidecar() {
+fn handle_sidecar_step(
+    root: &Path,
+    args: SetupArgs,
+    package_manager: Option<PackageManager>,
+) -> Option<ExitCode> {
+    match production_coverage::discover_sidecar(Some(root)) {
         Ok(path) => {
             println!("Step 2/4: Sidecar check... ok ({})", path.to_string_lossy());
             None
         }
-        Err(_) => {
+        Err(message) => {
             println!("Step 2/4: Sidecar check... not installed.");
-            println!(
-                "  -> Install path: {}",
-                production_coverage::canonical_sidecar_path().display()
+            println!("  -> {message}");
+            let install_command = package_manager.map_or_else(
+                || "npm install -g @fallow-cli/fallow-cov".to_owned(),
+                PackageManager::install_command,
             );
-            let prompt = "  -> Install @fallow-cli/fallow-cov via npm? [Y/n] ";
+            let prompt = if let Some(package_manager) = package_manager {
+                format!(
+                    "  -> Install @fallow-cli/fallow-cov with {}? [Y/n] ",
+                    package_manager.label()
+                )
+            } else {
+                "  -> Install @fallow-cli/fallow-cov globally via npm? [Y/n] ".to_owned()
+            };
             let accepted = match confirm(prompt, args) {
                 Ok(accepted) => accepted,
                 Err(message) => {
@@ -209,7 +338,7 @@ fn handle_sidecar_step(args: SetupArgs) -> Option<ExitCode> {
                 }
             };
             if !accepted {
-                println!("  -> Run: npm install -g @fallow-cli/fallow-cov");
+                println!("  -> Run: {install_command}");
                 println!(
                     "  -> Manual fallback: install a signed binary and place it at {}",
                     production_coverage::canonical_sidecar_path().display()
@@ -217,7 +346,7 @@ fn handle_sidecar_step(args: SetupArgs) -> Option<ExitCode> {
                 return Some(ExitCode::SUCCESS);
             }
 
-            match install_sidecar_via_npm() {
+            match install_sidecar(root, package_manager) {
                 Ok(path) => {
                     println!("  -> Installed at {}", path.display());
                     None
@@ -231,7 +360,8 @@ fn handle_sidecar_step(args: SetupArgs) -> Option<ExitCode> {
     }
 }
 
-fn confirm(prompt: &str, args: SetupArgs) -> Result<bool, String> {
+fn confirm(prompt: impl AsRef<str>, args: SetupArgs) -> Result<bool, String> {
+    let prompt = prompt.as_ref();
     if args.non_interactive {
         println!("{prompt}skipped (--non-interactive)");
         return Ok(false);
@@ -340,29 +470,60 @@ fn default_license_display(root: &Path) -> String {
     display_relative(root, &fallow_license::default_license_path())
 }
 
-fn install_sidecar_via_npm() -> Result<PathBuf, String> {
-    let status = Command::new("npm")
-        .args(["install", "-g", "@fallow-cli/fallow-cov"])
+fn install_sidecar(
+    root: &Path,
+    package_manager: Option<PackageManager>,
+) -> Result<PathBuf, String> {
+    let (program, args, current_dir, display_command) =
+        if let Some(package_manager) = package_manager {
+            let (program, args) = package_manager.install_args();
+            (program, args, root, package_manager.install_command())
+        } else {
+            (
+                "npm",
+                &["install", "-g", "@fallow-cli/fallow-cov"][..],
+                root,
+                "npm install -g @fallow-cli/fallow-cov".to_owned(),
+            )
+        };
+
+    let status = Command::new(program)
+        .args(args)
+        .current_dir(current_dir)
         .status()
-        .map_err(|err| format!("failed to run npm install -g @fallow-cli/fallow-cov: {err}"))?;
+        .map_err(|err| format!("failed to run {display_command}: {err}"))?;
 
     if !status.success() {
-        return Err(
-            "npm install -g @fallow-cli/fallow-cov failed. Install it manually or place the binary in ~/.fallow/bin/fallow-cov"
-                .to_owned(),
-        );
+        return Err(format!(
+            "{display_command} failed. Install it manually or place the binary in {}",
+            production_coverage::canonical_sidecar_path().display()
+        ));
     }
 
-    production_coverage::discover_sidecar().map_err(|_| {
+    production_coverage::discover_sidecar(Some(root)).map_err(|_| {
         format!(
-            "sidecar install finished but {} is still missing",
+            "sidecar install finished but fallow still could not find fallow-cov. Checked project-local node_modules/.bin, {}, and PATH",
             production_coverage::canonical_sidecar_path().display()
         )
     })
 }
 
-fn detect_framework(root: &Path) -> FrameworkKind {
-    let Ok(package_json) = PackageJson::load(&root.join("package.json")) else {
+fn detect_setup_context(root: &Path) -> CoverageSetupContext {
+    let package_json = PackageJson::load(&root.join("package.json")).ok();
+    let framework = detect_framework(package_json.as_ref());
+    let package_manager = detect_package_manager(root);
+    let scripts = package_json.as_ref().and_then(|pkg| pkg.scripts.as_ref());
+    CoverageSetupContext {
+        framework,
+        package_manager,
+        has_build_script: scripts.is_some_and(|scripts| scripts.contains_key("build")),
+        has_start_script: scripts.is_some_and(|scripts| scripts.contains_key("start")),
+        has_preview_script: scripts.is_some_and(|scripts| scripts.contains_key("preview")),
+    }
+}
+
+fn detect_framework(package_json: Option<&PackageJson>) -> FrameworkKind {
+    let Some(package_json) = package_json else {
         return FrameworkKind::Other;
     };
     let dependencies = package_json.all_dependency_names();
@@ -370,6 +531,20 @@ fn detect_framework(root: &Path) -> FrameworkKind {
         FrameworkKind::NextJs
     } else if dependencies.iter().any(|name| name.starts_with("@nestjs/")) {
         FrameworkKind::NestJs
+    } else if dependencies
+        .iter()
+        .any(|name| name == "nuxt" || name == "nuxi")
+    {
+        FrameworkKind::Nuxt
+    } else if dependencies.iter().any(|name| name == "@sveltejs/kit") {
+        FrameworkKind::SvelteKit
+    } else if dependencies.iter().any(|name| name == "astro") {
+        FrameworkKind::Astro
+    } else if dependencies
+        .iter()
+        .any(|name| name == "remix" || name.starts_with("@remix-run/"))
+    {
+        FrameworkKind::Remix
     } else if package_json.name.is_some() {
         FrameworkKind::PlainNode
     } else {
@@ -377,63 +552,104 @@ fn detect_framework(root: &Path) -> FrameworkKind {
     }
 }
 
-fn write_recipe(root: &Path, framework: FrameworkKind) -> Result<PathBuf, String> {
+fn detect_package_manager(root: &Path) -> Option<PackageManager> {
+    detect_package_manager_from_field(root).or_else(|| {
+        if root.join("bun.lockb").exists() || root.join("bun.lock").exists() {
+            Some(PackageManager::Bun)
+        } else if root.join("pnpm-lock.yaml").exists() {
+            Some(PackageManager::Pnpm)
+        } else if root.join("yarn.lock").exists() {
+            Some(PackageManager::Yarn)
+        } else if root.join("package-lock.json").exists()
+            || root.join("npm-shrinkwrap.json").exists()
+        {
+            Some(PackageManager::Npm)
+        } else {
+            None
+        }
+    })
+}
+
+fn detect_package_manager_from_field(root: &Path) -> Option<PackageManager> {
+    let content = std::fs::read_to_string(root.join("package.json")).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&content).ok()?;
+    let field = value.get("packageManager")?.as_str()?;
+    let name = field.split('@').next().unwrap_or(field);
+    match name {
+        "npm" => Some(PackageManager::Npm),
+        "pnpm" => Some(PackageManager::Pnpm),
+        "yarn" => Some(PackageManager::Yarn),
+        "bun" => Some(PackageManager::Bun),
+        _ => None,
+    }
+}
+
+fn write_recipe(root: &Path, context: &CoverageSetupContext) -> Result<PathBuf, String> {
     let docs_dir = root.join("docs");
     std::fs::create_dir_all(&docs_dir)
         .map_err(|err| format!("failed to create {}: {err}", docs_dir.display()))?;
     let path = docs_dir.join("collect-coverage.md");
-    std::fs::write(&path, recipe_contents(framework))
+    std::fs::write(&path, recipe_contents(context))
         .map_err(|err| format!("failed to write {}: {err}", path.display()))?;
     Ok(path)
 }
 
-fn recipe_contents(framework: FrameworkKind) -> String {
-    match framework {
-        FrameworkKind::NextJs => r"# Collect production coverage for Next.js
+fn recipe_contents(context: &CoverageSetupContext) -> String {
+    let title = match context.framework {
+        FrameworkKind::NextJs => "Next.js",
+        FrameworkKind::NestJs => "NestJS",
+        FrameworkKind::Nuxt => "Nuxt",
+        FrameworkKind::SvelteKit => "SvelteKit",
+        FrameworkKind::Astro => "Astro",
+        FrameworkKind::Remix => "Remix",
+        FrameworkKind::PlainNode => "Node service",
+        FrameworkKind::Other => {
+            return format!(
+                "# Collect production coverage\n\nThis project was not matched to a built-in recipe.\nSee {COVERAGE_DOCS_URL} for framework-specific instructions.\n"
+            );
+        }
+    };
 
-1. Remove any old dump directory: `rm -rf ./coverage`
-2. Build the app: `NODE_ENV=production npm run build`
-3. Start the app with V8 coverage enabled:
-   `NODE_V8_COVERAGE=./coverage NODE_ENV=production npm run start`
-4. Exercise the routes you care about.
-5. Stop the app and run: `fallow coverage setup`
-"
-        .to_owned(),
-        FrameworkKind::NestJs => r"# Collect production coverage for NestJS
-
-1. Build the app first: `npm run build`
-2. Remove any old dump directory: `rm -rf ./coverage`
-3. Start the built server with V8 coverage enabled:
-   `NODE_V8_COVERAGE=./coverage node dist/main.js`
-4. Exercise your HTTP or message handlers.
-5. Stop the server and run: `fallow coverage setup`
-"
-        .to_owned(),
-        FrameworkKind::PlainNode => r"# Collect production coverage for a Node service
-
-1. Remove any old dump directory: `rm -rf ./coverage`
-2. Start the production entry point with V8 coverage enabled:
-   `NODE_V8_COVERAGE=./coverage node dist/server.js`
-3. Exercise the app traffic you want to analyze.
-4. Stop the process and run: `fallow coverage setup`
-"
-        .to_owned(),
-        FrameworkKind::Other => format!(
-            "# Collect production coverage\n\nThis project was not matched to a built-in recipe.\nSee {COVERAGE_DOCS_URL} for framework-specific instructions.\n"
-        ),
+    let mut lines = vec![
+        format!("# Collect production coverage for {title}"),
+        String::new(),
+    ];
+    lines.push("1. Remove any old dump directory: `rm -rf ./coverage`".to_owned());
+    if context.has_build_script || context.build_command().is_some() {
+        if let Some(build_command) = context.build_command() {
+            lines.push(format!("2. Build the app: `{build_command}`"));
+        }
+        lines.push(format!(
+            "3. Start the app with V8 coverage enabled: `NODE_V8_COVERAGE=./coverage {}`",
+            context.run_command()
+        ));
+        lines.push("4. Exercise the routes or jobs you care about.".to_owned());
+        lines.push("5. Stop the app and run: `fallow coverage setup`".to_owned());
+    } else {
+        lines.push(format!(
+            "2. Start the app with V8 coverage enabled: `NODE_V8_COVERAGE=./coverage {}`",
+            context.run_command()
+        ));
+        lines.push("3. Exercise the app traffic you want to analyze.".to_owned());
+        lines.push("4. Stop the process and run: `fallow coverage setup`".to_owned());
     }
+    lines.push(String::new());
+    lines.join("\n")
 }
 
 fn detect_coverage_artifact(root: &Path) -> Option<PathBuf> {
-    let coverage_dir = root.join("coverage");
-    let istanbul = coverage_dir.join("coverage-final.json");
-    if istanbul.is_file() {
-        return Some(istanbul);
+    for file in [
+        root.join("coverage/coverage-final.json"),
+        root.join(".nyc_output/coverage-final.json"),
+    ] {
+        if file.is_file() {
+            return Some(file);
+        }
     }
-    if coverage_dir.is_dir() && directory_has_json(&coverage_dir) {
-        return Some(coverage_dir);
-    }
-    None
+
+    [root.join("coverage"), root.join(".nyc_output")]
+        .into_iter()
+        .find(|dir| dir.is_dir() && directory_has_json(dir))
 }
 
 fn directory_has_json(path: &Path) -> bool {
@@ -482,4 +698,67 @@ fn display_relative(root: &Path, path: &Path) -> String {
         |_| path.to_string_lossy().into_owned(),
         |relative| format!("./{}", relative.to_string_lossy()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CoverageSetupContext, FrameworkKind, PackageManager, detect_coverage_artifact,
+        detect_framework, detect_package_manager, recipe_contents,
+    };
+    use fallow_config::PackageJson;
+    use tempfile::tempdir;
+
+    #[test]
+    fn detect_framework_recognizes_nuxt_projects() {
+        let package_json: PackageJson =
+            serde_json::from_str(r#"{"name":"demo","dependencies":{"nuxt":"^3.0.0"}}"#)
+                .expect("package.json should parse");
+
+        assert_eq!(detect_framework(Some(&package_json)), FrameworkKind::Nuxt);
+    }
+
+    #[test]
+    fn detect_package_manager_prefers_package_manager_field() {
+        let dir = tempdir().expect("tempdir should be created");
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"name":"demo","packageManager":"bun@1.2.0"}"#,
+        )
+        .expect("package.json should be written");
+        std::fs::write(dir.path().join("pnpm-lock.yaml"), "lockfileVersion: '9.0'")
+            .expect("lockfile should be written");
+
+        assert_eq!(
+            detect_package_manager(dir.path()),
+            Some(PackageManager::Bun)
+        );
+    }
+
+    #[test]
+    fn recipe_contents_uses_detected_package_manager_scripts() {
+        let context = CoverageSetupContext {
+            framework: FrameworkKind::SvelteKit,
+            package_manager: Some(PackageManager::Pnpm),
+            has_build_script: true,
+            has_start_script: false,
+            has_preview_script: true,
+        };
+
+        let recipe = recipe_contents(&context);
+
+        assert!(recipe.contains("`pnpm build`"));
+        assert!(recipe.contains("`NODE_V8_COVERAGE=./coverage pnpm preview`"));
+    }
+
+    #[test]
+    fn detect_coverage_artifact_finds_nyc_output_istanbul_file() {
+        let dir = tempdir().expect("tempdir should be created");
+        let nyc_dir = dir.path().join(".nyc_output");
+        std::fs::create_dir_all(&nyc_dir).expect("nyc dir should be created");
+        let coverage_file = nyc_dir.join("coverage-final.json");
+        std::fs::write(&coverage_file, "{}").expect("coverage file should be written");
+
+        assert_eq!(detect_coverage_artifact(dir.path()), Some(coverage_file));
+    }
 }

@@ -123,8 +123,11 @@ fallow health --production-coverage ./coverage
 
 - `fallow license activate --trial --email ...` starts a trial and stores the signed license locally
 - `fallow license refresh` refreshes the stored license before the hard-fail window
-- `fallow coverage setup` detects your framework, installs the sidecar if needed, writes a collection recipe, and resumes from the current setup state on re-run
+- `fallow coverage setup` detects your framework and package manager, installs the sidecar if needed, writes a collection recipe, and resumes from the current setup state on re-run
+- The sidecar can be installed globally or as a project devDependency; fallow resolves `FALLOW_COV_BIN`, project-local shims, package-manager bin lookups, `~/.fallow/bin/fallow-cov`, and `PATH`
 - `fallow health --production-coverage <path>` accepts a V8 directory, a single V8 JSON file, or an Istanbul `coverage-final.json`
+- V8 dumps that include Node's `source-map-cache` are remapped through source maps before analysis, so minified or bundled production output can still be matched back to original source files
+- `fallow health --changed-since <ref> --production-coverage <path>` promotes touched hot paths to a `hot-path-changes-needed` verdict during change review
 
 Production coverage is merged into the same human, JSON, SARIF, compact, markdown, and CodeClimate outputs as the rest of the health report.
 

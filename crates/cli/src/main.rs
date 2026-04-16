@@ -790,7 +790,7 @@ fn build_ownership_resolver(
 
 // ── Config loading ───────────────────────────────────────────────
 
-/// Emit a terse "loaded config: <path>" line on stderr so users can verify
+/// Emit a terse `"loaded config: <path>"` line on stderr so users can verify
 /// which config was picked up. Suppressed for non-human output formats (so
 /// JSON/SARIF/markdown consumers get clean machine-readable output) and when
 /// `--quiet` is set.

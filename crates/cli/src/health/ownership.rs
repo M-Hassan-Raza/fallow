@@ -61,7 +61,7 @@ const DRIFT_MAX_ORIGINAL_SHARE: f64 = 0.10;
 pub struct OwnershipContext<'a> {
     /// Author email pool from [`fallow_core::churn::ChurnResult::author_pool`].
     pub author_pool: &'a [String],
-    /// Compiled bot-author globs (from [`OwnershipConfig::bot_patterns`]).
+    /// Compiled bot-author globs from the ownership config's `bot_patterns`.
     pub bot_globs: &'a GlobSet,
     /// CODEOWNERS lookup, when one was discovered.
     pub codeowners: Option<&'a CodeOwners>,

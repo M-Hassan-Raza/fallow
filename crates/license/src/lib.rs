@@ -65,7 +65,7 @@ pub struct LicenseClaims {
     pub jti: String,
 }
 
-/// Feature flag enum aligned with [`fallow_cov_protocol::Feature`].
+/// Feature flag enum aligned with the protocol's `Feature` strings.
 ///
 /// Wire format stays a string array; new variants are additive in minor protocol
 /// bumps and unrecognized strings round-trip through [`Feature::Other`].

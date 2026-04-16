@@ -19,6 +19,7 @@ path = "src/main.rs"
 fallow-core = { workspace = true }
 fallow-config = { workspace = true }
 fallow-types = { workspace = true }
+fallow-v8-coverage = { version = "2.38.0", path = "../v8-coverage" }
 fallow-cov-protocol = "0.1"
 fallow-license = { version = "2.38.0", path = "../license" }
 ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
@@ -38,7 +39,9 @@ tempfile = { workspace = true }
 miette = { workspace = true, features = ["fancy"] }
 rustc-hash = { workspace = true }
 oxc_coverage_instrument = { workspace = true }
+srcmap-sourcemap = "0.3.5"
 ureq = { workspace = true }
+url = "2"
 http = "1"
 xxhash-rust = { workspace = true }
 

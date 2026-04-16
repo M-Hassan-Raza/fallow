@@ -4,7 +4,7 @@
 //! It performs the mechanical conversion from V8's byte-offset-based coverage
 //! format (as emitted by `node --experimental-test-coverage`, `c8`, the
 //! Inspector protocol, or any V8 isolate) into the line/column-based
-//! [`IstanbulFunctionCoverage`] shape that fallow's CRAP scoring already
+//! [`IstanbulFileCoverage`] shape that fallow's CRAP scoring already
 //! consumes.
 //!
 //! The closed-source three-state cross-reference, combined scoring, hot-path

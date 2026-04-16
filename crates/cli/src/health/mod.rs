@@ -425,7 +425,13 @@ fn execute_health_inner(
         None
     };
     if let Some(report) = production_coverage.as_mut() {
-        apply_production_coverage_filters(report, loaded_baseline.as_ref(), &config.root, opts.top);
+        apply_production_coverage_filters(
+            report,
+            loaded_baseline.as_ref(),
+            &config.root,
+            opts.top,
+            changed_files.is_some(),
+        );
     }
 
     if let Some(save_path) = opts.save_baseline {
@@ -573,6 +579,7 @@ fn apply_production_coverage_filters(
     baseline: Option<&HealthBaselineData>,
     root: &std::path::Path,
     top: Option<usize>,
+    changed_review: bool,
 ) {
     if let Some(baseline) = baseline {
         report.findings = filter_new_production_coverage_findings(
@@ -580,8 +587,9 @@ fn apply_production_coverage_filters(
             baseline,
             root,
         );
-        refresh_production_coverage_verdict(report);
     }
+
+    refresh_production_coverage_verdict(report, changed_review);
 
     if let Some(top) = top {
         report.findings.truncate(top);
@@ -589,13 +597,17 @@ fn apply_production_coverage_filters(
     }
 }
 
-fn refresh_production_coverage_verdict(report: &mut crate::health_types::ProductionCoverageReport) {
+fn refresh_production_coverage_verdict(
+    report: &mut crate::health_types::ProductionCoverageReport,
+    changed_review: bool,
+) {
     let has_never_called = report.findings.iter().any(|finding| {
         matches!(
             finding.state,
             crate::health_types::ProductionCoverageState::NeverCalled
         )
     });
+    let has_changed_hot_path = changed_review && !report.hot_paths.is_empty();
 
     report.verdict = if matches!(
         report.verdict,
@@ -607,6 +619,8 @@ fn refresh_production_coverage_verdict(report: &mut crate::health_types::Product
         crate::health_types::ProductionCoverageVerdict::LicenseExpiredGrace
     } else if has_never_called {
         crate::health_types::ProductionCoverageVerdict::ColdCodeDetected
+    } else if has_changed_hot_path {
+        crate::health_types::ProductionCoverageVerdict::HotPathChangesNeeded
     } else {
         crate::health_types::ProductionCoverageVerdict::Clean
     };
@@ -1773,7 +1787,7 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_production_coverage_filters(&mut report, Some(&baseline), root, Some(1));
+        apply_production_coverage_filters(&mut report, Some(&baseline), root, Some(1), false);
 
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].function, "gamma");
@@ -1821,7 +1835,7 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_production_coverage_filters(&mut report, Some(&baseline), root, None);
+        apply_production_coverage_filters(&mut report, Some(&baseline), root, None, false);
 
         assert!(report.findings.is_empty());
         assert_eq!(
@@ -1833,5 +1847,36 @@ mod tests {
         assert_eq!(report.summary.functions_never_called, 1);
         assert_eq!(report.summary.functions_coverage_unavailable, 0);
         assert!((report.summary.percent_dead_in_production - 50.0).abs() < 0.05);
+    }
+
+    #[test]
+    fn production_coverage_changed_review_uses_hot_path_verdict() {
+        let root = Path::new("/project");
+        let mut report = crate::health_types::ProductionCoverageReport {
+            verdict: crate::health_types::ProductionCoverageVerdict::Clean,
+            summary: crate::health_types::ProductionCoverageSummary {
+                functions_total: 2,
+                functions_called: 2,
+                functions_never_called: 0,
+                functions_coverage_unavailable: 0,
+                percent_dead_in_production: 0.0,
+            },
+            findings: vec![],
+            hot_paths: vec![crate::health_types::ProductionCoverageHotPath {
+                path: PathBuf::from("/project/src/hot.ts"),
+                function: "renderHotPath".to_owned(),
+                line: Some(7),
+                invocations: 9_500,
+            }],
+            watermark: None,
+            warnings: vec![],
+        };
+
+        apply_production_coverage_filters(&mut report, None, root, None, true);
+
+        assert_eq!(
+            report.verdict,
+            crate::health_types::ProductionCoverageVerdict::HotPathChangesNeeded
+        );
     }
 }
