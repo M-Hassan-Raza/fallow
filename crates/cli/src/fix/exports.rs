@@ -143,7 +143,7 @@ pub(super) fn apply_export_fixes(
         }
 
         // Sort by line index descending so we can work backwards without shifting indices
-        line_fixes.sort_by(|a, b| b.line_idx.cmp(&a.line_idx));
+        line_fixes.sort_by_key(|f| std::cmp::Reverse(f.line_idx));
 
         // Group fixes by line_idx (multiple specifiers on the same `export { ... }` line)
         // We no longer dedup — instead we collect all export names per line.

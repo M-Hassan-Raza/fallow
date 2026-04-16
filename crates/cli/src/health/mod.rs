@@ -637,9 +637,9 @@ fn refresh_production_coverage_verdict(
 /// Sort findings by the specified criteria.
 fn sort_findings(findings: &mut [HealthFinding], sort: &SortBy) {
     match sort {
-        SortBy::Cyclomatic => findings.sort_by(|a, b| b.cyclomatic.cmp(&a.cyclomatic)),
-        SortBy::Cognitive => findings.sort_by(|a, b| b.cognitive.cmp(&a.cognitive)),
-        SortBy::Lines => findings.sort_by(|a, b| b.line_count.cmp(&a.line_count)),
+        SortBy::Cyclomatic => findings.sort_by_key(|f| std::cmp::Reverse(f.cyclomatic)),
+        SortBy::Cognitive => findings.sort_by_key(|f| std::cmp::Reverse(f.cognitive)),
+        SortBy::Lines => findings.sort_by_key(|f| std::cmp::Reverse(f.line_count)),
     }
 }
 
@@ -1106,7 +1106,7 @@ fn collect_large_functions(
             }
         }
     }
-    entries.sort_by(|a, b| b.line_count.cmp(&a.line_count));
+    entries.sort_by_key(|e| std::cmp::Reverse(e.line_count));
     entries
 }
 

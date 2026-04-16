@@ -58,7 +58,7 @@ pub(super) fn apply_enum_member_fixes(
         }
 
         // Sort by line index descending so we can work backwards
-        member_fixes.sort_by(|a, b| b.line_idx.cmp(&a.line_idx));
+        member_fixes.sort_by_key(|f| std::cmp::Reverse(f.line_idx));
         // Deduplicate by line_idx
         member_fixes.dedup_by_key(|f| f.line_idx);
 
@@ -199,7 +199,7 @@ fn remove_member_from_single_line(line: &str, member_name: &str) -> String {
 
     if filtered.is_empty() {
         // All members removed — leave empty enum body: `enum Foo {}`
-        format!("{}{}", prefix.trim_end(), suffix.trim_start(),)
+        format!("{}{}", prefix.trim_end(), suffix.trim_start())
     } else {
         // Reconstruct with consistent formatting: `{ A, B }`
         let members_str = filtered.join(", ");

@@ -62,7 +62,7 @@ pub fn push_duplicate_export_diagnostics(
                     source: Some("fallow".to_string()),
                     code: Some(NumberOrString::String("duplicate-export".to_string())),
                     code_description: doc_link("duplicate-exports"),
-                    message: format!("Duplicate export '{}'", dup.export_name,),
+                    message: format!("Duplicate export '{}'", dup.export_name),
                     related_information: if related_info.is_empty() {
                         None
                     } else {

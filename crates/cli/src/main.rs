@@ -748,9 +748,7 @@ fn format_from_env() -> Option<Format> {
 
 /// Read `FALLOW_QUIET` env var: "1" or "true" (case-insensitive) means quiet.
 fn quiet_from_env() -> bool {
-    std::env::var("FALLOW_QUIET")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false)
+    std::env::var("FALLOW_QUIET").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
 // ── Group-by resolver ────────────────────────────────────────────
@@ -959,11 +957,9 @@ fn validate_inputs(
         ));
     }
 
-    let threads = cli.threads.unwrap_or_else(|| {
-        std::thread::available_parallelism()
-            .map(std::num::NonZero::get)
-            .unwrap_or(4)
-    });
+    let threads = cli
+        .threads
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
 
     // Configure rayon global thread pool to match --threads, ensuring parsing
     // and import resolution use the same thread count as file walking.

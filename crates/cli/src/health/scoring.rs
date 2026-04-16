@@ -666,7 +666,7 @@ pub(super) fn compute_file_scores(
             .iter()
             .map(|f| (f.name.clone(), f.line, f.cognitive))
             .collect();
-        funcs.sort_by(|a, b| b.2.cmp(&a.2));
+        funcs.sort_by_key(|f| std::cmp::Reverse(f.2));
         funcs.truncate(3);
         if funcs[0].2 > 0 {
             top_complex_fns.insert((*path).clone(), funcs);
