@@ -80,7 +80,7 @@ criterion_group! {
     name = large_scale_benches;
     config = Criterion::default()
         .sample_size(10)
-        .measurement_time(Duration::from_secs(60))
+        .measurement_time(Duration::from_mins(1))
         .warm_up_time(Duration::from_secs(5));
     targets =
         bench_full_pipeline_5000,

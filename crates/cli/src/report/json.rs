@@ -1740,7 +1740,7 @@ mod tests {
     fn json_elapsed_ms_large_duration() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
-        let elapsed = Duration::from_secs(120);
+        let elapsed = Duration::from_mins(2);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["elapsed_ms"], 120_000);
