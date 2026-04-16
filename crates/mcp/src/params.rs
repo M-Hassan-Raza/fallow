@@ -278,7 +278,10 @@ pub struct HealthParams {
     /// Show only refactoring targets: ranked recommendations based on complexity, coupling, churn, and dead code.
     pub targets: Option<bool>,
 
-    /// Show static test coverage gaps: runtime files and exports with no test dependency path.
+    /// Explicitly request static test coverage gaps: runtime files and exports with
+    /// no test dependency path. A provided config file may also enable coverage
+    /// gaps via `rules.coverage-gaps` when no health sections are explicitly
+    /// selected.
     pub coverage_gaps: Option<bool>,
 
     /// Show only the project health score (0–100) with letter grade (A/B/C/D/F).

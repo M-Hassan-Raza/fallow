@@ -491,6 +491,18 @@ fn check_health_description_mentions_complexity() {
 }
 
 #[test]
+fn check_health_description_mentions_config_activated_coverage_gaps() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "check_health").unwrap();
+    let desc = tool.description.as_deref().unwrap();
+    assert!(
+        desc.contains("rules.coverage-gaps") || desc.contains("config file may also enable"),
+        "check_health description should explain config-activated coverage gaps"
+    );
+}
+
+#[test]
 fn fix_apply_description_warns_about_modification() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();

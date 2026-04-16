@@ -133,6 +133,97 @@ fn health_score_flag_shows_score() {
         json.get("score").is_some() || json.get("health_score").is_some(),
         "health --score should include score data"
     );
+    assert!(
+        json.get("file_scores").is_none(),
+        "health --score should not render file_scores"
+    );
+    assert!(
+        json.get("coverage_gaps").is_none(),
+        "health --score should not render coverage_gaps"
+    );
+    assert!(
+        json.get("hotspot_summary").is_none(),
+        "health --score should not render hotspot summaries"
+    );
+    assert!(
+        json.get("vital_signs").is_none(),
+        "health --score should not render vital signs"
+    );
+}
+
+#[test]
+fn health_score_flag_with_config_does_not_render_coverage_gaps() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let config_path = dir.path().join("fallow.json");
+    write_file(
+        &config_path,
+        r#"{
+  "rules": {
+    "coverage-gaps": "warn"
+  }
+}
+"#,
+    );
+
+    let root = fixture_path("production-mode");
+    let output = common::run_fallow_in_root(
+        "health",
+        &root,
+        &[
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
+            "--score",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "health --score should still succeed");
+
+    let json = parse_json(&output);
+    assert!(
+        json.get("coverage_gaps").is_none(),
+        "config-enabled coverage gaps should not override explicit section selection"
+    );
+}
+
+#[test]
+fn health_score_flag_with_config_error_fails_without_rendering_coverage_gaps() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let config_path = dir.path().join("fallow.json");
+    write_file(
+        &config_path,
+        r#"{
+  "rules": {
+    "coverage-gaps": "error"
+  }
+}
+"#,
+    );
+
+    let root = fixture_path("production-mode");
+    let output = common::run_fallow_in_root(
+        "health",
+        &root,
+        &[
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
+            "--score",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "coverage-gaps=error should still fail score-only health runs"
+    );
+
+    let json = parse_json(&output);
+    assert!(
+        json.get("coverage_gaps").is_none(),
+        "gate-only coverage gaps should not be rendered in score-only output"
+    );
 }
 
 #[test]
@@ -201,12 +292,98 @@ fn health_coverage_gaps_flag_reports_runtime_gaps() {
         .filter_map(|item| item.get("export_name").and_then(serde_json::Value::as_str))
         .collect();
     assert!(
-        export_names.contains(&"indirectlyCovered"),
-        "indirectlyCovered should be reported as an untested export: {export_names:?}"
-    );
-    assert!(
         !export_names.contains(&"covered"),
         "covered should not be reported as an untested export: {export_names:?}"
+    );
+    assert!(
+        !export_names.contains(&"indirectlyCovered"),
+        "exports already reported as dead code should be excluded from coverage gaps: {export_names:?}"
+    );
+}
+
+#[test]
+fn health_coverage_gaps_config_error_enforces_without_flag() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let config_path = dir.path().join("fallow.json");
+    write_file(
+        &config_path,
+        r#"{
+  "rules": {
+    "coverage-gaps": "error"
+  }
+}
+"#,
+    );
+
+    let root = fixture_path("production-mode");
+    let output = common::run_fallow_in_root(
+        "health",
+        &root,
+        &[
+            "--config",
+            config_path.to_str().expect("config path should be utf-8"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "coverage-gaps=error should fail health even without --coverage-gaps"
+    );
+
+    let json = parse_json(&output);
+    assert!(
+        json.get("coverage_gaps").is_some(),
+        "config-enabled coverage gaps should be present in the report"
+    );
+}
+
+#[test]
+fn health_coverage_gaps_production_excludes_dead_test_helpers() {
+    let output = run_fallow(
+        "health",
+        "production-mode",
+        &[
+            "--production",
+            "--coverage-gaps",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "production coverage gaps default to warn severity (exit 0)"
+    );
+
+    let json = parse_json(&output);
+    let coverage = json["coverage_gaps"]
+        .as_object()
+        .expect("production coverage_gaps should be an object");
+
+    let export_names: Vec<_> = coverage["exports"]
+        .as_array()
+        .expect("coverage_gaps.exports should be an array")
+        .iter()
+        .filter_map(|item| item.get("export_name").and_then(serde_json::Value::as_str))
+        .collect();
+    assert!(
+        !export_names.contains(&"testHelper"),
+        "exports already reported as dead code should not also be reported as coverage gaps: {export_names:?}"
+    );
+    assert!(
+        export_names.contains(&"app") && export_names.contains(&"helper"),
+        "production coverage gaps should still report runtime exports lacking test reachability: {export_names:?}"
+    );
+
+    let summary = coverage["summary"]
+        .as_object()
+        .expect("coverage_gaps.summary should be an object");
+    assert_eq!(
+        summary["untested_exports"].as_u64(),
+        Some(2),
+        "production coverage gaps should exclude dead exports from the export count"
     );
 }
 

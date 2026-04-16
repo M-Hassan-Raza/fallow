@@ -55,11 +55,23 @@ pub struct HealthOptions<'a> {
     pub save_baseline: Option<&'a std::path::Path>,
     pub complexity: bool,
     pub file_scores: bool,
+    /// Explicitly include coverage gaps in the rendered report.
     pub coverage_gaps: bool,
+    /// Allow config severity to enable coverage gap reporting when the caller
+    /// did not explicitly select health sections.
+    pub config_activates_coverage_gaps: bool,
     pub hotspots: bool,
     pub ownership: bool,
     pub ownership_emails: Option<fallow_config::EmailMode>,
     pub targets: bool,
+    /// Run the full health pipeline even if some sections are hidden, so score
+    /// and snapshot outputs stay accurate.
+    pub force_full: bool,
+    /// Render only the score/trend-oriented output, hiding supporting sections
+    /// that were computed solely for score accuracy.
+    pub score_only_output: bool,
+    /// Enforce the configured coverage-gap severity as a failing quality gate.
+    pub enforce_coverage_gap_gate: bool,
     pub effort: Option<EffortEstimate>,
     pub score: bool,
     pub min_score: Option<f64>,
@@ -237,9 +249,18 @@ fn execute_health_inner(
         findings.truncate(top);
     }
 
-    // --coverage-gaps flag overrides Off severity (explicit user intent).
-    // Without the flag, coverage gaps only activate when config severity is not Off.
-    let effective_coverage_gaps = opts.coverage_gaps;
+    // Coverage gaps have two separate concerns:
+    // - reporting: include the section in the rendered health output
+    // - gating: fail the command when config severity is `error`
+    //
+    // Config severity may enable reporting for top-level `health` when the user
+    // did not explicitly choose sections, but it must not override callers that
+    // intentionally set `coverage_gaps: false` (combined mode, audit, score-only).
+    let config_coverage_enabled = config.rules.coverage_gaps != fallow_config::Severity::Off;
+    let report_coverage_gaps =
+        opts.coverage_gaps || (opts.config_activates_coverage_gaps && config_coverage_enabled);
+    let enforce_coverage_gaps = opts.enforce_coverage_gap_gate
+        && config.rules.coverage_gaps == fallow_config::Severity::Error;
 
     // Load Istanbul coverage data for accurate CRAP scoring.
     // Priority: explicit --coverage flag > auto-detected coverage-final.json.
@@ -267,11 +288,15 @@ fn execute_health_inner(
     };
 
     // Compute file-level health scores (needed by hotspots and targets too)
-    let needs_file_scores =
-        opts.file_scores || effective_coverage_gaps || opts.hotspots || opts.targets;
+    let needs_file_scores = opts.file_scores
+        || report_coverage_gaps
+        || enforce_coverage_gaps
+        || opts.hotspots
+        || opts.targets
+        || opts.force_full;
     // Run file scoring and churn fetch in parallel when both are needed.
     // Churn fetch involves a `git log` shell-out that dominates health timing.
-    let needs_churn = opts.hotspots || opts.targets;
+    let needs_churn = opts.hotspots || opts.targets || opts.force_full;
     let (file_score_result, file_scores_ms, churn_fetch) = if needs_file_scores && needs_churn {
         std::thread::scope(|s| {
             let churn_handle = s.spawn(|| hotspots::fetch_churn_data(opts, &config.cache_dir));
@@ -448,9 +473,13 @@ fn execute_health_inner(
     let health_trend = compute_health_trend(opts, &vital_signs, &counts, health_score.as_ref());
 
     // Assemble final report
+    let coverage_gaps_has_findings = score_output
+        .as_ref()
+        .is_some_and(|output| !output.coverage.report.is_empty());
+
     let report = assemble_health_report(
         opts,
-        effective_coverage_gaps,
+        report_coverage_gaps,
         findings,
         files_analyzed,
         total_functions,
@@ -497,6 +526,8 @@ fn execute_health_inner(
         config,
         elapsed: start.elapsed(),
         timings,
+        coverage_gaps_has_findings,
+        should_fail_on_coverage_gaps: enforce_coverage_gaps,
     })
 }
 
@@ -775,7 +806,7 @@ fn compute_health_trend(
 )]
 fn assemble_health_report(
     opts: &HealthOptions<'_>,
-    effective_coverage_gaps: bool,
+    report_coverage_gaps: bool,
     findings: Vec<HealthFinding>,
     files_analyzed: usize,
     total_functions: usize,
@@ -798,7 +829,7 @@ fn assemble_health_report(
     sev_high: usize,
     sev_moderate: usize,
 ) -> HealthReport {
-    let coverage_gaps = if effective_coverage_gaps {
+    let coverage_gaps = if report_coverage_gaps {
         score_output.as_ref().map(|o| o.coverage.report.clone())
     } else {
         None
@@ -810,7 +841,9 @@ fn assemble_health_report(
         .map_or((0, 0), |o| (o.istanbul_matched, o.istanbul_total));
 
     // Extract file scores for the report (apply --top after hotspot/target computation)
-    let file_scores = if opts.file_scores {
+    let file_scores = if opts.score_only_output {
+        Vec::new()
+    } else if opts.file_scores {
         let mut scores = score_output.map(|o| o.scores).unwrap_or_default();
         if let Some(top) = opts.top {
             scores.truncate(top);
@@ -827,6 +860,38 @@ fn assemble_health_report(
         (Vec::new(), None)
     };
 
+    let summary_files_scored = if opts.score_only_output || !opts.file_scores {
+        None
+    } else {
+        files_scored
+    };
+    let summary_average_maintainability = if opts.score_only_output || !opts.file_scores {
+        None
+    } else {
+        average_maintainability
+    };
+    let summary_coverage_model = if opts.score_only_output {
+        None
+    } else if opts.file_scores || report_coverage_gaps || opts.hotspots || opts.targets {
+        Some(if has_istanbul_coverage {
+            crate::health_types::CoverageModel::Istanbul
+        } else {
+            crate::health_types::CoverageModel::StaticEstimated
+        })
+    } else {
+        None
+    };
+    let summary_istanbul_matched = if opts.score_only_output || !has_istanbul_coverage {
+        None
+    } else {
+        Some(ist_matched)
+    };
+    let summary_istanbul_total = if opts.score_only_output || !has_istanbul_coverage {
+        None
+    } else {
+        Some(ist_total)
+    };
+
     HealthReport {
         summary: HealthSummary {
             files_analyzed,
@@ -834,40 +899,20 @@ fn assemble_health_report(
             functions_above_threshold: total_above_threshold,
             max_cyclomatic_threshold: max_cyclomatic,
             max_cognitive_threshold: max_cognitive,
-            files_scored: if opts.file_scores { files_scored } else { None },
-            average_maintainability: if opts.file_scores {
-                average_maintainability
-            } else {
-                None
-            },
-            coverage_model: if opts.file_scores
-                || effective_coverage_gaps
-                || opts.hotspots
-                || opts.targets
-            {
-                Some(if has_istanbul_coverage {
-                    crate::health_types::CoverageModel::Istanbul
-                } else {
-                    crate::health_types::CoverageModel::StaticEstimated
-                })
-            } else {
-                None
-            },
-            istanbul_matched: if has_istanbul_coverage {
-                Some(ist_matched)
-            } else {
-                None
-            },
-            istanbul_total: if has_istanbul_coverage {
-                Some(ist_total)
-            } else {
-                None
-            },
+            files_scored: summary_files_scored,
+            average_maintainability: summary_average_maintainability,
+            coverage_model: summary_coverage_model,
+            istanbul_matched: summary_istanbul_matched,
+            istanbul_total: summary_istanbul_total,
             severity_critical_count: sev_critical,
             severity_high_count: sev_high,
             severity_moderate_count: sev_moderate,
         },
-        vital_signs: Some(vital_signs),
+        vital_signs: if opts.score_only_output {
+            None
+        } else {
+            Some(vital_signs)
+        },
         health_score,
         findings: if opts.complexity {
             findings
@@ -875,12 +920,32 @@ fn assemble_health_report(
             Vec::new()
         },
         file_scores,
-        coverage_gaps,
+        coverage_gaps: if opts.score_only_output {
+            None
+        } else {
+            coverage_gaps
+        },
         hotspots: report_hotspots,
-        hotspot_summary: report_hotspot_summary,
-        large_functions,
-        targets,
-        target_thresholds,
+        hotspot_summary: if opts.score_only_output {
+            None
+        } else {
+            report_hotspot_summary
+        },
+        large_functions: if opts.score_only_output {
+            Vec::new()
+        } else {
+            large_functions
+        },
+        targets: if opts.score_only_output {
+            Vec::new()
+        } else {
+            targets
+        },
+        target_thresholds: if opts.score_only_output {
+            None
+        } else {
+            target_thresholds
+        },
         health_trend,
     }
 }
@@ -1135,6 +1200,8 @@ pub struct HealthResult {
     pub config: ResolvedConfig,
     pub elapsed: Duration,
     pub timings: Option<HealthTimings>,
+    pub coverage_gaps_has_findings: bool,
+    pub should_fail_on_coverage_gaps: bool,
 }
 
 /// Print health results and return appropriate exit code.
@@ -1186,13 +1253,7 @@ pub fn print_health_result(
         return ExitCode::from(1);
     }
 
-    if result.config.rules.coverage_gaps == fallow_config::Severity::Error
-        && result
-            .report
-            .coverage_gaps
-            .as_ref()
-            .is_some_and(|gaps| !gaps.is_empty())
-    {
+    if result.should_fail_on_coverage_gaps && result.coverage_gaps_has_findings {
         return ExitCode::from(1);
     }
 

@@ -1455,6 +1455,8 @@ fn dispatch_health(
     let eff_score = if any_section { score } else { true } || snapshot_requested;
     // Score needs full pipeline for accuracy
     let force_full = snapshot_requested || eff_score;
+    let score_only_output =
+        score && !complexity && !file_scores && !coverage_gaps && !hotspots && !targets && !trend;
     let eff_file_scores = if any_section { file_scores } else { true } || force_full;
     let eff_coverage_gaps = if any_section { coverage_gaps } else { false };
     let eff_hotspots = if any_section { hotspots } else { true } || force_full;
@@ -1479,10 +1481,14 @@ fn dispatch_health(
         complexity: eff_complexity,
         file_scores: eff_file_scores,
         coverage_gaps: eff_coverage_gaps,
+        config_activates_coverage_gaps: !any_section,
         hotspots: eff_hotspots,
         ownership: ownership && eff_hotspots,
         ownership_emails,
         targets: eff_targets,
+        force_full,
+        score_only_output,
+        enforce_coverage_gap_gate: true,
         effort: effort.map(EffortFilter::to_estimate),
         score: eff_score,
         min_score,

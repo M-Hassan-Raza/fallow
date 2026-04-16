@@ -50,7 +50,11 @@ pub struct HealthReport {
     /// Per-file health scores (only populated with `--file-scores` or `--hotspots`).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub file_scores: Vec<FileHealthScore>,
-    /// Static coverage gaps (only populated with `--coverage-gaps`).
+    /// Static coverage gaps.
+    ///
+    /// Populated when coverage gaps are explicitly requested, or when the
+    /// top-level `health` command allows config severity to surface them in the
+    /// default report.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage_gaps: Option<CoverageGaps>,
     /// Hotspot entries (only populated with `--hotspots`).

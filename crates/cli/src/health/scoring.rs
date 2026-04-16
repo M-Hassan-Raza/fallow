@@ -480,6 +480,7 @@ fn compute_coverage_gaps(
         fallow_core::discover::FileId,
         &fallow_core::extract::ModuleInfo,
     >,
+    unused_exports: &rustc_hash::FxHashSet<(&std::path::Path, String)>,
 ) -> CoverageGapData {
     let mut runtime_files = 0usize;
     let mut covered_files = 0usize;
@@ -535,6 +536,9 @@ fn compute_coverage_gaps(
 
         for export in &node.exports {
             if export.is_type_only {
+                continue;
+            }
+            if unused_exports.contains(&(path.as_path(), export.name.to_string())) {
                 continue;
             }
 
@@ -717,7 +721,12 @@ pub(super) fn compute_file_scores(
         fallow_core::discover::FileId,
         &fallow_core::extract::ModuleInfo,
     > = modules.iter().map(|m| (m.file_id, m)).collect();
-    let coverage = compute_coverage_gaps(&graph, file_paths, &module_by_id);
+    let unused_exports: rustc_hash::FxHashSet<(&std::path::Path, String)> = results
+        .unused_exports
+        .iter()
+        .map(|export| (export.path.as_path(), export.export_name.clone()))
+        .collect();
+    let coverage = compute_coverage_gaps(&graph, file_paths, &module_by_id, &unused_exports);
 
     let mut scores = Vec::with_capacity(graph.modules.len());
     let mut istanbul_matched = 0usize;

@@ -55,6 +55,86 @@ fn combined_mode_runs_successfully() {
 }
 
 #[test]
+fn combined_mode_config_enabled_coverage_gaps_stays_out_of_health_section() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let config_path = dir.path().join("fallow.json");
+    std::fs::write(
+        &config_path,
+        r#"{
+  "rules": {
+    "coverage-gaps": "warn"
+  }
+}
+"#,
+    )
+    .expect("write config file");
+
+    let output = run_fallow_raw(&[
+        "--root",
+        common::fixture_path("production-mode")
+            .to_str()
+            .expect("fixture path should be utf-8"),
+        "--config",
+        config_path.to_str().expect("config path should be utf-8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "combined mode should not crash with config-enabled coverage gaps"
+    );
+
+    let json = parse_json(&output);
+    assert!(
+        json["health"].get("coverage_gaps").is_none(),
+        "combined mode should not leak coverage_gaps into the embedded health report"
+    );
+}
+
+#[test]
+fn combined_mode_hidden_coverage_gap_gate_does_not_fail() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let config_path = dir.path().join("fallow.json");
+    std::fs::write(
+        &config_path,
+        r#"{
+  "rules": {
+    "coverage-gaps": "error",
+    "unused-files": "off",
+    "unused-dependencies": "off",
+    "unused-exports": "off",
+    "test-only-dependencies": "off"
+  }
+}
+"#,
+    )
+    .expect("write config file");
+
+    let output = run_fallow_raw(&[
+        "--root",
+        common::fixture_path("coverage-gaps")
+            .to_str()
+            .expect("fixture path should be utf-8"),
+        "--config",
+        config_path.to_str().expect("config path should be utf-8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "combined mode should not fail on hidden coverage-gap gates"
+    );
+
+    let json = parse_json(&output);
+    assert!(
+        json["health"].get("coverage_gaps").is_none(),
+        "combined mode should keep hidden coverage gaps out of the embedded health report"
+    );
+}
+
+#[test]
 fn combined_human_output_labels_metrics_line() {
     let output = run_fallow_combined("basic-project", &[]);
     assert!(
