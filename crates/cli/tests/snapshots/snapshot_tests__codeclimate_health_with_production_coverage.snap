@@ -21,13 +21,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/production-never-called",
-    "description": "'coldPath' production coverage state: never-called (0 invocations)",
+    "check_name": "fallow/production-review-required",
+    "description": "'coldPath' production coverage verdict: review required (0 invocations)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "major",
-    "fingerprint": "9a5e2f85e94477dd",
+    "fingerprint": "4dc8b128005d6955",
     "location": {
       "path": "src/cold.ts",
       "lines": {
@@ -38,7 +38,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/production-coverage-unavailable",
-    "description": "'lateBound' production coverage state: coverage-unavailable (0 invocations)",
+    "description": "'lateBound' production coverage verdict: coverage unavailable (untracked)",
     "categories": [
       "Bug Risk"
     ],

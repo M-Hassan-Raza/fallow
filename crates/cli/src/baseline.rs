@@ -545,15 +545,13 @@ fn health_finding_key(finding: &crate::health_types::HealthFinding, root: &Path)
 
 fn production_coverage_finding_key(
     finding: &crate::health_types::ProductionCoverageFinding,
-    root: &Path,
+    _root: &Path,
 ) -> String {
-    format!(
-        "{}:{}:{}:{}",
-        relative_path(&finding.path, root),
-        finding.function,
-        finding.line.unwrap_or(0),
-        serde_json::to_string(&finding.state).unwrap_or_else(|_| "\"unknown\"".to_owned())
-    )
+    // Use the stable content-hash ID from the sidecar (e.g.
+    // `fallow:prod:a7f3b2c1`). Line and path changes produce a new ID —
+    // that's the correct behaviour for baseline dedup: a moved function
+    // should appear as a fresh finding until re-baselined.
+    finding.id.clone()
 }
 
 /// Filter health findings to only include those not present in the baseline.

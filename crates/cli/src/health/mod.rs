@@ -38,6 +38,15 @@ use targets::{TargetAuxData, compute_refactoring_targets};
 pub struct ProductionCoverageOptions {
     pub path: std::path::PathBuf,
     pub min_invocations_hot: u64,
+    /// Minimum total trace volume before high-confidence `safe_to_delete` /
+    /// `review_required` verdicts may be emitted. Below this the sidecar caps
+    /// confidence at `medium`. `None` lets the sidecar use its spec-default
+    /// (5000).
+    pub min_observation_volume: Option<u32>,
+    /// Fraction of total trace count below which an invoked function is
+    /// classified as `low_traffic` rather than `active`. `None` lets the
+    /// sidecar use its spec-default (0.001 = 0.1%).
+    pub low_traffic_threshold: Option<f64>,
     pub license_jwt: String,
     pub watermark: Option<crate::health_types::ProductionCoverageWatermark>,
 }
@@ -609,28 +618,30 @@ fn refresh_production_coverage_verdict(
     report: &mut crate::health_types::ProductionCoverageReport,
     changed_review: bool,
 ) {
-    let has_never_called = report.findings.iter().any(|finding| {
+    let has_cold_signal = report.findings.iter().any(|finding| {
         matches!(
-            finding.state,
-            crate::health_types::ProductionCoverageState::NeverCalled
+            finding.verdict,
+            crate::health_types::ProductionCoverageVerdict::SafeToDelete
+                | crate::health_types::ProductionCoverageVerdict::ReviewRequired
+                | crate::health_types::ProductionCoverageVerdict::LowTraffic
         )
     });
     let has_changed_hot_path = changed_review && !report.hot_paths.is_empty();
 
     report.verdict = if matches!(
         report.verdict,
-        crate::health_types::ProductionCoverageVerdict::LicenseExpiredGrace
+        crate::health_types::ProductionCoverageReportVerdict::LicenseExpiredGrace
     ) || matches!(
         report.watermark,
         Some(crate::health_types::ProductionCoverageWatermark::LicenseExpiredGrace)
     ) {
-        crate::health_types::ProductionCoverageVerdict::LicenseExpiredGrace
-    } else if has_never_called {
-        crate::health_types::ProductionCoverageVerdict::ColdCodeDetected
+        crate::health_types::ProductionCoverageReportVerdict::LicenseExpiredGrace
+    } else if has_cold_signal {
+        crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected
     } else if has_changed_hot_path {
-        crate::health_types::ProductionCoverageVerdict::HotPathChangesNeeded
+        crate::health_types::ProductionCoverageReportVerdict::HotPathChangesNeeded
     } else {
-        crate::health_types::ProductionCoverageVerdict::Clean
+        crate::health_types::ProductionCoverageReportVerdict::Clean
     };
 }
 
@@ -1368,8 +1379,9 @@ pub fn print_health_result(
             .is_some_and(|report| {
                 report.findings.iter().any(|finding| {
                     matches!(
-                        finding.state,
-                        crate::health_types::ProductionCoverageState::NeverCalled
+                        finding.verdict,
+                        crate::health_types::ProductionCoverageVerdict::SafeToDelete
+                            | crate::health_types::ProductionCoverageVerdict::ReviewRequired
                     )
                 })
             });
@@ -1728,68 +1740,114 @@ mod tests {
         assert_eq!(f.path, PathBuf::from("/project/src/a.ts"));
     }
 
+    fn fx_summary(
+        tracked: usize,
+        hit: usize,
+        unhit: usize,
+        untracked: usize,
+    ) -> crate::health_types::ProductionCoverageSummary {
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "test fixture totals are tiny — f64 precision is fine"
+        )]
+        let coverage_percent = if tracked == 0 {
+            0.0
+        } else {
+            (hit as f64 / tracked as f64) * 100.0
+        };
+        crate::health_types::ProductionCoverageSummary {
+            functions_tracked: tracked,
+            functions_hit: hit,
+            functions_unhit: unhit,
+            functions_untracked: untracked,
+            coverage_percent,
+            trace_count: 512,
+            period_days: 7,
+            deployments_seen: 2,
+        }
+    }
+
+    fn fx_evidence(
+        static_status: &str,
+        test_coverage: &str,
+        v8_tracking: &str,
+    ) -> crate::health_types::ProductionCoverageEvidence {
+        crate::health_types::ProductionCoverageEvidence {
+            static_status: static_status.to_owned(),
+            test_coverage: test_coverage.to_owned(),
+            v8_tracking: v8_tracking.to_owned(),
+            untracked_reason: None,
+            observation_days: 7,
+            deployments_observed: 2,
+        }
+    }
+
     #[test]
     fn production_coverage_top_applies_after_baseline_filtering() {
         let root = Path::new("/project");
         let baseline = HealthBaselineData {
             findings: vec![],
             production_coverage_findings: vec![
-                "src/a.ts:alpha:10:\"never-called\"".to_owned(),
-                "src/b.ts:beta:20:\"coverage-unavailable\"".to_owned(),
+                "fallow:prod:aaaaaaaa".to_owned(),
+                "fallow:prod:bbbbbbbb".to_owned(),
             ],
             target_keys: vec![],
         };
         let mut report = crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageVerdict::ColdCodeDetected,
-            summary: crate::health_types::ProductionCoverageSummary {
-                functions_total: 3,
-                functions_called: 0,
-                functions_never_called: 2,
-                functions_coverage_unavailable: 1,
-                percent_dead_in_production: 66.7,
-            },
+            verdict: crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected,
+            summary: fx_summary(3, 0, 2, 1),
             findings: vec![
                 crate::health_types::ProductionCoverageFinding {
+                    id: "fallow:prod:aaaaaaaa".to_owned(),
                     path: PathBuf::from("/project/src/a.ts"),
                     function: "alpha".to_owned(),
-                    line: Some(10),
-                    state: crate::health_types::ProductionCoverageState::NeverCalled,
-                    invocations: 0,
-                    confidence: crate::health_types::ProductionCoverageConfidence::High,
+                    line: 10,
+                    verdict: crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+                    invocations: Some(0),
+                    confidence: crate::health_types::ProductionCoverageConfidence::Medium,
+                    evidence: fx_evidence("used", "not_covered", "tracked"),
                     actions: vec![],
                 },
                 crate::health_types::ProductionCoverageFinding {
+                    id: "fallow:prod:bbbbbbbb".to_owned(),
                     path: PathBuf::from("/project/src/b.ts"),
                     function: "beta".to_owned(),
-                    line: Some(20),
-                    state: crate::health_types::ProductionCoverageState::CoverageUnavailable,
-                    invocations: 0,
-                    confidence: crate::health_types::ProductionCoverageConfidence::Low,
+                    line: 20,
+                    verdict: crate::health_types::ProductionCoverageVerdict::CoverageUnavailable,
+                    invocations: None,
+                    confidence: crate::health_types::ProductionCoverageConfidence::None,
+                    evidence: fx_evidence("used", "not_covered", "untracked"),
                     actions: vec![],
                 },
                 crate::health_types::ProductionCoverageFinding {
+                    id: "fallow:prod:cccccccc".to_owned(),
                     path: PathBuf::from("/project/src/c.ts"),
                     function: "gamma".to_owned(),
-                    line: Some(30),
-                    state: crate::health_types::ProductionCoverageState::NeverCalled,
-                    invocations: 0,
-                    confidence: crate::health_types::ProductionCoverageConfidence::High,
+                    line: 30,
+                    verdict: crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+                    invocations: Some(0),
+                    confidence: crate::health_types::ProductionCoverageConfidence::Medium,
+                    evidence: fx_evidence("used", "not_covered", "tracked"),
                     actions: vec![],
                 },
             ],
             hot_paths: vec![
                 crate::health_types::ProductionCoverageHotPath {
+                    id: "fallow:hot:11111111".to_owned(),
                     path: PathBuf::from("/project/src/hot-a.ts"),
                     function: "hotAlpha".to_owned(),
-                    line: Some(1),
+                    line: 1,
                     invocations: 500,
+                    percentile: 99,
                     actions: vec![],
                 },
                 crate::health_types::ProductionCoverageHotPath {
+                    id: "fallow:hot:22222222".to_owned(),
                     path: PathBuf::from("/project/src/hot-b.ts"),
                     function: "hotBeta".to_owned(),
-                    line: Some(2),
+                    line: 2,
                     invocations: 250,
+                    percentile: 50,
                     actions: vec![],
                 },
             ],
@@ -1803,13 +1861,13 @@ mod tests {
         assert_eq!(report.findings[0].function, "gamma");
         assert_eq!(
             report.verdict,
-            crate::health_types::ProductionCoverageVerdict::ColdCodeDetected
+            crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected
         );
-        assert_eq!(report.summary.functions_total, 3);
-        assert_eq!(report.summary.functions_called, 0);
-        assert_eq!(report.summary.functions_never_called, 2);
-        assert_eq!(report.summary.functions_coverage_unavailable, 1);
-        assert!((report.summary.percent_dead_in_production - 66.7).abs() < 0.05);
+        assert_eq!(report.summary.functions_tracked, 3);
+        assert_eq!(report.summary.functions_hit, 0);
+        assert_eq!(report.summary.functions_unhit, 2);
+        assert_eq!(report.summary.functions_untracked, 1);
+        assert!((report.summary.coverage_percent - 0.0).abs() < 0.05);
         assert_eq!(report.hot_paths.len(), 1);
         assert_eq!(report.hot_paths[0].function, "hotAlpha");
     }
@@ -1819,25 +1877,21 @@ mod tests {
         let root = Path::new("/project");
         let baseline = HealthBaselineData {
             findings: vec![],
-            production_coverage_findings: vec!["src/a.ts:alpha:10:\"never-called\"".to_owned()],
+            production_coverage_findings: vec!["fallow:prod:aaaaaaaa".to_owned()],
             target_keys: vec![],
         };
         let mut report = crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageVerdict::ColdCodeDetected,
-            summary: crate::health_types::ProductionCoverageSummary {
-                functions_total: 2,
-                functions_called: 1,
-                functions_never_called: 1,
-                functions_coverage_unavailable: 0,
-                percent_dead_in_production: 50.0,
-            },
+            verdict: crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected,
+            summary: fx_summary(2, 1, 1, 0),
             findings: vec![crate::health_types::ProductionCoverageFinding {
+                id: "fallow:prod:aaaaaaaa".to_owned(),
                 path: PathBuf::from("/project/src/a.ts"),
                 function: "alpha".to_owned(),
-                line: Some(10),
-                state: crate::health_types::ProductionCoverageState::NeverCalled,
-                invocations: 0,
-                confidence: crate::health_types::ProductionCoverageConfidence::High,
+                line: 10,
+                verdict: crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+                invocations: Some(0),
+                confidence: crate::health_types::ProductionCoverageConfidence::Medium,
+                evidence: fx_evidence("used", "not_covered", "tracked"),
                 actions: vec![],
             }],
             hot_paths: vec![],
@@ -1850,13 +1904,13 @@ mod tests {
         assert!(report.findings.is_empty());
         assert_eq!(
             report.verdict,
-            crate::health_types::ProductionCoverageVerdict::Clean
+            crate::health_types::ProductionCoverageReportVerdict::Clean
         );
-        assert_eq!(report.summary.functions_total, 2);
-        assert_eq!(report.summary.functions_called, 1);
-        assert_eq!(report.summary.functions_never_called, 1);
-        assert_eq!(report.summary.functions_coverage_unavailable, 0);
-        assert!((report.summary.percent_dead_in_production - 50.0).abs() < 0.05);
+        assert_eq!(report.summary.functions_tracked, 2);
+        assert_eq!(report.summary.functions_hit, 1);
+        assert_eq!(report.summary.functions_unhit, 1);
+        assert_eq!(report.summary.functions_untracked, 0);
+        assert!((report.summary.coverage_percent - 50.0).abs() < 0.05);
     }
 
     #[test]
@@ -1865,20 +1919,16 @@ mod tests {
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/hot.ts"));
         let mut report = crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageVerdict::Clean,
-            summary: crate::health_types::ProductionCoverageSummary {
-                functions_total: 2,
-                functions_called: 2,
-                functions_never_called: 0,
-                functions_coverage_unavailable: 0,
-                percent_dead_in_production: 0.0,
-            },
+            verdict: crate::health_types::ProductionCoverageReportVerdict::Clean,
+            summary: fx_summary(2, 2, 0, 0),
             findings: vec![],
             hot_paths: vec![crate::health_types::ProductionCoverageHotPath {
+                id: "fallow:hot:33333333".to_owned(),
                 path: PathBuf::from("/project/src/hot.ts"),
                 function: "renderHotPath".to_owned(),
-                line: Some(7),
+                line: 7,
                 invocations: 9_500,
+                percentile: 99,
                 actions: vec![],
             }],
             watermark: None,
@@ -1889,7 +1939,7 @@ mod tests {
 
         assert_eq!(
             report.verdict,
-            crate::health_types::ProductionCoverageVerdict::HotPathChangesNeeded
+            crate::health_types::ProductionCoverageReportVerdict::HotPathChangesNeeded
         );
     }
 
@@ -1899,20 +1949,16 @@ mod tests {
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/other.ts"));
         let mut report = crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageVerdict::Clean,
-            summary: crate::health_types::ProductionCoverageSummary {
-                functions_total: 2,
-                functions_called: 2,
-                functions_never_called: 0,
-                functions_coverage_unavailable: 0,
-                percent_dead_in_production: 0.0,
-            },
+            verdict: crate::health_types::ProductionCoverageReportVerdict::Clean,
+            summary: fx_summary(2, 2, 0, 0),
             findings: vec![],
             hot_paths: vec![crate::health_types::ProductionCoverageHotPath {
+                id: "fallow:hot:44444444".to_owned(),
                 path: PathBuf::from("/project/src/hot.ts"),
                 function: "renderHotPath".to_owned(),
-                line: Some(7),
+                line: 7,
                 invocations: 9_500,
+                percentile: 90,
                 actions: vec![],
             }],
             watermark: None,
@@ -1924,7 +1970,7 @@ mod tests {
         assert!(report.hot_paths.is_empty());
         assert_eq!(
             report.verdict,
-            crate::health_types::ProductionCoverageVerdict::Clean
+            crate::health_types::ProductionCoverageReportVerdict::Clean
         );
     }
 }

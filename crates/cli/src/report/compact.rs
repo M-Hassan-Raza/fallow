@@ -308,33 +308,37 @@ fn build_production_coverage_compact_lines(
     root: &Path,
 ) -> Vec<String> {
     let mut lines = vec![format!(
-        "production-coverage-summary:functions_total={},functions_called={},functions_never_called={},functions_coverage_unavailable={},percent_dead_in_production={:.1}",
-        production.summary.functions_total,
-        production.summary.functions_called,
-        production.summary.functions_never_called,
-        production.summary.functions_coverage_unavailable,
-        production.summary.percent_dead_in_production,
+        "production-coverage-summary:functions_tracked={},functions_hit={},functions_unhit={},functions_untracked={},coverage_percent={:.1},trace_count={},period_days={},deployments_seen={}",
+        production.summary.functions_tracked,
+        production.summary.functions_hit,
+        production.summary.functions_unhit,
+        production.summary.functions_untracked,
+        production.summary.coverage_percent,
+        production.summary.trace_count,
+        production.summary.period_days,
+        production.summary.deployments_seen,
     )];
     for finding in &production.findings {
         let relative = normalize_uri(&relative_path(&finding.path, root).display().to_string());
+        let invocations = finding
+            .invocations
+            .map_or_else(|| "null".to_owned(), |hits| hits.to_string());
         lines.push(format!(
-            "production-coverage:{}:{}:{}:state={},invocations={},confidence={}",
+            "production-coverage:{}:{}:{}:id={},verdict={},invocations={},confidence={}",
             relative,
-            finding.line.unwrap_or(0),
+            finding.line,
             finding.function,
-            finding.state,
-            finding.invocations,
+            finding.id,
+            finding.verdict,
+            invocations,
             finding.confidence,
         ));
     }
     for entry in &production.hot_paths {
         let relative = normalize_uri(&relative_path(&entry.path, root).display().to_string());
         lines.push(format!(
-            "production-hot-path:{}:{}:{}:invocations={}",
-            relative,
-            entry.line.unwrap_or(0),
-            entry.function,
-            entry.invocations,
+            "production-hot-path:{}:{}:{}:id={},invocations={},percentile={}",
+            relative, entry.line, entry.function, entry.id, entry.invocations, entry.percentile,
         ));
     }
     lines
@@ -361,9 +365,9 @@ pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path)
 mod tests {
     use super::*;
     use crate::health_types::{
-        ProductionCoverageConfidence, ProductionCoverageFinding, ProductionCoverageHotPath,
-        ProductionCoverageReport, ProductionCoverageState, ProductionCoverageSummary,
-        ProductionCoverageVerdict,
+        ProductionCoverageConfidence, ProductionCoverageEvidence, ProductionCoverageFinding,
+        ProductionCoverageHotPath, ProductionCoverageReport, ProductionCoverageReportVerdict,
+        ProductionCoverageSummary, ProductionCoverageVerdict,
     };
     use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
@@ -414,28 +418,42 @@ mod tests {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
             production_coverage: Some(ProductionCoverageReport {
-                verdict: ProductionCoverageVerdict::ColdCodeDetected,
+                verdict: ProductionCoverageReportVerdict::ColdCodeDetected,
                 summary: ProductionCoverageSummary {
-                    functions_total: 4,
-                    functions_called: 2,
-                    functions_never_called: 1,
-                    functions_coverage_unavailable: 1,
-                    percent_dead_in_production: 25.0,
+                    functions_tracked: 4,
+                    functions_hit: 2,
+                    functions_unhit: 1,
+                    functions_untracked: 1,
+                    coverage_percent: 50.0,
+                    trace_count: 512,
+                    period_days: 7,
+                    deployments_seen: 2,
                 },
                 findings: vec![ProductionCoverageFinding {
+                    id: "fallow:prod:deadbeef".to_owned(),
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
-                    line: Some(14),
-                    state: ProductionCoverageState::NeverCalled,
-                    invocations: 0,
-                    confidence: ProductionCoverageConfidence::High,
+                    line: 14,
+                    verdict: ProductionCoverageVerdict::ReviewRequired,
+                    invocations: Some(0),
+                    confidence: ProductionCoverageConfidence::Medium,
+                    evidence: ProductionCoverageEvidence {
+                        static_status: "used".to_owned(),
+                        test_coverage: "not_covered".to_owned(),
+                        v8_tracking: "tracked".to_owned(),
+                        untracked_reason: None,
+                        observation_days: 7,
+                        deployments_observed: 2,
+                    },
                     actions: vec![],
                 }],
                 hot_paths: vec![ProductionCoverageHotPath {
+                    id: "fallow:hot:cafebabe".to_owned(),
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
-                    line: Some(3),
+                    line: 3,
                     invocations: 250,
+                    percentile: 99,
                     actions: vec![],
                 }],
                 watermark: None,
@@ -453,15 +471,15 @@ mod tests {
         );
         assert_eq!(
             lines[0],
-            "production-coverage-summary:functions_total=4,functions_called=2,functions_never_called=1,functions_coverage_unavailable=1,percent_dead_in_production=25.0"
+            "production-coverage-summary:functions_tracked=4,functions_hit=2,functions_unhit=1,functions_untracked=1,coverage_percent=50.0,trace_count=512,period_days=7,deployments_seen=2"
         );
         assert_eq!(
             lines[1],
-            "production-coverage:src/cold.ts:14:coldPath:state=never-called,invocations=0,confidence=high"
+            "production-coverage:src/cold.ts:14:coldPath:id=fallow:prod:deadbeef,verdict=review_required,invocations=0,confidence=medium"
         );
         assert_eq!(
             lines[2],
-            "production-hot-path:src/hot.ts:3:hotPath:invocations=250"
+            "production-hot-path:src/hot.ts:3:hotPath:id=fallow:hot:cafebabe,invocations=250,percentile=99"
         );
     }
 

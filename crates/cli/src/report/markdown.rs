@@ -492,13 +492,16 @@ fn write_production_coverage_section(
     }
     let _ = writeln!(
         out,
-        "## Production Coverage\n\n- Verdict: {}\n- Tracked functions: {}\n- Called: {}\n- Never called: {}\n- Coverage unavailable: {}\n- Percent dead in production: {:.1}%\n",
+        "## Production Coverage\n\n- Verdict: {}\n- Functions tracked: {}\n- Hit: {}\n- Unhit: {}\n- Untracked: {}\n- Coverage: {:.1}%\n- Traces observed: {}\n- Period: {} day(s), {} deployment(s)\n",
         production.verdict,
-        production.summary.functions_total,
-        production.summary.functions_called,
-        production.summary.functions_never_called,
-        production.summary.functions_coverage_unavailable,
-        production.summary.percent_dead_in_production,
+        production.summary.functions_tracked,
+        production.summary.functions_hit,
+        production.summary.functions_unhit,
+        production.summary.functions_untracked,
+        production.summary.coverage_percent,
+        production.summary.trace_count,
+        production.summary.period_days,
+        production.summary.deployments_seen,
     );
     if let Some(watermark) = production.watermark {
         let _ = writeln!(out, "- Watermark: {watermark}\n");
@@ -509,33 +512,39 @@ fn write_production_coverage_section(
         ))
     };
     if !production.findings.is_empty() {
-        out.push_str("| Path | Function | State | Invocations | Confidence |\n");
-        out.push_str("|:-----|:---------|:------|------------:|:-----------|\n");
+        out.push_str("| ID | Path | Function | Verdict | Invocations | Confidence |\n");
+        out.push_str("|:---|:-----|:---------|:--------|------------:|:-----------|\n");
         for finding in &production.findings {
+            let invocations = finding
+                .invocations
+                .map_or_else(|| "—".to_owned(), |hits| hits.to_string());
             let _ = writeln!(
                 out,
-                "| `{}`:{} | `{}` | {} | {} | {} |",
+                "| `{}` | `{}`:{} | `{}` | {} | {} | {} |",
+                escape_backticks(&finding.id),
                 rel(&finding.path),
-                finding.line.unwrap_or(0),
+                finding.line,
                 escape_backticks(&finding.function),
-                finding.state,
-                finding.invocations,
+                finding.verdict,
+                invocations,
                 finding.confidence,
             );
         }
         out.push('\n');
     }
     if !production.hot_paths.is_empty() {
-        out.push_str("| Hot path | Function | Invocations |\n");
-        out.push_str("|:---------|:---------|------------:|\n");
+        out.push_str("| ID | Hot path | Function | Invocations | Percentile |\n");
+        out.push_str("|:---|:---------|:---------|------------:|-----------:|\n");
         for entry in &production.hot_paths {
             let _ = writeln!(
                 out,
-                "| `{}`:{} | `{}` | {} |",
+                "| `{}` | `{}`:{} | `{}` | {} | {} |",
+                escape_backticks(&entry.id),
                 rel(&entry.path),
-                entry.line.unwrap_or(0),
+                entry.line,
                 escape_backticks(&entry.function),
                 entry.invocations,
+                entry.percentile,
             );
         }
         out.push('\n');

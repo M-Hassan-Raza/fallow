@@ -92,16 +92,42 @@ expression: redact_health_sarif_version(&json_str)
               }
             },
             {
-              "id": "fallow/production-never-called",
+              "id": "fallow/production-safe-to-delete",
               "shortDescription": {
-                "text": "Function tracked in production coverage was never invoked"
+                "text": "Statically unused AND never invoked in production with V8 tracking"
               },
               "fullDescription": {
-                "text": "V8 tracked this function (it was parsed and prepared for execution) but it was never called during the observed production coverage window. Combined with static reachability analysis, a never-called function is the highest-confidence delete signal fallow emits."
+                "text": "The function is both statically unreachable in the module graph and was never invoked during the observed production coverage window. This is the highest-confidence delete signal fallow emits."
               },
               "helpUri": "https://docs.fallow.tools/explanations/health#production-coverage",
               "defaultConfiguration": {
                 "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/production-review-required",
+              "shortDescription": {
+                "text": "Statically used but never invoked in production"
+              },
+              "fullDescription": {
+                "text": "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed production coverage window. Needs a human look — may be seasonal, error-path only, or legitimately unused."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#production-coverage",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
+              "id": "fallow/production-low-traffic",
+              "shortDescription": {
+                "text": "Function was invoked below the low-traffic threshold"
+              },
+              "fullDescription": {
+                "text": "The function was invoked in production but below the configured `--low-traffic-threshold` fraction of total trace count (spec default 0.1%). Effectively dead for the current period."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/health#production-coverage",
+              "defaultConfiguration": {
+                "level": "note"
               }
             },
             {
@@ -123,7 +149,7 @@ expression: redact_health_sarif_version(&json_str)
                 "text": "Production coverage finding"
               },
               "fullDescription": {
-                "text": "Generic production-coverage finding for states other than never-called and coverage-unavailable. Includes `called` entries surfaced for completeness when the sidecar emits them and the forward-compat `unknown` sentinel."
+                "text": "Generic production-coverage finding for verdicts not covered by a more specific rule. Includes `active` entries surfaced for completeness when the sidecar emits them and the forward-compat `unknown` sentinel."
               },
               "helpUri": "https://docs.fallow.tools/explanations/health#production-coverage",
               "defaultConfiguration": {
@@ -155,10 +181,10 @@ expression: redact_health_sarif_version(&json_str)
           ]
         },
         {
-          "ruleId": "fallow/production-never-called",
+          "ruleId": "fallow/production-review-required",
           "level": "warning",
           "message": {
-            "text": "'coldPath' production coverage state: never-called (0 invocations)"
+            "text": "'coldPath' production coverage verdict: review required (0 invocations)"
           },
           "locations": [
             {
@@ -178,7 +204,7 @@ expression: redact_health_sarif_version(&json_str)
           "ruleId": "fallow/production-coverage-unavailable",
           "level": "note",
           "message": {
-            "text": "'lateBound' production coverage state: coverage-unavailable (0 invocations)"
+            "text": "'lateBound' production coverage verdict: coverage unavailable (untracked)"
           },
           "locations": [
             {

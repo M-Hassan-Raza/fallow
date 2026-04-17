@@ -72,8 +72,8 @@ pub(in crate::report) fn print_health_human(
         }
         if let Some(ref production) = report.production_coverage {
             parts.push(format!(
-                "{} never called in production",
-                production.summary.functions_never_called
+                "{} unhit in production",
+                production.summary.functions_unhit
             ));
         }
         eprintln!(
@@ -126,15 +126,17 @@ fn render_production_coverage(
     };
 
     let verdict = match production.verdict {
-        crate::health_types::ProductionCoverageVerdict::Clean => "clean",
-        crate::health_types::ProductionCoverageVerdict::HotPathChangesNeeded => {
+        crate::health_types::ProductionCoverageReportVerdict::Clean => "clean",
+        crate::health_types::ProductionCoverageReportVerdict::HotPathChangesNeeded => {
             "hot path changes needed"
         }
-        crate::health_types::ProductionCoverageVerdict::ColdCodeDetected => "cold code detected",
-        crate::health_types::ProductionCoverageVerdict::LicenseExpiredGrace => {
+        crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected => {
+            "cold code detected"
+        }
+        crate::health_types::ProductionCoverageReportVerdict::LicenseExpiredGrace => {
             "license expired grace"
         }
-        crate::health_types::ProductionCoverageVerdict::Unknown => "unknown",
+        crate::health_types::ProductionCoverageReportVerdict::Unknown => "unknown",
     };
     lines.push(format!(
         "{} {} {}",
@@ -143,13 +145,31 @@ fn render_production_coverage(
         verdict
     ));
     lines.push(format!(
-        "  {} tracked, {} called, {} never called, {} unavailable ({:.1}% dead)",
-        thousands(production.summary.functions_total),
-        thousands(production.summary.functions_called),
-        thousands(production.summary.functions_never_called),
-        thousands(production.summary.functions_coverage_unavailable),
-        production.summary.percent_dead_in_production,
+        "  {} tracked, {} hit, {} unhit, {} untracked ({:.1}% covered)",
+        thousands(production.summary.functions_tracked),
+        thousands(production.summary.functions_hit),
+        thousands(production.summary.functions_unhit),
+        thousands(production.summary.functions_untracked),
+        production.summary.coverage_percent,
     ));
+    if production.summary.trace_count > 0 || production.summary.period_days > 0 {
+        lines.push(format!(
+            "  based on {} traces over {} day{} ({} deployment{})",
+            thousands(production.summary.trace_count as usize),
+            production.summary.period_days,
+            if production.summary.period_days == 1 {
+                ""
+            } else {
+                "s"
+            },
+            production.summary.deployments_seen,
+            if production.summary.deployments_seen == 1 {
+                ""
+            } else {
+                "s"
+            },
+        ));
+    }
     if matches!(
         production.watermark,
         Some(crate::health_types::ProductionCoverageWatermark::LicenseExpiredGrace)
@@ -161,18 +181,16 @@ fn render_production_coverage(
     let shown_findings = production.findings.len().min(MAX_FLAT_ITEMS);
     for finding in &production.findings[..shown_findings] {
         let relative = format_path(&relative_path(&finding.path, root).display().to_string());
-        let line = finding.line.unwrap_or(0);
-        let state = match finding.state {
-            crate::health_types::ProductionCoverageState::NeverCalled => "never-called",
-            crate::health_types::ProductionCoverageState::CoverageUnavailable => {
-                "coverage-unavailable"
-            }
-            crate::health_types::ProductionCoverageState::Called => "called",
-            crate::health_types::ProductionCoverageState::Unknown => "unknown",
-        };
+        let invocations = finding.invocations.map_or_else(
+            || "untracked".to_owned(),
+            |hits| format!("{hits} invocations"),
+        );
         lines.push(format!(
-            "  {relative}:{line} {} [{} invocations, {state}]",
-            finding.function, finding.invocations
+            "  {relative}:{} {} [{}, {}]",
+            finding.line,
+            finding.function,
+            invocations,
+            finding.verdict.human_label(),
         ));
     }
     if production.findings.len() > MAX_FLAT_ITEMS {
@@ -185,11 +203,12 @@ fn render_production_coverage(
         lines.push("  hot paths:".to_owned());
         for entry in production.hot_paths.iter().take(5) {
             let relative = format_path(&relative_path(&entry.path, root).display().to_string());
-            let line = entry.line.unwrap_or(0);
             lines.push(format!(
-                "    {relative}:{line} {} ({})",
+                "    {relative}:{} {} ({} invocations, p{})",
+                entry.line,
                 entry.function,
-                thousands(entry.invocations as usize)
+                thousands(entry.invocations as usize),
+                entry.percentile,
             ));
         }
     }
@@ -1453,12 +1472,12 @@ pub(in crate::report) fn print_health_summary(
     }
     if let Some(ref production) = report.production_coverage {
         println!(
-            "  {:>6}  Never called in production",
-            production.summary.functions_never_called,
+            "  {:>6}  Unhit in production",
+            production.summary.functions_unhit,
         );
         println!(
-            "  {:>6}  Coverage unavailable in production",
-            production.summary.functions_coverage_unavailable,
+            "  {:>6}  Untracked by V8 (lazy-parsed / worker / dynamic)",
+            production.summary.functions_untracked,
         );
     }
 
@@ -1627,28 +1646,42 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
         report.production_coverage = Some(crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageVerdict::ColdCodeDetected,
+            verdict: crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected,
             summary: crate::health_types::ProductionCoverageSummary {
-                functions_total: 4,
-                functions_called: 2,
-                functions_never_called: 1,
-                functions_coverage_unavailable: 1,
-                percent_dead_in_production: 25.0,
+                functions_tracked: 4,
+                functions_hit: 2,
+                functions_unhit: 1,
+                functions_untracked: 1,
+                coverage_percent: 50.0,
+                trace_count: 2_847_291,
+                period_days: 30,
+                deployments_seen: 14,
             },
             findings: vec![crate::health_types::ProductionCoverageFinding {
+                id: "fallow:prod:deadbeef".to_owned(),
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_owned(),
-                line: Some(14),
-                state: crate::health_types::ProductionCoverageState::NeverCalled,
-                invocations: 0,
-                confidence: crate::health_types::ProductionCoverageConfidence::High,
+                line: 14,
+                verdict: crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+                invocations: Some(0),
+                confidence: crate::health_types::ProductionCoverageConfidence::Medium,
+                evidence: crate::health_types::ProductionCoverageEvidence {
+                    static_status: "used".to_owned(),
+                    test_coverage: "not_covered".to_owned(),
+                    v8_tracking: "tracked".to_owned(),
+                    untracked_reason: None,
+                    observation_days: 30,
+                    deployments_observed: 14,
+                },
                 actions: vec![],
             }],
             hot_paths: vec![crate::health_types::ProductionCoverageHotPath {
+                id: "fallow:hot:cafebabe".to_owned(),
                 path: root.join("src/hot.ts"),
                 function: "hotPath".to_owned(),
-                line: Some(3),
+                line: 3,
                 invocations: 250,
+                percentile: 99,
                 actions: vec![],
             }],
             watermark: Some(crate::health_types::ProductionCoverageWatermark::LicenseExpiredGrace),
@@ -1657,10 +1690,10 @@ mod tests {
 
         let text = plain(&build_health_human_lines(&report, &root));
         assert!(text.contains("Production coverage: cold code detected"));
-        assert!(text.contains("src/cold.ts:14 coldPath [0 invocations, never-called]"));
+        assert!(text.contains("src/cold.ts:14 coldPath [0 invocations, review required]"));
         assert!(text.contains("license expired grace active"));
         assert!(text.contains("hot paths:"));
-        assert!(text.contains("src/hot.ts:3 hotPath (250)"));
+        assert!(text.contains("src/hot.ts:3 hotPath (250 invocations, p99)"));
     }
 
     #[test]

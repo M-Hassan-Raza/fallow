@@ -8,8 +8,8 @@ use std::{collections::BTreeMap, fs};
 use ed25519_dalek::VerifyingKey;
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::{
-    CallState, Confidence, CoverageSource, PROTOCOL_VERSION, Request, Response, StaticFile,
-    StaticFindings, StaticFunction, Verdict, Watermark,
+    Confidence, CoverageSource, Evidence, PROTOCOL_VERSION, ReportVerdict, Request, Response,
+    StaticFile, StaticFindings, StaticFunction, Verdict, Watermark,
 };
 use fallow_license::{
     DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt,
@@ -26,10 +26,10 @@ use url::Url;
 use crate::error::emit_error;
 use crate::health::ProductionCoverageOptions;
 use crate::health_types::{
-    ProductionCoverageAction, ProductionCoverageConfidence, ProductionCoverageFinding,
-    ProductionCoverageHotPath, ProductionCoverageMessage, ProductionCoverageReport,
-    ProductionCoverageState, ProductionCoverageSummary, ProductionCoverageVerdict,
-    ProductionCoverageWatermark,
+    ProductionCoverageAction, ProductionCoverageConfidence, ProductionCoverageEvidence,
+    ProductionCoverageFinding, ProductionCoverageHotPath, ProductionCoverageMessage,
+    ProductionCoverageReport, ProductionCoverageReportVerdict, ProductionCoverageSummary,
+    ProductionCoverageVerdict, ProductionCoverageWatermark,
 };
 use crate::license::verifying_key;
 
@@ -101,6 +101,8 @@ impl RemappedFunction {
 pub fn prepare_options(
     path: &Path,
     min_invocations_hot: u64,
+    min_observation_volume: Option<u32>,
+    low_traffic_threshold: Option<f64>,
     output: OutputFormat,
 ) -> Result<ProductionCoverageOptions, ExitCode> {
     let key = match verifying_key() {
@@ -128,6 +130,8 @@ pub fn prepare_options(
     Ok(ProductionCoverageOptions {
         path: path.to_path_buf(),
         min_invocations_hot,
+        min_observation_volume,
+        low_traffic_threshold,
         license_jwt: jwt,
         watermark: if status.show_watermark() {
             Some(ProductionCoverageWatermark::LicenseExpiredGrace)
@@ -520,6 +524,20 @@ fn build_request(
                     start_line: function.line,
                     end_line: function.line.saturating_add(function.line_count),
                     cyclomatic: u32::from(function.cyclomatic),
+                    // Conservative defaults for v2.39: `fallow health` does not yet
+                    // cross-reference the module-graph reachability result from
+                    // `fallow dead-code`. Until that wiring lands, every function is
+                    // declared statically used — the sidecar will never emit
+                    // `safe_to_delete` on static-signal-only grounds, so the combined
+                    // verdict degrades gracefully to `review_required` / `active`.
+                    // Follow-up: thread the dead-code signal into this builder and
+                    // populate real values.
+                    static_used: true,
+                    // Same story for Istanbul test coverage: when `--coverage` is not
+                    // passed we have no test-coverage signal to join. Defaulting to
+                    // `false` caps `review_required` confidence at `medium` instead
+                    // of `high`, which is the safer wrong-answer than the reverse.
+                    test_covered: false,
                 }
             })
             .collect();
@@ -540,6 +558,14 @@ fn build_request(
             options: fallow_cov_protocol::Options {
                 include_hot_paths: true,
                 min_invocations_for_hot: Some(options.min_invocations_hot),
+                min_observation_volume: options.min_observation_volume,
+                low_traffic_threshold: options.low_traffic_threshold,
+                // Trace count, period, and deployments come from the beacon side in
+                // Phase 3. Phase 2 reads a single coverage dump — the sidecar falls
+                // back to summing observed invocations when `trace_count` is None.
+                trace_count: None,
+                period_days: None,
+                deployments_seen: None,
             },
         },
         locations,
@@ -1217,28 +1243,26 @@ fn stderr_message(stderr: &[u8], fallback: &str) -> String {
 
 fn convert_response(
     response: Response,
-    locations: &FunctionLocations,
+    _locations: &FunctionLocations,
     watermark: Option<ProductionCoverageWatermark>,
 ) -> ProductionCoverageReport {
     let mut findings = response
         .findings
         .into_iter()
         .filter_map(|finding| {
-            let state = map_state(&finding.state);
-            if matches!(state, ProductionCoverageState::Called) {
+            let verdict = map_verdict(finding.verdict);
+            if matches!(verdict, ProductionCoverageVerdict::Active) {
                 return None;
             }
-            let line = locations
-                .get(&(finding.file.clone(), finding.function.clone()))
-                .copied()
-                .flatten();
             Some(ProductionCoverageFinding {
+                id: finding.id,
                 path: PathBuf::from(finding.file),
                 function: finding.function,
-                line,
-                state,
+                line: finding.line,
+                verdict,
                 invocations: finding.invocations,
-                confidence: map_confidence(&finding.confidence),
+                confidence: map_confidence(finding.confidence),
+                evidence: map_evidence(finding.evidence),
                 actions: finding
                     .actions
                     .into_iter()
@@ -1253,8 +1277,8 @@ fn convert_response(
         .collect::<Vec<_>>();
 
     findings.sort_by(|left, right| {
-        state_rank(left.state)
-            .cmp(&state_rank(right.state))
+        verdict_rank(left.verdict)
+            .cmp(&verdict_rank(right.verdict))
             .then_with(|| left.path.cmp(&right.path))
             .then_with(|| left.function.cmp(&right.function))
     });
@@ -1263,16 +1287,15 @@ fn convert_response(
         .hot_paths
         .into_iter()
         .map(|entry| ProductionCoverageHotPath {
-            line: locations
-                .get(&(entry.file.clone(), entry.function.clone()))
-                .copied()
-                .flatten(),
+            id: entry.id,
             path: PathBuf::from(entry.file),
             function: entry.function,
+            line: entry.line,
             invocations: entry.invocations,
+            percentile: entry.percentile,
             // Actions on hot paths are reserved for future protocol versions
             // (e.g., a "review-on-change" suggestion). The sidecar protocol
-            // at v0.1 does not emit per-hot-path actions, so leave empty.
+            // at 0.2 does not emit per-hot-path actions, so leave empty.
             actions: Vec::new(),
         })
         .collect::<Vec<_>>();
@@ -1284,15 +1307,24 @@ fn convert_response(
             .then_with(|| left.function.cmp(&right.function))
     });
 
+    let coverage_percent = response.summary.coverage_percent;
+    let clamped_percent = if coverage_percent.is_finite() {
+        coverage_percent
+    } else {
+        0.0
+    };
+
     ProductionCoverageReport {
-        verdict: map_verdict(&response.verdict),
+        verdict: map_report_verdict(&response.verdict),
         summary: ProductionCoverageSummary {
-            functions_total: response.summary.functions_total as usize,
-            functions_called: response.summary.functions_called as usize,
-            functions_never_called: response.summary.functions_never_called as usize,
-            functions_coverage_unavailable: response.summary.functions_coverage_unavailable
-                as usize,
-            percent_dead_in_production: response.summary.percent_dead_in_production,
+            functions_tracked: response.summary.functions_tracked as usize,
+            functions_hit: response.summary.functions_hit as usize,
+            functions_unhit: response.summary.functions_unhit as usize,
+            functions_untracked: response.summary.functions_untracked as usize,
+            coverage_percent: clamped_percent,
+            trace_count: response.summary.trace_count,
+            period_days: response.summary.period_days,
+            deployments_seen: response.summary.deployments_seen,
         },
         findings,
         hot_paths,
@@ -1308,31 +1340,48 @@ fn convert_response(
     }
 }
 
-fn map_state(state: &CallState) -> ProductionCoverageState {
-    match state {
-        CallState::Called => ProductionCoverageState::Called,
-        CallState::NeverCalled => ProductionCoverageState::NeverCalled,
-        CallState::CoverageUnavailable => ProductionCoverageState::CoverageUnavailable,
-        CallState::Unknown => ProductionCoverageState::Unknown,
+const fn map_verdict(verdict: Verdict) -> ProductionCoverageVerdict {
+    match verdict {
+        Verdict::SafeToDelete => ProductionCoverageVerdict::SafeToDelete,
+        Verdict::ReviewRequired => ProductionCoverageVerdict::ReviewRequired,
+        Verdict::CoverageUnavailable => ProductionCoverageVerdict::CoverageUnavailable,
+        Verdict::LowTraffic => ProductionCoverageVerdict::LowTraffic,
+        Verdict::Active => ProductionCoverageVerdict::Active,
+        Verdict::Unknown => ProductionCoverageVerdict::Unknown,
     }
 }
 
-fn map_confidence(confidence: &Confidence) -> ProductionCoverageConfidence {
+const fn map_confidence(confidence: Confidence) -> ProductionCoverageConfidence {
     match confidence {
+        Confidence::VeryHigh => ProductionCoverageConfidence::VeryHigh,
         Confidence::High => ProductionCoverageConfidence::High,
         Confidence::Medium => ProductionCoverageConfidence::Medium,
         Confidence::Low => ProductionCoverageConfidence::Low,
+        Confidence::None => ProductionCoverageConfidence::None,
         Confidence::Unknown => ProductionCoverageConfidence::Unknown,
     }
 }
 
-fn map_verdict(verdict: &Verdict) -> ProductionCoverageVerdict {
+fn map_evidence(evidence: Evidence) -> ProductionCoverageEvidence {
+    ProductionCoverageEvidence {
+        static_status: evidence.static_status,
+        test_coverage: evidence.test_coverage,
+        v8_tracking: evidence.v8_tracking,
+        untracked_reason: evidence.untracked_reason,
+        observation_days: evidence.observation_days,
+        deployments_observed: evidence.deployments_observed,
+    }
+}
+
+fn map_report_verdict(verdict: &ReportVerdict) -> ProductionCoverageReportVerdict {
     match verdict {
-        Verdict::Clean => ProductionCoverageVerdict::Clean,
-        Verdict::HotPathChangesNeeded => ProductionCoverageVerdict::HotPathChangesNeeded,
-        Verdict::ColdCodeDetected => ProductionCoverageVerdict::ColdCodeDetected,
-        Verdict::LicenseExpiredGrace => ProductionCoverageVerdict::LicenseExpiredGrace,
-        Verdict::Unknown => ProductionCoverageVerdict::Unknown,
+        ReportVerdict::Clean => ProductionCoverageReportVerdict::Clean,
+        ReportVerdict::HotPathChangesNeeded => {
+            ProductionCoverageReportVerdict::HotPathChangesNeeded
+        }
+        ReportVerdict::ColdCodeDetected => ProductionCoverageReportVerdict::ColdCodeDetected,
+        ReportVerdict::LicenseExpiredGrace => ProductionCoverageReportVerdict::LicenseExpiredGrace,
+        ReportVerdict::Unknown => ProductionCoverageReportVerdict::Unknown,
     }
 }
 
@@ -1344,12 +1393,15 @@ fn map_watermark(watermark: &Watermark) -> ProductionCoverageWatermark {
     }
 }
 
-fn state_rank(state: ProductionCoverageState) -> u8 {
-    match state {
-        ProductionCoverageState::NeverCalled => 0,
-        ProductionCoverageState::CoverageUnavailable => 1,
-        ProductionCoverageState::Called => 2,
-        ProductionCoverageState::Unknown => 3,
+/// Sort order for finding rendering: strongest deletion signal first, noise last.
+const fn verdict_rank(verdict: ProductionCoverageVerdict) -> u8 {
+    match verdict {
+        ProductionCoverageVerdict::SafeToDelete => 0,
+        ProductionCoverageVerdict::ReviewRequired => 1,
+        ProductionCoverageVerdict::LowTraffic => 2,
+        ProductionCoverageVerdict::CoverageUnavailable => 3,
+        ProductionCoverageVerdict::Active => 4,
+        ProductionCoverageVerdict::Unknown => 5,
     }
 }
 
@@ -1363,8 +1415,8 @@ mod tests {
     };
     use crate::health::ProductionCoverageOptions;
     use fallow_cov_protocol::{
-        CallState, Confidence, CoverageSource, DiagnosticMessage, Finding, HotPath, Response,
-        Summary, Verdict,
+        Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, HotPath, ReportVerdict,
+        Response, Summary, Verdict,
     };
     use globset::GlobSetBuilder;
     use oxc_coverage_instrument::{Location, Position};
@@ -1599,33 +1651,48 @@ mod tests {
     }
 
     #[test]
-    fn ambiguous_duplicate_names_omit_line_in_final_report() {
-        let mut locations = FxHashMap::default();
-        locations.insert(("src/app.ts".to_owned(), "alpha".to_owned()), None);
+    fn convert_response_round_trips_ids_and_evidence() {
+        let locations = FxHashMap::default();
 
         let report = convert_response(
             Response {
-                protocol_version: "1.0.0".to_owned(),
-                verdict: Verdict::Clean,
+                protocol_version: "0.2.0".to_owned(),
+                verdict: ReportVerdict::ColdCodeDetected,
                 summary: Summary {
-                    functions_total: 1,
-                    functions_called: 0,
-                    functions_never_called: 1,
-                    functions_coverage_unavailable: 0,
-                    percent_dead_in_production: 100.0,
+                    functions_tracked: 1,
+                    functions_hit: 0,
+                    functions_unhit: 1,
+                    functions_untracked: 0,
+                    coverage_percent: 0.0,
+                    trace_count: 512,
+                    period_days: 7,
+                    deployments_seen: 2,
                 },
                 findings: vec![Finding {
+                    id: "fallow:prod:abc12345".to_owned(),
                     file: "src/app.ts".to_owned(),
                     function: "alpha".to_owned(),
-                    state: CallState::NeverCalled,
-                    invocations: 0,
-                    confidence: Confidence::High,
+                    line: 8,
+                    verdict: Verdict::ReviewRequired,
+                    invocations: Some(0),
+                    confidence: Confidence::Medium,
+                    evidence: Evidence {
+                        static_status: "used".to_owned(),
+                        test_coverage: "not_covered".to_owned(),
+                        v8_tracking: "tracked".to_owned(),
+                        untracked_reason: None,
+                        observation_days: 7,
+                        deployments_observed: 2,
+                    },
                     actions: vec![],
                 }],
                 hot_paths: vec![HotPath {
+                    id: "fallow:hot:def67890".to_owned(),
                     file: "src/app.ts".to_owned(),
                     function: "alpha".to_owned(),
+                    line: 8,
                     invocations: 20,
+                    percentile: 50,
                 }],
                 watermark: None,
                 errors: vec![],
@@ -1638,8 +1705,15 @@ mod tests {
             None,
         );
 
-        assert_eq!(report.findings[0].line, None);
-        assert_eq!(report.hot_paths[0].line, None);
+        assert_eq!(report.findings[0].id, "fallow:prod:abc12345");
+        assert_eq!(report.findings[0].line, 8);
+        assert_eq!(
+            report.findings[0].verdict,
+            crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+        );
+        assert_eq!(report.findings[0].evidence.static_status, "used");
+        assert_eq!(report.hot_paths[0].id, "fallow:hot:def67890");
+        assert_eq!(report.hot_paths[0].percentile, 50);
     }
 
     #[test]
@@ -1649,6 +1723,8 @@ mod tests {
         let options = ProductionCoverageOptions {
             path: root.join("coverage"),
             min_invocations_hot: 100,
+            min_observation_volume: None,
+            low_traffic_threshold: None,
             license_jwt: "test-jwt".to_owned(),
             watermark: None,
         };

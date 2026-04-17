@@ -193,10 +193,24 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         docs_path: "explanations/health#coverage-gaps",
     },
     RuleDef {
-        id: "fallow/production-never-called",
-        name: "Production Never Called",
-        short: "Function tracked in production coverage was never invoked",
-        full: "V8 tracked this function (it was parsed and prepared for execution) but it was never called during the observed production coverage window. Combined with static reachability analysis, a never-called function is the highest-confidence delete signal fallow emits.",
+        id: "fallow/production-safe-to-delete",
+        name: "Production Safe To Delete",
+        short: "Statically unused AND never invoked in production with V8 tracking",
+        full: "The function is both statically unreachable in the module graph and was never invoked during the observed production coverage window. This is the highest-confidence delete signal fallow emits.",
+        docs_path: "explanations/health#production-coverage",
+    },
+    RuleDef {
+        id: "fallow/production-review-required",
+        name: "Production Review Required",
+        short: "Statically used but never invoked in production",
+        full: "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed production coverage window. Needs a human look — may be seasonal, error-path only, or legitimately unused.",
+        docs_path: "explanations/health#production-coverage",
+    },
+    RuleDef {
+        id: "fallow/production-low-traffic",
+        name: "Production Low Traffic",
+        short: "Function was invoked below the low-traffic threshold",
+        full: "The function was invoked in production but below the configured `--low-traffic-threshold` fraction of total trace count (spec default 0.1%). Effectively dead for the current period.",
         docs_path: "explanations/health#production-coverage",
     },
     RuleDef {
@@ -210,7 +224,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         id: "fallow/production-coverage",
         name: "Production Coverage",
         short: "Production coverage finding",
-        full: "Generic production-coverage finding for states other than never-called and coverage-unavailable. Includes `called` entries surfaced for completeness when the sidecar emits them and the forward-compat `unknown` sentinel.",
+        full: "Generic production-coverage finding for verdicts not covered by a more specific rule. Includes `active` entries surfaced for completeness when the sidecar emits them and the forward-compat `unknown` sentinel.",
         docs_path: "explanations/health#production-coverage",
     },
 ];
@@ -909,7 +923,7 @@ mod tests {
 
     #[test]
     fn health_rules_count() {
-        assert_eq!(HEALTH_RULES.len(), 9);
+        assert_eq!(HEALTH_RULES.len(), 11);
     }
 
     #[test]

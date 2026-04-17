@@ -523,6 +523,21 @@ enum Command {
         /// Threshold for hot-path classification
         #[arg(long, default_value_t = 100)]
         min_invocations_hot: u64,
+
+        /// Minimum total trace volume before the sidecar allows high-confidence
+        /// `safe_to_delete` / `review_required` verdicts. Below this the
+        /// sidecar caps confidence at `medium` to protect against overconfident
+        /// verdicts on new or low-traffic services. Omit to use the sidecar's
+        /// spec default (5000).
+        #[arg(long, value_name = "N")]
+        min_observation_volume: Option<u32>,
+
+        /// Fraction of total trace count below which an invoked function is
+        /// classified as `low_traffic` rather than `active`. Expressed as a
+        /// decimal (e.g. `0.001` for 0.1%). Omit to use the sidecar's spec
+        /// default (0.001).
+        #[arg(long, value_name = "RATIO")]
+        low_traffic_threshold: Option<f64>,
     },
 
     /// Detect feature flag patterns in the codebase
@@ -1419,6 +1434,8 @@ fn dispatch_subcommand(
             coverage_root,
             production_coverage,
             min_invocations_hot,
+            min_observation_volume,
+            low_traffic_threshold,
         } => {
             // Resolve coverage: CLI flag > FALLOW_COVERAGE env var
             let coverage =
@@ -1456,6 +1473,8 @@ fn dispatch_subcommand(
                 coverage_root.as_deref(),
                 production_coverage.as_deref(),
                 min_invocations_hot,
+                min_observation_volume,
+                low_traffic_threshold,
             )
         }
         Command::Flags { top } => flags::run_flags(&flags::FlagsOptions {
@@ -1565,6 +1584,8 @@ fn dispatch_health(
     coverage_root: Option<&std::path::Path>,
     production_coverage: Option<&std::path::Path>,
     min_invocations_hot: u64,
+    min_observation_volume: Option<u32>,
+    low_traffic_threshold: Option<f64>,
 ) -> ExitCode {
     let (output, quiet, _fail_on_issues) = apply_ci_defaults(
         cli.ci,
@@ -1593,7 +1614,13 @@ fn dispatch_health(
     let eff_complexity = if any_section { complexity } else { true };
     let eff_targets = if any_section { targets } else { true };
     let production_coverage = if let Some(path) = production_coverage {
-        match health::coverage::prepare_options(path, min_invocations_hot, output) {
+        match health::coverage::prepare_options(
+            path,
+            min_invocations_hot,
+            min_observation_volume,
+            low_traffic_threshold,
+            output,
+        ) {
             Ok(options) => Some(options),
             Err(code) => return code,
         }

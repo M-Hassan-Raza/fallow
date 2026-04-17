@@ -776,9 +776,19 @@ pub fn build_health_sarif(
             "warning",
         ),
         sarif_rule(
-            "fallow/production-never-called",
-            "Function tracked in production coverage was never invoked",
+            "fallow/production-safe-to-delete",
+            "Function is statically unused and was never invoked in production",
             "warning",
+        ),
+        sarif_rule(
+            "fallow/production-review-required",
+            "Function is statically used but was never invoked in production",
+            "warning",
+        ),
+        sarif_rule(
+            "fallow/production-low-traffic",
+            "Function was invoked below the low-traffic threshold relative to total trace count",
+            "note",
         ),
         sarif_rule(
             "fallow/production-coverage-unavailable",
@@ -816,34 +826,45 @@ fn append_production_coverage_sarif_results(
 ) {
     for finding in &production.findings {
         let uri = relative_uri(&finding.path, root);
-        let rule_id = match finding.state {
-            crate::health_types::ProductionCoverageState::NeverCalled => {
-                "fallow/production-never-called"
+        let rule_id = match finding.verdict {
+            crate::health_types::ProductionCoverageVerdict::SafeToDelete => {
+                "fallow/production-safe-to-delete"
             }
-            crate::health_types::ProductionCoverageState::CoverageUnavailable => {
+            crate::health_types::ProductionCoverageVerdict::ReviewRequired => {
+                "fallow/production-review-required"
+            }
+            crate::health_types::ProductionCoverageVerdict::LowTraffic => {
+                "fallow/production-low-traffic"
+            }
+            crate::health_types::ProductionCoverageVerdict::CoverageUnavailable => {
                 "fallow/production-coverage-unavailable"
             }
-            crate::health_types::ProductionCoverageState::Called
-            | crate::health_types::ProductionCoverageState::Unknown => "fallow/production-coverage",
+            crate::health_types::ProductionCoverageVerdict::Active
+            | crate::health_types::ProductionCoverageVerdict::Unknown => {
+                "fallow/production-coverage"
+            }
         };
-        let level = if matches!(
-            finding.state,
-            crate::health_types::ProductionCoverageState::NeverCalled
-        ) {
-            "warning"
-        } else {
-            "note"
+        let level = match finding.verdict {
+            crate::health_types::ProductionCoverageVerdict::SafeToDelete
+            | crate::health_types::ProductionCoverageVerdict::ReviewRequired => "warning",
+            _ => "note",
         };
+        let invocations_hint = finding.invocations.map_or_else(
+            || "untracked".to_owned(),
+            |hits| format!("{hits} invocations"),
+        );
         let message = format!(
-            "'{}' production coverage state: {} ({} invocations)",
-            finding.function, finding.state, finding.invocations
+            "'{}' production coverage verdict: {} ({})",
+            finding.function,
+            finding.verdict.human_label(),
+            invocations_hint,
         );
         sarif_results.push(sarif_result(
             rule_id,
             level,
             &message,
             &uri,
-            finding.line.map(|line| (line, 1)),
+            Some((finding.line, 1)),
         ));
     }
 }
@@ -1178,7 +1199,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .unwrap();
-        assert_eq!(rules.len(), 9);
+        assert_eq!(rules.len(), 11);
     }
 
     #[test]

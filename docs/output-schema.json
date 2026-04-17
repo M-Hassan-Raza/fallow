@@ -348,15 +348,15 @@
     "ProductionCoverageReport": {
       "type": "object",
       "required": ["verdict", "summary"],
-      "description": "Production coverage findings merged into the health report. Present only when --production-coverage is used.",
+      "description": "Production coverage findings merged into the health report. Present only when --production-coverage is used. Shape mirrors fallow-cov-protocol 0.2.",
       "properties": {
         "verdict": {
-          "$ref": "#/definitions/ProductionCoverageVerdict",
+          "$ref": "#/definitions/ProductionCoverageReportVerdict",
           "description": "Overall production coverage verdict after baseline filtering and changed-review adjustments."
         },
         "summary": {
           "$ref": "#/definitions/ProductionCoverageSummary",
-          "description": "Aggregate tracked/called/cold counts for the analyzed production coverage input."
+          "description": "Aggregate tracked / hit / unhit / untracked counts for the analyzed production coverage input."
         },
         "findings": {
           "type": "array",
@@ -382,53 +382,105 @@
 
     "ProductionCoverageSummary": {
       "type": "object",
-      "required": ["functions_total", "functions_called", "functions_never_called", "functions_coverage_unavailable", "percent_dead_in_production"],
+      "required": ["functions_tracked", "functions_hit", "functions_unhit", "functions_untracked", "coverage_percent", "trace_count", "period_days", "deployments_seen"],
       "properties": {
-        "functions_total": {
+        "functions_tracked": {
           "type": "integer",
           "minimum": 0,
-          "description": "Total number of tracked static functions included in the sidecar request."
+          "description": "Number of functions the sidecar could observe in the V8 or Istanbul dump."
         },
-        "functions_called": {
+        "functions_hit": {
           "type": "integer",
           "minimum": 0,
-          "description": "Tracked functions observed with at least one invocation."
+          "description": "Tracked functions that received at least one invocation."
         },
-        "functions_never_called": {
+        "functions_unhit": {
           "type": "integer",
           "minimum": 0,
-          "description": "Tracked functions observed with zero invocations."
+          "description": "Tracked functions that were never invoked."
         },
-        "functions_coverage_unavailable": {
+        "functions_untracked": {
           "type": "integer",
           "minimum": 0,
-          "description": "Tracked functions for which production coverage could not be resolved."
+          "description": "Functions the sidecar could not track (lazy-parsed, worker thread, dynamic code, unresolved source map)."
         },
-        "percent_dead_in_production": {
+        "coverage_percent": {
           "type": "number",
           "minimum": 0,
           "maximum": 100,
-          "description": "Percentage of tracked functions classified as never called."
+          "description": "Ratio of functions_hit / functions_tracked, expressed as a percent."
+        },
+        "trace_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of observed invocations across all functions. Denominator for low-traffic classification."
+        },
+        "period_days": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Days of observation covered by the supplied dump (Phase 2 local analysis emits 0 — set by the beacon/cloud in Phase 3+)."
+        },
+        "deployments_seen": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct deployments contributing to the supplied dump (Phase 2 local analysis emits 0)."
         }
       }
     },
 
-    "ProductionCoverageVerdict": {
+    "ProductionCoverageReportVerdict": {
       "type": "string",
       "enum": ["clean", "hot-path-changes-needed", "cold-code-detected", "license-expired-grace", "unknown"],
-      "description": "Overall production coverage verdict."
+      "description": "Overall report verdict. Independent of the per-finding verdict."
     },
 
-    "ProductionCoverageState": {
+    "ProductionCoverageVerdict": {
       "type": "string",
-      "enum": ["called", "never-called", "coverage-unavailable", "unknown"],
-      "description": "Per-function production coverage state."
+      "enum": ["safe_to_delete", "review_required", "coverage_unavailable", "low_traffic", "active", "unknown"],
+      "description": "Per-function production coverage verdict derived from the decision table in fallow-cov-protocol."
     },
 
     "ProductionCoverageConfidence": {
       "type": "string",
-      "enum": ["high", "medium", "low", "unknown"],
+      "enum": ["very_high", "high", "medium", "low", "none", "unknown"],
       "description": "Confidence level for a production coverage finding."
+    },
+
+    "ProductionCoverageEvidence": {
+      "type": "object",
+      "required": ["static_status", "test_coverage", "v8_tracking", "observation_days", "deployments_observed"],
+      "description": "Supporting evidence for a production coverage finding. Mirrors the rows of the decision table.",
+      "properties": {
+        "static_status": {
+          "type": "string",
+          "enum": ["used", "unused"],
+          "description": "`used` when the function is reachable in the module graph, `unused` otherwise."
+        },
+        "test_coverage": {
+          "type": "string",
+          "enum": ["covered", "not_covered"],
+          "description": "`covered` when the project's test suite hits this function, `not_covered` otherwise."
+        },
+        "v8_tracking": {
+          "type": "string",
+          "enum": ["tracked", "untracked"],
+          "description": "`tracked` when V8 observed the function, `untracked` otherwise."
+        },
+        "untracked_reason": {
+          "type": "string",
+          "description": "Reason the function is untracked. Populated only when v8_tracking is `untracked`. Values: `lazy_parsed`, `worker_thread`, `dynamic_eval`, `unknown`."
+        },
+        "observation_days": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Days of observation backing this finding."
+        },
+        "deployments_observed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct deployments backing this finding."
+        }
+      }
     },
 
     "ProductionCoverageWatermark": {
@@ -474,8 +526,13 @@
 
     "ProductionCoverageFinding": {
       "type": "object",
-      "required": ["path", "function", "state", "invocations", "confidence"],
+      "required": ["id", "path", "function", "line", "verdict", "confidence", "evidence"],
       "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^fallow:prod:[0-9a-f]{8}$",
+          "description": "Stable content-hash ID of the form `fallow:prod:<hash>`, where <hash> is the first 8 hex characters of SHA-256(file + function + line + 'prod')."
+        },
         "path": {
           "type": "string",
           "description": "File path relative to the project root."
@@ -487,18 +544,21 @@
         "line": {
           "type": "integer",
           "minimum": 1,
-          "description": "1-indexed line number when uniquely attributable. Omitted when ambiguous or unavailable."
+          "description": "1-indexed line number the function starts on."
         },
-        "state": {
-          "$ref": "#/definitions/ProductionCoverageState"
+        "verdict": {
+          "$ref": "#/definitions/ProductionCoverageVerdict"
         },
         "invocations": {
           "type": "integer",
           "minimum": 0,
-          "description": "Observed invocation count for the function."
+          "description": "Observed invocation count for the function. Omitted when the function is untracked (lazy-parsed, worker-thread isolate, dynamic code)."
         },
         "confidence": {
           "$ref": "#/definitions/ProductionCoverageConfidence"
+        },
+        "evidence": {
+          "$ref": "#/definitions/ProductionCoverageEvidence"
         },
         "actions": {
           "type": "array",
@@ -510,8 +570,13 @@
 
     "ProductionCoverageHotPath": {
       "type": "object",
-      "required": ["path", "function", "invocations"],
+      "required": ["id", "path", "function", "line", "invocations", "percentile"],
       "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^fallow:hot:[0-9a-f]{8}$",
+          "description": "Stable content-hash ID of the form `fallow:hot:<hash>`."
+        },
         "path": {
           "type": "string",
           "description": "File path relative to the project root."
@@ -523,12 +588,18 @@
         "line": {
           "type": "integer",
           "minimum": 1,
-          "description": "1-indexed line number when uniquely attributable. Omitted when ambiguous or unavailable."
+          "description": "1-indexed line number the function starts on."
         },
         "invocations": {
           "type": "integer",
           "minimum": 0,
           "description": "Observed invocation count for the hot path."
+        },
+        "percentile": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Percentile rank over this response's hot-path distribution. 100 = busiest, 0 = quietest that still qualified."
         },
         "actions": {
           "type": "array",
@@ -569,8 +640,8 @@
 
     "SchemaVersion": {
       "type": "integer",
-      "description": "Schema version for this output format (independent of tool version). Adding new fields does not bump the version. Consumers should check this field to detect structural changes.",
-      "examples": [3]
+      "description": "Schema version for this output format (independent of tool version). Adding new fields does not bump the version. Consumers should check this field to detect structural changes. v4 reshapes the production-coverage block to fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence block, renamed summary fields).",
+      "examples": [4]
     },
     "ToolVersion": {
       "type": "string",

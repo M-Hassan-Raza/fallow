@@ -109,7 +109,7 @@ pub(super) fn print_grouped_json(
 /// Bump this when the structure of the JSON output changes in a
 /// backwards-incompatible way (removing/renaming fields, changing types).
 /// Adding new fields is always backwards-compatible and does not require a bump.
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 
 /// Build a JSON envelope with standard metadata fields at the top.
 ///
@@ -1067,10 +1067,10 @@ pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
 mod tests {
     use super::*;
     use crate::health_types::{
-        ProductionCoverageAction, ProductionCoverageConfidence, ProductionCoverageFinding,
-        ProductionCoverageHotPath, ProductionCoverageMessage, ProductionCoverageReport,
-        ProductionCoverageState, ProductionCoverageSummary, ProductionCoverageVerdict,
-        ProductionCoverageWatermark,
+        ProductionCoverageAction, ProductionCoverageConfidence, ProductionCoverageEvidence,
+        ProductionCoverageFinding, ProductionCoverageHotPath, ProductionCoverageMessage,
+        ProductionCoverageReport, ProductionCoverageReportVerdict, ProductionCoverageSummary,
+        ProductionCoverageVerdict, ProductionCoverageWatermark,
     };
     use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
@@ -1085,7 +1085,7 @@ mod tests {
         let elapsed = Duration::from_millis(123);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
-        assert_eq!(output["schema_version"], 3);
+        assert_eq!(output["schema_version"], 4);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
@@ -1123,21 +1123,33 @@ mod tests {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
             production_coverage: Some(ProductionCoverageReport {
-                verdict: ProductionCoverageVerdict::ColdCodeDetected,
+                verdict: ProductionCoverageReportVerdict::ColdCodeDetected,
                 summary: ProductionCoverageSummary {
-                    functions_total: 3,
-                    functions_called: 1,
-                    functions_never_called: 1,
-                    functions_coverage_unavailable: 1,
-                    percent_dead_in_production: 33.3,
+                    functions_tracked: 3,
+                    functions_hit: 1,
+                    functions_unhit: 1,
+                    functions_untracked: 1,
+                    coverage_percent: 33.3,
+                    trace_count: 2_847_291,
+                    period_days: 30,
+                    deployments_seen: 14,
                 },
                 findings: vec![ProductionCoverageFinding {
+                    id: "fallow:prod:deadbeef".to_owned(),
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
-                    line: Some(12),
-                    state: ProductionCoverageState::NeverCalled,
-                    invocations: 0,
-                    confidence: ProductionCoverageConfidence::High,
+                    line: 12,
+                    verdict: ProductionCoverageVerdict::ReviewRequired,
+                    invocations: Some(0),
+                    confidence: ProductionCoverageConfidence::Medium,
+                    evidence: ProductionCoverageEvidence {
+                        static_status: "used".to_owned(),
+                        test_coverage: "not_covered".to_owned(),
+                        v8_tracking: "tracked".to_owned(),
+                        untracked_reason: None,
+                        observation_days: 30,
+                        deployments_observed: 14,
+                    },
                     actions: vec![ProductionCoverageAction {
                         kind: "review-deletion".to_owned(),
                         description: "Tracked in production coverage with zero invocations."
@@ -1146,10 +1158,12 @@ mod tests {
                     }],
                 }],
                 hot_paths: vec![ProductionCoverageHotPath {
+                    id: "fallow:hot:cafebabe".to_owned(),
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
-                    line: Some(3),
+                    line: 3,
                     invocations: 250,
+                    percentile: 99,
                     actions: vec![],
                 }],
                 watermark: Some(ProductionCoverageWatermark::LicenseExpiredGrace),
@@ -1171,20 +1185,22 @@ mod tests {
             serde_json::Value::String("cold-code-detected".to_owned())
         );
         assert_eq!(
-            output["production_coverage"]["summary"]["functions_total"],
+            output["production_coverage"]["summary"]["functions_tracked"],
             serde_json::Value::from(3)
         );
         assert_eq!(
-            output["production_coverage"]["summary"]["percent_dead_in_production"],
+            output["production_coverage"]["summary"]["coverage_percent"],
             serde_json::Value::from(33.3)
         );
         let finding = &output["production_coverage"]["findings"][0];
         assert_eq!(finding["path"], "src/cold.ts");
-        assert_eq!(finding["state"], "never-called");
+        assert_eq!(finding["verdict"], "review_required");
+        assert_eq!(finding["id"], "fallow:prod:deadbeef");
         assert_eq!(finding["actions"][0]["type"], "review-deletion");
         let hot_path = &output["production_coverage"]["hot_paths"][0];
         assert_eq!(hot_path["path"], "src/hot.ts");
         assert_eq!(hot_path["function"], "hotPath");
+        assert_eq!(hot_path["percentile"], 99);
         assert_eq!(
             output["production_coverage"]["watermark"],
             serde_json::Value::String("license-expired-grace".to_owned())
@@ -1686,14 +1702,14 @@ mod tests {
     // ── Schema version stability ────────────────────────────────────
 
     #[test]
-    fn json_schema_version_is_3() {
+    fn json_schema_version_is_4() {
         let root = PathBuf::from("/project");
         let results = AnalysisResults::default();
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["schema_version"], SCHEMA_VERSION);
-        assert_eq!(output["schema_version"], 3);
+        assert_eq!(output["schema_version"], 4);
     }
 
     // ── Version string ──────────────────────────────────────────────
@@ -1899,7 +1915,7 @@ mod tests {
         let output = build_json(&results, &root, elapsed).expect("should serialize");
 
         // Metadata should reflect our explicit values, not anything from AnalysisResults.
-        assert_eq!(output["schema_version"], 3);
+        assert_eq!(output["schema_version"], 4);
         assert_eq!(output["elapsed_ms"], 99);
     }
 
@@ -1971,7 +1987,7 @@ mod tests {
         let elapsed = Duration::from_millis(42);
         let output = build_json_envelope(report, elapsed);
 
-        assert_eq!(output["schema_version"], 3);
+        assert_eq!(output["schema_version"], 4);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 42);
         assert!(output["findings"].is_array());

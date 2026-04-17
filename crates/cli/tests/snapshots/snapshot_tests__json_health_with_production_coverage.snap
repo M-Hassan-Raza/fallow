@@ -3,7 +3,7 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: redact_version(&json_str)
 ---
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "version": "[VERSION]",
   "elapsed_ms": 0,
   "findings": [
@@ -48,20 +48,31 @@ expression: redact_version(&json_str)
   "production_coverage": {
     "verdict": "cold-code-detected",
     "summary": {
-      "functions_total": 6,
-      "functions_called": 3,
-      "functions_never_called": 2,
-      "functions_coverage_unavailable": 1,
-      "percent_dead_in_production": 33.3
+      "functions_tracked": 6,
+      "functions_hit": 3,
+      "functions_unhit": 2,
+      "functions_untracked": 1,
+      "coverage_percent": 50.0,
+      "trace_count": 2847291,
+      "period_days": 30,
+      "deployments_seen": 14
     },
     "findings": [
       {
+        "id": "fallow:prod:deadbeef",
         "path": "src/cold.ts",
         "function": "coldPath",
         "line": 14,
-        "state": "never-called",
+        "verdict": "review_required",
         "invocations": 0,
-        "confidence": "high",
+        "confidence": "medium",
+        "evidence": {
+          "static_status": "used",
+          "test_coverage": "not_covered",
+          "v8_tracking": "tracked",
+          "observation_days": 30,
+          "deployments_observed": 14
+        },
         "actions": [
           {
             "type": "review-deletion",
@@ -71,12 +82,20 @@ expression: redact_version(&json_str)
         ]
       },
       {
+        "id": "fallow:prod:feedface",
         "path": "src/unknown.ts",
         "function": "lateBound",
         "line": 8,
-        "state": "coverage-unavailable",
-        "invocations": 0,
-        "confidence": "low",
+        "verdict": "coverage_unavailable",
+        "confidence": "none",
+        "evidence": {
+          "static_status": "used",
+          "test_coverage": "not_covered",
+          "v8_tracking": "untracked",
+          "untracked_reason": "lazy_parsed",
+          "observation_days": 30,
+          "deployments_observed": 14
+        },
         "actions": [
           {
             "type": "collect-production-coverage",
@@ -88,10 +107,12 @@ expression: redact_version(&json_str)
     ],
     "hot_paths": [
       {
+        "id": "fallow:hot:cafebabe",
         "path": "src/hot.ts",
         "function": "hotPath",
         "line": 3,
-        "invocations": 250
+        "invocations": 250,
+        "percentile": 99
       }
     ],
     "watermark": "license-expired-grace",

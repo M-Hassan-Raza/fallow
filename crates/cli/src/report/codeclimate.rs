@@ -542,38 +542,47 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
     if let Some(ref production) = report.production_coverage {
         for finding in &production.findings {
             let path = cc_path(&finding.path, root);
-            let check_name = match finding.state {
-                crate::health_types::ProductionCoverageState::NeverCalled => {
-                    "fallow/production-never-called"
+            let check_name = match finding.verdict {
+                crate::health_types::ProductionCoverageVerdict::SafeToDelete => {
+                    "fallow/production-safe-to-delete"
                 }
-                crate::health_types::ProductionCoverageState::CoverageUnavailable => {
+                crate::health_types::ProductionCoverageVerdict::ReviewRequired => {
+                    "fallow/production-review-required"
+                }
+                crate::health_types::ProductionCoverageVerdict::LowTraffic => {
+                    "fallow/production-low-traffic"
+                }
+                crate::health_types::ProductionCoverageVerdict::CoverageUnavailable => {
                     "fallow/production-coverage-unavailable"
                 }
-                crate::health_types::ProductionCoverageState::Called
-                | crate::health_types::ProductionCoverageState::Unknown => {
+                crate::health_types::ProductionCoverageVerdict::Active
+                | crate::health_types::ProductionCoverageVerdict::Unknown => {
                     "fallow/production-coverage"
                 }
             };
-            let description = format!(
-                "'{}' production coverage state: {} ({} invocations)",
-                finding.function, finding.state, finding.invocations
+            let invocations_hint = finding.invocations.map_or_else(
+                || "untracked".to_owned(),
+                |hits| format!("{hits} invocations"),
             );
-            let severity = if matches!(
-                finding.state,
-                crate::health_types::ProductionCoverageState::NeverCalled
-            ) {
-                "major"
-            } else {
-                // GitLab Code Quality renders MR inline annotations only for
-                // blocker/critical/major/minor. "info" is schema-valid but
-                // silently dropped from MR annotations, so use "minor" for
-                // coverage-unavailable advisory findings.
-                "minor"
+            let description = format!(
+                "'{}' production coverage verdict: {} ({})",
+                finding.function,
+                finding.verdict.human_label(),
+                invocations_hint,
+            );
+            // GitLab Code Quality renders MR inline annotations only for
+            // blocker/critical/major/minor. Any non-cold verdict collapses to
+            // "minor" — "info" is schema-valid but silently dropped from MR
+            // annotations.
+            let severity = match finding.verdict {
+                crate::health_types::ProductionCoverageVerdict::SafeToDelete => "critical",
+                crate::health_types::ProductionCoverageVerdict::ReviewRequired => "major",
+                _ => "minor",
             };
             let fp = fingerprint_hash(&[
                 check_name,
                 &path,
-                &finding.line.unwrap_or(0).to_string(),
+                &finding.line.to_string(),
                 &finding.function,
             ]);
             issues.push(cc_issue(
@@ -587,7 +596,7 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
                 // category used by static dead-code issues elsewhere.
                 "Bug Risk",
                 &path,
-                finding.line,
+                Some(finding.line),
                 &fp,
             ));
         }
