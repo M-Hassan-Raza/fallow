@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.40.0] - 2026-04-17
+
+### Added
+
+- **Scoped `usedClassMembers` rules** -- `usedClassMembers` entries may now be either a plain member name (global suppression, as before) OR a scoped object with `extends` / `implements` constraints. Framework-invoked method names that are too common to globally suppress (e.g. TypeORM `MigrationInterface.up` / `down`, ag-Grid `agInit`, Web Components `connectedCallback`) can be scoped so they only suppress on classes matching the specified heritage clause. Plain string entries keep their previous semantics; schema is a backward-compatible superset. New `UsedClassMemberRule` / `ScopedUsedClassMemberRule` types exposed in `schema.json` and `plugin-schema.json`. Thanks @M-Hassan-Raza ([#129](https://github.com/fallow-rs/fallow/pull/129)).
+- **`FALLOW_COV_BINARY_PATH` env var** -- second explicit-override slot for the production-coverage sidecar binary, ordered between `FALLOW_COV_BIN` and project-local lookup. Required for air-gapped enterprise installs, Linux distro-packaged sidecars, and Docker multi-user setups where `~/.fallow/bin` is not writable. Missing-file returns a clear error instead of silently falling through to auto-discovery, matching `FALLOW_COV_BIN`'s explicit-beats-implicit semantics.
+- **Ed25519 signature verification on every sidecar spawn** -- the `fallow-cov` production-coverage sidecar binary must ship with an adjacent `<binary>.sig` file. `fallow health --production-coverage` verifies the signature against a compiled-in public key (`BINARY_SIGNING_VERIFY_KEY`) before executing the sidecar and fails hard (exit code 4) on any of: missing `.sig` file, wrong signature length, or invalid signature. Strict from day one -- no warn-and-run, no opt-out env var. Hardens the sidecar supply chain across npm mirrors, air-gapped installs, and ad-hoc binary placement. Error messages direct users to `npm install @fallow-cli/fallow-cov`.
+
+### Fixed
+
+- **`fallow license` non-Unix stub** no longer fails clippy under rust 1.95 -- the `#[cfg(not(unix))]` permission-set stub returns `Result<(), String>` to mirror the Unix variant's signature, which rust 1.95's `unnecessary_wraps` flags. Added an explicit `#[allow]` with a reason.
+
 ## [2.39.0] - 2026-04-17
 
 ### Added
@@ -1448,7 +1460,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.39.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.40.0...HEAD
+[2.40.0]: https://github.com/fallow-rs/fallow/compare/v2.39.0...v2.40.0
 [2.39.0]: https://github.com/fallow-rs/fallow/compare/v2.38.0...v2.39.0
 [2.38.0]: https://github.com/fallow-rs/fallow/compare/v2.37.0...v2.38.0
 [2.37.0]: https://github.com/fallow-rs/fallow/compare/v2.36.0...v2.37.0
