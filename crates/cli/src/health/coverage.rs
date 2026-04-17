@@ -48,8 +48,8 @@ use crate::license::verifying_key;
 /// workflow on fallow-cloud asserts this daily. If you rotate the key, update
 /// both sides in the same release cycle per the procedure in ADR 008.
 const BINARY_SIGNING_VERIFY_KEY: [u8; 32] = [
-    5, 202, 230, 77, 115, 122, 129, 242, 85, 243, 195, 194, 27, 191, 159, 53, 1, 24, 105, 203, 179,
-    88, 43, 113, 206, 186, 85, 115, 106, 103, 145, 124,
+    19, 101, 100, 202, 175, 194, 21, 42, 215, 158, 125, 99, 218, 176, 85, 44, 62, 175, 122, 137,
+    33, 144, 210, 11, 56, 216, 191, 101, 249, 27, 112, 27,
 ];
 
 type FunctionLocations = FxHashMap<(String, String), Option<u32>>;
