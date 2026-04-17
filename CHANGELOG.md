@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.40.1] - 2026-04-17
+
+### Fixed
+
+- **`BINARY_SIGNING_VERIFY_KEY` rotated to match the key pair now deployed in the sidecar release pipeline.** The first two `fallow-rs/fallow-cloud` sidecar release tags (`sidecar-v0.1.0`, `sidecar-v0.1.1`) failed in CI because the `ED25519_BINARY_SIGNING_PRIVATE_KEY` GitHub secret had been set with a malformed `gh secret set --body -` invocation that stored the literal `-` rather than reading the seed from stdin. Recovering the original seed was not possible (write-only secrets, local env scrubbed after write), so a fresh key pair was provisioned across Fly (staged), GitHub Actions secret (validated via `workflow_dispatch`), and GitHub Actions variable. This commit updates the compiled-in verify key so v2.40.1+ CLI binaries accept signatures produced by the new signing key. v2.40.0 remains safe -- no sidecar binaries were ever published under the broken configuration (`sidecar-v0.1.0` / `sidecar-v0.1.1` reached neither npm nor the GitHub release assets), so no user-visible regression to undo. First real signed sidecar will ship against v2.40.1 + `sidecar-v0.1.2`.
+
 ## [2.40.0] - 2026-04-17
 
 ### Added
@@ -1460,7 +1466,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.40.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.40.1...HEAD
+[2.40.1]: https://github.com/fallow-rs/fallow/compare/v2.40.0...v2.40.1
 [2.40.0]: https://github.com/fallow-rs/fallow/compare/v2.39.0...v2.40.0
 [2.39.0]: https://github.com/fallow-rs/fallow/compare/v2.38.0...v2.39.0
 [2.38.0]: https://github.com/fallow-rs/fallow/compare/v2.37.0...v2.38.0
