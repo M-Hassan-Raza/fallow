@@ -7,7 +7,8 @@
 </p>
 
 <p align="center">
-  <strong>Codebase analyzer for TypeScript & JavaScript — unused code, duplication, complexity, and architecture.</strong><br>
+  <strong>Codebase intelligence for TypeScript & JavaScript.</strong><br>
+  Find unused code, duplication, complexity hotspots, and architecture drift. Optionally merge runtime evidence for hot-path review and runtime-backed deletion confidence.<br>
   <strong>Rust-native. Zero config. Sub-second.</strong>
 </p>
 
@@ -35,6 +36,10 @@ npx fallow
 
 90 framework plugins. No Node.js runtime. No config file needed.
 
+Static analysis is free and open source. Runtime intelligence is the paid team layer.
+
+Delete and refactor with confidence: the static layer catches unused files, exports, and dependencies in milliseconds. The optional Fallow Runtime layer merges real production execution data, so you can delete cold code backed by runtime evidence instead of hoping your static graph was complete.
+
 ## Install
 
 ```bash
@@ -45,17 +50,28 @@ cargo install fallow-cli    # Or via Cargo
 
 ## Commands
 
+### Static analysis (free)
+
+Everything below runs on your source alone. No account, no network, no runtime required.
+
 ```bash
 fallow                      # Run all three analyses
 fallow dead-code            # Dead code only
 fallow dupes                # Duplication only
 fallow health               # Complexity only
-fallow health --production-coverage ./coverage   # Merge runtime coverage into health
-fallow license activate --trial --email you@company.com
-fallow coverage setup       # Guided first-run setup for production coverage
 fallow audit                # Audit changed files (verdict: pass/warn/fail)
 fallow fix --dry-run        # Preview auto-removal of dead exports and deps
 fallow watch                # Re-analyze on file changes
+```
+
+### Runtime intelligence (optional, paid)
+
+These commands add production execution data on top of the static analysis above. They are opt-in and require an active Fallow Runtime license. See [Runtime intelligence](#runtime-intelligence-fallow-runtime).
+
+```bash
+fallow license activate --trial --email you@company.com
+fallow coverage setup                             # Guided first-run setup
+fallow health --production-coverage ./coverage    # Merge runtime coverage into health
 ```
 
 ## Dead code
@@ -113,11 +129,13 @@ fallow health --trend                     # Compare against saved snapshot
 fallow health --changed-since main        # Only changed files
 ```
 
-### Paid production coverage
+## Runtime intelligence (Fallow Runtime)
 
-Production coverage answers a different question than static reachability: which functions actually execute in production. Fallow can merge V8 coverage dumps (`NODE_V8_COVERAGE=...`) and Istanbul `coverage-final.json` files into the `health` report, classify cold functions, and surface hot paths.
+Static analysis answers: "is this code referenced anywhere in the source graph?" Runtime intelligence answers: "does this code actually execute in production?"
 
-Static `coverage_gaps` and paid `production_coverage` are separate layers in the same `health` surface:
+Fallow Runtime is the paid team layer. The engine is production coverage: V8 dumps (`NODE_V8_COVERAGE=...`) and Istanbul `coverage-final.json` files merged into the `health` surface. The product on top is runtime-backed decisions: hot/cold path review, runtime-weighted health scoring, stale-flag evidence, trends, alerts, and shared team workflows.
+
+Static `coverage_gaps` and runtime `production_coverage` are separate layers in the same `health` surface:
 - `coverage_gaps` is graph-based and answers which runtime files or exports have no test dependency path
 - `production_coverage` is runtime-based and answers which functions actually executed in production-like coverage input
 - `coverage_gaps` can appear either because you passed `--coverage-gaps`, or because top-level `health` enabled it from config severity when no narrower section flags were selected
@@ -165,7 +183,7 @@ Returns a verdict: **pass** (exit 0), **warn** (exit 0, warn-severity only), or 
 # GitHub Action
 - uses: fallow-rs/fallow@v2
 
-# GitLab CI — include the template and extend
+# GitLab CI -- include the template and extend
 include:
   - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/main/ci/gitlab-ci.yml'
 fallow:
@@ -214,7 +232,7 @@ The comment merging pipeline groups unused exports per file and deduplicates clo
 A `GITLAB_TOKEN` (PAT with `api` scope) is recommended for full features (suggestion blocks, cleanup of previous comments). `CI_JOB_TOKEN` works for posting but cannot delete comments from prior runs.
 
 ```yaml
-# .gitlab-ci.yml — full example with rich MR comments
+# .gitlab-ci.yml -- full example with rich MR comments
 include:
   - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/main/ci/gitlab-ci.yml'
 

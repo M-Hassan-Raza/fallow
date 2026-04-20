@@ -2,13 +2,15 @@
 
 > Last updated: 2026-04-20
 
-AI agents write more code than ever. They rarely clean up after themselves. Every generated file, every scaffolded export, every copied utility accumulates until your codebase is half dead weight.
+Fallow is the codebase intelligence layer for TypeScript and JavaScript. Static analysis shows how the codebase is wired: unused code, duplication, complexity, architecture boundaries, and feature flags. Runtime intelligence shows what actually executes: hot paths, cold paths, and the risks inside every change. Together they let humans and agents clean up and refactor with confidence.
 
-Fallow is the counterbalance: fast, framework-aware dead code detection that works at the speed AI generates code. One binary, sub-second analysis, 14 issue types, 90 framework plugins, auto-fix, and native integration with the tools agents already use.
+AI agents ship code faster than teams can review it. The problem is not only dead code, it is structural drift and execution drift. Fallow addresses both.
 
 ---
 
 ## Where we are (v2.41.0)
+
+Two layers ship today: the static layer (free and open source) covers how the code is wired, and the runtime layer (paid) covers what actually executes in production.
 
 **Dead code analysis** -- 14 issue types: unused files, exports, types, dependencies, enum/class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, type-only dependencies, and test-only production dependencies. 90 framework plugins with auto-detection. Auto-fix for safe removals. Inline suppression. Severity rules (`error` / `warn` / `off`).
 
@@ -50,9 +52,9 @@ Cross-reference unused dependencies with vulnerability data. "These 3 unused dep
 
 Define import rules between directory-based layers (`src/ui/` cannot import from `src/db/`). Validated against the module graph -- like dependency-cruiser but faster and integrated with dead code analysis.
 
-### Production coverage refinements
+### Runtime intelligence
 
-The core production-coverage path is live. Next up: better hot-path change review (`HotPathChangesNeeded` once fallow can correlate modified code with hot functions), deeper framework heuristics, and smoother packaging for the companion sidecar install experience.
+The core production-coverage path is live. Next up: better hot-path change review (`HotPathChangesNeeded` once fallow can correlate modified code with hot functions), deeper framework heuristics, and smoother packaging for the companion sidecar install experience. Runtime intelligence is the paid team layer, and it is where heavier workflows (alerts, runtime-backed review, stale-flag evidence) will land.
 
 ### Pre-commit hooks
 
@@ -80,10 +82,10 @@ Catch unused exports and unresolved imports before they reach CI. Scoped to chan
 
 ## Competitive context
 
-- **Knip** -- the closest alternative. Both use the Oxc parser, but fallow runs as a native Rust binary with no Node.js runtime -- 3-18x faster in benchmarks. Knip errors out on the largest monorepos (20k+ files).
+- **Knip** -- the closest alternative on dead code. Both use the Oxc parser, but fallow runs as a native Rust binary with no Node.js runtime -- 3-18x faster in benchmarks, and Knip errors out on the largest monorepos (20k+ files). Fallow also goes beyond dead code into duplication, complexity, architecture, and runtime intelligence, so the comparison is only one slice of what fallow does.
 - **Biome** -- has module graph infrastructure but hasn't shipped cross-file unused export detection. If they do, they cover ~1 of fallow's 14 issue types.
 - **SonarQube** -- dominates enterprise code quality but is Java-centric, slow on JS/TS, and lacks framework-aware dead code analysis.
-- **AI code review tools** -- complementary. AI generates code faster than humans review it, accelerating the dead code problem. Fallow is the structural analysis layer that AI reviewers lack: it sees the full module graph, not just the diff.
+- **AI code review tools** -- complementary. AI generates code faster than humans review it, which accelerates both dead code and structural drift. Fallow is the codebase-intelligence layer that AI reviewers lack: it sees the full module graph and the runtime execution profile, not just the diff.
 
 ---
 
