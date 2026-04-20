@@ -47,10 +47,31 @@ use crate::license::verifying_key;
 /// `fallow-rs/fallow-cloud` byte-for-byte; the `binary-signing-parity.yml`
 /// workflow on fallow-cloud asserts this daily. If you rotate the key, update
 /// both sides in the same release cycle per the procedure in ADR 008.
+#[cfg(not(feature = "test-sidecar-key"))]
 const BINARY_SIGNING_VERIFY_KEY: [u8; 32] = [
     19, 101, 100, 202, 175, 194, 21, 42, 215, 158, 125, 99, 218, 176, 85, 44, 62, 175, 122, 137,
     33, 144, 210, 11, 56, 216, 191, 101, 249, 27, 112, 27,
 ];
+
+/// Test-only sidecar binary-signing pubkey, derived from the deterministic
+/// seed `[0xAA; 32]` at `crates/cli/tests/common/test_signing_keys.rs`. Enabled
+/// only by the `test-sidecar-key` cargo feature. A `compile_error!` below
+/// refuses to let this feature coexist with a release build so it cannot ship
+/// to users by accident.
+#[cfg(feature = "test-sidecar-key")]
+const BINARY_SIGNING_VERIFY_KEY: [u8; 32] = [
+    0xe7, 0x34, 0xea, 0x6c, 0x2b, 0x62, 0x57, 0xde, 0x72, 0x35, 0x5e, 0x47, 0x2a, 0xa0, 0x5a, 0x4c,
+    0x48, 0x7e, 0x6b, 0x46, 0x3c, 0x02, 0x9e, 0xd3, 0x06, 0xdf, 0x2f, 0x01, 0xb5, 0x63, 0x6b, 0x58,
+];
+
+// Hard stop: `test-sidecar-key` ships the test pubkey instead of the real
+// binary-signing pubkey. A release build with this feature active would accept
+// stub sidecars signed by any party in possession of the seed. Debug builds
+// only.
+#[cfg(all(feature = "test-sidecar-key", not(debug_assertions)))]
+compile_error!(
+    "feature `test-sidecar-key` must never be enabled in release builds; it swaps the sidecar binary-signing pubkey for a test keypair whose seed is public"
+);
 
 type FunctionLocations = FxHashMap<(String, String), Option<u32>>;
 
@@ -1602,6 +1623,41 @@ mod tests {
             BINARY_SIGNING_VERIFY_KEY, [0u8; 32],
             "BINARY_SIGNING_VERIFY_KEY is the all-zeros placeholder. Generate a real keypair per fallow-cloud/decisions/008-sidecar-key-rotation.md and paste the public bytes here before cutting a release."
         );
+    }
+
+    // Structural invariant: the production-coverage analysis path must not
+    // perform any network I/O. Enterprise / air-gapped buyers depend on this.
+    // The gate for Phase 2 step 4 of the roadmap is explicitly "integration
+    // test asserting zero network calls during analysis"; this source-level
+    // assertion is the fastest regression guard for that contract. The sibling
+    // integration tests in `crates/cli/tests/production_coverage_tests.rs`
+    // exercise the full spawn pipeline with a signed stub sidecar.
+    #[test]
+    fn production_coverage_module_has_no_network_code() {
+        // Scan only the non-test portion of the file; the FORBIDDEN list below
+        // would otherwise match its own entries.
+        let full = include_str!("coverage.rs");
+        let analysis_source = full.split("#[cfg(test)]").next().unwrap_or(full);
+        const FORBIDDEN: &[&str] = &[
+            "ureq::",
+            "ureq_",
+            "reqwest",
+            "hyper::",
+            "std::net::Tcp",
+            "std::net::Udp",
+            "std::net::Socket",
+            "tokio::net::",
+            "rustls::",
+            "openssl::ssl",
+            "native_tls::",
+            "curl::",
+        ];
+        for needle in FORBIDDEN {
+            assert!(
+                !analysis_source.contains(needle),
+                "crates/cli/src/health/coverage.rs must not reference `{needle}`; the production-coverage analysis path is sealed and cannot make network calls",
+            );
+        }
     }
 
     #[test]

@@ -780,6 +780,7 @@ dependencies = [
 name = "fallow-cli"
 version = "2.41.0"
 dependencies = [
+ "base64",
  "clap",
  "colored",
  "dunce",

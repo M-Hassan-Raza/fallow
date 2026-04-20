@@ -1,0 +1,98 @@
+//! Test-only stub `fallow-cov` sidecar used by
+//! `crates/cli/tests/production_coverage_tests.rs` to exercise the full
+//! spawn/marshalling pipeline without depending on the closed-source sidecar.
+//!
+//! Gated behind the `test-sidecar-key` cargo feature; the `compile_error!` in
+//! `crates/cli/src/health/coverage.rs` prevents this binary from shipping in
+//! release builds.
+//!
+//! Reads a `fallow_cov_protocol::Request` from stdin and emits a
+//! `fallow_cov_protocol::Response` on stdout (or exits with a specific code)
+//! based on the `FALLOW_STUB_MODE` env var:
+//!
+//! - unset / `"ok"`: clean response, exit 0
+//! - `"protocol-mismatch"`: response with `protocol_version = "99.0.0"`, exit 0
+//! - `"exit-4"` / `"exit-5"` / `"exit-6"`: prints the mode as stderr, exits
+//!   with that code
+//! - `"malformed-stdout"`: writes non-JSON bytes, exit 0
+//! - `"empty-stdout"`: writes nothing, exit 0
+
+#![expect(
+    clippy::print_stderr,
+    reason = "stub sidecar emits diagnostic lines on stderr for failure modes; tests assert against them"
+)]
+
+use std::io::{Read, Write};
+use std::process::ExitCode;
+
+use fallow_cov_protocol::{PROTOCOL_VERSION, ReportVerdict, Request, Response, Summary};
+
+fn main() -> ExitCode {
+    // Drain stdin so the parent CLI's writer does not get EPIPE on close.
+    // Parsing the Request is best-effort; the stub does not depend on its
+    // contents, but consuming the bytes matters.
+    let mut buf = Vec::new();
+    let _ = std::io::stdin().read_to_end(&mut buf);
+    let _parsed: Option<Request> = serde_json::from_slice(&buf).ok();
+
+    let mode = std::env::var("FALLOW_STUB_MODE").unwrap_or_default();
+    match mode.as_str() {
+        "" | "ok" => emit_clean_response(PROTOCOL_VERSION),
+        "protocol-mismatch" => emit_clean_response("99.0.0"),
+        "malformed-stdout" => emit_bytes(b"definitely not JSON\n"),
+        "empty-stdout" => ExitCode::SUCCESS,
+        "exit-4" => {
+            eprintln!("stub sidecar: simulated protocol mismatch");
+            ExitCode::from(4)
+        }
+        "exit-5" => {
+            eprintln!("stub sidecar: simulated input parse error");
+            ExitCode::from(5)
+        }
+        "exit-6" => {
+            eprintln!("stub sidecar: simulated internal error");
+            ExitCode::from(6)
+        }
+        other => {
+            eprintln!("stub sidecar: unknown FALLOW_STUB_MODE={other}");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn emit_clean_response(protocol_version: &str) -> ExitCode {
+    let response = Response {
+        protocol_version: protocol_version.to_owned(),
+        verdict: ReportVerdict::Clean,
+        summary: Summary {
+            functions_tracked: 0,
+            functions_hit: 0,
+            functions_unhit: 0,
+            functions_untracked: 0,
+            coverage_percent: 0.0,
+            trace_count: 0,
+            period_days: 0,
+            deployments_seen: 0,
+        },
+        findings: Vec::new(),
+        hot_paths: Vec::new(),
+        watermark: None,
+        errors: Vec::new(),
+        warnings: Vec::new(),
+    };
+    match serde_json::to_vec(&response) {
+        Ok(bytes) => emit_bytes(&bytes),
+        Err(err) => {
+            eprintln!("stub sidecar: failed to serialize response: {err}");
+            ExitCode::from(6)
+        }
+    }
+}
+
+fn emit_bytes(bytes: &[u8]) -> ExitCode {
+    let mut stdout = std::io::stdout().lock();
+    if stdout.write_all(bytes).is_err() || stdout.flush().is_err() {
+        return ExitCode::from(6);
+    }
+    ExitCode::SUCCESS
+}

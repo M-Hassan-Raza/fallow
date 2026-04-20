@@ -15,6 +15,20 @@ readme = "../../README.md"
 name = "fallow"
 path = "src/main.rs"
 
+[[bin]]
+name = "stub_sidecar"
+path = "src/bin/stub_sidecar.rs"
+required-features = ["test-sidecar-key"]
+
+[features]
+default = []
+# Test-only feature that swaps the sidecar binary-signing verify key and the
+# license JWT verify key for deterministic keypairs derived from fixed seeds.
+# Used by the end-to-end production-coverage integration tests. MUST NOT be
+# enabled in release builds; a compile_error! at
+# crates/cli/src/health/coverage.rs guards against that.
+test-sidecar-key = []
+
 [dependencies]
 fallow-core = { workspace = true }
 fallow-config = { workspace = true }
@@ -56,6 +70,9 @@ insta = { workspace = true }
 fallow-types = { workspace = true }
 oxc_span = { workspace = true }
 proptest = { workspace = true }
+base64 = "0.22"
+ed25519-dalek = { version = "2", default-features = false, features = ["std"] }
+fallow-cov-protocol = "0.2"
 
 [package.metadata.cargo-shear]
 ignored = ["miette"] # feature-only dep: activates fancy rendering for fallow-config's miette::Report

@@ -23,9 +23,20 @@ use fallow_license::{
 use serde::Deserialize;
 
 /// Ed25519 verification key for fallow license JWT validation.
+#[cfg(not(feature = "test-sidecar-key"))]
 pub const PUBLIC_KEY_BYTES: [u8; 32] = [
     179, 203, 218, 13, 98, 63, 103, 172, 91, 108, 23, 122, 27, 101, 200, 182, 174, 117, 160, 41,
     167, 151, 66, 171, 13, 61, 148, 65, 181, 144, 24, 120,
+];
+
+/// Test-only license JWT verification key, derived from the deterministic seed
+/// `[0xBB; 32]`. Enabled only by the `test-sidecar-key` cargo feature. The
+/// `compile_error!` at `crates/cli/src/health/coverage.rs` enforces that this
+/// feature stays out of release builds.
+#[cfg(feature = "test-sidecar-key")]
+pub const PUBLIC_KEY_BYTES: [u8; 32] = [
+    0x7d, 0x59, 0xc5, 0x62, 0x3d, 0xd4, 0x0a, 0x74, 0xaa, 0x4d, 0x5a, 0x32, 0xac, 0x64, 0x5d, 0x3b,
+    0x3f, 0x95, 0xda, 0xea, 0xe4, 0xc2, 0x2b, 0xe2, 0x54, 0x76, 0xdd, 0x6a, 0x48, 0x6f, 0x73, 0x82,
 ];
 const DEFAULT_API_URL: &str = "https://api.fallow.cloud";
 const NETWORK_EXIT_CODE: u8 = 7;
