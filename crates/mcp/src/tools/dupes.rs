@@ -61,6 +61,9 @@ pub fn build_find_dupes_args(params: &FindDupesParams) -> Result<Vec<String>, St
         args.push("--changed-since".to_string());
         args.push(since.clone());
     }
+    if let Some(ref gb) = params.group_by {
+        args.extend(["--group-by".to_string(), gb.clone()]);
+    }
 
     Ok(args)
 }

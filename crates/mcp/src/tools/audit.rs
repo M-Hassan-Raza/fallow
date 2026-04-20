@@ -23,6 +23,9 @@ pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
         args.extend(["--base".to_string(), base.clone()]);
     }
     push_scope(&mut args, params.production, params.workspace.as_deref());
+    if let Some(ref gb) = params.group_by {
+        args.extend(["--group-by".to_string(), gb.clone()]);
+    }
 
     args
 }

@@ -206,6 +206,12 @@ pub struct FindDupesParams {
         description = "Only report issues in files changed since this git ref (branch, tag, or commit SHA)"
     )]
     pub changed_since: Option<String>,
+
+    /// Group clone families by CODEOWNERS ownership, directory, workspace
+    /// package, or GitLab CODEOWNERS section. Values: "owner", "directory",
+    /// "package", "section". `section` attaches an `owners: string[]` array
+    /// to each group. Passed through to the CLI's `--group-by` flag.
+    pub group_by: Option<String>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -379,6 +385,12 @@ pub struct HealthParams {
     /// when omitted. Takes effect only when `production_coverage` is also
     /// set; silently ignored otherwise.
     pub min_invocations_hot: Option<u64>,
+
+    /// Group health findings by CODEOWNERS ownership, directory, workspace
+    /// package, or GitLab CODEOWNERS section. Values: "owner", "directory",
+    /// "package", "section". `section` attaches an `owners: string[]` array
+    /// to each group. Passed through to the CLI's `--group-by` flag.
+    pub group_by: Option<String>,
 }
 
 /// Parameters for `health_production_coverage`, the focused paid-tier
@@ -462,6 +474,14 @@ pub struct AuditParams {
 
     /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
+
+    /// Group audit findings by CODEOWNERS ownership, directory, workspace
+    /// package, or GitLab CODEOWNERS section. Values: "owner", "directory",
+    /// "package", "section". `section` attaches an `owners: string[]` array
+    /// to each group in the JSON output. Passed through to the CLI's
+    /// `--group-by` flag; propagates to all three sub-analyses (dead-code,
+    /// dupes, health) that audit runs.
+    pub group_by: Option<String>,
 }
 
 /// Parameters for `list_boundaries`.

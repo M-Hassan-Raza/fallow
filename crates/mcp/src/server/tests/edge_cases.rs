@@ -674,6 +674,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         min_severity: Some("critical".to_string()),
         ownership: Some(true),
         ownership_email_mode: Some(crate::params::EmailModeParam::Hash),
+        group_by: Some("section".to_string()),
     };
     let args = build_health_args(&params);
     // Every single flag should be present

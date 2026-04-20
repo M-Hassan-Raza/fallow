@@ -115,6 +115,9 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
             min_invocations_hot.to_string(),
         ]);
     }
+    if let Some(ref gb) = params.group_by {
+        args.extend(["--group-by".to_string(), gb.clone()]);
+    }
 
     args
 }

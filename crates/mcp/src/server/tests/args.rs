@@ -301,6 +301,7 @@ fn find_dupes_args_with_all_options() {
         no_cache: Some(true),
         threads: Some(8),
         changed_since: Some("main".to_string()),
+        group_by: None,
     };
     let args = build_find_dupes_args(&params).unwrap();
     assert_eq!(
@@ -391,6 +392,19 @@ fn find_dupes_args_threshold_zero() {
     let args = build_find_dupes_args(&params).unwrap();
     assert!(args.contains(&"--threshold".to_string()));
     assert!(args.contains(&"0".to_string()));
+}
+
+#[test]
+fn find_dupes_args_group_by_section() {
+    let params = FindDupesParams {
+        group_by: Some("section".to_string()),
+        ..Default::default()
+    };
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(
+        args.windows(2).any(|w| w == ["--group-by", "section"]),
+        "expected --group-by section, got {args:?}"
+    );
 }
 
 // ── Argument building: fix_preview vs fix_apply ───────────────────
@@ -564,6 +578,7 @@ fn health_args_with_all_options() {
         min_severity: None,
         ownership: None,
         ownership_email_mode: None,
+        group_by: None,
     };
     let args = build_health_args(&params);
     assert_eq!(
@@ -642,6 +657,19 @@ fn health_args_partial_options() {
             "--sort",
             "cyclomatic",
         ]
+    );
+}
+
+#[test]
+fn health_args_group_by_section() {
+    let params = HealthParams {
+        group_by: Some("section".to_string()),
+        ..Default::default()
+    };
+    let args = build_health_args(&params);
+    assert!(
+        args.windows(2).any(|w| w == ["--group-by", "section"]),
+        "expected --group-by section, got {args:?}"
     );
 }
 
@@ -947,6 +975,7 @@ fn audit_args_with_all_options() {
         workspace: Some("@app/core".to_string()),
         no_cache: Some(true),
         threads: Some(4),
+        group_by: None,
     });
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/project".to_string()));
@@ -960,6 +989,18 @@ fn audit_args_with_all_options() {
     assert!(args.contains(&"--no-cache".to_string()));
     assert!(args.contains(&"--threads".to_string()));
     assert!(args.contains(&"4".to_string()));
+}
+
+#[test]
+fn audit_args_group_by_section() {
+    let args = build_audit_args(&AuditParams {
+        group_by: Some("section".to_string()),
+        ..Default::default()
+    });
+    assert!(
+        args.windows(2).any(|w| w == ["--group-by", "section"]),
+        "expected --group-by section, got {args:?}"
+    );
 }
 
 // ── Argument building: list_boundaries ──────────────────────────

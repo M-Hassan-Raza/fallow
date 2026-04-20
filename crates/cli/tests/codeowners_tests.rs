@@ -114,3 +114,75 @@ fn from_file_surfaces_parse_error_for_malformed_glob() {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn gitlab_section_shared_lead_owner_regression_133() {
+    // Issue #133: multiple sections listing the same reviewer first must NOT
+    // collapse into a single bucket under --group-by section. Regression
+    // fixture mirrored after the poncho real-world case (120+ sections, all
+    // sharing one lead reviewer).
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let path = dir.path().join(".gitlab/CODEOWNERS");
+    write(
+        &path,
+        "\
+[billing] @core-reviewers @alice @bob
+src/billing/
+
+[notifications] @core-reviewers @alice @bob
+src/notifications/
+
+[search] @core-reviewers @charlie @dave
+src/search/
+
+[admin] @core-reviewers @eve
+src/admin/
+",
+    );
+
+    let co = CodeOwners::discover(dir.path()).expect("discover GitLab CODEOWNERS");
+    assert!(co.has_sections(), "parser should detect section headers");
+
+    let billing = co
+        .section_and_owners_of(Path::new("src/billing/invoice.ts"))
+        .expect("billing match");
+    let notifications = co
+        .section_and_owners_of(Path::new("src/notifications/email.ts"))
+        .expect("notifications match");
+    let search = co
+        .section_and_owners_of(Path::new("src/search/indexer.ts"))
+        .expect("search match");
+    let admin = co
+        .section_and_owners_of(Path::new("src/admin/dashboard.ts"))
+        .expect("admin match");
+
+    // Each section resolves to its own name even though three of them share
+    // the exact same default owners. `owner_of` (the legacy primary-owner
+    // lookup) would collapse all four into "@core-reviewers"; `section_of`
+    // must not.
+    assert_eq!(billing.0, Some("billing"));
+    assert_eq!(notifications.0, Some("notifications"));
+    assert_eq!(search.0, Some("search"));
+    assert_eq!(admin.0, Some("admin"));
+    assert_eq!(
+        billing.1,
+        ["@core-reviewers", "@alice", "@bob"]
+            .map(String::from)
+            .as_slice()
+    );
+    assert_eq!(
+        admin.1,
+        ["@core-reviewers", "@eve"].map(String::from).as_slice()
+    );
+
+    // Sanity: owner mode does collapse on this fixture. Documents the exact
+    // behavior difference #133 was filed against.
+    assert_eq!(
+        co.owner_of(Path::new("src/billing/invoice.ts")),
+        Some("@core-reviewers"),
+    );
+    assert_eq!(
+        co.owner_of(Path::new("src/admin/dashboard.ts")),
+        Some("@core-reviewers"),
+    );
+}
