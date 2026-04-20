@@ -10,6 +10,7 @@
   <strong>Codebase intelligence for TypeScript & JavaScript.</strong><br>
   Free static analysis for unused code, duplication, complexity, and architecture drift.<br>
   Optional runtime intelligence for hot paths, cold paths, and runtime-backed code decisions.<br>
+  <strong>Built for AI-assisted development. No AI inside.</strong><br>
   <strong>Rust-native. Zero config. Sub-second.</strong>
 </p>
 
@@ -39,7 +40,9 @@ npx fallow
 
 90 framework plugins. No Node.js runtime required for static analysis. No config needed for the first run.
 
-Fallow builds a project-wide understanding of your TS/JS codebase instead of checking one file at a time. Use it to clean up dead code, reduce duplication, find risky complexity, and enforce architecture boundaries. Add the runtime layer when you want to know what actually executed in production.
+Fallow builds a project-wide understanding of your TS/JS codebase instead of checking one file at a time. Use it to review AI-generated changes faster, clean up dead code, reduce duplication, find risky complexity, and enforce architecture boundaries. Add the runtime layer when you want to know what actually executed in production.
+
+**Fallow is the codebase truth layer your coding agent can call. It is not an AI assistant.**
 
 ## Install
 
@@ -82,6 +85,41 @@ It builds a module graph across the whole project so it can find problems that f
 | Dependency in package.json never imported | no | yes |
 
 [Full comparison: fallow vs ESLint, Biome, knip, ts-prune](https://docs.fallow.tools/explanations/fallow-vs-linters)
+
+## Why teams using AI need Fallow
+
+AI accelerates code creation. It does not eliminate review, cleanup, or architecture drift.
+
+When Claude Code, Codex, Cursor, or other tools generate changes, teams still need to know:
+
+- did this introduce dead code?
+- did it duplicate logic that already existed?
+- did complexity get worse?
+- did the change cross a boundary it should not cross?
+- is this code on a hot path or a cold one?
+- what should the reviewer read closely first?
+
+Fallow answers those questions with deterministic, graph-based analysis and structured output, so both humans and agents can act on facts instead of guesses.
+
+## How agents use Fallow
+
+Agents do not need to guess from limited context. They can call Fallow directly via the CLI or MCP.
+
+Common agent workflow:
+
+1. generate or edit code
+2. run `fallow --format json`
+3. inspect dead code, duplication, health findings, and per-issue `actions`
+4. apply safe fixes or adjust the patch before opening a PR
+5. hand the result to a human reviewer with better evidence
+
+```bash
+npx fallow --format json
+npx fallow audit --format json
+npx fallow fix --dry-run --format json
+```
+
+See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setup and the full list of structured tools.
 
 ## More static commands
 
@@ -153,12 +191,13 @@ Static analysis answers: **what is connected to what?**
 
 Runtime intelligence answers: **what actually ran?**
 
-Fallow Runtime is the optional paid team layer. It uses production coverage as the collection engine (V8 dumps via `NODE_V8_COVERAGE=...` and Istanbul `coverage-final.json` files), then merges that evidence into `fallow health` so teams can:
+Fallow Runtime is the optional paid team layer. It uses production coverage as the collection engine (V8 dumps via `NODE_V8_COVERAGE=...` and Istanbul `coverage-final.json` files), then merges that evidence into `fallow health` so teams and coding agents can:
 
-- identify cold code with more confidence
-- review changes on hot paths more carefully
-- weight refactors by real execution importance
-- spot stale feature-flag branches
+- review changes on hot production paths more carefully
+- delete cold code with stronger evidence
+- prioritize refactors by runtime importance
+- spot stale feature-flag branches and stale runtime code
+- give agents factual usage data instead of assumptions
 
 ```bash
 fallow license activate --trial --email you@company.com
@@ -321,6 +360,8 @@ See the [full configuration reference](https://docs.fallow.tools/configuration/o
 [Full plugin list](https://docs.fallow.tools/frameworks/built-in) -- missing one? Add a [custom plugin](https://docs.fallow.tools/frameworks/custom-plugins) or [open an issue](https://github.com/fallow-rs/fallow/issues).
 
 ## Editor & AI support
+
+Fallow is not an AI assistant. It is the codebase truth layer your assistant can call.
 
 - **VS Code extension** -- tree views, status bar, one-click fixes, auto-download LSP binary ([Marketplace](https://github.com/fallow-rs/fallow/tree/main/editors/vscode))
 - **LSP server** -- real-time diagnostics, hover info, code actions, Code Lens with reference counts
