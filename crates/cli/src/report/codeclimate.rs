@@ -493,11 +493,16 @@ pub(super) fn print_grouped_codeclimate(
 
 /// Build CodeClimate JSON array from health/complexity analysis results.
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "CRAP adds a fourth exceeded-threshold branch plus its description; splitting the dispatch table would fragment the mapping."
+)]
 pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_json::Value {
     let mut issues = Vec::new();
 
     let cyc_t = report.summary.max_cyclomatic_threshold;
     let cog_t = report.summary.max_cognitive_threshold;
+    let crap_t = report.summary.max_crap_threshold;
 
     for finding in &report.findings {
         let path = cc_path(&finding.path, root);
@@ -514,11 +519,29 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
                 "'{}' has cognitive complexity {} (threshold: {})",
                 finding.name, finding.cognitive, cog_t
             ),
+            ExceededThreshold::Crap
+            | ExceededThreshold::CyclomaticCrap
+            | ExceededThreshold::CognitiveCrap
+            | ExceededThreshold::All => {
+                let crap = finding.crap.unwrap_or(0.0);
+                let coverage = finding
+                    .coverage_pct
+                    .map(|pct| format!(", coverage {pct:.0}%"))
+                    .unwrap_or_default();
+                format!(
+                    "'{}' has CRAP score {crap:.1} (threshold: {crap_t:.1}, cyclomatic {}{coverage})",
+                    finding.name, finding.cyclomatic,
+                )
+            }
         };
         let check_name = match finding.exceeded {
             ExceededThreshold::Both => "fallow/high-complexity",
             ExceededThreshold::Cyclomatic => "fallow/high-cyclomatic-complexity",
             ExceededThreshold::Cognitive => "fallow/high-cognitive-complexity",
+            ExceededThreshold::Crap
+            | ExceededThreshold::CyclomaticCrap
+            | ExceededThreshold::CognitiveCrap
+            | ExceededThreshold::All => "fallow/high-crap-score",
         };
         // Map finding severity to CodeClimate severity levels
         let severity = match finding.severity {
@@ -1150,5 +1173,40 @@ mod tests {
                 .unwrap()
                 .contains("loader")
         );
+    }
+
+    #[test]
+    fn health_codeclimate_crap_only_uses_crap_check_name() {
+        use crate::health_types::{FindingSeverity, HealthFinding, HealthReport, HealthSummary};
+        let root = PathBuf::from("/project");
+        let report = HealthReport {
+            findings: vec![HealthFinding {
+                path: root.join("src/untested.ts"),
+                name: "risky".to_string(),
+                line: 7,
+                col: 0,
+                cyclomatic: 10,
+                cognitive: 10,
+                line_count: 20,
+                param_count: 1,
+                exceeded: crate::health_types::ExceededThreshold::Crap,
+                severity: FindingSeverity::High,
+                crap: Some(60.0),
+                coverage_pct: Some(25.0),
+            }],
+            summary: HealthSummary {
+                functions_analyzed: 10,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let json = build_health_codeclimate(&report, &root);
+        let issues = json.as_array().unwrap();
+        assert_eq!(issues[0]["check_name"], "fallow/high-crap-score");
+        assert_eq!(issues[0]["severity"], "major");
+        let description = issues[0]["description"].as_str().unwrap();
+        assert!(description.contains("CRAP score"), "desc: {description}");
+        assert!(description.contains("coverage 25%"), "desc: {description}");
     }
 }

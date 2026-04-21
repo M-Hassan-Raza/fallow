@@ -76,6 +76,7 @@ build_command_args() {
     health)
       [ -n "${INPUT_MAX_CYCLOMATIC:-}" ] && ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
       [ -n "${INPUT_MAX_COGNITIVE:-}" ] && ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
+      [ -n "${INPUT_MAX_CRAP:-}" ] && ARGS+=(--max-crap "$INPUT_MAX_CRAP")
       [ "$include_top" = "true" ] && [ -n "${INPUT_TOP:-}" ] && ARGS+=(--top "$INPUT_TOP")
       [ -n "${INPUT_SORT:-}" ] && ARGS+=(--sort "$INPUT_SORT")
       [ "${INPUT_SCORE:-}" = "true" ] && ARGS+=(--score)
@@ -140,6 +141,11 @@ for name_val in "min-tokens:${INPUT_MIN_TOKENS:-}" "min-lines:${INPUT_MIN_LINES:
 done
 if [ -n "${INPUT_THRESHOLD:-}" ] && ! [[ "$INPUT_THRESHOLD" =~ ^[0-9]+\.?[0-9]*$ ]]; then
   echo "::error::threshold must be a number, got: ${INPUT_THRESHOLD}"; exit 2
+fi
+# max-crap accepts floating-point values (e.g. 30.0, 45.5) because CRAP scores
+# are non-integer. Use the same numeric regex as threshold.
+if [ -n "${INPUT_MAX_CRAP:-}" ] && ! [[ "$INPUT_MAX_CRAP" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+  echo "::error::max-crap must be a non-negative number, got: ${INPUT_MAX_CRAP}"; exit 2
 fi
 
 # --- Check for --sarif-file support ---

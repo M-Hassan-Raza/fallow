@@ -29,6 +29,10 @@ pub(super) struct FileScoreOutput {
     /// Istanbul match stats: functions matched / total (only meaningful with Istanbul model).
     pub istanbul_matched: usize,
     pub istanbul_total: usize,
+    /// Per-file, per-function CRAP data used to emit `--max-crap` findings.
+    /// Absolute paths match `FileHealthScore.path`. Absent entries indicate the
+    /// file had zero functions.
+    pub per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
 }
 
 /// Aggregate complexity totals from a parsed module.
@@ -128,6 +132,18 @@ fn compute_crap_scores_binary(
     ((max * 10.0).round() / 10.0, above)
 }
 
+/// Per-function CRAP data used to emit `--max-crap` findings.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct PerFunctionCrap {
+    /// 1-based line number of the function's definition.
+    pub line: u32,
+    /// Computed CRAP score, rounded to one decimal place.
+    pub crap: f64,
+    /// Coverage percentage used to compute `crap`, when Istanbul matched the
+    /// function. `None` for estimated coverage or unmatched functions.
+    pub coverage_pct: Option<f64>,
+}
+
 /// Istanbul CRAP result: CRAP scores plus match statistics.
 pub(super) struct IstanbulCrapResult {
     pub max_crap: f64,
@@ -136,6 +152,8 @@ pub(super) struct IstanbulCrapResult {
     pub matched: usize,
     /// Total functions evaluated.
     pub total: usize,
+    /// Per-function CRAP data indexed by function position within `complexity`.
+    pub per_function: Vec<PerFunctionCrap>,
 }
 
 /// Compute per-function CRAP scores using Istanbul coverage data.
@@ -163,33 +181,41 @@ fn compute_crap_scores_istanbul(
             above_threshold: 0,
             matched: 0,
             total: 0,
+            per_function: Vec::new(),
         };
     }
     let mut max = 0.0_f64;
     let mut above = 0usize;
     let mut matched = 0usize;
+    let mut per_function = Vec::with_capacity(complexity.len());
     for f in complexity {
         let cc = f64::from(f.cyclomatic);
-        let crap = if let Some(cov_pct) =
-            file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line))
-        {
+        let lookup = file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line));
+        let (crap, coverage_pct) = if let Some(cov_pct) = lookup {
             matched += 1;
-            crap_formula(cc, cov_pct)
+            (crap_formula(cc, cov_pct), Some(cov_pct))
         } else if is_test_reachable {
-            cc
+            (cc, None)
         } else {
-            cc * cc + cc
+            (cc * cc + cc, None)
         };
+        let crap_rounded = (crap * 10.0).round() / 10.0;
         max = max.max(crap);
         if crap >= CRAP_THRESHOLD {
             above += 1;
         }
+        per_function.push(PerFunctionCrap {
+            line: f.line,
+            crap: crap_rounded,
+            coverage_pct,
+        });
     }
     IstanbulCrapResult {
         max_crap: (max * 10.0).round() / 10.0,
         above_threshold: above,
         matched,
         total: complexity.len(),
+        per_function,
     }
 }
 
@@ -211,16 +237,28 @@ const INDIRECT_TEST_COVERAGE_ESTIMATE: f64 = 40.0;
 ///
 /// Applies the canonical CRAP formula with these estimates.
 /// Returns `(max_crap, count_above_threshold)`.
+/// Estimated CRAP result: score aggregates plus per-function data.
+pub(super) struct EstimatedCrapResult {
+    pub max_crap: f64,
+    pub above_threshold: usize,
+    pub per_function: Vec<PerFunctionCrap>,
+}
+
 fn compute_crap_scores_estimated(
     complexity: &[fallow_types::extract::FunctionComplexity],
     test_referenced_exports: &rustc_hash::FxHashSet<String>,
     is_test_reachable: bool,
-) -> (f64, usize) {
+) -> EstimatedCrapResult {
     if complexity.is_empty() {
-        return (0.0, 0);
+        return EstimatedCrapResult {
+            max_crap: 0.0,
+            above_threshold: 0,
+            per_function: Vec::new(),
+        };
     }
     let mut max = 0.0_f64;
     let mut above = 0usize;
+    let mut per_function = Vec::with_capacity(complexity.len());
     for f in complexity {
         let cc = f64::from(f.cyclomatic);
         let estimated_coverage = if test_referenced_exports.contains(f.name.as_str()) {
@@ -231,12 +269,25 @@ fn compute_crap_scores_estimated(
             0.0
         };
         let crap = crap_formula(cc, estimated_coverage);
+        let crap_rounded = (crap * 10.0).round() / 10.0;
         max = max.max(crap);
         if crap >= CRAP_THRESHOLD {
             above += 1;
         }
+        // Estimated model never attaches a `coverage_pct` because the values
+        // are heuristic (85%, 40%, 0%) rather than observed; reporting them
+        // as "the function's real coverage" would be misleading.
+        per_function.push(PerFunctionCrap {
+            line: f.line,
+            crap: crap_rounded,
+            coverage_pct: None,
+        });
     }
-    ((max * 10.0).round() / 10.0, above)
+    EstimatedCrapResult {
+        max_crap: (max * 10.0).round() / 10.0,
+        above_threshold: above,
+        per_function,
+    }
 }
 
 /// Build the set of export names that have at least one test-reachable reference.
@@ -731,6 +782,8 @@ pub(super) fn compute_file_scores(
     let mut scores = Vec::with_capacity(graph.modules.len());
     let mut istanbul_matched = 0usize;
     let mut istanbul_total = 0usize;
+    let mut per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>> =
+        rustc_hash::FxHashMap::default();
 
     for node in &graph.modules {
         let Some(path) = file_paths.get(&node.file_id) else {
@@ -811,7 +864,9 @@ pub(super) fn compute_file_scores(
             )
         });
         let is_test_reachable = node.is_test_reachable() || is_coverage_suppressed;
-        let (crap_max, crap_above_threshold) = if let Some(istanbul) = istanbul_coverage {
+        let (crap_max, crap_above_threshold, per_function) = if let Some(istanbul) =
+            istanbul_coverage
+        {
             let canonical = dunce::canonicalize(&path_owned).unwrap_or_else(|_| path_owned.clone());
             let result = module.map_or(
                 IstanbulCrapResult {
@@ -819,6 +874,7 @@ pub(super) fn compute_file_scores(
                     above_threshold: 0,
                     matched: 0,
                     total: 0,
+                    per_function: Vec::new(),
                 },
                 |m| {
                     compute_crap_scores_istanbul(
@@ -830,13 +886,19 @@ pub(super) fn compute_file_scores(
             );
             istanbul_matched += result.matched;
             istanbul_total += result.total;
-            (result.max_crap, result.above_threshold)
+            (result.max_crap, result.above_threshold, result.per_function)
         } else {
-            module.map_or((0.0, 0), |m| {
+            module.map_or((0.0, 0, Vec::new()), |m| {
                 let test_refs = build_test_referenced_exports(&node.exports, &graph.modules);
-                compute_crap_scores_estimated(&m.complexity, &test_refs, is_test_reachable)
+                let result =
+                    compute_crap_scores_estimated(&m.complexity, &test_refs, is_test_reachable);
+                (result.max_crap, result.above_threshold, result.per_function)
             })
         };
+
+        if !per_function.is_empty() {
+            per_function_crap.insert(path_owned.clone(), per_function);
+        }
 
         scores.push(FileHealthScore {
             path: path_owned,
@@ -901,6 +963,7 @@ pub(super) fn compute_file_scores(
         },
         istanbul_matched,
         istanbul_total,
+        per_function_crap,
     })
 }
 
@@ -2718,7 +2781,8 @@ mod tests {
         let funcs = vec![make_fn_complexity(10)];
         let mut refs = rustc_hash::FxHashSet::default();
         refs.insert("test_fn".to_string());
-        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, true);
+        let result = compute_crap_scores_estimated(&funcs, &refs, true);
+        let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 10.3).abs() < 0.1);
         assert_eq!(above, 0);
     }
@@ -2729,7 +2793,8 @@ mod tests {
         // CC=10: CRAP = 100 * (0.6)^3 + 10 = 100 * 0.216 + 10 = 31.6
         let funcs = vec![make_fn_complexity(10)];
         let refs = rustc_hash::FxHashSet::default();
-        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, true);
+        let result = compute_crap_scores_estimated(&funcs, &refs, true);
+        let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 31.6).abs() < 0.1);
         assert_eq!(above, 1); // above threshold of 30
     }
@@ -2740,7 +2805,8 @@ mod tests {
         // CC=5: CRAP = 25 * 1 + 5 = 30
         let funcs = vec![make_fn_complexity(5)];
         let refs = rustc_hash::FxHashSet::default();
-        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, false);
+        let result = compute_crap_scores_estimated(&funcs, &refs, false);
+        let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max - 30.0).abs() < f64::EPSILON);
         assert_eq!(above, 1);
     }
@@ -2751,7 +2817,8 @@ mod tests {
         let funcs = vec![make_fn_complexity(2)];
         let mut refs = rustc_hash::FxHashSet::default();
         refs.insert("test_fn".to_string());
-        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, true);
+        let result = compute_crap_scores_estimated(&funcs, &refs, true);
+        let (max, above) = (result.max_crap, result.above_threshold);
         assert!(max < 3.0);
         assert_eq!(above, 0);
     }
@@ -2759,7 +2826,8 @@ mod tests {
     #[test]
     fn estimated_crap_empty() {
         let refs = rustc_hash::FxHashSet::default();
-        let (max, above) = compute_crap_scores_estimated(&[], &refs, true);
+        let result = compute_crap_scores_estimated(&[], &refs, true);
+        let (max, above) = (result.max_crap, result.above_threshold);
         assert!((max).abs() < f64::EPSILON);
         assert_eq!(above, 0);
     }
@@ -2950,7 +3018,8 @@ mod tests {
         ];
         let mut refs = rustc_hash::FxHashSet::default();
         refs.insert("test_fn".to_string()); // Only test_fn is directly referenced
-        let (max, above) = compute_crap_scores_estimated(&funcs, &refs, true);
+        let result = compute_crap_scores_estimated(&funcs, &refs, true);
+        let (max, above) = (result.max_crap, result.above_threshold);
         // test_fn: CC=10, 85% coverage -> CRAP ~10.3
         // helper: CC=3, 40% coverage (indirect) -> CRAP = 9*0.216+3 = 4.944
         assert!(max > 10.0);

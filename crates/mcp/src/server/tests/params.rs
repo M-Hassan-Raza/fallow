@@ -136,6 +136,7 @@ fn health_params_all_fields_deserialize() {
         "config": "fallow.toml",
         "max_cyclomatic": 25,
         "max_cognitive": 30,
+        "max_crap": 45.5,
         "top": 10,
         "sort": "cognitive",
         "changed_since": "HEAD~3",
@@ -149,6 +150,7 @@ fn health_params_all_fields_deserialize() {
     assert_eq!(params.config.as_deref(), Some("fallow.toml"));
     assert_eq!(params.max_cyclomatic, Some(25));
     assert_eq!(params.max_cognitive, Some(30));
+    assert_eq!(params.max_crap, Some(45.5));
     assert_eq!(params.top, Some(10));
     assert_eq!(params.sort.as_deref(), Some("cognitive"));
     assert_eq!(params.changed_since.as_deref(), Some("HEAD~3"));
@@ -165,6 +167,7 @@ fn health_params_minimal() {
     assert!(params.config.is_none());
     assert!(params.max_cyclomatic.is_none());
     assert!(params.max_cognitive.is_none());
+    assert!(params.max_crap.is_none());
     assert!(params.top.is_none());
     assert!(params.sort.is_none());
     assert!(params.changed_since.is_none());

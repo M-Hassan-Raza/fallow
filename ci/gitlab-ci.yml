@@ -113,6 +113,7 @@ variables:
   # Health specific
   FALLOW_MAX_CYCLOMATIC: ""
   FALLOW_MAX_COGNITIVE: ""
+  FALLOW_MAX_CRAP: ""             # Maximum CRAP score (default 30.0); pair with coverage data for accurate per-function scoring
   FALLOW_TOP: ""
   FALLOW_SORT: ""               # cyclomatic, cognitive, or lines
   FALLOW_SCORE: "false"          # health score (0-100 with letter grade), enables delta header in MR comments
@@ -245,6 +246,10 @@ variables:
       if [ -n "$FALLOW_THRESHOLD" ] && ! echo "$FALLOW_THRESHOLD" | grep -qE '^[0-9]+\.?[0-9]*$'; then
         echo "ERROR: threshold must be a number, got: ${FALLOW_THRESHOLD}"; exit 2
       fi
+      # max-crap accepts floating-point values; CRAP scores are non-integer.
+      if [ -n "$FALLOW_MAX_CRAP" ] && ! echo "$FALLOW_MAX_CRAP" | grep -qE '^[0-9]+\.?[0-9]*$'; then
+        echo "ERROR: max-crap must be a non-negative number, got: ${FALLOW_MAX_CRAP}"; exit 2
+      fi
 
       # ── Auto changed-since in MR context ───────────────────────────
       if [ -n "${CI_MERGE_REQUEST_IID:-}" ] && [ -z "$FALLOW_CHANGED_SINCE" ] && [ "$FALLOW_COMMAND" != "fix" ]; then
@@ -303,6 +308,7 @@ variables:
         health)
           [ -n "$FALLOW_MAX_CYCLOMATIC" ]     && ARGS+=(--max-cyclomatic "$FALLOW_MAX_CYCLOMATIC")
           [ -n "$FALLOW_MAX_COGNITIVE" ]      && ARGS+=(--max-cognitive "$FALLOW_MAX_COGNITIVE")
+          [ -n "$FALLOW_MAX_CRAP" ]           && ARGS+=(--max-crap "$FALLOW_MAX_CRAP")
           [ -n "$FALLOW_TOP" ]                && ARGS+=(--top "$FALLOW_TOP")
           [ -n "$FALLOW_SORT" ]               && ARGS+=(--sort "$FALLOW_SORT")
           [ "$FALLOW_SCORE" = "true" ]        && ARGS+=(--score)

@@ -692,7 +692,7 @@
 
     "HealthSummary": {
       "type": "object",
-      "required": ["files_analyzed", "functions_analyzed", "functions_above_threshold", "max_cyclomatic_threshold", "max_cognitive_threshold", "severity_critical_count", "severity_high_count", "severity_moderate_count"],
+      "required": ["files_analyzed", "functions_analyzed", "functions_above_threshold", "max_cyclomatic_threshold", "max_cognitive_threshold", "max_crap_threshold", "severity_critical_count", "severity_high_count", "severity_moderate_count"],
       "properties": {
         "files_analyzed": {
           "type": "integer",
@@ -713,6 +713,10 @@
         "max_cognitive_threshold": {
           "type": "integer",
           "description": "Configured cognitive complexity threshold."
+        },
+        "max_crap_threshold": {
+          "type": "number",
+          "description": "Configured CRAP (Change Risk Anti-Patterns) score threshold. Functions meeting or exceeding this score appear as findings with the `crap` and optional `coverage_pct` fields populated."
         },
         "files_scored": {
           "type": "integer",
@@ -789,8 +793,16 @@
         },
         "exceeded": {
           "type": "string",
-          "enum": ["cyclomatic", "cognitive", "both"],
-          "description": "Which threshold(s) this function exceeds."
+          "enum": ["cyclomatic", "cognitive", "both", "crap", "cyclomatic_crap", "cognitive_crap", "all"],
+          "description": "Which threshold(s) this function exceeds. `crap` and its combinations are emitted when `max_crap_threshold` is crossed."
+        },
+        "crap": {
+          "type": "number",
+          "description": "CRAP score (rounded to one decimal). Present only when the function exceeded the CRAP threshold; absent otherwise."
+        },
+        "coverage_pct": {
+          "type": "number",
+          "description": "Per-function statement coverage percentage (0.0 to 100.0) used to derive `crap`. Present only when Istanbul coverage data matched the function; absent for the estimated model or unmatched functions."
         },
         "severity": {
           "type": "string",

@@ -68,6 +68,9 @@ pub struct HealthOptions<'a> {
     pub quiet: bool,
     pub max_cyclomatic: Option<u16>,
     pub max_cognitive: Option<u16>,
+    /// Maximum CRAP score threshold (overrides config, default 30.0). Functions
+    /// meeting or exceeding this score are reported as complexity findings.
+    pub max_crap: Option<f64>,
     pub top: Option<usize>,
     pub sort: SortBy,
     pub production: bool,
@@ -216,6 +219,12 @@ fn execute_health_inner(
     // Resolve thresholds: CLI flags override config
     let max_cyclomatic = opts.max_cyclomatic.unwrap_or(config.health.max_cyclomatic);
     let max_cognitive = opts.max_cognitive.unwrap_or(config.health.max_cognitive);
+    let max_crap = opts.max_crap.unwrap_or(config.health.max_crap);
+    // CRAP findings require per-function CRAP data, which is computed as a
+    // side effect of file scoring. Enforce CRAP checks only when the
+    // configured threshold is positive; a zero or negative threshold would
+    // flag every function and is treated as "disabled".
+    let enforce_crap = max_crap > 0.0;
 
     let ignore_set = build_ignore_set(&config.health.ignore);
     let changed_files = opts
@@ -245,35 +254,7 @@ fn execute_health_inner(
     if let Some(ref ws) = ws_roots {
         findings.retain(|f| ws.iter().any(|r| f.path.starts_with(r)));
     }
-    sort_findings(&mut findings, &opts.sort);
     let complexity_ms = t.elapsed().as_secs_f64() * 1000.0;
-    let total_above_threshold = findings.len();
-
-    // Count severity tiers before baseline filtering and --top truncation
-    let (mut sev_critical, mut sev_high, mut sev_moderate) = (0usize, 0usize, 0usize);
-    for f in &findings {
-        match f.severity {
-            FindingSeverity::Critical => sev_critical += 1,
-            FindingSeverity::High => sev_high += 1,
-            FindingSeverity::Moderate => sev_moderate += 1,
-        }
-    }
-
-    // Load baseline for filtering (save happens after targets are computed)
-    let loaded_baseline = if let Some(load_path) = opts.baseline {
-        Some(load_health_baseline(
-            load_path,
-            &mut findings,
-            &config.root,
-            opts.quiet,
-            opts.output,
-        )?)
-    } else {
-        None
-    };
-    if let Some(top) = opts.top {
-        findings.truncate(top);
-    }
 
     // Coverage gaps have two separate concerns:
     // - reporting: include the section in the rendered health output
@@ -313,13 +294,17 @@ fn execute_health_inner(
         None
     };
 
-    // Compute file-level health scores (needed by hotspots and targets too)
+    // Compute file-level health scores (needed by hotspots and targets too).
+    // `enforce_crap` requires per-function CRAP data emitted as a side effect
+    // of file scoring, so it forces the file-score pipeline on even for
+    // otherwise-complexity-only runs.
     let needs_file_scores = opts.file_scores
         || report_coverage_gaps
         || enforce_coverage_gaps
         || opts.hotspots
         || opts.targets
-        || opts.force_full;
+        || opts.force_full
+        || enforce_crap;
     // Run file scoring and churn fetch in parallel when both are needed.
     // Churn fetch involves a `git log` shell-out that dominates health timing.
     let needs_churn = opts.hotspots || opts.targets || opts.force_full;
@@ -392,6 +377,54 @@ fn execute_health_inner(
     let file_scores_slice = score_output
         .as_ref()
         .map_or(&[] as &[_], |o| o.scores.as_slice());
+
+    // Merge per-function CRAP data into complexity findings. Functions that
+    // only exceed `--max-crap` (and not cyclomatic/cognitive) are added as
+    // new findings; functions already flagged for complexity get the CRAP
+    // fields populated so reports can surface the combined risk.
+    if enforce_crap && let Some(ref score_out) = score_output {
+        merge_crap_findings(
+            &mut findings,
+            &modules,
+            &file_paths,
+            &config.root,
+            &ignore_set,
+            changed_files.as_ref(),
+            ws_roots.as_deref(),
+            &score_out.per_function_crap,
+            max_crap,
+            max_cyclomatic,
+            max_cognitive,
+        );
+    }
+    sort_findings(&mut findings, &opts.sort);
+    let total_above_threshold = findings.len();
+
+    // Count severity tiers before baseline filtering and --top truncation
+    let (mut sev_critical, mut sev_high, mut sev_moderate) = (0usize, 0usize, 0usize);
+    for f in &findings {
+        match f.severity {
+            FindingSeverity::Critical => sev_critical += 1,
+            FindingSeverity::High => sev_high += 1,
+            FindingSeverity::Moderate => sev_moderate += 1,
+        }
+    }
+
+    // Load baseline for filtering (save happens after targets are computed)
+    let loaded_baseline = if let Some(load_path) = opts.baseline {
+        Some(load_health_baseline(
+            load_path,
+            &mut findings,
+            &config.root,
+            opts.quiet,
+            opts.output,
+        )?)
+    } else {
+        None
+    };
+    if let Some(top) = opts.top {
+        findings.truncate(top);
+    }
 
     // Compute hotspot analysis using pre-fetched churn data
     let t = Instant::now();
@@ -541,6 +574,7 @@ fn execute_health_inner(
         total_above_threshold,
         max_cyclomatic,
         max_cognitive,
+        max_crap,
         files_scored,
         average_maintainability,
         vital_signs,
@@ -931,6 +965,7 @@ fn assemble_health_report(
     total_above_threshold: usize,
     max_cyclomatic: u16,
     max_cognitive: u16,
+    max_crap: f64,
     files_scored: Option<usize>,
     average_maintainability: Option<f64>,
     vital_signs: crate::health_types::VitalSigns,
@@ -1018,6 +1053,7 @@ fn assemble_health_report(
             functions_above_threshold: total_above_threshold,
             max_cyclomatic_threshold: max_cyclomatic,
             max_cognitive_threshold: max_cognitive,
+            max_crap_threshold: max_crap,
             files_scored: summary_files_scored,
             average_maintainability: summary_average_maintainability,
             coverage_model: summary_coverage_model,
@@ -1186,12 +1222,6 @@ fn collect_findings(
             let exceeds_cyclomatic = fc.cyclomatic > max_cyclomatic;
             let exceeds_cognitive = fc.cognitive > max_cognitive;
             if exceeds_cyclomatic || exceeds_cognitive {
-                let exceeded = match (exceeds_cyclomatic, exceeds_cognitive) {
-                    (true, true) => ExceededThreshold::Both,
-                    (true, false) => ExceededThreshold::Cyclomatic,
-                    (false, true) => ExceededThreshold::Cognitive,
-                    (false, false) => unreachable!(),
-                };
                 findings.push(HealthFinding {
                     path: path.clone(),
                     name: fc.name.clone(),
@@ -1201,21 +1231,180 @@ fn collect_findings(
                     cognitive: fc.cognitive,
                     line_count: fc.line_count,
                     param_count: fc.param_count,
-                    exceeded,
+                    exceeded: ExceededThreshold::from_bools(
+                        exceeds_cyclomatic,
+                        exceeds_cognitive,
+                        false,
+                    ),
                     severity: compute_finding_severity(
                         fc.cognitive,
                         fc.cyclomatic,
+                        None,
                         DEFAULT_COGNITIVE_HIGH,
                         DEFAULT_COGNITIVE_CRITICAL,
                         DEFAULT_CYCLOMATIC_HIGH,
                         DEFAULT_CYCLOMATIC_CRITICAL,
                     ),
+                    crap: None,
+                    coverage_pct: None,
                 });
             }
         }
     }
 
     (findings, files_analyzed, total_functions)
+}
+
+/// Merge per-function CRAP data into an existing complexity findings vector.
+///
+/// Functions that only exceed `--max-crap` (without exceeding cyclomatic or
+/// cognitive) become new findings. Functions that already produced a finding
+/// for cyclomatic/cognitive get their `crap` and `coverage_pct` fields
+/// populated, and the `exceeded` discriminant plus `severity` are recomputed
+/// to reflect CRAP's contribution.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "CRAP merge needs the same filter pipeline as collect_findings"
+)]
+fn merge_crap_findings(
+    findings: &mut Vec<HealthFinding>,
+    modules: &[fallow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
+    config_root: &std::path::Path,
+    ignore_set: &globset::GlobSet,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+    per_function_crap: &rustc_hash::FxHashMap<std::path::PathBuf, Vec<scoring::PerFunctionCrap>>,
+    max_crap: f64,
+    max_cyclomatic: u16,
+    max_cognitive: u16,
+) {
+    // Index existing findings by (path, line) so we can update in place.
+    let finding_index: rustc_hash::FxHashMap<(std::path::PathBuf, u32), usize> = findings
+        .iter()
+        .enumerate()
+        .map(|(idx, f)| ((f.path.clone(), f.line), idx))
+        .collect();
+    // Build (path -> line -> &FunctionComplexity) for creating new findings
+    // for CRAP-only violations.
+    let mut complexity_by_line: rustc_hash::FxHashMap<
+        &std::path::Path,
+        rustc_hash::FxHashMap<u32, &fallow_types::extract::FunctionComplexity>,
+    > = rustc_hash::FxHashMap::default();
+    for module in modules {
+        let Some(&path) = file_paths.get(&module.file_id) else {
+            continue;
+        };
+        let entry = complexity_by_line.entry(path.as_path()).or_default();
+        for fc in &module.complexity {
+            entry.insert(fc.line, fc);
+        }
+    }
+    // Track suppressions per file so we can honor `// fallow-ignore-*
+    // complexity` for CRAP-only findings too.
+    let suppressions_by_path: rustc_hash::FxHashMap<&std::path::Path, _> = modules
+        .iter()
+        .filter_map(|m| {
+            file_paths
+                .get(&m.file_id)
+                .map(|p| (p.as_path(), &m.suppressions))
+        })
+        .collect();
+
+    let mut new_findings: Vec<HealthFinding> = Vec::new();
+    for (path, per_fn) in per_function_crap {
+        // Apply the same filters as collect_findings so CRAP findings respect
+        // `ignore`, `--changed-since`, and `--workspace`.
+        let relative = path.strip_prefix(config_root).unwrap_or(path);
+        if ignore_set.is_match(relative) {
+            continue;
+        }
+        if let Some(changed) = changed_files
+            && !changed.contains(path)
+        {
+            continue;
+        }
+        if let Some(ws) = ws_roots
+            && !ws.iter().any(|r| path.starts_with(r))
+        {
+            continue;
+        }
+
+        for pf in per_fn {
+            if pf.crap < max_crap {
+                continue;
+            }
+            if let Some(sups) = suppressions_by_path.get(path.as_path())
+                && fallow_core::suppress::is_suppressed(
+                    sups,
+                    pf.line,
+                    fallow_core::suppress::IssueKind::Complexity,
+                )
+            {
+                continue;
+            }
+
+            if let Some(&idx) = finding_index.get(&(path.clone(), pf.line)) {
+                let finding = &mut findings[idx];
+                finding.crap = Some(pf.crap);
+                finding.coverage_pct = pf.coverage_pct;
+                let exceeds_cyclomatic = finding.exceeded.includes_cyclomatic();
+                let exceeds_cognitive = finding.exceeded.includes_cognitive();
+                finding.exceeded =
+                    ExceededThreshold::from_bools(exceeds_cyclomatic, exceeds_cognitive, true);
+                finding.severity = compute_finding_severity(
+                    finding.cognitive,
+                    finding.cyclomatic,
+                    Some(pf.crap),
+                    DEFAULT_COGNITIVE_HIGH,
+                    DEFAULT_COGNITIVE_CRITICAL,
+                    DEFAULT_CYCLOMATIC_HIGH,
+                    DEFAULT_CYCLOMATIC_CRITICAL,
+                );
+            } else {
+                let Some(fc) = complexity_by_line
+                    .get(path.as_path())
+                    .and_then(|m| m.get(&pf.line).copied())
+                else {
+                    continue;
+                };
+                // Skip functions that already exceed cyclomatic/cognitive:
+                // `collect_findings` would have already produced a finding
+                // for them, so finding_index lookup above should have hit.
+                // A missing entry here means the function passed those
+                // thresholds but still exceeds CRAP on its own.
+                let exceeds_cyclomatic = fc.cyclomatic > max_cyclomatic;
+                let exceeds_cognitive = fc.cognitive > max_cognitive;
+                new_findings.push(HealthFinding {
+                    path: path.clone(),
+                    name: fc.name.clone(),
+                    line: fc.line,
+                    col: fc.col,
+                    cyclomatic: fc.cyclomatic,
+                    cognitive: fc.cognitive,
+                    line_count: fc.line_count,
+                    param_count: fc.param_count,
+                    exceeded: ExceededThreshold::from_bools(
+                        exceeds_cyclomatic,
+                        exceeds_cognitive,
+                        true,
+                    ),
+                    severity: compute_finding_severity(
+                        fc.cognitive,
+                        fc.cyclomatic,
+                        Some(pf.crap),
+                        DEFAULT_COGNITIVE_HIGH,
+                        DEFAULT_COGNITIVE_CRITICAL,
+                        DEFAULT_CYCLOMATIC_HIGH,
+                        DEFAULT_CYCLOMATIC_CRITICAL,
+                    ),
+                    crap: Some(pf.crap),
+                    coverage_pct: pf.coverage_pct,
+                });
+            }
+        }
+    }
+    findings.extend(new_findings);
 }
 
 /// Save health baseline to disk.

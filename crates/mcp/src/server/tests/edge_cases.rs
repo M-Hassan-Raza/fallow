@@ -645,6 +645,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         config: Some("fallow.toml".to_string()),
         max_cyclomatic: Some(25),
         max_cognitive: Some(15),
+        max_crap: Some(30.0),
         top: Some(20),
         sort: Some("cognitive".to_string()),
         changed_since: Some("develop".to_string()),

@@ -9,6 +9,13 @@ const fn default_max_cognitive() -> u16 {
     15
 }
 
+/// Savoia and Evans (2007) canonical CRAP threshold: CC=5 untested gives
+/// exactly `5^2 + 5 = 30`, marking the boundary where refactoring or test
+/// coverage becomes recommended.
+const fn default_max_crap() -> f64 {
+    30.0
+}
+
 /// Default bot/service-account author patterns filtered from ownership metrics.
 ///
 /// Matches common CI bot signatures and service-account naming conventions.
@@ -98,6 +105,15 @@ pub struct HealthConfig {
     #[serde(default = "default_max_cognitive")]
     pub max_cognitive: u16,
 
+    /// Maximum allowed CRAP (Change Risk Anti-Patterns) score per function
+    /// (default: 30.0). CRAP combines cyclomatic complexity with test
+    /// coverage: high complexity plus low coverage produces a high CRAP
+    /// score. Functions meeting or exceeding this threshold are reported.
+    /// Use `--coverage` with Istanbul data for accurate per-function CRAP;
+    /// otherwise fallow estimates coverage from the module graph.
+    #[serde(default = "default_max_crap")]
+    pub max_crap: f64,
+
     /// Glob patterns to exclude from complexity analysis.
     #[serde(default)]
     pub ignore: Vec<String>,
@@ -113,6 +129,7 @@ impl Default for HealthConfig {
         Self {
             max_cyclomatic: default_max_cyclomatic(),
             max_cognitive: default_max_cognitive(),
+            max_crap: default_max_crap(),
             ignore: vec![],
             ownership: OwnershipConfig::default(),
         }
@@ -128,6 +145,7 @@ mod tests {
         let config = HealthConfig::default();
         assert_eq!(config.max_cyclomatic, 20);
         assert_eq!(config.max_cognitive, 15);
+        assert!((config.max_crap - 30.0).abs() < f64::EPSILON);
         assert!(config.ignore.is_empty());
     }
 
@@ -136,11 +154,13 @@ mod tests {
         let json = r#"{
             "maxCyclomatic": 30,
             "maxCognitive": 25,
+            "maxCrap": 50.0,
             "ignore": ["**/generated/**", "vendor/**"]
         }"#;
         let config: HealthConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.max_cyclomatic, 30);
         assert_eq!(config.max_cognitive, 25);
+        assert!((config.max_crap - 50.0).abs() < f64::EPSILON);
         assert_eq!(config.ignore, vec!["**/generated/**", "vendor/**"]);
     }
 
@@ -150,7 +170,17 @@ mod tests {
         let config: HealthConfig = serde_json::from_str(json).unwrap();
         assert_eq!(config.max_cyclomatic, 10);
         assert_eq!(config.max_cognitive, 15); // default
+        assert!((config.max_crap - 30.0).abs() < f64::EPSILON); // default
         assert!(config.ignore.is_empty()); // default
+    }
+
+    #[test]
+    fn health_config_json_only_max_crap() {
+        let json = r#"{"maxCrap": 15.5}"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert!((config.max_crap - 15.5).abs() < f64::EPSILON);
+        assert_eq!(config.max_cyclomatic, 20); // default
+        assert_eq!(config.max_cognitive, 15); // default
     }
 
     #[test]
@@ -200,6 +230,7 @@ ignore = ["generated/**", "vendor/**"]
         let config = HealthConfig {
             max_cyclomatic: 50,
             max_cognitive: 40,
+            max_crap: 75.0,
             ignore: vec!["test/**".to_string()],
             ownership: OwnershipConfig::default(),
         };
@@ -207,6 +238,7 @@ ignore = ["generated/**", "vendor/**"]
         let restored: HealthConfig = serde_json::from_str(&json).unwrap();
         assert_eq!(restored.max_cyclomatic, 50);
         assert_eq!(restored.max_cognitive, 40);
+        assert!((restored.max_crap - 75.0).abs() < f64::EPSILON);
         assert_eq!(restored.ignore, vec!["test/**"]);
     }
 

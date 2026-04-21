@@ -640,6 +640,7 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         quiet: opts.quiet,
         max_cyclomatic: None,
         max_cognitive: None,
+        max_crap: None,
         top: None,
         sort: SortBy::Cyclomatic,
         production: opts.production,

@@ -168,8 +168,15 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         id: "fallow/high-complexity",
         name: "High Complexity (Both)",
         short: "Function exceeds both complexity thresholds",
-        full: "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring — it has many paths AND is hard to understand.",
+        full: "Function exceeds both cyclomatic and cognitive complexity thresholds. This is the strongest signal that a function needs refactoring, it has many paths AND is hard to understand.",
         docs_path: "explanations/health#complexity-metrics",
+    },
+    RuleDef {
+        id: "fallow/high-crap-score",
+        name: "High CRAP Score",
+        short: "Function has a high CRAP score (complexity combined with low coverage)",
+        full: "The function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the configured threshold. CRAP combines cyclomatic complexity with test coverage using the Savoia and Evans (2007) formula: `CC^2 * (1 - coverage/100)^3 + CC`. High CRAP indicates changes to this function carry high risk because it is complex AND poorly tested. Pair with `--coverage` for accurate per-function scoring; without it fallow estimates coverage from the module graph.",
+        docs_path: "explanations/health#crap-score",
     },
     RuleDef {
         id: "fallow/refactoring-target",
@@ -923,7 +930,7 @@ mod tests {
 
     #[test]
     fn health_rules_count() {
-        assert_eq!(HEALTH_RULES.len(), 11);
+        assert_eq!(HEALTH_RULES.len(), 12);
     }
 
     #[test]

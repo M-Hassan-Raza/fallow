@@ -18,6 +18,7 @@ fn health_production_coverage(coverage: &str) -> HealthProductionCoverageParams 
         low_traffic_threshold: None,
         no_cache: None,
         threads: None,
+        max_crap: None,
     }
 }
 
@@ -549,6 +550,7 @@ fn health_args_with_all_options() {
         config: Some("fallow.toml".to_string()),
         max_cyclomatic: Some(25),
         max_cognitive: Some(15),
+        max_crap: Some(42.0),
         top: Some(20),
         sort: Some("cognitive".to_string()),
         changed_since: Some("develop".to_string()),
@@ -603,6 +605,8 @@ fn health_args_with_all_options() {
             "25",
             "--max-cognitive",
             "15",
+            "--max-crap",
+            "42",
             "--top",
             "20",
             "--sort",
@@ -670,6 +674,34 @@ fn health_args_group_by_section() {
     assert!(
         args.windows(2).any(|w| w == ["--group-by", "section"]),
         "expected --group-by section, got {args:?}"
+    );
+}
+
+#[test]
+fn health_args_max_crap_alone() {
+    let params = HealthParams {
+        max_crap: Some(25.5),
+        ..Default::default()
+    };
+    let args = build_health_args(&params);
+    assert!(
+        args.windows(2).any(|w| w == ["--max-crap", "25.5"]),
+        "expected --max-crap 25.5, got {args:?}"
+    );
+}
+
+#[test]
+fn health_args_max_crap_integer_value() {
+    let params = HealthParams {
+        max_crap: Some(30.0),
+        ..Default::default()
+    };
+    let args = build_health_args(&params);
+    // Integer-valued floats render without a trailing ".0", keeping CLI
+    // surface area stable for agents comparing args literally.
+    assert!(
+        args.windows(2).any(|w| w == ["--max-crap", "30"]),
+        "expected --max-crap 30 (no trailing zero), got {args:?}"
     );
 }
 
@@ -780,6 +812,7 @@ fn health_production_coverage_all_tuning_flags_emit() {
         low_traffic_threshold: Some(0.005),
         no_cache: Some(true),
         threads: Some(8),
+        max_crap: Some(42.5),
     };
     let args = build_health_production_coverage_args(&params);
     assert!(args.contains(&"--root".to_string()));
@@ -798,6 +831,10 @@ fn health_production_coverage_all_tuning_flags_emit() {
     assert!(args.contains(&"--no-cache".to_string()));
     assert!(args.contains(&"--threads".to_string()));
     assert!(args.contains(&"8".to_string()));
+    assert!(
+        args.windows(2).any(|w| w == ["--max-crap", "42.5"]),
+        "expected --max-crap 42.5, got {args:?}"
+    );
 }
 
 #[test]
@@ -979,6 +1016,7 @@ fn audit_args_with_all_options() {
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
+        max_crap: Some(30.0),
     });
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/project".to_string()));
@@ -1003,6 +1041,18 @@ fn audit_args_group_by_section() {
     assert!(
         args.windows(2).any(|w| w == ["--group-by", "section"]),
         "expected --group-by section, got {args:?}"
+    );
+}
+
+#[test]
+fn audit_args_max_crap_forwards_to_cli() {
+    let args = build_audit_args(&AuditParams {
+        max_crap: Some(42.5),
+        ..Default::default()
+    });
+    assert!(
+        args.windows(2).any(|w| w == ["--max-crap", "42.5"]),
+        "expected --max-crap 42.5, got {args:?}"
     );
 }
 

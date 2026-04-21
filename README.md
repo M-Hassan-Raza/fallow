@@ -363,7 +363,8 @@ Works out of the box. When you need to customize, create `.fallowrc.json` or run
   },
   "health": {
     "maxCyclomatic": 20,
-    "maxCognitive": 15
+    "maxCognitive": 15,
+    "maxCrap": 30
   }
 }
 ```

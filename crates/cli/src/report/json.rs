@@ -615,18 +615,43 @@ pub(crate) fn inject_health_actions(output: &mut serde_json::Value) {
 }
 
 /// Build the `actions` array for a single complexity finding.
+///
+/// When the finding was triggered by CRAP (alone or alongside complexity),
+/// the primary action switches to `add-tests` because coverage is the
+/// leverage point for lowering CRAP on a given complexity. When only
+/// cyclomatic/cognitive were exceeded, `refactor-function` remains primary.
 fn build_health_finding_actions(item: &serde_json::Value) -> serde_json::Value {
     let name = item
         .get("name")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("function");
+    let exceeded = item
+        .get("exceeded")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
+    let includes_crap = matches!(
+        exceeded,
+        "crap" | "cyclomatic_crap" | "cognitive_crap" | "all"
+    );
+    let crap_only = exceeded == "crap";
 
-    let mut actions = vec![serde_json::json!({
-        "type": "refactor-function",
-        "auto_fixable": false,
-        "description": format!("Refactor `{name}` to reduce complexity (extract helper functions, simplify branching)"),
-        "note": "Consider splitting into smaller functions with single responsibilities",
-    })];
+    let mut actions: Vec<serde_json::Value> = Vec::new();
+    if includes_crap {
+        actions.push(serde_json::json!({
+            "type": "add-tests",
+            "auto_fixable": false,
+            "description": format!("Add test coverage for `{name}` to lower its CRAP score (coverage reduces risk even without refactoring)"),
+            "note": "CRAP = CC^2 * (1 - cov/100)^3 + CC; higher coverage is the fastest way to bring CRAP under threshold",
+        }));
+    }
+    if !crap_only {
+        actions.push(serde_json::json!({
+            "type": "refactor-function",
+            "auto_fixable": false,
+            "description": format!("Refactor `{name}` to reduce complexity (extract helper functions, simplify branching)"),
+            "note": "Consider splitting into smaller functions with single responsibilities",
+        }));
+    }
 
     actions.push(serde_json::json!({
         "type": "suppress-line",

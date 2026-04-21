@@ -27,6 +27,9 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if let Some(max_cognitive) = params.max_cognitive {
         args.extend(["--max-cognitive".to_string(), max_cognitive.to_string()]);
     }
+    if let Some(max_crap) = params.max_crap {
+        args.extend(["--max-crap".to_string(), format!("{max_crap}")]);
+    }
     if let Some(top) = params.top {
         args.extend(["--top".to_string(), top.to_string()]);
     }

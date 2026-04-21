@@ -46,6 +46,7 @@
     "functions_above_threshold": 3,
     "max_cyclomatic_threshold": 20,
     "max_cognitive_threshold": 15,
+    "max_crap_threshold": 30.0,
     "files_scored": 6,
     "average_maintainability": 86.8,
     "severity_critical_count": 1,

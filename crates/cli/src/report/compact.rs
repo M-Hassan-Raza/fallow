@@ -185,9 +185,25 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             crate::health_types::FindingSeverity::High => "high",
             crate::health_types::FindingSeverity::Moderate => "moderate",
         };
+        let crap_suffix = match finding.crap {
+            Some(crap) => {
+                let coverage = finding
+                    .coverage_pct
+                    .map(|pct| format!(",coverage_pct={pct:.1}"))
+                    .unwrap_or_default();
+                format!(",crap={crap:.1}{coverage}")
+            }
+            None => String::new(),
+        };
         println!(
-            "high-complexity:{}:{}:{}:cyclomatic={},cognitive={},severity={}",
-            relative, finding.line, finding.name, finding.cyclomatic, finding.cognitive, severity,
+            "high-complexity:{}:{}:{}:cyclomatic={},cognitive={},severity={}{}",
+            relative,
+            finding.line,
+            finding.name,
+            finding.cyclomatic,
+            finding.cognitive,
+            severity,
+            crap_suffix,
         );
     }
     for score in &report.file_scores {

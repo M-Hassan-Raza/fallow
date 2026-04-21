@@ -422,6 +422,12 @@ enum Command {
         #[arg(long)]
         max_cognitive: Option<u16>,
 
+        /// Maximum CRAP score threshold (overrides config, default 30.0).
+        /// Functions meeting or exceeding this score are reported alongside
+        /// complexity findings. Pair with `--coverage` for accurate scoring.
+        #[arg(long)]
+        max_crap: Option<f64>,
+
         /// Show only the N most complex functions
         #[arg(long)]
         top: Option<usize>,
@@ -598,6 +604,12 @@ enum Command {
         /// (produced by `fallow dupes --save-baseline`).
         #[arg(long)]
         dupes_baseline: Option<PathBuf>,
+
+        /// Maximum CRAP score threshold (overrides config, default 30.0).
+        /// Functions meeting or exceeding this score cause audit to fail.
+        /// Pair with `--coverage` for accurate scoring.
+        #[arg(long)]
+        max_crap: Option<f64>,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -1540,6 +1552,7 @@ fn dispatch_subcommand(
         Command::Health {
             max_cyclomatic,
             max_cognitive,
+            max_crap,
             top,
             sort,
             complexity,
@@ -1579,6 +1592,7 @@ fn dispatch_subcommand(
                 threads,
                 max_cyclomatic,
                 max_cognitive,
+                max_crap,
                 top,
                 sort,
                 complexity,
@@ -1622,6 +1636,7 @@ fn dispatch_subcommand(
             dead_code_baseline,
             health_baseline,
             dupes_baseline,
+            max_crap,
         } => {
             if cli.baseline.is_some() || cli.save_baseline.is_some() {
                 return emit_error(
@@ -1674,6 +1689,7 @@ fn dispatch_subcommand(
                 dead_code_baseline: resolved_dead_code_baseline.as_deref(),
                 health_baseline: resolved_health_baseline.as_deref(),
                 dupes_baseline: resolved_dupes_baseline.as_deref(),
+                max_crap,
             })
         }
         Command::Schema => unreachable!("handled above"),
@@ -1735,6 +1751,7 @@ fn dispatch_health(
     threads: usize,
     max_cyclomatic: Option<u16>,
     max_cognitive: Option<u16>,
+    max_crap: Option<f64>,
     top: Option<usize>,
     sort: health::SortBy,
     complexity: bool,
@@ -1808,6 +1825,7 @@ fn dispatch_health(
         quiet,
         max_cyclomatic,
         max_cognitive,
+        max_crap,
         top,
         sort,
         production: cli.production,

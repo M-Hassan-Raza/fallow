@@ -277,6 +277,12 @@ pub struct HealthParams {
     /// Maximum cognitive complexity threshold. Functions exceeding this are reported.
     pub max_cognitive: Option<u16>,
 
+    /// Maximum CRAP score threshold (default 30.0). Functions meeting or
+    /// exceeding this score are reported alongside complexity findings. Pair
+    /// with `coverage` for accurate per-function CRAP; without Istanbul data
+    /// fallow estimates coverage from the module graph.
+    pub max_crap: Option<f64>,
+
     /// Number of top results to return, sorted by complexity.
     pub top: Option<usize>,
 
@@ -445,6 +451,12 @@ pub struct HealthProductionCoverageParams {
 
     /// Number of parser threads. Defaults to available CPU cores.
     pub threads: Option<usize>,
+
+    /// Maximum CRAP score threshold (default 30.0). Functions meeting or
+    /// exceeding this score appear as findings alongside complexity violations.
+    /// Production V8 coverage yields the most accurate per-function CRAP
+    /// inputs, making this flag especially useful on this tool.
+    pub max_crap: Option<f64>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
@@ -500,6 +512,13 @@ pub struct AuditParams {
     /// are excluded from the audit verdict. Passed through to the CLI's
     /// `--dupes-baseline` flag.
     pub dupes_baseline: Option<String>,
+
+    /// Maximum CRAP score threshold (default 30.0). Functions meeting or
+    /// exceeding this score cause audit to fail. Pair with `coverage` on
+    /// `check_health` for accurate per-function CRAP; without Istanbul data
+    /// fallow estimates coverage from the module graph. Passed through to
+    /// the CLI's `--max-crap` flag.
+    pub max_crap: Option<f64>,
 }
 
 /// Parameters for `list_boundaries`.

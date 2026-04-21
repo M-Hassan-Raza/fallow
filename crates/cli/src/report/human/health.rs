@@ -40,10 +40,11 @@ pub(in crate::report) fn print_health_human(
             eprintln!(
                 "{}",
                 format!(
-                    "  {} functions analyzed (max cyclomatic: {}, max cognitive: {})",
+                    "  {} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {:.1})",
                     report.summary.functions_analyzed,
                     report.summary.max_cyclomatic_threshold,
                     report.summary.max_cognitive_threshold,
+                    report.summary.max_crap_threshold,
                 )
                 .dimmed()
             );
@@ -799,11 +800,25 @@ fn render_findings(
             cog_colored,
             format!("{:>3}", finding.line_count).dimmed(),
         ));
+        // Line 3: CRAP score. Only set on findings that exceeded the CRAP
+        // threshold (merge_crap_findings guards insertion), so the score is
+        // always at/above threshold and always colored red+bold.
+        if let Some(crap) = finding.crap {
+            let crap_colored = format!("{crap:>5.1}").red().bold().to_string();
+            let coverage_suffix = finding
+                .coverage_pct
+                .map(|pct| format!("  ({pct:.0}% tested)"))
+                .unwrap_or_default();
+            lines.push(format!(
+                "         {crap_colored} CRAP{}",
+                coverage_suffix.dimmed(),
+            ));
+        }
     }
     lines.push(format!(
         "  {}",
         format!(
-            "Functions exceeding cyclomatic or cognitive complexity thresholds \u{2014} {DOCS_HEALTH}#complexity-metrics"
+            "Functions exceeding cyclomatic, cognitive, or CRAP thresholds ({DOCS_HEALTH}#complexity-metrics)"
         )
         .dimmed()
     ));
@@ -1627,6 +1642,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
@@ -1662,6 +1679,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 100,
@@ -1693,6 +1712,8 @@ mod tests {
                     param_count: 0,
                     exceeded: crate::health_types::ExceededThreshold::Both,
                     severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
                 },
                 crate::health_types::HealthFinding {
                     path: root.join("src/parser.ts"),
@@ -1705,6 +1726,8 @@ mod tests {
                     param_count: 0,
                     exceeded: crate::health_types::ExceededThreshold::Both,
                     severity: crate::health_types::FindingSeverity::High,
+                    crap: None,
+                    coverage_pct: None,
                 },
             ],
             summary: crate::health_types::HealthSummary {
@@ -3046,6 +3069,8 @@ mod tests {
             param_count: 0,
             exceeded: crate::health_types::ExceededThreshold::Both,
             severity: crate::health_types::FindingSeverity::Moderate,
+            crap: None,
+            coverage_pct: None,
         }];
         report.health_score = Some(crate::health_types::HealthScore {
             score: 75.0,
@@ -3138,6 +3163,8 @@ mod tests {
             param_count: 0,
             exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
             severity: crate::health_types::FindingSeverity::Moderate,
+            crap: None,
+            coverage_pct: None,
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3161,6 +3188,8 @@ mod tests {
             param_count: 0,
             exceeded: crate::health_types::ExceededThreshold::Cognitive,
             severity: crate::health_types::FindingSeverity::High,
+            crap: None,
+            coverage_pct: None,
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3185,6 +3214,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::Moderate,
+                crap: None,
+                coverage_pct: None,
             },
             crate::health_types::HealthFinding {
                 path: root.join("src/b.ts"),
@@ -3197,6 +3228,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::Moderate,
+                crap: None,
+                coverage_pct: None,
             },
         ];
         let lines = build_health_human_lines(&report, &root);
@@ -3222,6 +3255,8 @@ mod tests {
             param_count: 0,
             exceeded: crate::health_types::ExceededThreshold::Both,
             severity: crate::health_types::FindingSeverity::Moderate,
+            crap: None,
+            coverage_pct: None,
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);

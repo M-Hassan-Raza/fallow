@@ -69,6 +69,9 @@ pub struct AuditOptions<'a> {
     pub health_baseline: Option<&'a std::path::Path>,
     /// Baseline file for duplication analysis (as produced by `fallow dupes --save-baseline`).
     pub dupes_baseline: Option<&'a std::path::Path>,
+    /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
+    /// Functions meeting or exceeding this score cause audit to fail.
+    pub max_crap: Option<f64>,
 }
 
 // ── Auto-detect base branch ──────────────────────────────────────
@@ -419,6 +422,7 @@ fn run_audit_health<'a>(
         quiet: opts.quiet,
         max_cyclomatic: None,
         max_cognitive: None,
+        max_crap: opts.max_crap,
         top: None,
         sort: SortBy::Cyclomatic,
         production: opts.production,

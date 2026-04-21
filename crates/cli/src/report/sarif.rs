@@ -640,6 +640,9 @@ pub fn build_health_sarif(
 
     for finding in &report.findings {
         let uri = relative_uri(&finding.path, root);
+        // When CRAP contributes alongside complexity, use the CRAP rule as the
+        // most actionable identifier (CRAP combines complexity and coverage)
+        // and surface all exceeded dimensions in the message.
         let (rule_id, message) = match finding.exceeded {
             ExceededThreshold::Cyclomatic => (
                 "fallow/high-cyclomatic-complexity",
@@ -666,6 +669,27 @@ pub fn build_health_sarif(
                     report.summary.max_cognitive_threshold,
                 ),
             ),
+            ExceededThreshold::Crap
+            | ExceededThreshold::CyclomaticCrap
+            | ExceededThreshold::CognitiveCrap
+            | ExceededThreshold::All => {
+                let crap = finding.crap.unwrap_or(0.0);
+                let coverage = finding
+                    .coverage_pct
+                    .map(|pct| format!(", coverage {pct:.0}%"))
+                    .unwrap_or_default();
+                (
+                    "fallow/high-crap-score",
+                    format!(
+                        "'{}' has CRAP score {:.1} (threshold: {:.1}, cyclomatic {}{})",
+                        finding.name,
+                        crap,
+                        report.summary.max_crap_threshold,
+                        finding.cyclomatic,
+                        coverage,
+                    ),
+                )
+            }
         };
 
         let level = match finding.severity {
@@ -759,6 +783,11 @@ pub fn build_health_sarif(
             "fallow/high-complexity",
             "Function exceeds both complexity thresholds",
             "note",
+        ),
+        sarif_rule(
+            "fallow/high-crap-score",
+            "Function has a high CRAP score (high complexity combined with low coverage)",
+            "warning",
         ),
         sarif_rule(
             "fallow/refactoring-target",
@@ -1199,7 +1228,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .unwrap();
-        assert_eq!(rules.len(), 11);
+        assert_eq!(rules.len(), 12);
     }
 
     #[test]
@@ -1217,6 +1246,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Cyclomatic,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
@@ -1260,6 +1291,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Cognitive,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 3,
@@ -1297,6 +1330,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 1,
@@ -1312,6 +1347,84 @@ mod tests {
         let msg = entry["message"]["text"].as_str().unwrap();
         assert!(msg.contains("cyclomatic complexity 30"));
         assert!(msg.contains("cognitive complexity 45"));
+    }
+
+    #[test]
+    fn health_sarif_crap_only_emits_crap_rule() {
+        // CRAP-only: cyclomatic + cognitive below their thresholds, CRAP at or
+        // above the CRAP threshold. Rule must be `fallow/high-crap-score`.
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/untested.ts"),
+                name: "risky".to_string(),
+                line: 8,
+                col: 0,
+                cyclomatic: 10,
+                cognitive: 10,
+                line_count: 20,
+                param_count: 1,
+                exceeded: crate::health_types::ExceededThreshold::Crap,
+                severity: crate::health_types::FindingSeverity::High,
+                crap: Some(82.2),
+                coverage_pct: Some(12.0),
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let entry = &sarif["runs"][0]["results"][0];
+        assert_eq!(entry["ruleId"], "fallow/high-crap-score");
+        let msg = entry["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("CRAP score 82.2"), "msg: {msg}");
+        assert!(msg.contains("coverage 12%"), "msg: {msg}");
+    }
+
+    #[test]
+    fn health_sarif_cyclomatic_crap_uses_crap_rule() {
+        // Cyclomatic + CRAP both exceeded. The CRAP-centric rule subsumes
+        // the cyclomatic breach; only one SARIF result is emitted.
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/hot.ts"),
+                name: "branchy".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 67,
+                cognitive: 12,
+                line_count: 80,
+                param_count: 1,
+                exceeded: crate::health_types::ExceededThreshold::CyclomaticCrap,
+                severity: crate::health_types::FindingSeverity::Critical,
+                crap: Some(182.0),
+                coverage_pct: None,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let sarif = build_health_sarif(&report, &root);
+        let results = sarif["runs"][0]["results"].as_array().unwrap();
+        assert_eq!(
+            results.len(),
+            1,
+            "CyclomaticCrap should emit a single SARIF result under the CRAP rule"
+        );
+        assert_eq!(results[0]["ruleId"], "fallow/high-crap-score");
+        let msg = results[0]["message"]["text"].as_str().unwrap();
+        assert!(msg.contains("CRAP score 182"), "msg: {msg}");
+        // coverage_pct absent => no coverage suffix
+        assert!(!msg.contains("coverage"), "msg: {msg}");
     }
 
     // ── Severity mapping ──

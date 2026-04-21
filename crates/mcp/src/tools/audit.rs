@@ -35,6 +35,9 @@ pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
     if let Some(ref path) = params.dupes_baseline {
         args.extend(["--dupes-baseline".to_string(), path.clone()]);
     }
+    if let Some(max_crap) = params.max_crap {
+        args.extend(["--max-crap".to_string(), format!("{max_crap}")]);
+    }
 
     args
 }

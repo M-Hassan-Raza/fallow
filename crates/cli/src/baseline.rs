@@ -1032,6 +1032,8 @@ mod tests {
             param_count: 0,
             exceeded: crate::health_types::ExceededThreshold::Both,
             severity: crate::health_types::FindingSeverity::High,
+            crap: None,
+            coverage_pct: None,
         }
     }
 

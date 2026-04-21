@@ -470,10 +470,11 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
             let _ = write!(
                 out,
                 "## Fallow: no functions exceed complexity thresholds\n\n\
-                 **{}** functions analyzed (max cyclomatic: {}, max cognitive: {})\n",
+                 **{}** functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {:.1})\n",
                 report.summary.functions_analyzed,
                 report.summary.max_cyclomatic_threshold,
                 report.summary.max_cognitive_threshold,
+                report.summary.max_crap_threshold,
             );
         }
         return out;
@@ -716,8 +717,8 @@ fn write_findings_section(
         );
     }
 
-    out.push_str("| File | Function | Severity | Cyclomatic | Cognitive | Lines |\n");
-    out.push_str("|:-----|:---------|:---------|:-----------|:----------|:------|\n");
+    out.push_str("| File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |\n");
+    out.push_str("|:-----|:---------|:---------|:-----------|:----------|:-----|:------|\n");
 
     for finding in &report.findings {
         let file_str = rel(&finding.path);
@@ -736,9 +737,20 @@ fn write_findings_section(
             crate::health_types::FindingSeverity::High => "high",
             crate::health_types::FindingSeverity::Moderate => "moderate",
         };
+        let crap_cell = match finding.crap {
+            Some(crap) => {
+                let marker = if crap >= report.summary.max_crap_threshold {
+                    " **!**"
+                } else {
+                    ""
+                };
+                format!("{crap:.1}{marker}")
+            }
+            None => "-".to_string(),
+        };
         let _ = writeln!(
             out,
-            "| `{file_str}:{line}` | `{name}` | {severity_label} | {cyc}{cyc_marker} | {cog}{cog_marker} | {lines} |",
+            "| `{file_str}:{line}` | `{name}` | {severity_label} | {cyc}{cyc_marker} | {cog}{cog_marker} | {crap_cell} | {lines} |",
             line = finding.line,
             name = escape_backticks(&finding.name),
             cyc = finding.cyclomatic,
@@ -751,11 +763,12 @@ fn write_findings_section(
     let _ = write!(
         out,
         "\n**{files}** files, **{funcs}** functions analyzed \
-         (thresholds: cyclomatic > {cyc}, cognitive > {cog})\n",
+         (thresholds: cyclomatic > {cyc}, cognitive > {cog}, CRAP >= {crap:.1})\n",
         files = s.files_analyzed,
         funcs = s.functions_analyzed,
         cyc = s.max_cyclomatic_threshold,
         cog = s.max_cognitive_threshold,
+        crap = s.max_crap_threshold,
     );
 }
 
@@ -1372,6 +1385,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
@@ -1389,6 +1404,49 @@ mod tests {
         assert!(md.contains("25 **!**"));
         assert!(md.contains("30 **!**"));
         assert!(md.contains("| 80 |"));
+        // CRAP column renders `-` when the finding didn't trigger on CRAP.
+        assert!(md.contains("| - |"));
+    }
+
+    #[test]
+    fn health_markdown_crap_column_shows_score_and_marker() {
+        let root = PathBuf::from("/project");
+        let report = crate::health_types::HealthReport {
+            findings: vec![crate::health_types::HealthFinding {
+                path: root.join("src/risky.ts"),
+                name: "branchy".to_string(),
+                line: 1,
+                col: 0,
+                cyclomatic: 67,
+                cognitive: 10,
+                line_count: 80,
+                param_count: 1,
+                exceeded: crate::health_types::ExceededThreshold::CyclomaticCrap,
+                severity: crate::health_types::FindingSeverity::Critical,
+                crap: Some(182.0),
+                coverage_pct: None,
+            }],
+            summary: crate::health_types::HealthSummary {
+                files_analyzed: 1,
+                functions_analyzed: 1,
+                functions_above_threshold: 1,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let md = build_health_markdown(&report, &root);
+        assert!(
+            md.contains("| CRAP |"),
+            "markdown table should have CRAP column header: {md}"
+        );
+        assert!(
+            md.contains("182.0 **!**"),
+            "CRAP value should be rendered with a threshold marker: {md}"
+        );
+        assert!(
+            md.contains("CRAP >="),
+            "trailing summary line should reference the CRAP threshold: {md}"
+        );
     }
 
     #[test]
@@ -1406,6 +1464,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Cognitive,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
@@ -1716,6 +1776,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
@@ -1765,6 +1827,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
@@ -1817,6 +1881,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 1,
@@ -1866,6 +1932,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
@@ -1944,6 +2012,8 @@ mod tests {
                 param_count: 0,
                 exceeded: crate::health_types::ExceededThreshold::Both,
                 severity: crate::health_types::FindingSeverity::High,
+                crap: None,
+                coverage_pct: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,

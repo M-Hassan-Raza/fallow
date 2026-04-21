@@ -143,6 +143,15 @@ pub struct HealthFinding {
     pub exceeded: ExceededThreshold,
     /// How far above the threshold: moderate (just above), high, or critical.
     pub severity: FindingSeverity,
+    /// CRAP score (`CC^2 * (1 - cov/100)^3 + CC`), rounded to one decimal.
+    /// Present when the function also exceeded `--max-crap`, otherwise absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub crap: Option<f64>,
+    /// Per-function statement coverage percentage (0.0 to 100.0) used to
+    /// derive `crap`. Present when Istanbul data matched the function,
+    /// otherwise absent (estimated model or unmatched functions).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage_pct: Option<f64>,
 }
 
 /// Which complexity threshold was exceeded.
@@ -153,8 +162,75 @@ pub enum ExceededThreshold {
     Cyclomatic,
     /// Only cognitive exceeded.
     Cognitive,
-    /// Both thresholds exceeded.
+    /// Both cyclomatic and cognitive exceeded (may or may not also exceed CRAP).
     Both,
+    /// Only CRAP exceeded (cyclomatic and cognitive are under threshold).
+    Crap,
+    /// Cyclomatic and CRAP exceeded.
+    CyclomaticCrap,
+    /// Cognitive and CRAP exceeded.
+    CognitiveCrap,
+    /// Cyclomatic, cognitive, and CRAP all exceeded.
+    All,
+}
+
+impl ExceededThreshold {
+    /// Classify a finding from which individual thresholds were exceeded.
+    ///
+    /// Panics if all three bools are false; callers are expected to only
+    /// construct an `ExceededThreshold` for findings that exceeded at least
+    /// one threshold.
+    #[must_use]
+    pub fn from_bools(cyclomatic: bool, cognitive: bool, crap: bool) -> Self {
+        match (cyclomatic, cognitive, crap) {
+            (true, true, true) => Self::All,
+            (true, true, false) => Self::Both,
+            (true, false, true) => Self::CyclomaticCrap,
+            (false, true, true) => Self::CognitiveCrap,
+            (true, false, false) => Self::Cyclomatic,
+            (false, true, false) => Self::Cognitive,
+            (false, false, true) => Self::Crap,
+            (false, false, false) => {
+                unreachable!("ExceededThreshold requires at least one threshold exceeded")
+            }
+        }
+    }
+
+    /// True when the cyclomatic threshold contributed to the finding.
+    #[must_use]
+    pub const fn includes_cyclomatic(&self) -> bool {
+        matches!(
+            self,
+            Self::Cyclomatic | Self::Both | Self::CyclomaticCrap | Self::All
+        )
+    }
+
+    /// True when the cognitive threshold contributed to the finding.
+    #[must_use]
+    pub const fn includes_cognitive(&self) -> bool {
+        matches!(
+            self,
+            Self::Cognitive | Self::Both | Self::CognitiveCrap | Self::All
+        )
+    }
+
+    /// True when the CRAP threshold contributed to the finding.
+    ///
+    /// Exercised by the `exceeded_threshold_includes_helpers` unit test below;
+    /// the binary target has no direct caller today, so the lint is allowed
+    /// rather than expected (`#[expect]` would be unfulfilled on the lib side
+    /// which does reach the tests).
+    #[must_use]
+    #[allow(
+        dead_code,
+        reason = "symmetry with includes_cyclomatic/cognitive; consumed by tests and intended for report format extensions"
+    )]
+    pub const fn includes_crap(&self) -> bool {
+        matches!(
+            self,
+            Self::Crap | Self::CyclomaticCrap | Self::CognitiveCrap | Self::All
+        )
+    }
 }
 
 /// Severity tier indicating how far a function exceeds complexity thresholds.
@@ -172,12 +248,23 @@ pub enum FindingSeverity {
     Critical,
 }
 
+/// CRAP score threshold for "high" severity. CC=7 untested -> 56, CC=10 -> 110.
+pub const DEFAULT_CRAP_HIGH: f64 = 50.0;
+
+/// CRAP score threshold for "critical" severity. CC=10 untested gives 110,
+/// CC=12 untested gives 156; 100 lands between the two and flags genuinely
+/// dangerous combinations of high complexity and low coverage.
+pub const DEFAULT_CRAP_CRITICAL: f64 = 100.0;
+
 /// Compute the severity tier for a complexity finding.
 ///
-/// Uses the highest tier reached across both cognitive and cyclomatic scores.
+/// Uses the highest tier reached across cognitive, cyclomatic, and CRAP
+/// scores. Pass `None` for `crap` to skip the CRAP contribution (used when
+/// the finding was triggered by complexity thresholds only).
 pub fn compute_finding_severity(
     cognitive: u16,
     cyclomatic: u16,
+    crap: Option<f64>,
     cognitive_high: u16,
     cognitive_critical: u16,
     cyclomatic_high: u16,
@@ -199,7 +286,17 @@ pub fn compute_finding_severity(
         FindingSeverity::Moderate
     };
 
-    cog.max(cyc)
+    let crap_sev = crap.map_or(FindingSeverity::Moderate, |c| {
+        if c >= DEFAULT_CRAP_CRITICAL {
+            FindingSeverity::Critical
+        } else if c >= DEFAULT_CRAP_HIGH {
+            FindingSeverity::High
+        } else {
+            FindingSeverity::Moderate
+        }
+    });
+
+    cog.max(cyc).max(crap_sev)
 }
 
 /// A function exceeding the very-high-risk size threshold (>60 LOC).
@@ -228,6 +325,9 @@ pub struct HealthSummary {
     pub max_cyclomatic_threshold: u16,
     /// Configured cognitive threshold.
     pub max_cognitive_threshold: u16,
+    /// Configured CRAP threshold. Functions meeting or exceeding this score
+    /// are reported alongside complexity findings.
+    pub max_crap_threshold: f64,
     /// Number of files scored (only set with `--file-scores`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub files_scored: Option<usize>,
@@ -262,6 +362,7 @@ impl Default for HealthSummary {
             functions_above_threshold: 0,
             max_cyclomatic_threshold: 20,
             max_cognitive_threshold: 15,
+            max_crap_threshold: 30.0,
             files_scored: None,
             average_maintainability: None,
             coverage_model: None,
@@ -507,13 +608,17 @@ mod tests {
 
     #[test]
     fn exceeded_threshold_all_variants_serialize() {
-        for variant in [
-            ExceededThreshold::Cyclomatic,
-            ExceededThreshold::Cognitive,
-            ExceededThreshold::Both,
+        for (variant, expected) in [
+            (ExceededThreshold::Cyclomatic, r#""cyclomatic""#),
+            (ExceededThreshold::Cognitive, r#""cognitive""#),
+            (ExceededThreshold::Both, r#""both""#),
+            (ExceededThreshold::Crap, r#""crap""#),
+            (ExceededThreshold::CyclomaticCrap, r#""cyclomatic_crap""#),
+            (ExceededThreshold::CognitiveCrap, r#""cognitive_crap""#),
+            (ExceededThreshold::All, r#""all""#),
         ] {
             let json = serde_json::to_string(&variant).unwrap();
-            assert!(!json.is_empty());
+            assert_eq!(json, expected, "wire form for {variant:?} should be stable");
         }
     }
 
@@ -604,53 +709,114 @@ mod tests {
 
     #[test]
     fn compute_severity_moderate_when_below_high_thresholds() {
-        let severity = compute_finding_severity(20, 25, 25, 40, 30, 50);
+        let severity = compute_finding_severity(20, 25, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::Moderate);
     }
 
     #[test]
     fn compute_severity_high_from_cognitive() {
-        let severity = compute_finding_severity(25, 20, 25, 40, 30, 50);
+        let severity = compute_finding_severity(25, 20, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::High);
     }
 
     #[test]
     fn compute_severity_high_from_cyclomatic() {
-        let severity = compute_finding_severity(20, 30, 25, 40, 30, 50);
+        let severity = compute_finding_severity(20, 30, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::High);
     }
 
     #[test]
     fn compute_severity_critical_from_cognitive() {
-        let severity = compute_finding_severity(40, 20, 25, 40, 30, 50);
+        let severity = compute_finding_severity(40, 20, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::Critical);
     }
 
     #[test]
     fn compute_severity_critical_from_cyclomatic() {
-        let severity = compute_finding_severity(20, 50, 25, 40, 30, 50);
+        let severity = compute_finding_severity(20, 50, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::Critical);
     }
 
     #[test]
     fn compute_severity_uses_highest_across_dimensions() {
         // Cognitive is critical, cyclomatic is moderate -> critical
-        let severity = compute_finding_severity(45, 20, 25, 40, 30, 50);
+        let severity = compute_finding_severity(45, 20, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::Critical);
     }
 
     #[test]
     fn compute_severity_at_exact_boundaries() {
         // At exactly the high threshold -> high
-        let severity = compute_finding_severity(25, 30, 25, 40, 30, 50);
+        let severity = compute_finding_severity(25, 30, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::High);
 
         // One below high threshold -> moderate
-        let severity = compute_finding_severity(24, 29, 25, 40, 30, 50);
+        let severity = compute_finding_severity(24, 29, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::Moderate);
 
         // At exactly the critical threshold -> critical
-        let severity = compute_finding_severity(40, 50, 25, 40, 30, 50);
+        let severity = compute_finding_severity(40, 50, None, 25, 40, 30, 50);
         assert_eq!(severity, FindingSeverity::Critical);
+    }
+
+    #[test]
+    fn compute_severity_crap_contributes_high() {
+        // Low cyclomatic and cognitive but high CRAP -> high severity
+        let severity = compute_finding_severity(10, 10, Some(60.0), 25, 40, 30, 50);
+        assert_eq!(severity, FindingSeverity::High);
+    }
+
+    #[test]
+    fn compute_severity_crap_contributes_critical() {
+        // CRAP at critical tier drives overall severity to critical
+        let severity = compute_finding_severity(10, 10, Some(120.0), 25, 40, 30, 50);
+        assert_eq!(severity, FindingSeverity::Critical);
+    }
+
+    #[test]
+    fn compute_severity_crap_moderate_under_high() {
+        // CRAP at 30 is moderate; neither cyclomatic nor cognitive trigger
+        let severity = compute_finding_severity(10, 10, Some(30.0), 25, 40, 30, 50);
+        assert_eq!(severity, FindingSeverity::Moderate);
+    }
+
+    #[test]
+    fn exceeded_threshold_from_bools() {
+        assert!(matches!(
+            ExceededThreshold::from_bools(true, false, false),
+            ExceededThreshold::Cyclomatic
+        ));
+        assert!(matches!(
+            ExceededThreshold::from_bools(true, true, true),
+            ExceededThreshold::All
+        ));
+        assert!(matches!(
+            ExceededThreshold::from_bools(false, false, true),
+            ExceededThreshold::Crap
+        ));
+        assert!(matches!(
+            ExceededThreshold::from_bools(true, false, true),
+            ExceededThreshold::CyclomaticCrap
+        ));
+    }
+
+    #[test]
+    fn exceeded_threshold_includes_helpers() {
+        let all = ExceededThreshold::All;
+        assert!(all.includes_cyclomatic());
+        assert!(all.includes_cognitive());
+        assert!(all.includes_crap());
+
+        let crap_only = ExceededThreshold::Crap;
+        assert!(!crap_only.includes_cyclomatic());
+        assert!(!crap_only.includes_cognitive());
+        assert!(crap_only.includes_crap());
+
+        // `includes_crap` distinguishes the three CRAP-containing variants.
+        assert!(ExceededThreshold::CyclomaticCrap.includes_crap());
+        assert!(ExceededThreshold::CognitiveCrap.includes_crap());
+        assert!(!ExceededThreshold::Both.includes_crap());
+        assert!(!ExceededThreshold::Cyclomatic.includes_crap());
+        assert!(!ExceededThreshold::Cognitive.includes_crap());
     }
 }

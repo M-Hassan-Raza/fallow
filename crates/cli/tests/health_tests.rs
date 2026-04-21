@@ -47,10 +47,13 @@ fn git(root: &Path, args: &[&str]) {
 
 #[test]
 fn health_json_output_is_valid() {
+    // Disable the default CRAP gate (30.0) so the fixture's branchy untested
+    // function doesn't push the process to exit 1. This test only verifies
+    // shape, not findings.
     let output = run_fallow(
         "health",
         "complexity-project",
-        &["--format", "json", "--quiet"],
+        &["--max-crap", "10000", "--format", "json", "--quiet"],
     );
     assert_eq!(output.code, 0, "health should succeed");
     let json = parse_json(&output);
@@ -84,6 +87,10 @@ fn health_exits_0_below_threshold() {
         &[
             "--max-cyclomatic",
             "50",
+            // Raise the CRAP gate out of the way so this test isolates the
+            // cyclomatic/cognitive behaviour under test.
+            "--max-crap",
+            "10000",
             "--complexity",
             "--format",
             "json",
@@ -114,6 +121,80 @@ fn health_exits_1_when_threshold_exceeded() {
     assert_eq!(
         output.code, 1,
         "health should exit 1 when complexity exceeds threshold"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// CRAP threshold (--max-crap)
+// ---------------------------------------------------------------------------
+
+/// With a high `--max-crap`, no function should trigger a CRAP finding and the
+/// summary's `max_crap_threshold` must reflect the CLI override.
+#[test]
+fn health_exits_0_when_crap_below_threshold() {
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &[
+            "--max-cyclomatic",
+            "99",
+            "--max-crap",
+            "10000",
+            "--complexity",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "health should exit 0 when CRAP stays below a very high threshold"
+    );
+    let json: serde_json::Value = serde_json::from_str(&output.stdout).unwrap();
+    assert_eq!(
+        json["summary"]["max_crap_threshold"].as_f64(),
+        Some(10_000.0),
+        "summary should echo the CLI-supplied threshold"
+    );
+}
+
+/// With a very low `--max-crap`, every nontrivial function should become a
+/// finding and the command must exit 1.
+#[test]
+fn health_exits_1_when_crap_threshold_exceeded() {
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &[
+            "--max-cyclomatic",
+            "9999",
+            "--max-cognitive",
+            "9999",
+            "--max-crap",
+            "1",
+            "--complexity",
+            "--fail-on-issues",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "health should exit 1 when any function has CRAP >= 1"
+    );
+    let json: serde_json::Value = serde_json::from_str(&output.stdout).unwrap();
+    let findings = json["findings"].as_array().expect("findings array");
+    assert!(
+        !findings.is_empty(),
+        "crap-triggered run should emit at least one finding"
+    );
+    let any_crap = findings
+        .iter()
+        .any(|f| f.get("crap").and_then(|v| v.as_f64()).is_some());
+    assert!(
+        any_crap,
+        "at least one finding should carry a populated `crap` score when --max-crap triggered"
     );
 }
 

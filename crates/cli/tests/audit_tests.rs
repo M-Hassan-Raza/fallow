@@ -447,3 +447,67 @@ fn audit_badge_format_exits_2() {
         "audit with --format badge should exit 2 (unsupported)"
     );
 }
+
+/// `--max-crap` on audit must flow into the health sub-analysis so that a
+/// changed file with a high-complexity untested function triggers the
+/// failing verdict.
+#[test]
+fn audit_max_crap_flag_fails_when_threshold_crossed() {
+    let dir = create_audit_fixture("crap");
+
+    // Introduce a file with a branchy, untested function. Combined with the
+    // low `--max-crap 1`, any non-trivial cyclomatic count is guaranteed to
+    // exceed the threshold.
+    fs::write(
+        dir.path().join("src/branchy.ts"),
+        "export function branchy(n: number): number {\n\
+           if (n < 0) return -1;\n\
+           if (n === 0) return 0;\n\
+           if (n < 10) return 1;\n\
+           if (n < 100) return 2;\n\
+           if (n < 1000) return 3;\n\
+           if (n < 10000) return 4;\n\
+           return 5;\n\
+         }\n\
+         import { used } from './legacy';\nbranchy(used);\n",
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["-c", "commit.gpgsign=false", "commit", "-m", "add branchy"])
+        .current_dir(dir.path())
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
+        .output()
+        .unwrap();
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 1,
+        "audit should fail when --max-crap is crossed. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["verdict"].as_str(),
+        Some("fail"),
+        "verdict should be fail when CRAP threshold is crossed"
+    );
+}

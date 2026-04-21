@@ -357,6 +357,7 @@ fn check_health_schema_contains_expected_properties() {
         "config",
         "max_cyclomatic",
         "max_cognitive",
+        "max_crap",
         "top",
         "sort",
         "changed_since",
@@ -417,6 +418,7 @@ fn audit_schema_contains_expected_properties() {
         "workspace",
         "no_cache",
         "threads",
+        "max_crap",
     ] {
         assert!(
             schema.contains(prop),

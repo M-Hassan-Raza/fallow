@@ -11,9 +11,9 @@ MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wra
 - `analyze` - full dead code analysis (`fallow dead-code --format json`), supports `boundary_violations` convenience param
 - `check_changed` - incremental analysis (`fallow dead-code --changed-since`)
 - `find_dupes` - code duplication (`fallow dupes --format json`), supports `changed_since`
-- `check_health` - complexity metrics (`fallow health --format json`), supports `file_scores`, `hotspots`, `targets`, `since`, `min_commits`, `production_coverage` (paid, forwards `--production-coverage <path>`), `min_invocations_hot` (hot-path threshold) params
-- `health_production_coverage` - focused paid production-coverage entry point (`fallow health --production-coverage <path>`). Required `coverage` param (V8 dir, V8 JSON, or Istanbul JSON). Tuning: `min_invocations_hot`, `min_observation_volume`, `low_traffic_threshold`. Raise `FALLOW_TIMEOUT_SECS` for multi-megabyte dumps.
-- `audit` - combined dead-code + complexity + duplication for changed files, returns verdict (`fallow audit --format json`)
+- `check_health` - complexity metrics (`fallow health --format json`), supports `file_scores`, `hotspots`, `targets`, `since`, `min_commits`, `production_coverage` (paid, forwards `--production-coverage <path>`), `min_invocations_hot` (hot-path threshold), `max_crap` (per-function CRAP threshold, default 30.0; forwards `--max-crap <N>`) params
+- `health_production_coverage` - focused paid production-coverage entry point (`fallow health --production-coverage <path>`). Required `coverage` param (V8 dir, V8 JSON, or Istanbul JSON). Tuning: `min_invocations_hot`, `min_observation_volume`, `low_traffic_threshold`, `max_crap`. Raise `FALLOW_TIMEOUT_SECS` for multi-megabyte dumps.
+- `audit` - combined dead-code + complexity + duplication for changed files, returns verdict (`fallow audit --format json`). Supports `max_crap` (forwards `--max-crap <N>` to the health sub-analysis).
 - `fix_preview` - dry-run auto-fix (`fallow fix --dry-run --format json`)
 - `fix_apply` - apply auto-fixes (`fallow fix --yes --format json`), destructive
 - `project_info` - project metadata (`fallow list --format json`), supports section params (`entry_points`, `files`, `plugins`, `boundaries`)

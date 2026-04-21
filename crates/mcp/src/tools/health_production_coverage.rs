@@ -43,6 +43,9 @@ pub fn build_health_production_coverage_args(
             low_traffic_threshold.to_string(),
         ]);
     }
+    if let Some(max_crap) = params.max_crap {
+        args.extend(["--max-crap".to_string(), format!("{max_crap}")]);
+    }
 
     args
 }
