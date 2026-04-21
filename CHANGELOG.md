@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.43.0] - 2026-04-21
+
+### Added
+
+- **`fallow audit` per-analysis baselines.** Three new flags on the `audit` command let each sub-analysis (dead code, health, duplication) filter against its own saved baseline: `--dead-code-baseline <PATH>`, `--health-baseline <PATH>`, `--dupes-baseline <PATH>`. Baselines reuse the formats produced by `fallow dead-code --save-baseline`, `fallow health --save-baseline`, and `fallow dupes --save-baseline` respectively (no new format). Issues present in the respective baseline are excluded from the audit verdict, so touching a legacy file with pre-existing findings no longer makes `fallow audit` fail on a PR that introduces no new issues. Defaults can be set in `.fallowrc.json` under `audit.deadCodeBaseline` / `audit.healthBaseline` / `audit.dupesBaseline`, with CLI flags overriding. Relative paths from either source resolve against `--root` so CI scripts using `--root $REPO_ROOT` behave consistently with interactive use. The MCP `audit` tool exposes the same three params (`dead_code_baseline`, `health_baseline`, `dupes_baseline`). Closes [#139](https://github.com/fallow-rs/fallow/issues/139).
+- **`group_by` on `find_dupes`, `check_health`, and `audit` MCP tools.** The three sibling tools now accept the same `group_by` param (`"owner"` / `"directory"` / `"package"` / `"section"`) that `analyze` already accepts, so agents can partition duplication, complexity, and audit output the same way they partition dead-code output. Fixes an oversight from the `--group-by section` shipping in v2.42.0 where the flag reached every CLI surface but only one of four MCP tools.
+
+### Changed
+
+- **Global `--baseline` / `--save-baseline` are now rejected on `fallow audit`** (exit 2) with an error pointing users at `--dead-code-baseline`, `--health-baseline`, and `--dupes-baseline`. Audit runs three sub-analyses with different baseline formats, so a single baseline path was ambiguous. Previously the global flag was silently ignored on `audit`. If you were passing it on audit before, it was already a no-op; switch to the per-analysis flags.
+
+### Fixed
+
+- **Nuxt shared auto-imports are no longer flagged as unused.** Composables and utilities exported by auto-import-aware Nuxt packages (`#imports`, framework-scoped auto-imports) were surfacing as unused-export false positives in projects that relied on the auto-import dance instead of explicit `import` statements. The Nuxt plugin now recognizes these shared auto-imports and treats them as always-reachable.
+
 ## [2.42.0] - 2026-04-20
 
 ### Added
@@ -1497,7 +1512,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.42.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.43.0...HEAD
+[2.43.0]: https://github.com/fallow-rs/fallow/compare/v2.42.0...v2.43.0
 [2.42.0]: https://github.com/fallow-rs/fallow/compare/v2.41.0...v2.42.0
 [2.41.0]: https://github.com/fallow-rs/fallow/compare/v2.40.3...v2.41.0
 [2.40.3]: https://github.com/fallow-rs/fallow/compare/v2.40.2...v2.40.3

@@ -1,6 +1,6 @@
 # Fallow Roadmap
 
-> Last updated: 2026-04-20
+> Last updated: 2026-04-21
 
 Fallow is the codebase intelligence layer for TypeScript and JavaScript. Static analysis shows how the codebase is wired: unused code, duplication, complexity, architecture boundaries, and feature flags. Runtime intelligence shows what actually executes: hot paths, cold paths, and the risks inside every change. Together they let humans and agents clean up and refactor with confidence.
 
@@ -8,7 +8,7 @@ AI agents ship code faster than teams can review it. The problem is not only dea
 
 ---
 
-## Where we are (v2.42.0)
+## Where we are (v2.43.0)
 
 Two layers ship today: the static layer (free and open source) covers how the code is wired, and the runtime layer (paid) covers what actually executes in production.
 
