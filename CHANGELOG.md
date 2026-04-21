@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.44.0] - 2026-04-21
+
+### Added
+
+- **`--max-crap <N>`: per-function CRAP threshold on `fallow health` and `fallow audit`.** New threshold flag (and `health.maxCrap` config key, default 30.0) that fails the command when any function's CRAP (Change Risk Anti-Patterns) score meets or exceeds the threshold. Mirrors the existing `--max-cyclomatic` / `--max-cognitive` gates but uses the Savoia and Evans (2007) canonical formula `CC^2 * (1 - cov/100)^3 + CC`, which combines complexity with coverage so an AI-assisted workflow can force refactors or test coverage on exactly the functions that combine both risk dimensions. Pair with `--coverage ./coverage/coverage-final.json` for Istanbul-backed per-function coverage; without Istanbul data fallow estimates coverage from the module graph (directly test-referenced = 85%, indirectly reachable = 40%, untested = 0%). `HealthFinding` gains optional `crap` and `coverage_pct` fields and the `exceeded` enum gains four CRAP-containing variants (`crap`, `cyclomatic_crap`, `cognitive_crap`, `all`); the CRAP-only finding carries an `add-tests` action in JSON output because coverage is the leverage point, not refactoring. Findings are filterable by `--baseline` / `--save-baseline` the same way complexity findings are. SARIF adds a new `fallow/high-crap-score` rule (12 health rules total), CodeClimate maps CRAP findings to a matching check name, markdown renders a dedicated CRAP column, and human output appends a third metrics line with `(N% tested)` when Istanbul matched. MCP surfaces `max_crap` on `check_health`, `audit`, and `health_production_coverage`. GitHub Action and GitLab CI expose the input with floating-point validation and thread it through the jq summary, annotation, and review-comment templates. Closes [#141](https://github.com/fallow-rs/fallow/issues/141).
+- **`development` export condition honored by the resolver.** The Oxc resolver is now configured with `"development"` in the baseline condition set alongside `import`, `require`, `default`, `types`, and `node`. Packages that publish a `development` branch in `exports` / `imports` (common pattern: source files for dev, compiled output for prod; used by Vite, Vitest, esbuild, Rollup) now resolve deterministically to source when fallow walks them. The `resolve.conditions` config key lets users prepend custom condition names (e.g. `["test"]`, `["bun"]`) ahead of the baseline so codebases with custom conditional-export setups can opt into the variants that match their toolchain. When the React Native or Expo plugin is active, `"react-native"` and `"browser"` prepend automatically as before. Closes [#135](https://github.com/fallow-rs/fallow/issues/135).
+
+### Changed
+
+- **README summary block matches actual `--summary` output.** The hero block on the README used to show a hand-written sketch of what `fallow --summary` produced; it now mirrors the real output byte-for-byte so new users scanning the front page see the same column alignment and labels they will encounter when they run the command.
+
 ## [2.43.0] - 2026-04-21
 
 ### Added
@@ -1512,7 +1523,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.43.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.44.0...HEAD
+[2.44.0]: https://github.com/fallow-rs/fallow/compare/v2.43.0...v2.44.0
 [2.43.0]: https://github.com/fallow-rs/fallow/compare/v2.42.0...v2.43.0
 [2.42.0]: https://github.com/fallow-rs/fallow/compare/v2.41.0...v2.42.0
 [2.41.0]: https://github.com/fallow-rs/fallow/compare/v2.40.3...v2.41.0
