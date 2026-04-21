@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.44.2] - 2026-04-21
+
+### Fixed
+
+- **Class members used only through interface-typed bindings are no longer flagged unused.** When a class method was called only via an interface-typed variable or parameter (e.g. `const strategy: VirtualScrollStrategy = ...; strategy.attach();` where `FixedSizeScrollStrategy implements VirtualScrollStrategy`), the method appeared as an unused class member because the access resolved to the interface name, not the implementer. The extractor now tracks type-annotated bindings (locals, parameters, class fields, parameter properties) alongside `new ClassName()` bindings, and the member-usage analysis propagates interface member accesses to every class that `implements` the interface. Same-named interface exports in separate files stay isolated by `ExportKey`, so unrelated implementers do not silently credit each other. Cache version bumped to 44 so warm caches pick up the new extraction records on upgrade. Closes [#132](https://github.com/fallow-rs/fallow/issues/132). Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza).
+- **`react-router.config.ts` route modules with a `routesFn` are honored.** Config-driven route modules (`import { flatRoutes } from "@react-router/fs-routes"; export default { routes: flatRoutes() }`) are now extracted the same way as static `routes: [...]` arrays, so route files referenced only through the filesystem convention are no longer reported as unused files in React Router 7 apps.
+- **`rand 0.8` re-pinned in `fallow-license` dev-dependencies.** A Dependabot bump to `rand 0.9` broke the `OsRng` + `SignatureEncoding` wiring used by test key generation; the release build never exercised that path so CI missed the regression. Dev-deps now stay on 0.8 until the signing path is ported to 0.9's new `TryRngCore` trait set.
+
 ## [2.44.1] - 2026-04-21
 
 ### Fixed
@@ -1529,7 +1537,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.44.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.44.2...HEAD
+[2.44.2]: https://github.com/fallow-rs/fallow/compare/v2.44.1...v2.44.2
 [2.44.1]: https://github.com/fallow-rs/fallow/compare/v2.44.0...v2.44.1
 [2.44.0]: https://github.com/fallow-rs/fallow/compare/v2.43.0...v2.44.0
 [2.43.0]: https://github.com/fallow-rs/fallow/compare/v2.42.0...v2.43.0
