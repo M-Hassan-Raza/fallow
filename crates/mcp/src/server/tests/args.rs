@@ -976,6 +976,9 @@ fn audit_args_with_all_options() {
         no_cache: Some(true),
         threads: Some(4),
         group_by: None,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
     });
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/project".to_string()));
@@ -1001,6 +1004,39 @@ fn audit_args_group_by_section() {
         args.windows(2).any(|w| w == ["--group-by", "section"]),
         "expected --group-by section, got {args:?}"
     );
+}
+
+#[test]
+fn audit_args_per_analysis_baselines() {
+    let args = build_audit_args(&AuditParams {
+        dead_code_baseline: Some(".fallow-dead-code.json".to_string()),
+        health_baseline: Some(".fallow-health.json".to_string()),
+        dupes_baseline: Some(".fallow-dupes.json".to_string()),
+        ..Default::default()
+    });
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--dead-code-baseline", ".fallow-dead-code.json"]),
+        "expected --dead-code-baseline, got {args:?}"
+    );
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--health-baseline", ".fallow-health.json"]),
+        "expected --health-baseline, got {args:?}"
+    );
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--dupes-baseline", ".fallow-dupes.json"]),
+        "expected --dupes-baseline, got {args:?}"
+    );
+}
+
+#[test]
+fn audit_args_without_baselines_does_not_emit_flags() {
+    let args = build_audit_args(&AuditParams::default());
+    assert!(!args.iter().any(|a| a == "--dead-code-baseline"));
+    assert!(!args.iter().any(|a| a == "--health-baseline"));
+    assert!(!args.iter().any(|a| a == "--dupes-baseline"));
 }
 
 // ── Argument building: list_boundaries ──────────────────────────

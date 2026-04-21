@@ -63,6 +63,12 @@ pub struct AuditOptions<'a> {
     pub explain: bool,
     pub performance: bool,
     pub group_by: Option<crate::GroupBy>,
+    /// Baseline file for dead-code analysis (as produced by `fallow dead-code --save-baseline`).
+    pub dead_code_baseline: Option<&'a std::path::Path>,
+    /// Baseline file for health analysis (as produced by `fallow health --save-baseline`).
+    pub health_baseline: Option<&'a std::path::Path>,
+    /// Baseline file for duplication analysis (as produced by `fallow dupes --save-baseline`).
+    pub dupes_baseline: Option<&'a std::path::Path>,
 }
 
 // ── Auto-detect base branch ──────────────────────────────────────
@@ -318,7 +324,7 @@ fn run_audit_check<'a>(
         fail_on_issues: false,
         filters: &filters,
         changed_since,
-        baseline: None,
+        baseline: opts.dead_code_baseline,
         save_baseline: None,
         sarif_file: None,
         production: opts.production,
@@ -383,7 +389,7 @@ fn run_audit_dupes<'a>(
         cross_language: dupes_cfg.cross_language,
         ignore_imports: dupes_cfg.ignore_imports,
         top: None,
-        baseline_path: None,
+        baseline_path: opts.dupes_baseline,
         save_baseline_path: None,
         production: opts.production,
         trace: None,
@@ -419,7 +425,7 @@ fn run_audit_health<'a>(
         changed_since,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
-        baseline: None,
+        baseline: opts.health_baseline,
         save_baseline: None,
         complexity: true,
         file_scores: false,

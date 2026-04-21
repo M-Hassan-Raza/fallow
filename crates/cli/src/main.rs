@@ -578,7 +578,27 @@ enum Command {
     /// Combines dead-code + complexity + duplication scoped to changed files
     /// and returns a verdict (pass/warn/fail).
     /// Auto-detects the base branch if --changed-since/--base is not set.
-    Audit,
+    ///
+    /// The global --baseline / --save-baseline flags are rejected on audit.
+    /// Use --dead-code-baseline, --health-baseline, and --dupes-baseline
+    /// (or their config equivalents) because each sub-analysis uses a
+    /// different baseline format.
+    Audit {
+        /// Compare dead-code issues against a saved baseline
+        /// (produced by `fallow dead-code --save-baseline`).
+        #[arg(long)]
+        dead_code_baseline: Option<PathBuf>,
+
+        /// Compare health findings against a saved baseline
+        /// (produced by `fallow health --save-baseline`).
+        #[arg(long)]
+        health_baseline: Option<PathBuf>,
+
+        /// Compare duplication clone groups against a saved baseline
+        /// (produced by `fallow dupes --save-baseline`).
+        #[arg(long)]
+        dupes_baseline: Option<PathBuf>,
+    },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
     Schema,
@@ -913,6 +933,33 @@ fn load_config(
         }
         .resolve(root.to_path_buf(), output, threads, no_cache, quiet),
     })
+}
+
+/// Resolve an audit baseline path using CLI > config precedence.
+///
+/// Both sources resolve relative paths against the project root. This keeps
+/// behavior consistent in CI scripts where `--root $REPO_ROOT` differs from
+/// the process CWD.
+fn resolve_audit_baseline_path(
+    root: &std::path::Path,
+    cli: Option<&std::path::Path>,
+    config: Option<&str>,
+) -> Option<PathBuf> {
+    let path = cli.map(std::path::Path::to_path_buf).or_else(|| {
+        config.map(|p| {
+            let path = PathBuf::from(p);
+            if path.is_absolute() {
+                path
+            } else {
+                root.join(path)
+            }
+        })
+    })?;
+    if path.is_absolute() {
+        Some(path)
+    } else {
+        Some(root.join(path))
+    }
 }
 
 // ── Format resolution ─────────────────────────────────────────────
@@ -1571,21 +1618,64 @@ fn dispatch_subcommand(
             explain: cli.explain,
             top,
         }),
-        Command::Audit => audit::run_audit(&audit::AuditOptions {
-            root,
-            config_path: &cli.config,
-            output,
-            no_cache: cli.no_cache,
-            threads,
-            quiet,
-            changed_since: cli.changed_since.as_deref(),
-            production: cli.production,
-            workspace: cli.workspace.as_deref(),
-            changed_workspaces: cli.changed_workspaces.as_deref(),
-            explain: cli.explain,
-            performance: cli.performance,
-            group_by: cli.group_by,
-        }),
+        Command::Audit {
+            dead_code_baseline,
+            health_baseline,
+            dupes_baseline,
+        } => {
+            if cli.baseline.is_some() || cli.save_baseline.is_some() {
+                return emit_error(
+                    "audit uses per-analysis baselines. Use --dead-code-baseline, --health-baseline, or --dupes-baseline (or save them with `fallow dead-code|health|dupes --save-baseline <file>`)",
+                    2,
+                    output,
+                );
+            }
+            let audit_cfg = match load_config(
+                root,
+                &cli.config,
+                output,
+                cli.no_cache,
+                threads,
+                cli.production,
+                quiet,
+            ) {
+                Ok(c) => c.audit,
+                Err(code) => return code,
+            };
+            let resolved_dead_code_baseline = resolve_audit_baseline_path(
+                root,
+                dead_code_baseline.as_deref(),
+                audit_cfg.dead_code_baseline.as_deref(),
+            );
+            let resolved_health_baseline = resolve_audit_baseline_path(
+                root,
+                health_baseline.as_deref(),
+                audit_cfg.health_baseline.as_deref(),
+            );
+            let resolved_dupes_baseline = resolve_audit_baseline_path(
+                root,
+                dupes_baseline.as_deref(),
+                audit_cfg.dupes_baseline.as_deref(),
+            );
+            audit::run_audit(&audit::AuditOptions {
+                root,
+                config_path: &cli.config,
+                output,
+                no_cache: cli.no_cache,
+                threads,
+                quiet,
+                changed_since: cli.changed_since.as_deref(),
+                production: cli.production,
+                workspace: cli.workspace.as_deref(),
+                changed_workspaces: cli.changed_workspaces.as_deref(),
+                explain: cli.explain,
+                performance: cli.performance,
+                group_by: cli.group_by,
+                dead_code_baseline: resolved_dead_code_baseline.as_deref(),
+                health_baseline: resolved_health_baseline.as_deref(),
+                dupes_baseline: resolved_dupes_baseline.as_deref(),
+            })
+        }
         Command::Schema => unreachable!("handled above"),
         Command::Migrate {
             toml,

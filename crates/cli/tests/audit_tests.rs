@@ -186,6 +186,246 @@ fn audit_json_has_summary_with_changes() {
 }
 
 // ---------------------------------------------------------------------------
+// Audit baseline support (issue #139)
+// ---------------------------------------------------------------------------
+
+/// Create a fixture whose legacy file already has several unused exports,
+/// then branch and touch that file without introducing new issues.
+///
+/// Returns the `TempDir` guard. The fixture is on a branch named
+/// `feature`; the default branch is `main`.
+fn create_audit_baseline_fixture() -> TempDir {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "audit-baseline-test", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler"},"include":["src"]}"#,
+    )
+    .unwrap();
+
+    // Legacy file with multiple pre-existing unused exports.
+    fs::write(
+        dir.join("src/legacy.ts"),
+        "export const used = 1;\n\
+         export const unusedA = 'a';\n\
+         export const unusedB = 'b';\n\
+         export const unusedC = 'c';\n\
+         export const unusedD = 'd';\n\
+         export const unusedE = 'e';\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './legacy';\nconsole.log(used);\n",
+    )
+    .unwrap();
+
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+
+    git(&["init", "-b", "main"]);
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+    git(&["checkout", "-b", "feature"]);
+
+    // Touch the legacy file without adding new issues.
+    let legacy = fs::read_to_string(dir.join("src/legacy.ts")).unwrap();
+    fs::write(dir.join("src/legacy.ts"), format!("{legacy}// touched\n")).unwrap();
+    git(&["add", "."]);
+    git(&["-c", "commit.gpgsign=false", "commit", "-m", "touch legacy"]);
+
+    tmp
+}
+
+#[test]
+fn audit_without_baseline_reports_preexisting_issues() {
+    let tmp = create_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "audit should fail when touched file has pre-existing issues. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    let dead_code_issues = json["summary"]["dead_code_issues"]
+        .as_u64()
+        .expect("summary.dead_code_issues should be present");
+    assert!(
+        dead_code_issues >= 5,
+        "expected at least 5 pre-existing unused exports, got {dead_code_issues}"
+    );
+}
+
+#[test]
+fn audit_with_dead_code_baseline_filters_preexisting_issues() {
+    let tmp = create_audit_baseline_fixture();
+    let dir = tmp.path();
+    let baseline_path = dir.join(".fallow-dead-code-baseline.json");
+
+    // Save baseline from `main` state (before touching the file).
+    // Switch back to main, save, then back to feature.
+    let git = |args: &[&str]| {
+        Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed")
+    };
+    git(&["checkout", "main"]);
+    let save = run_fallow_raw(&[
+        "dead-code",
+        "--root",
+        dir.to_str().unwrap(),
+        "--save-baseline",
+        baseline_path.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        save.code == 0 || save.code == 1,
+        "save-baseline should not crash, got {}: {}",
+        save.code,
+        save.stderr
+    );
+    assert!(
+        baseline_path.exists(),
+        "baseline file should have been written"
+    );
+    git(&["checkout", "feature"]);
+
+    // Now audit with the dead-code baseline.
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "main",
+        "--dead-code-baseline",
+        baseline_path.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "audit with dead-code baseline should pass (no new issues). stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["verdict"].as_str(),
+        Some("pass"),
+        "verdict should be pass when all pre-existing issues are baselined"
+    );
+    assert_eq!(
+        json["summary"]["dead_code_issues"].as_u64(),
+        Some(0),
+        "baseline should filter all pre-existing unused exports"
+    );
+}
+
+#[test]
+fn audit_rejects_global_baseline_flag() {
+    let tmp = create_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "--baseline",
+        "anything.json",
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 2,
+        "global --baseline on audit should exit 2. stderr: {}",
+        output.stderr
+    );
+    let combined = format!("{}{}", output.stdout, output.stderr);
+    assert!(
+        combined.contains("--dead-code-baseline")
+            || combined.contains("--health-baseline")
+            || combined.contains("--dupes-baseline"),
+        "error should point users at per-analysis flags, got: {combined}"
+    );
+}
+
+#[test]
+fn audit_rejects_global_save_baseline_flag() {
+    let tmp = create_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "--save-baseline",
+        "anywhere.json",
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 2,
+        "global --save-baseline on audit should exit 2. stderr: {}",
+        output.stderr
+    );
+    let combined = format!("{}{}", output.stdout, output.stderr);
+    assert!(
+        combined.contains("--dead-code-baseline")
+            || combined.contains("--health-baseline")
+            || combined.contains("--dupes-baseline"),
+        "error should point users at per-analysis flags, got: {combined}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Audit error handling
 // ---------------------------------------------------------------------------
 

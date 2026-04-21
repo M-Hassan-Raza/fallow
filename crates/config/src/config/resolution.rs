@@ -75,6 +75,8 @@ pub struct ResolvedConfig {
     pub overrides: Vec<ResolvedOverride>,
     /// Regression config (passed through from user config, not resolved).
     pub regression: Option<super::RegressionConfig>,
+    /// Audit baseline paths (passed through from user config, not resolved).
+    pub audit: super::AuditConfig,
     /// Optional CODEOWNERS file path (passed through for `--group-by owner`).
     pub codeowners: Option<String>,
     /// Workspace package name patterns that are public libraries.
@@ -216,6 +218,7 @@ impl FallowConfig {
             dynamically_loaded: self.dynamically_loaded,
             overrides,
             regression: self.regression,
+            audit: self.audit,
             codeowners: self.codeowners,
             public_packages: self.public_packages,
             flags: self.flags,
@@ -297,6 +300,7 @@ mod tests {
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
+            audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
@@ -340,6 +344,7 @@ mod tests {
                 },
             }],
             regression: None,
+            audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
@@ -399,6 +404,7 @@ mod tests {
                 },
             ],
             regression: None,
+            audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),
@@ -442,6 +448,7 @@ mod tests {
             dynamically_loaded: vec![],
             overrides: vec![],
             regression: None,
+            audit: crate::config::AuditConfig::default(),
             codeowners: None,
             public_packages: vec![],
             flags: FlagsConfig::default(),

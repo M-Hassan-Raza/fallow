@@ -710,6 +710,7 @@ mod tests {
                 dynamically_loaded: vec![],
                 overrides: vec![],
                 regression: None,
+                audit: fallow_config::AuditConfig::default(),
                 codeowners: None,
                 public_packages: vec![],
                 flags: FlagsConfig::default(),

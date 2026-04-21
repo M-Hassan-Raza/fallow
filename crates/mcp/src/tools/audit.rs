@@ -26,6 +26,15 @@ pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
     if let Some(ref gb) = params.group_by {
         args.extend(["--group-by".to_string(), gb.clone()]);
     }
+    if let Some(ref path) = params.dead_code_baseline {
+        args.extend(["--dead-code-baseline".to_string(), path.clone()]);
+    }
+    if let Some(ref path) = params.health_baseline {
+        args.extend(["--health-baseline".to_string(), path.clone()]);
+    }
+    if let Some(ref path) = params.dupes_baseline {
+        args.extend(["--dupes-baseline".to_string(), path.clone()]);
+    }
 
     args
 }

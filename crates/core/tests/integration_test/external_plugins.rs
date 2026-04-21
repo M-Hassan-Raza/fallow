@@ -23,6 +23,7 @@ fn external_plugin_config(root: &std::path::Path) -> fallow_config::ResolvedConf
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
+        audit: fallow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: fallow_config::FlagsConfig::default(),

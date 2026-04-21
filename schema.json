@@ -210,6 +210,10 @@
         }
       ]
     },
+    "audit": {
+      "description": "Audit command baseline paths (one per analysis: dead-code, health, dupes).\n\n`fallow audit` runs three analyses and each has its own baseline format.\nPaths in this section are resolved relative to the project root. CLI flags\n(`--dead-code-baseline`, `--health-baseline`, `--dupes-baseline`) override\nthese values when provided.",
+      "$ref": "#/$defs/AuditConfig"
+    },
     "sealed": {
       "description": "Mark this config as sealed: `extends` paths must be file-relative and\nresolve within this config's own directory. `npm:` and `https:` extends\nare rejected. Useful for library publishers and monorepo sub-packages\nthat want to guarantee their config is self-contained and not subject\nto ancestor configs being injected via `extends`.\n\nDiscovery is unaffected (first-match-wins already stops the directory\nwalk at the nearest config). This only constrains `extends`.",
       "type": "boolean",
@@ -1290,6 +1294,33 @@
           "format": "uint",
           "minimum": 0,
           "default": 0
+        }
+      }
+    },
+    "AuditConfig": {
+      "description": "Per-analysis baseline paths for the `audit` command.\n\nEach field points to a baseline file produced by the corresponding\nsubcommand (`fallow dead-code --save-baseline`, `fallow health --save-baseline`,\n`fallow dupes --save-baseline`). `audit` passes each baseline through to its\nunderlying analysis; baseline-matched issues are excluded from the verdict.",
+      "type": "object",
+      "properties": {
+        "deadCodeBaseline": {
+          "description": "Path to the dead-code baseline (produced by `fallow dead-code --save-baseline`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "healthBaseline": {
+          "description": "Path to the health baseline (produced by `fallow health --save-baseline`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dupesBaseline": {
+          "description": "Path to the duplication baseline (produced by `fallow dupes --save-baseline`).",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

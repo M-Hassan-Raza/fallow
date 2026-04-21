@@ -176,6 +176,15 @@ pub struct FallowConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub regression: Option<RegressionConfig>,
 
+    /// Audit command baseline paths (one per analysis: dead-code, health, dupes).
+    ///
+    /// `fallow audit` runs three analyses and each has its own baseline format.
+    /// Paths in this section are resolved relative to the project root. CLI flags
+    /// (`--dead-code-baseline`, `--health-baseline`, `--dupes-baseline`) override
+    /// these values when provided.
+    #[serde(default, skip_serializing_if = "AuditConfig::is_empty")]
+    pub audit: AuditConfig,
+
     /// Mark this config as sealed: `extends` paths must be file-relative and
     /// resolve within this config's own directory. `npm:` and `https:` extends
     /// are rejected. Useful for library publishers and monorepo sub-packages
@@ -186,6 +195,38 @@ pub struct FallowConfig {
     /// walk at the nearest config). This only constrains `extends`.
     #[serde(default)]
     pub sealed: bool,
+}
+
+/// Per-analysis baseline paths for the `audit` command.
+///
+/// Each field points to a baseline file produced by the corresponding
+/// subcommand (`fallow dead-code --save-baseline`, `fallow health --save-baseline`,
+/// `fallow dupes --save-baseline`). `audit` passes each baseline through to its
+/// underlying analysis; baseline-matched issues are excluded from the verdict.
+#[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditConfig {
+    /// Path to the dead-code baseline (produced by `fallow dead-code --save-baseline`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dead_code_baseline: Option<String>,
+
+    /// Path to the health baseline (produced by `fallow health --save-baseline`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_baseline: Option<String>,
+
+    /// Path to the duplication baseline (produced by `fallow dupes --save-baseline`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dupes_baseline: Option<String>,
+}
+
+impl AuditConfig {
+    /// True when all baseline paths are unset.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.dead_code_baseline.is_none()
+            && self.health_baseline.is_none()
+            && self.dupes_baseline.is_none()
+    }
 }
 
 /// Regression baseline counts, embedded in the config file.

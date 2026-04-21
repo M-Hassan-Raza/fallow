@@ -152,6 +152,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
+        audit: fallow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: fallow_config::FlagsConfig::default(),

@@ -482,6 +482,24 @@ pub struct AuditParams {
     /// `--group-by` flag; propagates to all three sub-analyses (dead-code,
     /// dupes, health) that audit runs.
     pub group_by: Option<String>,
+
+    /// Path to a dead-code baseline file (produced by `fallow dead-code
+    /// --save-baseline`). When set, dead-code issues present in the
+    /// baseline are excluded from the audit verdict. Passed through to
+    /// the CLI's `--dead-code-baseline` flag.
+    pub dead_code_baseline: Option<String>,
+
+    /// Path to a health baseline file (produced by `fallow health
+    /// --save-baseline`). When set, complexity findings present in the
+    /// baseline are excluded from the audit verdict. Passed through to
+    /// the CLI's `--health-baseline` flag.
+    pub health_baseline: Option<String>,
+
+    /// Path to a duplication baseline file (produced by `fallow dupes
+    /// --save-baseline`). When set, clone groups present in the baseline
+    /// are excluded from the audit verdict. Passed through to the CLI's
+    /// `--dupes-baseline` flag.
+    pub dupes_baseline: Option<String>,
 }
 
 /// Parameters for `list_boundaries`.

@@ -29,6 +29,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         dynamically_loaded: vec![],
         overrides: vec![],
         regression: None,
+        audit: fallow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
         flags: fallow_config::FlagsConfig::default(),

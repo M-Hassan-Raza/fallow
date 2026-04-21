@@ -242,6 +242,23 @@ fallow audit --format json                # Structured output with verdict
 
 Returns a verdict: **pass** (exit 0), **warn** (exit 0, warn-severity only), or **fail** (exit 1). JSON output includes a `verdict` field for CI and agent integration.
 
+**Per-analysis baselines.** When touching legacy files with pre-existing issues, reuse the baselines saved by the individual subcommands so audit only fails on genuinely new findings:
+
+```bash
+# Save once from a clean ref
+fallow dead-code --save-baseline .fallow/dead-code-baseline.json
+fallow health    --save-baseline .fallow/health-baseline.json
+fallow dupes     --save-baseline .fallow/dupes-baseline.json
+
+# Feed into audit on every PR
+fallow audit \
+  --dead-code-baseline .fallow/dead-code-baseline.json \
+  --health-baseline    .fallow/health-baseline.json \
+  --dupes-baseline     .fallow/dupes-baseline.json
+```
+
+Configure defaults in `.fallowrc.json` under `audit.deadCodeBaseline` / `audit.healthBaseline` / `audit.dupesBaseline` so CI stays one command (`fallow audit`). CLI flags override config.
+
 ## CI integration
 
 ```yaml
