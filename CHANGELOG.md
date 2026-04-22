@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.45.1] - 2026-04-22
+
+### Fixed
+
+- **Istanbul `--coverage` now matches functions produced by standard Istanbul tooling (Jest, nyc, c8, babel-plugin-istanbul).** Standard Istanbul producers omit the non-standard `FnEntry.line` field that `oxc-coverage-instrument` writes, so fallow's `load_istanbul_coverage` silently defaulted the line to `0` and every lookup failed — `istanbul_matched: 0` out of N, all CRAP scores fell back to binary estimation, and `--max-crap` ran against estimates instead of real coverage. The loader now falls back to `FnEntry.decl.start.line` when `FnEntry.line` is missing, restoring the anonymous-by-line and fuzzy lookup paths for Jest/nyc/c8-produced coverage while preserving the fast path for `oxc-coverage-instrument` output. Closes [#166](https://github.com/fallow-rs/fallow/issues/166).
+- **Repeated "entry point outside project root" warnings collapse into a single diagnostic.** Monorepos with shared entry points (e.g. workspace `package.json` pointing at a sibling build output) used to emit the same warning once per analysis target, spamming `stderr` with dozens of identical lines. The warnings are now deduplicated with a counted summary so the signal stays visible without drowning out other diagnostics.
+- **`fallow dupes` tuning flags (`--min-lines`, `--min-tokens`, `--mode`, `--cross-language`) are forwarded correctly in combined GitLab CI mode.** The wrapper's combined-mode `ARGS=()` block built the `dupes` invocation without reading the `FALLOW_DUPES_*` env vars, so user overrides set in `.gitlab-ci.yml` silently became defaults. Fix pairs with the same GitHub Action fix from v2.44.x so both CI integrations honor the same tuning surface.
+- **Entry point discovery and VS Code extension downloads are hardened.** The entry-point walker now tolerates package manifests with missing / non-object `bin` or `exports` fields instead of aborting discovery, and the VS Code extension's binary-download path validates content-length + checksum against the expected artifact before unpacking (no more silent half-downloads that fail the first `fallow` invocation with an opaque error).
+- **CLI `stderr` noise reduced on normal runs.** Incidental `tracing` / `println!` lines that leaked into `stderr` during analysis (progress prints, one-off debug lines) are gone; `FALLOW_QUIET=1` runs are byte-clean on stdout/stderr for scripting integrations.
+- **`--changed-since` now includes untracked files that were added in the working tree but not yet committed.** Changed-scope filtering based on `git diff` missed brand-new files until they were staged, so a PR-style run (`--changed-since origin/main`) could falsely report zero issues on new code. Untracked-and-added paths are now folded into the changed set.
+- **Production coverage signal alignment in CI reporting.** `fallow health --production-coverage` output now consistently reports the same matched / unmatched / stale counts across human, JSON, markdown, and the GitHub Action / GitLab CI summary + annotation pipelines. Prior releases could show different subtotals depending on whether combined mode or the standalone command ran.
+
 ## [2.45.0] - 2026-04-22
 
 ### Added
@@ -1551,7 +1563,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.45.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.45.1...HEAD
+[2.45.1]: https://github.com/fallow-rs/fallow/compare/v2.45.0...v2.45.1
 [2.45.0]: https://github.com/fallow-rs/fallow/compare/v2.44.2...v2.45.0
 [2.44.2]: https://github.com/fallow-rs/fallow/compare/v2.44.1...v2.44.2
 [2.44.1]: https://github.com/fallow-rs/fallow/compare/v2.44.0...v2.44.1
