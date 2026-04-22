@@ -6,7 +6,7 @@
 //! the cloud computes `inventory minus runtime-seen = untracked`.
 //!
 //! The current cloud join key is `(filePath, functionName)`, so the walker in
-//! [`fallow_extract::inventory`] produces names that match the
+//! `fallow_core::extract::inventory` produces names that match the
 //! Istanbul/`oxc-coverage-instrument` naming path. To avoid silently wrong
 //! results, this command rejects uploads when a single file contains multiple
 //! distinct functions with the same emitted name, because the current backend

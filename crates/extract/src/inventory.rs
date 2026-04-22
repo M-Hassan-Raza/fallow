@@ -15,8 +15,7 @@
 //! resolution precedence:
 //!
 //! 1. Parent-provided `pending_name` (from `MethodDefinition`,
-//!    `VariableDeclarator`), same pattern as
-//!    [`crate::complexity::ComplexityVisitor`].
+//!    `VariableDeclarator`), same pattern as the internal complexity visitor.
 //! 2. The function's own `id` (named `function foo() {}`, named function
 //!    expression `const x = function named() {}`).
 //! 3. `(anonymous_N)` with the current counter value; counter then increments.

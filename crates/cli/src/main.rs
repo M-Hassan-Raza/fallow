@@ -708,7 +708,7 @@ enum CoverageCli {
     /// Upload a static function inventory to fallow cloud (Production
     /// Coverage, paid). Unlocks the `untracked` filter on the dashboard by
     /// pairing runtime coverage data with the AST view of "every function
-    /// that exists". See https://fallow.tools/coverage.
+    /// that exists". See <https://fallow.tools/coverage>.
     ///
     /// This command is the only fallow subcommand that makes network calls
     /// outside of `fallow license`. `fallow check` stays offline.
@@ -719,7 +719,7 @@ enum CoverageCli {
         /// Fallow cloud API key (bearer token).
         ///
         /// Precedence: this flag > $FALLOW_API_KEY. Generate at
-        /// https://fallow.cloud/settings#api-keys.
+        /// <https://fallow.cloud/settings#api-keys>.
         ///
         /// Security: prefer $FALLOW_API_KEY on shared CI runners. Passing a
         /// secret on the command line may be visible to other processes via
