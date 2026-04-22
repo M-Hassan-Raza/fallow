@@ -2,7 +2,7 @@
 
 > Last updated: 2026-04-22
 
-This roadmap tracks planned work on Fallow. For shipped capabilities, see the [README](README.md) and [CHANGELOG](CHANGELOG.md).
+This roadmap tracks planned work on Fallow. For shipped capabilities, see the [documentation](https://docs.fallow.tools) and [GitHub releases](https://github.com/fallow-rs/fallow/releases).
 
 ---
 
