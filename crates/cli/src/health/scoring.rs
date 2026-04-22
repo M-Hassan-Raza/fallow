@@ -349,7 +349,7 @@ impl IstanbulFileCoverage {
     /// Istanbul records the function as anonymous. The single-candidate guard
     /// keeps the match unambiguous so we never silently attribute the wrong
     /// coverage to a function. See issue #155.
-    fn lookup(&self, name: &str, line: u32) -> Option<f64> {
+    pub(super) fn lookup(&self, name: &str, line: u32) -> Option<f64> {
         // 1. Exact match.
         if let Some(&pct) = self.functions.get(&(name.to_string(), line)) {
             return Some(pct);

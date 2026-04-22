@@ -25,6 +25,7 @@ use url::Url;
 
 use crate::error::emit_error;
 use crate::health::ProductionCoverageOptions;
+use crate::health::scoring::IstanbulCoverage;
 use crate::health_types::{
     ProductionCoverageAction, ProductionCoverageConfidence, ProductionCoverageEvidence,
     ProductionCoverageFinding, ProductionCoverageHotPath, ProductionCoverageMessage,
@@ -78,6 +79,17 @@ type FunctionLocations = FxHashMap<(String, String), Option<u32>>;
 struct PreparedCoverageSources {
     sources: Vec<CoverageSource>,
     _temp_dir: Option<TempDir>,
+}
+
+#[derive(Default)]
+struct StaticSignalIndex {
+    unused_files: FxHashSet<PathBuf>,
+    exported_names: FxHashMap<PathBuf, FxHashSet<String>>,
+    exported_lines: FxHashMap<PathBuf, FxHashSet<u32>>,
+    unused_export_names: FxHashMap<PathBuf, FxHashSet<String>>,
+    unused_export_lines: FxHashMap<PathBuf, FxHashSet<u32>>,
+    test_referenced_export_names: FxHashMap<PathBuf, FxHashSet<String>>,
+    test_referenced_export_lines: FxHashMap<PathBuf, FxHashSet<u32>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -185,10 +197,12 @@ pub fn prepare_options(
     clippy::too_many_arguments,
     reason = "sidecar invocation needs the same filter context as health analysis"
 )]
-pub fn analyze(
+pub(super) fn analyze(
     options: &ProductionCoverageOptions,
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
+    analysis_output: &fallow_core::AnalysisOutput,
+    istanbul_coverage: Option<&IstanbulCoverage>,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
     ignore_set: &GlobSet,
     changed_files: Option<&FxHashSet<PathBuf>>,
@@ -201,10 +215,14 @@ pub fn analyze(
         discover_sidecar(Some(root)).map_err(|message| emit_error(&message, 4, output))?;
     let prepared_sources = prepare_coverage_sources(&options.path)
         .map_err(|message| emit_error(&message, 5, output))?;
+    let static_signals = build_static_signal_index(modules, analysis_output, file_paths)
+        .map_err(|message| emit_error(&message, 2, output))?;
     let (request, locations) = build_request(
         options,
         root,
         modules,
+        &static_signals,
+        istanbul_coverage,
         file_paths,
         ignore_set,
         changed_files,
@@ -592,6 +610,8 @@ fn build_request(
     options: &ProductionCoverageOptions,
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
+    static_signals: &StaticSignalIndex,
+    istanbul_coverage: Option<&IstanbulCoverage>,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
     ignore_set: &GlobSet,
     changed_files: Option<&FxHashSet<PathBuf>>,
@@ -611,6 +631,8 @@ fn build_request(
         let Some(&path) = file_paths.get(&module.file_id) else {
             continue;
         };
+        let canonical_path =
+            istanbul_coverage.map(|_| dunce::canonicalize(path).unwrap_or_else(|_| path.clone()));
         let relative = path.strip_prefix(root).unwrap_or(path);
         if ignore_set.is_match(relative) {
             continue;
@@ -633,25 +655,30 @@ fn build_request(
             .iter()
             .map(|function| {
                 mark_ambiguous_function_line(&mut locations, path, &function.name, function.line);
+                let static_used = function_static_used(path, function, static_signals);
+                let test_covered = function_test_covered(
+                    path,
+                    canonical_path.as_deref(),
+                    function,
+                    static_signals,
+                    istanbul_coverage,
+                );
                 StaticFunction {
                     name: function.name.clone(),
                     start_line: function.line,
                     end_line: function.line.saturating_add(function.line_count),
                     cyclomatic: u32::from(function.cyclomatic),
-                    // Conservative defaults for v2.39: `fallow health` does not yet
-                    // cross-reference the module-graph reachability result from
-                    // `fallow dead-code`. Until that wiring lands, every function is
-                    // declared statically used — the sidecar will never emit
-                    // `safe_to_delete` on static-signal-only grounds, so the combined
-                    // verdict degrades gracefully to `review_required` / `active`.
-                    // Follow-up: thread the dead-code signal into this builder and
-                    // populate real values.
-                    static_used: true,
-                    // Same story for Istanbul test coverage: when `--coverage` is not
-                    // passed we have no test-coverage signal to join. Defaulting to
-                    // `false` caps `review_required` confidence at `medium` instead
-                    // of `high`, which is the safer wrong-answer than the reverse.
-                    test_covered: false,
+                    // Export-level dead-code signals are reliable enough to mark
+                    // unreferenced exports as statically unused. Internal-only
+                    // functions still default to `true` until fallow grows an
+                    // intra-file call graph; that avoids false `safe_to_delete`
+                    // verdicts when a private helper is only called locally.
+                    static_used,
+                    // Join real test evidence when available: Istanbul per-function
+                    // hits first, then direct test-reachable export references as a
+                    // conservative fallback. We intentionally do not infer "covered"
+                    // for every function in a test-reachable file.
+                    test_covered,
                 }
             })
             .collect();
@@ -693,6 +720,151 @@ fn build_request(
         },
         locations,
     )
+}
+
+fn build_static_signal_index(
+    modules: &[fallow_types::extract::ModuleInfo],
+    analysis_output: &fallow_core::AnalysisOutput,
+    file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
+) -> Result<StaticSignalIndex, String> {
+    let graph = analysis_output
+        .graph
+        .as_ref()
+        .ok_or_else(|| "analysis graph not available for production coverage".to_owned())?;
+    let mut index = StaticSignalIndex::default();
+
+    for file in &analysis_output.results.unused_files {
+        index.unused_files.insert(file.path.clone());
+    }
+    for export in &analysis_output.results.unused_exports {
+        index
+            .unused_export_names
+            .entry(export.path.clone())
+            .or_default()
+            .insert(export.export_name.clone());
+        index
+            .unused_export_lines
+            .entry(export.path.clone())
+            .or_default()
+            .insert(export.line);
+    }
+
+    let module_by_id: FxHashMap<_, _> = modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+    for node in &graph.modules {
+        let Some(&path) = file_paths.get(&node.file_id) else {
+            continue;
+        };
+        let module = module_by_id.get(&node.file_id);
+        for export in &node.exports {
+            if export.is_type_only {
+                continue;
+            }
+
+            index
+                .exported_names
+                .entry(path.clone())
+                .or_default()
+                .insert(export.name.to_string());
+
+            if let Some(module) = module {
+                let (line, _) = fallow_types::extract::byte_offset_to_line_col(
+                    &module.line_offsets,
+                    export.span.start,
+                );
+                index
+                    .exported_lines
+                    .entry(path.clone())
+                    .or_default()
+                    .insert(line);
+
+                let has_test_ref = export.references.iter().any(|reference| {
+                    graph
+                        .modules
+                        .get(reference.from_file.0 as usize)
+                        .is_some_and(fallow_core::graph::ModuleNode::is_test_reachable)
+                });
+                if has_test_ref {
+                    index
+                        .test_referenced_export_names
+                        .entry(path.clone())
+                        .or_default()
+                        .insert(export.name.to_string());
+                    index
+                        .test_referenced_export_lines
+                        .entry(path.clone())
+                        .or_default()
+                        .insert(line);
+                }
+            }
+        }
+    }
+
+    Ok(index)
+}
+
+fn function_static_used(
+    path: &Path,
+    function: &fallow_types::extract::FunctionComplexity,
+    static_signals: &StaticSignalIndex,
+) -> bool {
+    if static_signals.unused_files.contains(path) {
+        return false;
+    }
+    if !function_matches_export(path, function, static_signals) {
+        return true;
+    }
+    !static_signals
+        .unused_export_names
+        .get(path)
+        .is_some_and(|names| names.contains(function.name.as_str()))
+        && !static_signals
+            .unused_export_lines
+            .get(path)
+            .is_some_and(|lines| lines.contains(&function.line))
+}
+
+fn function_test_covered(
+    path: &Path,
+    canonical_path: Option<&Path>,
+    function: &fallow_types::extract::FunctionComplexity,
+    static_signals: &StaticSignalIndex,
+    istanbul_coverage: Option<&IstanbulCoverage>,
+) -> bool {
+    if let Some(coverage) = istanbul_coverage
+        && let Some(canonical_path) = canonical_path
+        && let Some(coverage_pct) = coverage
+            .get(canonical_path)
+            .and_then(|file| file.lookup(function.name.as_str(), function.line))
+    {
+        return coverage_pct > 0.0;
+    }
+
+    static_signals
+        .test_referenced_export_names
+        .get(path)
+        .is_some_and(|names| names.contains(function.name.as_str()))
+        || static_signals
+            .test_referenced_export_lines
+            .get(path)
+            .is_some_and(|lines| lines.contains(&function.line))
+}
+
+fn function_matches_export(
+    path: &Path,
+    function: &fallow_types::extract::FunctionComplexity,
+    static_signals: &StaticSignalIndex,
+) -> bool {
+    static_signals
+        .exported_names
+        .get(path)
+        .is_some_and(|names| names.contains(function.name.as_str()))
+        || static_signals
+            .exported_lines
+            .get(path)
+            .is_some_and(|lines| lines.contains(&function.line))
 }
 
 fn mark_ambiguous_function_line(
@@ -1603,12 +1775,13 @@ const fn verdict_rank(verdict: ProductionCoverageVerdict) -> u8 {
 mod tests {
     use super::{
         AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, FunctionIdentity, PackageManagerOutput,
-        RemappedFunction, build_request, convert_response, discover_sidecar, looks_like_istanbul,
-        merge_remapped_functions, path_binary_candidates, prepare_coverage_sources,
-        resolve_original_source_path, resolve_sidecar_via_command, verify_sidecar_signature,
-        write_istanbul_coverage_file,
+        RemappedFunction, StaticSignalIndex, build_request, build_static_signal_index,
+        convert_response, discover_sidecar, looks_like_istanbul, merge_remapped_functions,
+        path_binary_candidates, prepare_coverage_sources, resolve_original_source_path,
+        resolve_sidecar_via_command, verify_sidecar_signature, write_istanbul_coverage_file,
     };
     use crate::health::ProductionCoverageOptions;
+    use fallow_config::{FallowConfig, OutputFormat};
     use fallow_cov_protocol::{
         Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, HotPath, ReportVerdict,
         Response, Summary, Verdict,
@@ -2098,6 +2271,8 @@ mod tests {
             &options,
             &root,
             &[],
+            &StaticSignalIndex::default(),
+            None,
             &FxHashMap::default(),
             &ignore_set,
             None,
@@ -2106,6 +2281,132 @@ mod tests {
         );
 
         assert_eq!(request.project_root, ws_root.to_string_lossy());
+    }
+
+    #[test]
+    fn build_request_joins_dead_code_and_direct_test_signals() {
+        let root = make_temp_dir("coverage-static-signals");
+        let src_dir = root.join("src");
+        std::fs::create_dir_all(&src_dir)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", src_dir.display()));
+        std::fs::write(
+            root.join("package.json"),
+            r#"{"name":"demo","main":"src/index.ts"}"#,
+        )
+        .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
+        std::fs::write(
+            src_dir.join("index.ts"),
+            "import { tested } from './app';\ntested();\n",
+        )
+        .unwrap_or_else(|err| panic!("failed to write index.ts: {err}"));
+        std::fs::write(
+            src_dir.join("app.ts"),
+            "export function tested() { return 1; }\n\
+             export function cold() { return 2; }\n\
+             function internal() { return 3; }\n",
+        )
+        .unwrap_or_else(|err| panic!("failed to write app.ts: {err}"));
+        std::fs::write(
+            src_dir.join("app.test.ts"),
+            "import { tested } from './app';\ntested();\n",
+        )
+        .unwrap_or_else(|err| panic!("failed to write app.test.ts: {err}"));
+
+        let config =
+            FallowConfig::default().resolve(root.clone(), OutputFormat::Json, 1, true, true);
+        let files = fallow_core::discover::discover_files(&config);
+        let parse_result = fallow_core::extract::parse_all_files(&files, None, true);
+        let modules = parse_result.modules;
+        let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
+        let analysis_output = fallow_core::analyze_with_parse_result(&config, &modules)
+            .unwrap_or_else(|err| panic!("failed to analyze temp project: {err}"));
+        let static_signals = build_static_signal_index(&modules, &analysis_output, &file_paths)
+            .unwrap_or_else(|err| panic!("failed to build static signal index: {err}"));
+        let app_path = src_dir.join("app.ts");
+        let tested_line = modules
+            .iter()
+            .find_map(|module| {
+                file_paths.get(&module.file_id).and_then(|path| {
+                    if **path == app_path {
+                        module
+                            .complexity
+                            .iter()
+                            .find(|function| function.name == "tested")
+                            .map(|function| function.line)
+                    } else {
+                        None
+                    }
+                })
+            })
+            .unwrap_or_else(|| panic!("expected tested function line in parsed module"));
+        let mut static_signals = static_signals;
+        static_signals
+            .test_referenced_export_names
+            .entry(app_path.clone())
+            .or_default()
+            .insert("tested".to_owned());
+        static_signals
+            .test_referenced_export_lines
+            .entry(app_path)
+            .or_default()
+            .insert(tested_line);
+
+        let options = ProductionCoverageOptions {
+            path: root.join("coverage"),
+            min_invocations_hot: 100,
+            min_observation_volume: None,
+            low_traffic_threshold: None,
+            license_jwt: "test-jwt".to_owned(),
+            watermark: None,
+        };
+        let ignore_set = GlobSetBuilder::new()
+            .build()
+            .unwrap_or_else(|err| panic!("failed to build empty globset: {err}"));
+
+        let (request, _locations) = build_request(
+            &options,
+            &root,
+            &modules,
+            &static_signals,
+            None,
+            &file_paths,
+            &ignore_set,
+            None,
+            None,
+            vec![],
+        );
+
+        let app_file = request
+            .static_findings
+            .files
+            .iter()
+            .find(|file| file.path.ends_with("src/app.ts"))
+            .unwrap_or_else(|| panic!("expected src/app.ts in sidecar request"));
+        let tested = app_file
+            .functions
+            .iter()
+            .find(|function| function.name == "tested")
+            .unwrap_or_else(|| panic!("expected tested function in sidecar request"));
+        let cold = app_file
+            .functions
+            .iter()
+            .find(|function| function.name == "cold")
+            .unwrap_or_else(|| panic!("expected cold function in sidecar request"));
+        let internal = app_file
+            .functions
+            .iter()
+            .find(|function| function.name == "internal")
+            .unwrap_or_else(|| panic!("expected internal function in sidecar request"));
+
+        assert!(tested.static_used);
+        assert!(tested.test_covered);
+        assert!(!cold.static_used);
+        assert!(!cold.test_covered);
+        assert!(internal.static_used);
+        assert!(!internal.test_covered);
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
     }
 
     #[test]

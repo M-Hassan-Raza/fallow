@@ -17,6 +17,11 @@ def nl: "%0A";
     else
       "::\($level) file=\(.path | san),line=\(.line),col=\(.col + 1),title=High cognitive complexity (\($sev))::Function '\(.name | san)' is hard to understand (cognitive: \(.cognitive), threshold: \($cog_t)).\(nl)\(nl)  \u2022 Severity: \($sev)\(nl)  \u2022 Cyclomatic: \(.cyclomatic)\(nl)  \u2022 Cognitive: \(.cognitive)\(nl)\($crap_line)  \u2022 Lines: \(.line_count)\(nl)\(nl)High cognitive complexity means deeply nested or interleaved logic.\(nl)Consider flattening control flow or extracting helper functions."
     end),
+  (.production_coverage.findings[]? |
+    (if .verdict == "coverage_unavailable" then "notice" else "warning" end) as $level |
+    (if .invocations == null then "\u2014" else (.invocations | tostring) end) as $invocations |
+    (if .evidence.untracked_reason then (.evidence.v8_tracking + " (" + .evidence.untracked_reason + ")") else .evidence.v8_tracking end) as $tracking |
+    "::\($level) file=\(.path | san),line=\(.line),title=Production coverage (\(.verdict | san))::Function '\(.function | san)' is flagged by production coverage.\(nl)\(nl)  \u2022 Verdict: \(.verdict)\(nl)  \u2022 Invocations: \($invocations)\(nl)  \u2022 Confidence: \(.confidence)\(nl)  \u2022 Static: \(.evidence.static_status)\(nl)  \u2022 Tests: \(.evidence.test_coverage)\(nl)  \u2022 V8: \($tracking)\(nl)\(nl)\(if .actions | length > 0 then .actions[0].description | san else "Review the runtime evidence before changing this path." end)"),
   ((.targets // .refactoring_targets // [])[:5][]? |
     "::notice file=\(.path | san),title=Refactoring target (\(.effort) effort)::Priority: \(.priority) | Confidence: \(.confidence)\(nl)\(nl)\(.recommendation | san)\(nl)\(nl)\(if .factors then (.factors | map("  \u2022 \(.metric): \(.detail // (.value | tostring))") | join(nl)) else "" end)")
 ] | .[]

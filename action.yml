@@ -114,6 +114,21 @@ inputs:
   max-crap:
     description: 'Maximum CRAP score threshold (health and audit commands, default: 30.0). Functions meeting or exceeding this score are reported alongside complexity findings. Pair with coverage data for accurate per-function scoring.'
     required: false
+  production-coverage:
+    description: 'Path to paid production coverage input for the health command: a V8 coverage directory, V8 JSON file, or Istanbul coverage-final.json'
+    required: false
+  coverage-root:
+    description: 'Rebase Istanbul file paths before matching health coverage or production coverage input'
+    required: false
+  min-invocations-hot:
+    description: 'Hot-path threshold for production coverage findings (health command, default: 100)'
+    required: false
+  min-observation-volume:
+    description: 'Minimum observation volume required for high-confidence production coverage verdicts (health command)'
+    required: false
+  low-traffic-threshold:
+    description: 'Fraction of total trace volume below which an invoked function is classified as low_traffic instead of active (health command)'
+    required: false
   top:
     description: 'Show only the N worst offenders (health and dupes commands)'
     required: false
@@ -259,6 +274,11 @@ runs:
         INPUT_MAX_CYCLOMATIC: ${{ inputs.max-cyclomatic }}
         INPUT_MAX_COGNITIVE: ${{ inputs.max-cognitive }}
         INPUT_MAX_CRAP: ${{ inputs.max-crap }}
+        INPUT_PRODUCTION_COVERAGE: ${{ inputs.production-coverage }}
+        INPUT_COVERAGE_ROOT: ${{ inputs.coverage-root }}
+        INPUT_MIN_INVOCATIONS_HOT: ${{ inputs.min-invocations-hot }}
+        INPUT_MIN_OBSERVATION_VOLUME: ${{ inputs.min-observation-volume }}
+        INPUT_LOW_TRAFFIC_THRESHOLD: ${{ inputs.low-traffic-threshold }}
         INPUT_TOP: ${{ inputs.top }}
         INPUT_SORT: ${{ inputs.sort }}
         INPUT_FILE_SCORES: ${{ inputs.file-scores }}
@@ -391,7 +411,7 @@ runs:
           case "$INPUT_COMMAND" in
             dead-code|check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
             dupes)           echo "::error::Fallow found ${ISSUES} clone groups" ;;
-            health)          echo "::error::Fallow found ${ISSUES} high complexity functions" ;;
+            health)          echo "::error::Fallow found ${ISSUES} health findings" ;;
             fix)             echo "::error::Fallow found ${ISSUES} fixable issues" ;;
             "")              echo "::error::Fallow found ${ISSUES} issues" ;;
           esac

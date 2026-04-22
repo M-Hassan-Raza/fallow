@@ -14,6 +14,8 @@ set +e -o pipefail
 #   INPUT_MAX_CYCLOMATIC,
 #   INPUT_MAX_COGNITIVE, INPUT_TOP, INPUT_SORT, INPUT_FILE_SCORES, INPUT_HOTSPOTS,
 #   INPUT_TARGETS, INPUT_COMPLEXITY, INPUT_SINCE, INPUT_MIN_COMMITS,
+#   INPUT_PRODUCTION_COVERAGE, INPUT_COVERAGE_ROOT, INPUT_MIN_INVOCATIONS_HOT,
+#   INPUT_MIN_OBSERVATION_VOLUME, INPUT_LOW_TRAFFIC_THRESHOLD,
 #   INPUT_SCORE, INPUT_SAVE_SNAPSHOT, INPUT_TREND, INPUT_ISSUE_TYPES, INPUT_NO_CACHE, INPUT_THREADS,
 #   INPUT_ONLY, INPUT_SKIP
 
@@ -77,6 +79,11 @@ build_command_args() {
       [ -n "${INPUT_MAX_CYCLOMATIC:-}" ] && ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
       [ -n "${INPUT_MAX_COGNITIVE:-}" ] && ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
       [ -n "${INPUT_MAX_CRAP:-}" ] && ARGS+=(--max-crap "$INPUT_MAX_CRAP")
+      [ -n "${INPUT_PRODUCTION_COVERAGE:-}" ] && ARGS+=(--production-coverage "$INPUT_PRODUCTION_COVERAGE")
+      [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
+      [ -n "${INPUT_MIN_INVOCATIONS_HOT:-}" ] && ARGS+=(--min-invocations-hot "$INPUT_MIN_INVOCATIONS_HOT")
+      [ -n "${INPUT_MIN_OBSERVATION_VOLUME:-}" ] && ARGS+=(--min-observation-volume "$INPUT_MIN_OBSERVATION_VOLUME")
+      [ -n "${INPUT_LOW_TRAFFIC_THRESHOLD:-}" ] && ARGS+=(--low-traffic-threshold "$INPUT_LOW_TRAFFIC_THRESHOLD")
       [ "$include_top" = "true" ] && [ -n "${INPUT_TOP:-}" ] && ARGS+=(--top "$INPUT_TOP")
       [ -n "${INPUT_SORT:-}" ] && ARGS+=(--sort "$INPUT_SORT")
       [ "${INPUT_SCORE:-}" = "true" ] && ARGS+=(--score)
@@ -133,7 +140,8 @@ esac
 
 for name_val in "min-tokens:${INPUT_MIN_TOKENS:-}" "min-lines:${INPUT_MIN_LINES:-}" \
                "max-cyclomatic:${INPUT_MAX_CYCLOMATIC:-}" "max-cognitive:${INPUT_MAX_COGNITIVE:-}" \
-               "top:${INPUT_TOP:-}" "min-commits:${INPUT_MIN_COMMITS:-}" "threads:${INPUT_THREADS:-}"; do
+               "top:${INPUT_TOP:-}" "min-commits:${INPUT_MIN_COMMITS:-}" "threads:${INPUT_THREADS:-}" \
+               "min-invocations-hot:${INPUT_MIN_INVOCATIONS_HOT:-}" "min-observation-volume:${INPUT_MIN_OBSERVATION_VOLUME:-}"; do
   name="${name_val%%:*}"; val="${name_val#*:}"
   if [ -n "$val" ] && ! [[ "$val" =~ ^[0-9]+$ ]]; then
     echo "::error::${name} must be a positive integer, got: ${val}"; exit 2
@@ -146,6 +154,9 @@ fi
 # are non-integer. Use the same numeric regex as threshold.
 if [ -n "${INPUT_MAX_CRAP:-}" ] && ! [[ "$INPUT_MAX_CRAP" =~ ^[0-9]+\.?[0-9]*$ ]]; then
   echo "::error::max-crap must be a non-negative number, got: ${INPUT_MAX_CRAP}"; exit 2
+fi
+if [ -n "${INPUT_LOW_TRAFFIC_THRESHOLD:-}" ] && ! [[ "$INPUT_LOW_TRAFFIC_THRESHOLD" =~ ^[0-9]+\.?[0-9]*$ ]]; then
+  echo "::error::low-traffic-threshold must be a non-negative number, got: ${INPUT_LOW_TRAFFIC_THRESHOLD}"; exit 2
 fi
 
 # --- Check for --sarif-file support ---
@@ -266,9 +277,9 @@ fi
 case "$INPUT_COMMAND" in
   dead-code|check) ISSUES=$(jq -r '.total_issues' fallow-results.json) ;;
   dupes)           ISSUES=$(jq -r '.stats.clone_groups' fallow-results.json) ;;
-  health)          ISSUES=$(jq -r '.summary.functions_above_threshold' fallow-results.json) ;;
+  health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.production_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
   fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
-  "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0))' fallow-results.json) ;;
+  "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.production_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
 esac
 
 if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then

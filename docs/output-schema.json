@@ -365,7 +365,7 @@
         },
         "findings": {
           "type": "array",
-          "description": "Cold or unavailable production coverage findings. Omitted when empty.",
+          "description": "Surfaced production coverage findings (`safe_to_delete`, `review_required`, `low_traffic`, `coverage_unavailable`). Omitted when empty. `active` functions stay out of this list so the CLI output remains actionable.",
           "items": { "$ref": "#/definitions/ProductionCoverageFinding" }
         },
         "hot_paths": {
@@ -474,7 +474,7 @@
     "ProductionCoverageVerdict": {
       "type": "string",
       "enum": ["safe_to_delete", "review_required", "coverage_unavailable", "low_traffic", "active", "unknown"],
-      "description": "Per-function production coverage verdict derived from the decision table in fallow-cov-protocol."
+      "description": "Protocol-level per-function production coverage verdict derived from the decision table in fallow-cov-protocol. The CLI's `production_coverage.findings` array omits `active` entries even though the underlying enum still includes it."
     },
 
     "ProductionCoverageConfidence": {

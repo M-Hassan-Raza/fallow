@@ -231,7 +231,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         id: "fallow/production-coverage",
         name: "Production Coverage",
         short: "Production coverage finding",
-        full: "Generic production-coverage finding for verdicts not covered by a more specific rule. Includes `active` entries surfaced for completeness when the sidecar emits them and the forward-compat `unknown` sentinel.",
+        full: "Generic production-coverage finding for verdicts not covered by a more specific rule. Covers the forward-compat `unknown` sentinel; the CLI filters `active` entries out of `production_coverage.findings` so the surfaced list stays actionable.",
         docs_path: "explanations/health#production-coverage",
     },
 ];

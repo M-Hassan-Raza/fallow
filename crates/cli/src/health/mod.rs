@@ -305,6 +305,48 @@ fn execute_health_inner(
         || opts.targets
         || opts.force_full
         || enforce_crap;
+    let needs_analysis_output = needs_file_scores || opts.production_coverage.is_some();
+    let mut shared_analysis_output = if needs_analysis_output {
+        if let Some(pre) = pre_computed_analysis {
+            Some(pre)
+        } else {
+            Some(
+                fallow_core::analyze_with_parse_result(&config, &modules)
+                    .map_err(|e| emit_error(&format!("analysis failed: {e}"), 2, opts.output))?,
+            )
+        }
+    } else {
+        None
+    };
+
+    let mut production_coverage = if let Some(ref production_options) = opts.production_coverage {
+        let analysis_output = shared_analysis_output
+            .as_ref()
+            .expect("production coverage requires analysis output");
+        Some(coverage::analyze(
+            production_options,
+            &config.root,
+            &modules,
+            analysis_output,
+            istanbul_coverage.as_ref(),
+            &file_paths,
+            &ignore_set,
+            changed_files.as_ref(),
+            ws_roots.as_deref(),
+            opts.top,
+            opts.quiet,
+            opts.output,
+        )?)
+    } else {
+        None
+    };
+
+    let precomputed_for_scores = if needs_file_scores {
+        shared_analysis_output.take()
+    } else {
+        None
+    };
+
     // Run file scoring and churn fetch in parallel when both are needed.
     // Churn fetch involves a `git log` shell-out that dominates health timing.
     let needs_churn = opts.hotspots || opts.targets || opts.force_full;
@@ -321,7 +363,7 @@ fn execute_health_inner(
                 &ignore_set,
                 opts.output,
                 istanbul_coverage.as_ref(),
-                pre_computed_analysis,
+                precomputed_for_scores,
             );
             let fs_ms = t.elapsed().as_secs_f64() * 1000.0;
             let churn = churn_handle.join().expect("churn thread panicked");
@@ -339,7 +381,7 @@ fn execute_health_inner(
                 &ignore_set,
                 opts.output,
                 istanbul_coverage.as_ref(),
-                pre_computed_analysis,
+                precomputed_for_scores,
             )
         } else {
             Ok((None, None, None))
@@ -454,22 +496,6 @@ fn execute_health_inner(
     );
     let targets_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    let mut production_coverage = if let Some(ref production_options) = opts.production_coverage {
-        Some(coverage::analyze(
-            production_options,
-            &config.root,
-            &modules,
-            &file_paths,
-            &ignore_set,
-            changed_files.as_ref(),
-            ws_roots.as_deref(),
-            opts.top,
-            opts.quiet,
-            opts.output,
-        )?)
-    } else {
-        None
-    };
     if let Some(report) = production_coverage.as_mut() {
         apply_production_coverage_filters(
             report,
@@ -1575,6 +1601,7 @@ pub fn print_health_result(
                         finding.verdict,
                         crate::health_types::ProductionCoverageVerdict::SafeToDelete
                             | crate::health_types::ProductionCoverageVerdict::ReviewRequired
+                            | crate::health_types::ProductionCoverageVerdict::LowTraffic
                     )
                 })
             });
@@ -1592,6 +1619,7 @@ pub fn print_health_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_config::{FallowConfig, OutputFormat};
     use fallow_core::extract::ModuleInfo;
     use fallow_types::discover::FileId;
     use fallow_types::extract::FunctionComplexity;
@@ -1979,6 +2007,16 @@ mod tests {
         }
     }
 
+    fn test_resolved_config() -> fallow_config::ResolvedConfig {
+        FallowConfig::default().resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Json,
+            1,
+            true,
+            true,
+        )
+    }
+
     #[test]
     fn production_coverage_top_applies_after_baseline_filtering() {
         let root = Path::new("/project");
@@ -2168,6 +2206,43 @@ mod tests {
         assert_eq!(
             report.verdict,
             crate::health_types::ProductionCoverageReportVerdict::Clean
+        );
+    }
+
+    #[test]
+    fn print_health_result_fails_on_low_traffic_production_coverage() {
+        let result = HealthResult {
+            report: crate::health_types::HealthReport {
+                production_coverage: Some(crate::health_types::ProductionCoverageReport {
+                    verdict: crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected,
+                    summary: fx_summary(1, 0, 1, 0),
+                    findings: vec![crate::health_types::ProductionCoverageFinding {
+                        id: "fallow:prod:lowtraffic".to_owned(),
+                        path: PathBuf::from("/project/src/cold.ts"),
+                        function: "coldPath".to_owned(),
+                        line: 14,
+                        verdict: crate::health_types::ProductionCoverageVerdict::LowTraffic,
+                        invocations: Some(1),
+                        confidence: crate::health_types::ProductionCoverageConfidence::Low,
+                        evidence: fx_evidence("used", "not_covered", "tracked"),
+                        actions: vec![],
+                    }],
+                    hot_paths: vec![],
+                    watermark: None,
+                    warnings: vec![],
+                }),
+                ..crate::health_types::HealthReport::default()
+            },
+            config: test_resolved_config(),
+            elapsed: Duration::default(),
+            timings: None,
+            coverage_gaps_has_findings: false,
+            should_fail_on_coverage_gaps: false,
+        };
+
+        assert_eq!(
+            print_health_result(&result, true, false, None, None, false),
+            ExitCode::from(1),
         );
     }
 }

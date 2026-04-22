@@ -9,10 +9,21 @@ def dupes_docs: "https://docs.fallow.tools/explanations/duplication";
 def suppression_docs: "https://docs.fallow.tools/configuration/suppression";
 def metric_delta(name):
   (.health.health_trend.metrics // []) | map(select(.name == name)) | first // null;
+def prod_failing_findings:
+  (.health.production_coverage.findings // [])
+  | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic"));
+def prod_advisory_findings:
+  (.health.production_coverage.findings // [])
+  | map(select(.verdict != "safe_to_delete" and .verdict != "review_required" and .verdict != "low_traffic"));
+def prod_hot_paths: (.health.production_coverage.hot_paths // []);
 
 (count(.check; "total_issues")) as $check |
 (count(.dupes.stats; "clone_groups")) as $dupes |
-(count(.health.summary; "functions_above_threshold")) as $health |
+(count(.health.summary; "functions_above_threshold")) as $complex |
+(($complex) + (prod_failing_findings | length)) as $health |
+(prod_failing_findings | length) as $prod_failing |
+(prod_advisory_findings | length) as $prod_advisory |
+(prod_hot_paths | length) as $hot_paths |
 ($check + $dupes + $health) as $total |
 (.health.vital_signs // {}) as $vitals |
 (.health.summary // {}) as $summary |
@@ -41,8 +52,15 @@ else "" end) +
 
 if $total == 0 then
   "# \ud83c\udf3f Fallow\n\n" +
-  "> [!NOTE]\n> **No issues found**\n\n" +
-  ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No complex functions" +
+  (if $prod_advisory > 0 or $hot_paths > 0 then
+    "> [!NOTE]\n> **No blocking issues found**\n\n" +
+    ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No blocking health findings" +
+    (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** production coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
+    (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end)
+  else
+    "> [!NOTE]\n> **No issues found**\n\n" +
+    ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No complex functions"
+  end) +
   (if $vitals.maintainability_avg then
     "\n\n| Metric | Value |\n|:-------|------:|\n" +
     "| [Maintainability](\(health_docs)#maintainability-index-mi) | **\(pct($vitals.maintainability_avg))** / 100 |\n"
@@ -55,7 +73,9 @@ else
   " \u00b7 " +
   (if $dupes > 0 then ":warning: **\($dupes)** clone groups" else ":white_check_mark: No duplication" end) +
   " \u00b7 " +
-  (if $health > 0 then ":warning: **\($health)** complex functions" else ":white_check_mark: No complex functions" end) +
+  (if $health > 0 then ":warning: **\($health)** health findings" else ":white_check_mark: No blocking health findings" end) +
+  (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
+  (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end) +
   "\n\n" +
 
   # Pointer to inline comments
@@ -99,13 +119,32 @@ else
   else "" end) +
 
   # Complexity breakdown
-  (if $health > 0 then
-    "<details>\n<summary><strong><a href=\"\(health_docs)#complexity-metrics\">Complexity</a> (\($health) functions above threshold)</strong></summary>\n\n" +
+  (if $complex > 0 then
+    "<details>\n<summary><strong><a href=\"\(health_docs)#complexity-metrics\">Complexity</a> (\($complex) functions above threshold)</strong></summary>\n\n" +
     "| File | Function | [Cyclomatic](\(health_docs)#cyclomatic-complexity) | [Cognitive](\(health_docs)#cognitive-complexity) |\n|:-----|:---------|----------:|---------:|\n" +
     ([.health.findings[:5][] |
       "| `\(.path | rel_path):\(.line)` | `\(.name)` | \(.cyclomatic) | \(.cognitive) |"
     ] | join("\n")) +
     "\n\n</details>\n\n"
+  else "" end) +
+
+  (if $prod_failing > 0 or $prod_advisory > 0 or $hot_paths > 0 then
+    "<details>\n<summary><strong><a href=\"\(health_docs)#production-coverage\">Production coverage</a> (\($prod_failing + $prod_advisory) finding\(if ($prod_failing + $prod_advisory) == 1 then "" else "s" end)\(if $hot_paths > 0 then ", \($hot_paths) hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end))</strong></summary>\n\n" +
+    (if $prod_failing + $prod_advisory > 0 then
+      "| File | Function | Verdict | Invocations | Confidence |\n|:-----|:---------|:--------|------------:|:-----------|\n" +
+      ([(.health.production_coverage.findings // [])[:5][] |
+        "| `\(.path | rel_path):\(.line)` | `\(.function)` | `\(.verdict)` | \(if .invocations == null then "\u2014" else (.invocations | tostring) end) | \(.confidence) |"
+      ] | join("\n")) +
+      (if $hot_paths > 0 then "\n\n" else "" end)
+    else "" end) +
+    (if $hot_paths > 0 then
+      "| File | Function | Invocations | Percentile |\n|:-----|:---------|------------:|-----------:|\n" +
+      ([prod_hot_paths[:5][] |
+        "| `\(.path | rel_path):\(.line)` | `\(.function)` | \(.invocations) | \(.percentile) |"
+      ] | join("\n")) +
+      "\n\n"
+    else "" end) +
+    "</details>\n\n"
   else "" end) +
 
   # Vital signs
