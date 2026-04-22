@@ -1,5 +1,5 @@
 name: 'Fallow - Codebase Intelligence'
-description: 'Codebase intelligence for TypeScript and JavaScript. Finds unused code, duplication, circular deps, complexity hotspots, and architecture drift. Optional runtime intelligence layer merges production execution data into the same report.'
+description: 'Finds unused code, duplication, circular deps, complexity hotspots, and architecture drift in TypeScript and JavaScript.'
 author: 'Bart Waardenburg'
 
 branding:
