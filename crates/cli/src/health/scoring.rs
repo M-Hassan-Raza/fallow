@@ -331,7 +331,8 @@ fn crap_formula(cc: f64, coverage_pct: f64) -> f64 {
 pub(super) struct IstanbulFileCoverage {
     /// Per-function coverage percentages, keyed by (name, line).
     /// Line is 1-based, matching both fallow's `FunctionComplexity.line`
-    /// and Istanbul's `FnEntry.line`.
+    /// and Istanbul's effective declaration line (`FnEntry.line` when
+    /// present, otherwise `FnEntry.decl.start.line`).
     functions: rustc_hash::FxHashMap<(String, u32), f64>,
 }
 
@@ -346,9 +347,11 @@ impl IstanbulFileCoverage {
     ///
     /// Step 3 covers arrow-function exports where fallow extracts the binding
     /// identifier (`const myHandler = () => {...}` yields `myHandler`) while
-    /// Istanbul records the function as anonymous. The single-candidate guard
-    /// keeps the match unambiguous so we never silently attribute the wrong
-    /// coverage to a function. See issue #155.
+    /// Istanbul records the function as anonymous. `load_istanbul_coverage`
+    /// normalizes missing `FnEntry.line` values to `decl.start.line` so
+    /// standard Istanbul producers still participate in this fallback. The
+    /// single-candidate guard keeps the match unambiguous so we never silently
+    /// attribute the wrong coverage to a function. See issues #155 and #166.
     pub(super) fn lookup(&self, name: &str, line: u32) -> Option<f64> {
         // 1. Exact match.
         if let Some(&pct) = self.functions.get(&(name.to_string(), line)) {
@@ -459,13 +462,24 @@ pub(super) fn load_istanbul_coverage(
         let mut functions = rustc_hash::FxHashMap::default();
         for (fn_id, fn_entry) in &file_cov.fn_map {
             let coverage_pct = compute_function_statement_coverage(file_cov, fn_id, fn_entry);
-            functions.insert((fn_entry.name.clone(), fn_entry.line), coverage_pct);
+            functions.insert(
+                (fn_entry.name.clone(), effective_istanbul_fn_line(fn_entry)),
+                coverage_pct,
+            );
         }
 
         files.insert(canonical, IstanbulFileCoverage { functions });
     }
 
     Ok(IstanbulCoverage { files })
+}
+
+fn effective_istanbul_fn_line(fn_entry: &oxc_coverage_instrument::FnEntry) -> u32 {
+    if fn_entry.line > 0 {
+        fn_entry.line
+    } else {
+        fn_entry.decl.start.line
+    }
 }
 
 /// Compute statement-level coverage percentage for a single function.
@@ -2925,6 +2939,122 @@ mod tests {
         let ratio = compute_dead_code_ratio(path, &exports, &unused_files, &unused_by_path);
         // 1 unused / 2 value exports = 0.5
         assert!((ratio - 0.5).abs() < f64::EPSILON);
+    }
+
+    fn write_single_file_istanbul_fixture(
+        coverage_path: &std::path::Path,
+        source_path: &std::path::Path,
+        fn_map: &serde_json::Value,
+        function_hits: &serde_json::Value,
+    ) {
+        let mut root = serde_json::Map::new();
+        root.insert(
+            source_path.to_string_lossy().into_owned(),
+            serde_json::json!({
+                "path": source_path.to_string_lossy().into_owned(),
+                "statementMap": {},
+                "fnMap": fn_map,
+                "branchMap": {},
+                "s": {},
+                "f": function_hits,
+                "b": {}
+            }),
+        );
+
+        std::fs::write(coverage_path, serde_json::to_string(&root).unwrap()).unwrap();
+    }
+
+    // --- load_istanbul_coverage ---
+
+    #[test]
+    fn load_istanbul_coverage_falls_back_to_decl_line_for_missing_fn_line() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/service.ts");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "export class DataService {}\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "(anonymous_0)",
+                    "decl": {
+                        "start": { "line": 5, "column": 2 },
+                        "end": { "line": 5, "column": 13 }
+                    },
+                    "loc": {
+                        "start": { "line": 5, "column": 14 },
+                        "end": { "line": 11, "column": 3 }
+                    }
+                },
+                "1": {
+                    "name": "(anonymous_1)",
+                    "decl": {
+                        "start": { "line": 20, "column": 14 },
+                        "end": { "line": 20, "column": 25 }
+                    },
+                    "loc": {
+                        "start": { "line": 20, "column": 28 },
+                        "end": { "line": 22, "column": 2 }
+                    }
+                }
+            }),
+            &serde_json::json!({
+                "0": 1,
+                "1": 0
+            }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        // Standard Istanbul omits `FnEntry.line` here, so the loader must fall
+        // back to `decl.start.line` for the anonymous-by-line lookup to work.
+        assert_eq!(file_coverage.lookup("processData", 5), Some(100.0));
+        assert_eq!(file_coverage.lookup("handleSpecial", 20), Some(0.0));
+    }
+
+    #[test]
+    fn load_istanbul_coverage_prefers_explicit_fn_line_over_decl_line() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/handler.ts");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "export const handleClick = () => {}\n").unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "handleClick",
+                    "line": 40,
+                    "decl": {
+                        "start": { "line": 22, "column": 13 },
+                        "end": { "line": 22, "column": 24 }
+                    },
+                    "loc": {
+                        "start": { "line": 40, "column": 27 },
+                        "end": { "line": 42, "column": 1 }
+                    }
+                }
+            }),
+            &serde_json::json!({
+                "0": 1
+            }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        // Preserve the explicit line from `oxc_coverage_instrument` output so
+        // we do not regress the precise-name fast path for existing producers.
+        assert_eq!(file_coverage.lookup("handleClick", 40), Some(100.0));
+        assert!(file_coverage.lookup("handleClick", 22).is_none());
     }
 
     // --- IstanbulFileCoverage::lookup ---
