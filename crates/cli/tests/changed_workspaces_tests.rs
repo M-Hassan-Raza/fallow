@@ -151,6 +151,69 @@ fn changed_workspaces_scopes_to_workspaces_with_changes() {
     );
 }
 
+#[test]
+fn changed_workspaces_scopes_to_workspace_with_untracked_file() {
+    let tmp = create_monorepo_fixture();
+    let dir = tmp.path();
+
+    fs::write(
+        dir.join("packages/ui/src/extra.ts"),
+        "export const extra = 1;\nexport type UiUntracked = { value: number };\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/ui/src/index.ts"),
+        "import { used } from './utils';\nimport { extra } from './extra';\nconsole.log(used(), extra);\n",
+    )
+    .unwrap();
+
+    let output = run_fallow_raw(&[
+        "check",
+        "--root",
+        dir.to_str().unwrap(),
+        "--changed-workspaces",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert!(
+        output.code == 0 || output.code == 1,
+        "check should not crash: code={}, stderr={}",
+        output.code,
+        output.stderr
+    );
+    let json = parse_json(&output);
+
+    let unused_types = json["unused_types"]
+        .as_array()
+        .expect("unused_types should be an array");
+    assert!(
+        unused_types.iter().any(|item| {
+            item["path"].as_str().is_some_and(|path| {
+                path.contains("packages/ui/src/extra.ts")
+                    || path.contains("packages\\ui\\src\\extra.ts")
+            }) && item["export_name"].as_str() == Some("UiUntracked")
+        }),
+        "expected untracked UI file to keep workspace-scoped findings: {unused_types:?}"
+    );
+
+    let export_paths: Vec<String> = json["unused_exports"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|e| e["path"].as_str().map(ToOwned::to_owned))
+        .collect();
+    assert!(
+        export_paths
+            .iter()
+            .all(|p| p.contains("packages/ui/") || p.contains("packages\\ui\\")),
+        "expected only UI-workspace exports after --changed-workspaces, got {export_paths:?}"
+    );
+}
+
 // ────────────────────────────────────────────────────────────────
 // CLI-layer conflict detection.
 // ────────────────────────────────────────────────────────────────

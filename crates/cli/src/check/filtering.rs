@@ -357,15 +357,12 @@ impl ChangedFilesError {
     }
 }
 
-/// Get files changed since a git ref. Returns `Err` (with details) when the
-/// git invocation itself failed, so callers can choose between warn-and-ignore
-/// and hard-error behavior.
-pub fn try_get_changed_files(
+fn collect_git_paths(
     root: &std::path::Path,
-    git_ref: &str,
+    args: &[&str],
 ) -> Result<rustc_hash::FxHashSet<std::path::PathBuf>, ChangedFilesError> {
     let output = std::process::Command::new("git")
-        .args(["diff", "--name-only", &format!("{git_ref}...HEAD")])
+        .args(args)
         .current_dir(root)
         .output()
         .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
@@ -384,6 +381,31 @@ pub fn try_get_changed_files(
         .map(|line| root.join(line))
         .collect();
 
+    Ok(files)
+}
+
+/// Get files changed since a git ref. Returns `Err` (with details) when the
+/// git invocation itself failed, so callers can choose between warn-and-ignore
+/// and hard-error behavior.
+///
+/// Includes both:
+/// - committed changes from the merge-base range `git_ref...HEAD`
+/// - tracked staged/unstaged changes from `HEAD` to the current worktree
+/// - untracked files not ignored by Git
+///
+/// This keeps `--changed-since` useful for local validation instead of only
+/// reflecting the last committed `HEAD`.
+pub fn try_get_changed_files(
+    root: &std::path::Path,
+    git_ref: &str,
+) -> Result<rustc_hash::FxHashSet<std::path::PathBuf>, ChangedFilesError> {
+    let mut files =
+        collect_git_paths(root, &["diff", "--name-only", &format!("{git_ref}...HEAD")])?;
+    files.extend(collect_git_paths(root, &["diff", "--name-only", "HEAD"])?);
+    files.extend(collect_git_paths(
+        root,
+        &["ls-files", "--others", "--exclude-standard"],
+    )?);
     Ok(files)
 }
 

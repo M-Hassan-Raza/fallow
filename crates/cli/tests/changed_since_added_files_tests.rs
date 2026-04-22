@@ -97,6 +97,117 @@ fn build_fixture() -> TempDir {
     tmp
 }
 
+fn build_dirty_modified_fixture() -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"changed-since-dirty-modified","private":true,"type":"module"}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/base.ts"), "export const used = 1;\n").unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './base';\nconsole.log(used);\n",
+    )
+    .unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    git(dir, &["add", "."]);
+    git(
+        dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+    );
+
+    fs::write(
+        dir.join("src/base.ts"),
+        "export const used = 1;\nexport type DirtyUnused = { value: number };\n",
+    )
+    .unwrap();
+
+    tmp
+}
+
+fn build_staged_added_export_fixture() -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"changed-since-staged-added","private":true,"type":"module"}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/base.ts"), "export const used = 1;\n").unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './base';\nconsole.log(used);\n",
+    )
+    .unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    git(dir, &["add", "."]);
+    git(
+        dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+    );
+
+    fs::write(
+        dir.join("src/extra.ts"),
+        "export const extra = 2;\nexport type AddedUnused = { value: number };\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './base';\nimport { extra } from './extra';\nconsole.log(used, extra);\n",
+    )
+    .unwrap();
+
+    git(dir, &["add", "src/index.ts", "src/extra.ts"]);
+
+    tmp
+}
+
+fn build_untracked_added_export_fixture() -> TempDir {
+    let tmp = TempDir::new().unwrap();
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"changed-since-untracked-added","private":true,"type":"module"}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/base.ts"), "export const used = 1;\n").unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './base';\nconsole.log(used);\n",
+    )
+    .unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    git(dir, &["add", "."]);
+    git(
+        dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+    );
+
+    fs::write(
+        dir.join("src/extra.ts"),
+        "export const extra = 2;\nexport type UntrackedUnused = { value: number };\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './base';\nimport { extra } from './extra';\nconsole.log(used, extra);\n",
+    )
+    .unwrap();
+
+    tmp
+}
+
 fn collect_paths(items: &serde_json::Value) -> Vec<String> {
     items
         .as_array()
@@ -139,6 +250,111 @@ fn check_changed_since_keeps_added_file_findings() {
             .iter()
             .any(|path| path.ends_with("src/dupe.ts")),
         "added duplicate file must survive --changed-since filtering: {unused_files:?}"
+    );
+}
+
+#[test]
+fn check_changed_since_keeps_dirty_modified_file_type_findings() {
+    let tmp = build_dirty_modified_fixture();
+    let output = run_fallow_raw(&[
+        "check",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--changed-since",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "check should fail on dirty changed-file issues"
+    );
+
+    let json = parse_json(&output);
+    let unused_types = json["unused_types"]
+        .as_array()
+        .expect("unused_types should be an array");
+
+    assert!(
+        unused_types.iter().any(|item| {
+            item["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("src/base.ts"))
+                && item["export_name"].as_str() == Some("DirtyUnused")
+        }),
+        "dirty modified file must survive --changed-since filtering: {unused_types:?}"
+    );
+}
+
+#[test]
+fn check_changed_since_keeps_staged_added_file_type_findings() {
+    let tmp = build_staged_added_export_fixture();
+    let output = run_fallow_raw(&[
+        "check",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--changed-since",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "check should fail on staged added-file issues"
+    );
+
+    let json = parse_json(&output);
+    let unused_types = json["unused_types"]
+        .as_array()
+        .expect("unused_types should be an array");
+
+    assert!(
+        unused_types.iter().any(|item| {
+            item["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("src/extra.ts"))
+                && item["export_name"].as_str() == Some("AddedUnused")
+        }),
+        "staged added file must survive --changed-since filtering: {unused_types:?}"
+    );
+}
+
+#[test]
+fn check_changed_since_keeps_untracked_added_file_type_findings() {
+    let tmp = build_untracked_added_export_fixture();
+    let output = run_fallow_raw(&[
+        "check",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--changed-since",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "check should fail on untracked added-file issues"
+    );
+
+    let json = parse_json(&output);
+    let unused_types = json["unused_types"]
+        .as_array()
+        .expect("unused_types should be an array");
+
+    assert!(
+        unused_types.iter().any(|item| {
+            item["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("src/extra.ts"))
+                && item["export_name"].as_str() == Some("UntrackedUnused")
+        }),
+        "untracked added file must survive --changed-since filtering: {unused_types:?}"
     );
 }
 
