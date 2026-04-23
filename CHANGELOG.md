@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.47.1] - 2026-04-23
+
+### Fixed
+
+- **Windows ARM64 (`aarch64-pc-windows-msvc`) is now a first-class release target.** `npx fallow` previously hard-failed on Windows ARM devices because no native binary was published. The release pipeline now builds and publishes `@fallow-cli/win32-arm64-msvc` for the CLI / LSP / MCP binaries and `@fallow-cli/fallow-node-win32-arm64-msvc` for the Node bindings, and the npm wrapper plus VS Code extension downloader both resolve the new target. A PR-time CI lane on native Windows ARM64 runners compiles the CLI and the NAPI addon so the target is covered before release instead of only at tag time. The npm platform resolution was also factored into a shared helper with tests so future targets stay consistent. Closes [#165](https://github.com/fallow-rs/fallow/issues/165). Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza) ([#171](https://github.com/fallow-rs/fallow/pull/171)).
+
 ## [2.47.0] - 2026-04-23
 
 ### Added
@@ -1595,7 +1601,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.47.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.47.1...HEAD
+[2.47.1]: https://github.com/fallow-rs/fallow/compare/v2.47.0...v2.47.1
 [2.47.0]: https://github.com/fallow-rs/fallow/compare/v2.46.0...v2.47.0
 [2.46.0]: https://github.com/fallow-rs/fallow/compare/v2.45.1...v2.46.0
 [2.45.1]: https://github.com/fallow-rs/fallow/compare/v2.45.0...v2.45.1
