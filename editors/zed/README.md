@@ -18,7 +18,7 @@ The extension looks for `fallow-lsp` in this order:
 1. `lsp.fallow.binary.path`
 2. local `node_modules/.bin/fallow-lsp` in the current worktree
 3. `fallow-lsp` on `PATH`
-4. a managed binary downloaded from the latest GitHub release
+4. a managed binary downloaded from the latest GitHub release and verified against Fallow's Ed25519 signing key
 
 If you already install Fallow through npm or a package manager, you usually do not need to configure anything.
 
@@ -91,6 +91,8 @@ Fallow currently reads issue toggles from LSP initialization options:
 4. Open a TypeScript or JavaScript project and confirm `fallow` is running in the language server UI.
 
 If Zed opens the project in Restricted Mode, trust the worktree first. Restricted Mode blocks language servers entirely.
+
+To preflight the actual packaged extension artifact locally, install the target once with `rustup target add wasm32-wasip2` and run `cargo build --target wasm32-wasip2 --manifest-path editors/zed/Cargo.toml`.
 
 ## Linux note
 

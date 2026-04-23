@@ -168,8 +168,11 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt
+          targets: wasm32-wasip2
       - name: Run tests
         run: cargo test --manifest-path editors/zed/Cargo.toml
+      - name: Build wasm extension
+        run: cargo build --target wasm32-wasip2 --manifest-path editors/zed/Cargo.toml
       - name: Format
         run: cargo fmt --check --manifest-path editors/zed/Cargo.toml
 
