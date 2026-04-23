@@ -11,6 +11,11 @@
   "bugs": {
     "url": "https://github.com/fallow-rs/fallow/issues"
   },
+  "intent": {
+    "version": 1,
+    "repo": "fallow-rs/fallow",
+    "docs": "https://docs.fallow.tools"
+  },
   "keywords": [
     "unused-code",
     "circular-dependencies",
@@ -19,7 +24,9 @@
     "analyzer",
     "typescript",
     "javascript",
-    "static-analysis"
+    "static-analysis",
+    "agent-skills",
+    "tanstack-intent"
   ],
   "engines": {
     "node": ">=16"
@@ -32,6 +39,8 @@
   "files": [
     "bin",
     "scripts",
+    "skills",
+    "!skills/_artifacts",
     "README.md"
   ],
   "scripts": {
@@ -40,6 +49,9 @@
   },
   "dependencies": {
     "detect-libc": "2.1.2"
+  },
+  "devDependencies": {
+    "@tanstack/intent": "0.0.29"
   },
   "optionalDependencies": {
     "@fallow-cli/darwin-arm64": "2.47.1",

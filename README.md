@@ -65,15 +65,15 @@ Fallow builds a project-wide understanding of your TS/JS codebase instead of che
 ## Install
 
 ```bash
-npx fallow                  # Run without installing
-npm install -g fallow       # Or install globally (macOS, Linux, Windows)
-cargo install fallow-cli    # Or via Cargo
+npm install --save-dev fallow   # or: pnpm add -D fallow / yarn add -D fallow / bun add -d fallow
 ```
+
+Installs the CLI, LSP server, MCP server, and version-matched Agent Skill into `node_modules`. For one-off CLI use, run `npx fallow`; Rust users can also run `cargo install fallow-cli`.
 
 Programmatic Node API:
 
 ```bash
-npm install @fallow-cli/fallow-node
+npm install @fallow-cli/fallow-node   # or: pnpm/yarn/bun add @fallow-cli/fallow-node
 ```
 
 ```ts
@@ -422,7 +422,7 @@ Fallow is not an AI assistant. It is the codebase truth layer your assistant can
 
 - **VS Code extension** -- tree views, status bar, one-click fixes, auto-download LSP binary ([Marketplace](https://github.com/fallow-rs/fallow/tree/main/editors/vscode))
 - **LSP server** -- real-time diagnostics, hover info, code actions, Code Lens with reference counts
-- **MCP server** -- AI agent integration for Claude Code, Cursor, Windsurf ([fallow-skills](https://github.com/fallow-rs/fallow-skills))
+- **Agent Skill + MCP server** -- version-matched AI agent guidance ships in the npm package, with MCP integration for Claude Code, Codex, Cursor, Windsurf, and other agents ([fallow-skills](https://github.com/fallow-rs/fallow-skills))
 - **JSON `actions` array** -- every issue in `--format json` output includes fix suggestions with `auto_fixable` flag, so agents can self-correct
 
 ## Performance

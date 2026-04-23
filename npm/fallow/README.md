@@ -13,10 +13,20 @@ Static analysis is free and open source. Runtime intelligence is the paid team l
 ## Installation
 
 ```bash
-npm install -g fallow
+npm install --save-dev fallow   # or: pnpm add -D fallow / yarn add -D fallow / bun add -d fallow
 ```
 
-This installs the `fallow` CLI plus the companion `fallow-lsp` and `fallow-mcp` binaries.
+Installs the `fallow` CLI plus the companion `fallow-lsp` and `fallow-mcp` binaries in your project.
+
+The package also ships a version-matched Agent Skill under `skills/fallow`.
+TanStack Intent discovers it from `node_modules` automatically:
+
+```bash
+npx @tanstack/intent list
+npx @tanstack/intent load fallow#fallow
+```
+
+For one-off CLI use without project-local skill discovery, run `npx fallow`.
 
 ## Usage
 

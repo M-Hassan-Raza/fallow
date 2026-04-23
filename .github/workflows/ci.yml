@@ -32,6 +32,7 @@ jobs:
       actions: ${{ steps.filter.outputs.actions }}
       miri: ${{ steps.filter.outputs.miri }}
       ci-scripts: ${{ steps.filter.outputs.ci-scripts }}
+      npm-package: ${{ steps.filter.outputs.npm-package }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4.0.1
@@ -62,6 +63,9 @@ jobs:
             ci-scripts:
               - 'ci/**'
               - 'action/**'
+            npm-package:
+              - 'npm/fallow/**'
+              - '.github/workflows/ci.yml'
 
   check:
     name: Check (${{ matrix.os }})
@@ -141,6 +145,44 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: crate-ci/typos@cf5f1c29a8ac336af8568821ec41919923b05a83 # v1
+
+  npm-package:
+    name: npm Package
+    needs: changes
+    if: needs.changes.outputs.npm-package == 'true' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '22'
+
+      - name: Validate bundled Agent Skill
+        run: npx --yes @tanstack/intent@0.0.29 validate npm/fallow/skills
+
+      - name: Check npm package contents
+        run: |
+          npm pack --dry-run --json ./npm/fallow > /tmp/fallow-pack.json
+          node <<'NODE'
+          const fs = require('fs');
+          const [pack] = JSON.parse(fs.readFileSync('/tmp/fallow-pack.json', 'utf8'));
+          const files = new Set(pack.files.map((file) => file.path));
+          const required = [
+            'package.json',
+            'README.md',
+            'skills/fallow/SKILL.md',
+            'skills/fallow/references/cli-reference.md',
+            'skills/fallow/references/gotchas.md',
+            'skills/fallow/references/patterns.md',
+          ];
+          const missing = required.filter((file) => !files.has(file));
+          if (missing.length > 0) {
+            throw new Error(`npm package is missing expected files: ${missing.join(', ')}`);
+          }
+          NODE
 
   vscode:
     name: VS Code Extension

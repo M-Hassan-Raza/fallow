@@ -5,7 +5,7 @@ Native Node.js bindings for fallow’s main analyses.
 ## Install
 
 ```bash
-npm install @fallow-cli/fallow-node
+npm install @fallow-cli/fallow-node   # or: pnpm/yarn/bun add @fallow-cli/fallow-node
 ```
 
 ## API
