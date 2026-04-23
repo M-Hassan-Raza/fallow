@@ -32,9 +32,38 @@ update_optional_deps() {
   "
 }
 
+update_napi_lockfile() {
+  node -e "
+    const fs = require('fs');
+    const lockPath = '$1';
+    const lock = JSON.parse(fs.readFileSync(lockPath, 'utf8'));
+    lock.version = '$VERSION';
+    if (lock.packages?.['']) {
+      lock.packages[''].version = '$VERSION';
+      if (lock.packages[''].optionalDependencies) {
+        for (const key of Object.keys(lock.packages[''].optionalDependencies)) {
+          if (key.startsWith('@fallow-cli/fallow-node')) {
+            lock.packages[''].optionalDependencies[key] = '$VERSION';
+          }
+        }
+      }
+    }
+    fs.writeFileSync(lockPath, JSON.stringify(lock, null, 2) + '\n');
+  "
+}
+
 # Update main fallow package (version + optionalDependencies)
 update_optional_deps "$ROOT/npm/fallow/package.json"
 echo "  Updated fallow/package.json → $VERSION"
+
+# Update Node bindings package (version + optionalDependencies)
+update_optional_deps "$ROOT/crates/napi/package.json"
+echo "  Updated crates/napi/package.json → $VERSION"
+
+if [ -f "$ROOT/crates/napi/package-lock.json" ]; then
+  update_napi_lockfile "$ROOT/crates/napi/package-lock.json"
+  echo "  Updated crates/napi/package-lock.json → $VERSION"
+fi
 
 # Update platform-specific npm packages
 for pkg in "$ROOT"/npm/*/package.json; do

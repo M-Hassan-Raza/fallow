@@ -70,6 +70,20 @@ npm install -g fallow       # Or install globally (macOS, Linux, Windows)
 cargo install fallow-cli    # Or via Cargo
 ```
 
+Programmatic Node API:
+
+```bash
+npm install @fallow-cli/fallow-node
+```
+
+```ts
+import { detectDeadCode, detectDuplication, computeHealth } from '@fallow-cli/fallow-node';
+
+const deadCode = await detectDeadCode({ root: process.cwd() });
+const dupes = await detectDuplication({ root: process.cwd(), mode: 'mild', minTokens: 30 });
+const health = await computeHealth({ root: process.cwd(), score: true, ownershipEmails: 'handle' });
+```
+
 ## Start here
 
 ```bash
