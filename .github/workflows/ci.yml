@@ -28,6 +28,7 @@ jobs:
       rust: ${{ steps.filter.outputs.rust }}
       vscode: ${{ steps.filter.outputs.vscode }}
       zed: ${{ steps.filter.outputs.zed }}
+      npm: ${{ steps.filter.outputs.npm }}
       actions: ${{ steps.filter.outputs.actions }}
       miri: ${{ steps.filter.outputs.miri }}
       ci-scripts: ${{ steps.filter.outputs.ci-scripts }}
@@ -49,6 +50,8 @@ jobs:
               - 'editors/vscode/**'
             zed:
               - 'editors/zed/**'
+            npm:
+              - 'npm/**'
             actions:
               - '.github/**'
             miri:
@@ -175,6 +178,23 @@ jobs:
         run: cargo build --target wasm32-wasip2 --manifest-path editors/zed/Cargo.toml
       - name: Format
         run: cargo fmt --check --manifest-path editors/zed/Cargo.toml
+
+  windows-arm64:
+    name: Windows ARM64 Native Compile
+    needs: changes
+    if: needs.changes.outputs.rust == 'true' || needs.changes.outputs.npm == 'true' || needs.changes.outputs.actions == 'true' || github.event_name == 'push'
+    runs-on: windows-11-arm
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: ./.github/actions/setup-rust
+        with:
+          targets: aarch64-pc-windows-msvc
+          cache-key: windows-arm64
+      - name: Check Windows ARM64 compilation
+        run: cargo check -p fallow-cli -p fallow-lsp -p fallow-mcp --target aarch64-pc-windows-msvc
 
   test-gitlab-ci:
     name: Test GitLab CI scripts
