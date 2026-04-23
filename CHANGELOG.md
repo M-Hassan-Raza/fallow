@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.48.0] - 2026-04-23
+
+### Added
+
+- **Agent skill now ships inside the `fallow` npm package.** The `skills/fallow/` content (SKILL.md plus CLI reference, gotchas, and patterns references) is now packaged alongside the CLI wrapper, so `npm install fallow` places the skill on disk next to the binary the agent drives. This removes version drift between the installed binary and the skill an agent loads from a separately-cloned `fallow-skills` checkout, and removes the manual clone step from the onboarding path. Claude Code, Codex, and other agents that discover skills on disk pick it up without any extra configuration. The same content remains published from the `fallow-skills` repo for users who prefer plugin-style installs. A CI lane now verifies the bundled skill stays in sync with the source of truth on every PR. Closes [#173](https://github.com/fallow-rs/fallow/issues/173). Thanks [@OmerGronich](https://github.com/OmerGronich) for the proposal.
+
 ## [2.47.1] - 2026-04-23
 
 ### Fixed
@@ -1601,7 +1607,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.47.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.48.0...HEAD
+[2.48.0]: https://github.com/fallow-rs/fallow/compare/v2.47.1...v2.48.0
 [2.47.1]: https://github.com/fallow-rs/fallow/compare/v2.47.0...v2.47.1
 [2.47.0]: https://github.com/fallow-rs/fallow/compare/v2.46.0...v2.47.0
 [2.46.0]: https://github.com/fallow-rs/fallow/compare/v2.45.1...v2.46.0
