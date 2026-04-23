@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.47.0] - 2026-04-23
+
+### Added
+
+- **Native Node.js bindings package (`@fallow-cli/fallow-node`).** New async NAPI-RS bindings expose the main one-shot analyses directly inside Node without spawning the CLI: `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `computeComplexity`, and `computeHealth`. The bindings reuse the CLI orchestration layer and return the same JSON report envelopes the CLI emits, including `schema_version`, `summary`, relative paths, and injected `actions`. The Rust-side programmatic facade lives in `fallow-cli::programmatic`, and the repo now includes a temp-project Node smoke test plus CI/release wiring for the addon package. The JS API accepts lowercase CLI-style enum literals (`"mild"`, `"cyclomatic"`, `"low"`, `"handle"`) and rejected promises now expose structured fallow fields like `exitCode`, `help`, and `context`. See <https://docs.fallow.tools/integrations/node-bindings>.
+
+### Fixed
+
+- **Benchmark JSON parsing hardened against partial runs.** The benchmark harness used a best-effort parser that silently treated truncated or malformed JSON as "zero findings", so a crashed run scored as a clean run. Parsing now validates the envelope and rejects invalid payloads up front, so partial results no longer poison cross-tool comparisons.
+- **Benchmark validity checks tightened; Vite overhead reduced.** The benchmark validity gate used to accept runs whose `summary.total_issues` silently disagreed with the sum of its per-category counts. It now rejects those runs, matching the stricter behavior the public comparison tables rely on. Adjacent Vite bench setup no longer installs dev dependencies it never invokes, cutting per-run overhead.
+- **Recursive plugin config scans avoided.** Some framework plugins re-scanned the project config object every time a file was processed, producing redundant work on large monorepos. The scans now memoize the resolved config per analysis run, removing the redundant traversals.
+- **`unused-listed-deps` no longer false-positives on broken `tsconfig.json` path aliases.** A `tsconfig.json` whose `compilerOptions.paths` pointed at a non-existent prefix would cause the resolver to fall through to "unlisted" on imports that were actually listed in `package.json`, flagging legitimate dependencies as unused. The resolver now treats unresolved alias prefixes as transient rather than definitive, so the listed-dep check only fires on genuinely missing entries.
+
+### Changed
+
+- **`cargo shear` no longer flags `tokio` in `crates/napi`.** The Node bindings crate no longer declares a direct `tokio` dependency; the napi `tokio_rt` feature already pulls it transitively.
+- **NAPI option parsing no longer silently truncates `maxCyclomatic` / `maxCognitive`.** Both fields are now validated against `u16::MAX`; out-of-range values produce a typed `InvalidArg` napi error instead of wrapping to a different threshold.
+- **`sync-npm-versions.sh` now rewrites the version strings NAPI-RS bakes into `crates/napi/index.js`.** Bumping a release used to leave the hardcoded `!== 'X.Y.Z'` comparisons at the previous tag, so strict `NAPI_RS_ENFORCE_VERSION_CHECK` consumers saw spurious mismatches on every release. The sync script now rewrites those literals in lockstep with `package.json`.
+
+## [2.46.0] - 2026-04-23
+
+### Added
+
+- **`fallow setup-hooks` generates a Claude Code `PreToolUse` gate** that intercepts Claude's `git commit` / `git push` Bash tool calls, runs `fallow audit --format json --quiet --explain`, and blocks with exit 2 + JSON-to-stderr on `verdict: "fail"`. The agent reads the full audit envelope (including `_meta.docs` links and `actions` arrays on every finding), fixes the code, and retries. Runtime errors fail open with a single stderr notice so skips stay visible rather than silently trusting a missing gate. Writes project-level `.claude/settings.json` + `.claude/hooks/fallow-gate.sh` (chmod 755 on Unix), and optionally maintains an idempotent managed block in `AGENTS.md` between `<!-- fallow:setup-hooks:start/end -->` markers as a Codex fallback while Codex hooks stabilise. Flags: `--agent claude|codex`, `--dry-run`, `--force`, `--user` (installs globally under `~/.claude/` with a `$HOME`-based handler command), `--gitignore-claude`, `--uninstall`. The uninstall path removes the fallow handler while preserving any non-fallow handlers in the same matcher group, deletes the hook script if it still carries the generator marker, and strips the managed AGENTS.md block; idempotent on repeat runs. Re-running the installer upgrades handlers written by earlier manual setups (absolute paths, `~/`-based paths, Windows drive paths) to the canonical `"$CLAUDE_PROJECT_DIR"` form without leaving duplicates. See <https://docs.fallow.tools/integrations/claude-hooks>.
+- **Zed editor extension.** Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza) ([#164](https://github.com/fallow-rs/fallow/pull/164)).
+
+### Fixed
+
+- **Health baselines survive line-number churn.** The health baseline keyed on `file + function + line_start`, so any refactor that shifted lines invalidated every entry and reported the same findings as "new." The key now uses `file + function + qualified_name` (line-stable), mirroring the dead-code and duplication baselines. Closes [#169](https://github.com/fallow-rs/fallow/issues/169). Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza).
+- **`fallow --save-baseline <path>` auto-creates the parent directory.** Copy-pasting the `fallow-baselines/dead-code.json` example into a fresh repo used to error with "No such file or directory" because the baseline writer never ran `mkdir -p`. Applies to `dead-code`, `health`, and `dupes` save-baseline paths.
+- **Shallow nested package scripts are discovered again.** The package-script walker stopped descending into `workspaces/*/package.json` entries that lived one directory below the root, silently dropping nested script declarations from the entry-point graph. The walker now follows shallow nesting the same way it follows deep nesting.
+
 ## [2.45.1] - 2026-04-22
 
 ### Fixed
@@ -1563,7 +1595,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.45.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.47.0...HEAD
+[2.47.0]: https://github.com/fallow-rs/fallow/compare/v2.46.0...v2.47.0
+[2.46.0]: https://github.com/fallow-rs/fallow/compare/v2.45.1...v2.46.0
 [2.45.1]: https://github.com/fallow-rs/fallow/compare/v2.45.0...v2.45.1
 [2.45.0]: https://github.com/fallow-rs/fallow/compare/v2.44.2...v2.45.0
 [2.44.2]: https://github.com/fallow-rs/fallow/compare/v2.44.1...v2.44.2

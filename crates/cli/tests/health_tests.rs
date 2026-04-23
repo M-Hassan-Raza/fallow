@@ -1,8 +1,9 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{fixture_path, parse_json, redact_all, run_fallow};
+use common::{fixture_path, parse_json, redact_all, run_fallow, run_fallow_in_root};
 use std::path::Path;
+use tempfile::tempdir;
 
 fn write_file(path: &Path, contents: &str) {
     if let Some(parent) = path.parent() {
@@ -72,6 +73,46 @@ fn health_json_has_findings() {
     assert!(
         json.get("findings").is_some(),
         "health JSON should have findings key"
+    );
+}
+
+#[test]
+fn health_save_baseline_creates_parent_directory() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"health-save","version":"1.0.0"}"#,
+    );
+    write_file(
+        &dir.path().join("src/index.ts"),
+        r"export function alpha(value: number): number {
+  if (value > 10) return value * 2;
+  return value + 1;
+}
+",
+    );
+
+    let baseline_path = dir.path().join("fallow-baselines/health.json");
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--targets",
+            "--save-baseline",
+            baseline_path.to_str().unwrap(),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let rendered = redact_all(&format!("{}\n{}", output.stdout, output.stderr), dir.path());
+    assert_eq!(
+        output.code, 0,
+        "health save baseline should succeed: {rendered}"
+    );
+    assert!(
+        baseline_path.exists(),
+        "health save baseline should create nested file: {rendered}"
     );
 }
 
@@ -242,8 +283,7 @@ fn health_score_flag_with_config_does_not_render_coverage_gaps() {
   "rules": {
     "coverage-gaps": "warn"
   }
-}
-"#,
+}"#,
     );
 
     let root = fixture_path("production-mode");
@@ -265,6 +305,143 @@ fn health_score_flag_with_config_does_not_render_coverage_gaps() {
     assert!(
         json.get("coverage_gaps").is_none(),
         "config-enabled coverage gaps should not override explicit section selection"
+    );
+}
+
+#[test]
+fn health_baseline_partial_overflow_does_not_emit_stale_baseline_warning() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"baseline-health-repro","type":"module"}"#,
+    );
+    write_file(
+        &dir.path().join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2020","module":"ES2020","strict":true},"include":["src"]}"#,
+    );
+    write_file(
+        &dir.path().join("src/index.ts"),
+        r#"export function alpha(items: number[]): string {
+  let result = "";
+  for (let i = 0; i < items.length; i++) {
+    if (items[i] % 2 === 0) {
+      if (items[i] % 3 === 0) {
+        if (items[i] % 5 === 0) { result += "fizzbuzz"; }
+        else { result += "fizz"; }
+      } else if (items[i] % 5 === 0) { result += "buzz"; }
+      else { result += String(items[i]); }
+    } else {
+      if (items[i] % 7 === 0) { result += "lucky"; }
+      else if (items[i] > 50) {
+        if (items[i] < 75) { result += "mid"; }
+        else { result += "high"; }
+      } else { result += "low"; }
+    }
+  }
+  return result;
+}"#,
+    );
+
+    let baseline_path = dir.path().join("health-baseline.json");
+    let baseline_path_str = baseline_path
+        .to_str()
+        .expect("baseline path should be valid UTF-8");
+
+    let save = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--save-baseline",
+            baseline_path_str,
+        ],
+    );
+    let save_output = redact_all(&format!("{}\n{}", save.stdout, save.stderr), dir.path());
+    assert!(
+        save.code == 0 || save.code == 1,
+        "save baseline should not crash: {save_output}"
+    );
+    assert!(
+        baseline_path.exists(),
+        "save baseline should create the baseline file: {save_output}"
+    );
+    assert!(
+        save_output.contains("Saved health baseline to"),
+        "save baseline should confirm the write: {save_output}"
+    );
+
+    write_file(
+        &dir.path().join("src/index.ts"),
+        r#"export function alpha(items: number[]): string {
+  let result = "";
+  for (let i = 0; i < items.length; i++) {
+    if (items[i] % 2 === 0) {
+      if (items[i] % 3 === 0) {
+        if (items[i] % 5 === 0) { result += "fizzbuzz"; }
+        else { result += "fizz"; }
+      } else if (items[i] % 5 === 0) { result += "buzz"; }
+      else { result += String(items[i]); }
+    } else {
+      if (items[i] % 7 === 0) { result += "lucky"; }
+      else if (items[i] > 50) {
+        if (items[i] < 75) { result += "mid"; }
+        else { result += "high"; }
+      } else { result += "low"; }
+    }
+  }
+  return result;
+}
+
+export function beta(items: number[]): string {
+  let result = "";
+  for (let i = 0; i < items.length; i++) {
+    if (items[i] % 2 === 0) {
+      if (items[i] % 3 === 0) {
+        if (items[i] % 5 === 0) { result += "fizzbuzz"; }
+        else { result += "fizz"; }
+      } else if (items[i] % 5 === 0) { result += "buzz"; }
+      else { result += String(items[i]); }
+    } else {
+      if (items[i] % 7 === 0) { result += "lucky"; }
+      else if (items[i] > 50) {
+        if (items[i] < 75) { result += "mid"; }
+        else { result += "high"; }
+      } else { result += "low"; }
+    }
+  }
+  return result;
+}"#,
+    );
+
+    let load = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--baseline",
+            baseline_path_str,
+        ],
+    );
+    let combined = redact_all(&format!("{}\n{}", load.stdout, load.stderr), dir.path());
+    assert_eq!(
+        load.code, 1,
+        "baseline load should still report the overflowing findings: {combined}"
+    );
+    assert!(
+        combined.contains("alpha") && combined.contains("beta"),
+        "expected overflow run to still report both functions: {combined}"
+    );
+    assert!(
+        !combined.contains("Warning: health baseline has"),
+        "partial-overflow baseline should not look stale: {combined}"
     );
 }
 

@@ -5,6 +5,7 @@ use fallow_config::{
     UsedClassMemberRule,
 };
 use helpers::{check_plugin_detection, discover_config_files, process_config_result};
+use rustc_hash::FxHashSet;
 
 /// Build a dependency object from names for JSON deserialization.
 fn deps_json(names: &[&str]) -> serde_json::Value {
@@ -1544,6 +1545,7 @@ fn run_workspace_fast_returns_empty_for_no_active_plugins() {
         Path::new("/workspace"),
         &matchers,
         &relative_files,
+        &FxHashSet::default(),
     );
     assert!(result.active_plugins.is_empty());
     assert!(result.entry_patterns.is_empty());
@@ -1563,6 +1565,7 @@ fn run_workspace_fast_detects_active_plugins() {
         Path::new("/workspace"),
         &matchers,
         &relative_files,
+        &FxHashSet::default(),
     );
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
     assert!(!result.entry_patterns.is_empty());
@@ -1583,6 +1586,7 @@ fn run_workspace_fast_filters_matchers_to_active_plugins() {
         Path::new("/workspace"),
         &matchers,
         &relative_files,
+        &FxHashSet::default(),
     );
     // Only nextjs should be active
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
@@ -1908,8 +1912,8 @@ fn eslint_activates_by_config_file_existence() {
 
 #[test]
 fn discover_config_files_finds_in_subdirectory() {
-    // Nx plugin has "**/project.json" config pattern — filesystem glob discovery
-    // should find config files beneath the project root.
+    // Nx plugin has "**/project.json" config pattern. Callers provide focused
+    // search roots rather than forcing a recursive whole-tree walk.
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     let subdir = root.join("packages").join("app");
@@ -1920,14 +1924,14 @@ fn discover_config_files_finds_in_subdirectory() {
     let matchers = registry.precompile_config_matchers();
     let resolved: FxHashSet<&str> = FxHashSet::default();
 
-    let json_configs = discover_config_files(&matchers, &resolved, &[root]);
+    let json_configs = discover_config_files(&matchers, &resolved, &[root, subdir.as_path()]);
     // Check if any nx project.json was discovered
     let found_project_json = json_configs
         .iter()
         .any(|(path, _)| path.ends_with("project.json"));
     assert!(
         found_project_json,
-        "discover_config_files should find project.json below the project root"
+        "discover_config_files should find project.json in the provided search roots"
     );
 }
 

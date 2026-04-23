@@ -19,6 +19,13 @@ use helpers::{
     process_static_patterns,
 };
 
+fn must_parse_workspace_config_when_root_active(plugin_name: &str) -> bool {
+    matches!(
+        plugin_name,
+        "docusaurus" | "jest" | "tanstack-router" | "vitest"
+    )
+}
+
 /// Registry of all available plugins (built-in + external).
 pub struct PluginRegistry {
     plugins: Vec<Box<dyn Plugin>>,
@@ -91,6 +98,22 @@ impl PluginRegistry {
         pkg: &PackageJson,
         root: &Path,
         discovered_files: &[PathBuf],
+    ) -> AggregatedPluginResult {
+        self.run_with_search_roots(pkg, root, discovered_files, &[root])
+    }
+
+    /// Run all plugins against a project with explicit config-file search roots.
+    ///
+    /// `config_search_roots` should stay narrowly focused to directories that are
+    /// already known to matter for this project. Broad recursive scans are
+    /// intentionally avoided because they become prohibitively expensive on
+    /// large monorepos with populated `node_modules` trees.
+    pub fn run_with_search_roots(
+        &self,
+        pkg: &PackageJson,
+        root: &Path,
+        discovered_files: &[PathBuf],
+        config_search_roots: &[&Path],
     ) -> AggregatedPluginResult {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
@@ -199,7 +222,8 @@ impl PluginRegistry {
             // Phase 3b: Filesystem fallback for JSON config files.
             // JSON files (angular.json, project.json) are not in the discovered file set
             // because fallow only discovers JS/TS/CSS/Vue/etc. files.
-            let json_configs = discover_config_files(&config_matchers, &resolved_plugins, &[root]);
+            let json_configs =
+                discover_config_files(&config_matchers, &resolved_plugins, config_search_roots);
             for (abs_path, plugin) in &json_configs {
                 if let Ok(source) = std::fs::read_to_string(abs_path) {
                     let plugin_result = plugin.resolve_config(abs_path, &source, root);
@@ -265,6 +289,7 @@ impl PluginRegistry {
         project_root: &Path,
         precompiled_config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
         relative_files: &[(&PathBuf, String)],
+        skip_config_plugins: &FxHashSet<&str>,
     ) -> AggregatedPluginResult {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
@@ -302,7 +327,11 @@ impl PluginRegistry {
         let active_names: FxHashSet<&str> = active.iter().map(|p| p.name()).collect();
         let workspace_matchers: Vec<_> = precompiled_config_matchers
             .iter()
-            .filter(|(p, _)| active_names.contains(p.name()))
+            .filter(|(p, _)| {
+                active_names.contains(p.name())
+                    && (!skip_config_plugins.contains(p.name())
+                        || must_parse_workspace_config_when_root_active(p.name()))
+            })
             .map(|(plugin, matchers)| (*plugin, matchers.clone()))
             .collect();
 
