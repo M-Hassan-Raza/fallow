@@ -1483,7 +1483,7 @@ fn load_health_baseline(
         .map_err(|e| emit_error(&format!("failed to read health baseline: {e}"), 2, output))?;
     let baseline: HealthBaselineData = serde_json::from_str(&json)
         .map_err(|e| emit_error(&format!("failed to parse health baseline: {e}"), 2, output))?;
-    let baseline_entries = baseline.findings.len();
+    let baseline_entries = baseline.finding_entry_count();
     let before = findings.len();
     *findings = filter_new_health_findings(std::mem::take(findings), &baseline, root);
     let matched = before.saturating_sub(findings.len());
@@ -2022,6 +2022,7 @@ mod tests {
         let root = Path::new("/project");
         let baseline = HealthBaselineData {
             findings: vec![],
+            finding_counts: std::collections::BTreeMap::new(),
             production_coverage_findings: vec![
                 "fallow:prod:aaaaaaaa".to_owned(),
                 "fallow:prod:bbbbbbbb".to_owned(),
@@ -2112,6 +2113,7 @@ mod tests {
         let root = Path::new("/project");
         let baseline = HealthBaselineData {
             findings: vec![],
+            finding_counts: std::collections::BTreeMap::new(),
             production_coverage_findings: vec!["fallow:prod:aaaaaaaa".to_owned()],
             target_keys: vec![],
         };
