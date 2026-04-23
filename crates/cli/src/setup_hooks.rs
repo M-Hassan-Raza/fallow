@@ -37,8 +37,25 @@ pub struct SetupHooksOptions<'a> {
     pub uninstall: bool,
 }
 
-/// Static content of `.claude/hooks/fallow-gate.sh`.
+/// Template content of `.claude/hooks/fallow-gate.sh`. Contains the
+/// `@@FALLOW_INSTALLER_VERSION@@` placeholder; use [`rendered_gate_script`] to
+/// obtain the install-ready bytes.
 pub const FALLOW_GATE_SCRIPT: &str = include_str!("setup_hooks/fallow-gate.sh");
+
+/// Marker substituted at install time by [`rendered_gate_script`]. Follows the
+/// autotools `@@NAME@@` convention: grep-friendly, bash-safe, unambiguously
+/// "already rendered" when read in an installed script.
+const INSTALLER_VERSION_PLACEHOLDER: &str = "@@FALLOW_INSTALLER_VERSION@@";
+
+/// Render the gate script with install-time substitutions applied. Stamps the
+/// fallow version that invoked `setup-hooks` into a header comment for
+/// forensics; the enforced `FALLOW_GATE_MIN_VERSION` default stays hand-bumped
+/// by maintainers when a correctness-affecting filtering fix lands, and is
+/// intentionally NOT substituted here.
+#[must_use]
+pub fn rendered_gate_script() -> String {
+    FALLOW_GATE_SCRIPT.replace(INSTALLER_VERSION_PLACEHOLDER, env!("CARGO_PKG_VERSION"))
+}
 
 /// Static content of `.claude/settings.json` when no prior file exists.
 pub const CLAUDE_SETTINGS_DEFAULT: &str = include_str!("setup_hooks/settings.json");
@@ -218,7 +235,7 @@ impl ClaudeTargets {
             merge_claude_settings(&self.settings_path, opts.user, opts.force, opts.dry_run)?;
         let script_outcome = write_executable_script(
             &self.script_path,
-            FALLOW_GATE_SCRIPT,
+            &rendered_gate_script(),
             opts.force,
             opts.dry_run,
         )?;
@@ -1297,7 +1314,63 @@ mod tests {
         o.agent = Some(HookAgentArg::Claude);
         assert_eq!(run_setup_hooks(&o), ExitCode::SUCCESS);
         let replaced = std::fs::read_to_string(&script_path).unwrap();
-        assert_eq!(replaced, FALLOW_GATE_SCRIPT);
+        assert_eq!(replaced, rendered_gate_script());
+    }
+
+    #[test]
+    fn rendered_script_substitutes_installer_version() {
+        let rendered = rendered_gate_script();
+        assert!(
+            !rendered.contains(INSTALLER_VERSION_PLACEHOLDER),
+            "placeholder should be substituted, still present in rendered script"
+        );
+        let expected = format!("Installer version: {}", env!("CARGO_PKG_VERSION"));
+        assert!(
+            rendered.contains(&expected),
+            "rendered script should stamp installer version, got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn rendered_script_preserves_correctness_floor() {
+        let rendered = rendered_gate_script();
+        assert!(
+            rendered.contains("FALLOW_GATE_MIN_VERSION-2.46.0"),
+            "enforced floor must stay maintainer-bumped, not installer-pinned; \
+             rendered script was:\n{rendered}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gate_script_sort_v_orders_plain_semver_correctly() {
+        // The gate's floor check is `sort -V | head -n1`. Lock down only the
+        // orderings the gate actually depends on in practice: plain-vs-plain
+        // semver, which is stable across GNU and BSD sort. Prerelease ordering
+        // (`2.48.0-alpha.1` vs `2.48.0`) diverges between platforms: GNU places
+        // the prerelease BELOW the release (semver-correct), BSD places it
+        // ABOVE. Fallow's shipped floor is always a plain version and
+        // `CARGO_PKG_VERSION` stamped at install is plain on published
+        // releases, so this divergence does not affect the common flow. The
+        // gate script's header notes the quirk for anyone setting
+        // `FALLOW_GATE_MIN_VERSION` to a prerelease explicitly.
+        let output = std::process::Command::new("bash")
+            .arg("-c")
+            .arg("printf '%s\\n' 2.46.0 2.30.0 2.48.0 2.46.0 2.46.1 | sort -V")
+            .output()
+            .expect("bash + sort must be available on unix test runners");
+        assert!(output.status.success(), "sort -V exited nonzero");
+        let sorted: Vec<&str> = std::str::from_utf8(&output.stdout)
+            .unwrap()
+            .lines()
+            .collect();
+        assert_eq!(
+            sorted,
+            vec!["2.30.0", "2.46.0", "2.46.0", "2.46.1", "2.48.0"],
+            "plain semver ordering via sort -V must place lower first; the gate's \
+             floor check reads `head -n1` of this ordering to decide if the user's \
+             fallow is below the floor"
+        );
     }
 
     #[test]
