@@ -3,8 +3,11 @@ use std::path::Path;
 use std::time::Duration;
 
 use colored::Colorize;
-use fallow_config::RulesConfig;
-use fallow_core::results::{AnalysisResults, UnusedExport, UnusedMember};
+use fallow_config::{RulesConfig, Severity};
+use fallow_core::results::{
+    AnalysisResults, TestOnlyDependency, TypeOnlyDependency, UnusedDependency, UnusedExport,
+    UnusedMember,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
@@ -254,6 +257,66 @@ fn format_dep_with_pkg(name: &str, pkg_path: &Path, root: &Path) -> String {
     }
 }
 
+/// Shared accessor for the dep types rendered with `format_dep_with_pkg`
+/// (package name + owning package.json path). Kept crate-private since it
+/// exists only to deduplicate the closures inside build_dependencies_section.
+trait NamedPkgDep {
+    fn pkg_name(&self) -> &str;
+    fn pkg_path(&self) -> &Path;
+}
+
+impl NamedPkgDep for UnusedDependency {
+    fn pkg_name(&self) -> &str {
+        &self.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl NamedPkgDep for TypeOnlyDependency {
+    fn pkg_name(&self) -> &str {
+        &self.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl NamedPkgDep for TestOnlyDependency {
+    fn pkg_name(&self) -> &str {
+        &self.package_name
+    }
+    fn pkg_path(&self) -> &Path {
+        &self.path
+    }
+}
+
+fn push_human_pkg_dep_section<T: NamedPkgDep>(
+    lines: &mut Vec<String>,
+    items: &[T],
+    title: &'static str,
+    severity: Severity,
+    max_items: usize,
+    total_issues: usize,
+    root: &Path,
+) {
+    build_human_section_ex(
+        lines,
+        items,
+        title,
+        severity_to_level(severity),
+        max_items,
+        total_issues,
+        |dep| {
+            vec![format!(
+                "  {}",
+                format_dep_with_pkg(dep.pkg_name(), dep.pkg_path(), root)
+            )]
+        },
+    );
+}
+
 fn build_unused_code_section(
     lines: &mut Vec<String>,
     results: &AnalysisResults,
@@ -380,47 +443,32 @@ fn build_dependencies_section(
     }
     push_category_header(lines, "Dependencies");
 
-    build_human_section_ex(
+    push_human_pkg_dep_section(
         lines,
         &results.unused_dependencies,
         "Unused dependencies",
-        severity_to_level(rules.unused_dependencies),
+        rules.unused_dependencies,
         max_items,
         total_issues,
-        |dep| {
-            vec![format!(
-                "  {}",
-                format_dep_with_pkg(&dep.package_name, &dep.path, root)
-            )]
-        },
+        root,
     );
-    build_human_section_ex(
+    push_human_pkg_dep_section(
         lines,
         &results.unused_dev_dependencies,
         "Unused devDependencies",
-        severity_to_level(rules.unused_dev_dependencies),
+        rules.unused_dev_dependencies,
         max_items,
         total_issues,
-        |dep| {
-            vec![format!(
-                "  {}",
-                format_dep_with_pkg(&dep.package_name, &dep.path, root)
-            )]
-        },
+        root,
     );
-    build_human_section_ex(
+    push_human_pkg_dep_section(
         lines,
         &results.unused_optional_dependencies,
         "Unused optionalDependencies",
-        severity_to_level(rules.unused_optional_dependencies),
+        rules.unused_optional_dependencies,
         max_items,
         total_issues,
-        |dep| {
-            vec![format!(
-                "  {}",
-                format_dep_with_pkg(&dep.package_name, &dep.path, root)
-            )]
-        },
+        root,
     );
     build_human_grouped_section(
         lines,
@@ -441,33 +489,23 @@ fn build_dependencies_section(
         total_issues,
         |dep| vec![format!("  {}", dep.package_name.bold())],
     );
-    build_human_section_ex(
+    push_human_pkg_dep_section(
         lines,
         &results.type_only_dependencies,
         "Type-only dependencies (consider moving to devDependencies)",
-        severity_to_level(rules.type_only_dependencies),
+        rules.type_only_dependencies,
         max_items,
         total_issues,
-        |dep| {
-            vec![format!(
-                "  {}",
-                format_dep_with_pkg(&dep.package_name, &dep.path, root)
-            )]
-        },
+        root,
     );
-    build_human_section_ex(
+    push_human_pkg_dep_section(
         lines,
         &results.test_only_dependencies,
         "Test-only production dependencies (consider moving to devDependencies)",
-        severity_to_level(rules.test_only_dependencies),
+        rules.test_only_dependencies,
         max_items,
         total_issues,
-        |dep| {
-            vec![format!(
-                "  {}",
-                format_dep_with_pkg(&dep.package_name, &dep.path, root)
-            )]
-        },
+        root,
     );
 }
 
