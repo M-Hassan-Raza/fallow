@@ -7,9 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.47.0] - 2026-04-23
+
 ### Added
 
-- **Native Node.js bindings package (`@fallow-cli/fallow-node`).** New async NAPI-RS bindings expose the main one-shot analyses directly inside Node without spawning the CLI: `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `computeComplexity`, and `computeHealth`. The bindings reuse the CLI orchestration layer and return the same JSON report envelopes the CLI emits, including `schema_version`, `summary`, relative paths, and injected `actions`. The Rust-side programmatic facade lives in `fallow-cli::programmatic`, and the repo now includes a temp-project Node smoke test plus CI/release wiring for the addon package. The JS API accepts lowercase CLI-style enum literals (`"mild"`, `"cyclomatic"`, `"low"`, `"handle"`) and rejected promises now expose structured fallow fields like `exitCode`, `help`, and `context`.
+- **Native Node.js bindings package (`@fallow-cli/fallow-node`).** New async NAPI-RS bindings expose the main one-shot analyses directly inside Node without spawning the CLI: `detectDeadCode`, `detectCircularDependencies`, `detectBoundaryViolations`, `detectDuplication`, `computeComplexity`, and `computeHealth`. The bindings reuse the CLI orchestration layer and return the same JSON report envelopes the CLI emits, including `schema_version`, `summary`, relative paths, and injected `actions`. The Rust-side programmatic facade lives in `fallow-cli::programmatic`, and the repo now includes a temp-project Node smoke test plus CI/release wiring for the addon package. The JS API accepts lowercase CLI-style enum literals (`"mild"`, `"cyclomatic"`, `"low"`, `"handle"`) and rejected promises now expose structured fallow fields like `exitCode`, `help`, and `context`. See <https://docs.fallow.tools/integrations/node-bindings>.
+
+### Fixed
+
+- **Benchmark JSON parsing hardened against partial runs.** The benchmark harness used a best-effort parser that silently treated truncated or malformed JSON as "zero findings", so a crashed run scored as a clean run. Parsing now validates the envelope and rejects invalid payloads up front, so partial results no longer poison cross-tool comparisons.
+- **Benchmark validity checks tightened; Vite overhead reduced.** The benchmark validity gate used to accept runs whose `summary.total_issues` silently disagreed with the sum of its per-category counts. It now rejects those runs, matching the stricter behavior the public comparison tables rely on. Adjacent Vite bench setup no longer installs dev dependencies it never invokes, cutting per-run overhead.
+- **Recursive plugin config scans avoided.** Some framework plugins re-scanned the project config object every time a file was processed, producing redundant work on large monorepos. The scans now memoize the resolved config per analysis run, removing the redundant traversals.
+- **`unused-listed-deps` no longer false-positives on broken `tsconfig.json` path aliases.** A `tsconfig.json` whose `compilerOptions.paths` pointed at a non-existent prefix would cause the resolver to fall through to "unlisted" on imports that were actually listed in `package.json`, flagging legitimate dependencies as unused. The resolver now treats unresolved alias prefixes as transient rather than definitive, so the listed-dep check only fires on genuinely missing entries.
+
+### Changed
+
+- **`cargo shear` no longer flags `tokio` in `crates/napi`.** The Node bindings crate no longer declares a direct `tokio` dependency; the napi `tokio_rt` feature already pulls it transitively.
+- **NAPI option parsing no longer silently truncates `maxCyclomatic` / `maxCognitive`.** Both fields are now validated against `u16::MAX`; out-of-range values produce a typed `InvalidArg` napi error instead of wrapping to a different threshold.
+- **`sync-npm-versions.sh` now rewrites the version strings NAPI-RS bakes into `crates/napi/index.js`.** Bumping a release used to leave the hardcoded `!== 'X.Y.Z'` comparisons at the previous tag, so strict `NAPI_RS_ENFORCE_VERSION_CHECK` consumers saw spurious mismatches on every release. The sync script now rewrites those literals in lockstep with `package.json`.
 
 ## [2.46.0] - 2026-04-23
 
@@ -1580,7 +1595,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.45.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.47.0...HEAD
+[2.47.0]: https://github.com/fallow-rs/fallow/compare/v2.46.0...v2.47.0
 [2.46.0]: https://github.com/fallow-rs/fallow/compare/v2.45.1...v2.46.0
 [2.45.1]: https://github.com/fallow-rs/fallow/compare/v2.45.0...v2.45.1
 [2.45.0]: https://github.com/fallow-rs/fallow/compare/v2.44.2...v2.45.0
