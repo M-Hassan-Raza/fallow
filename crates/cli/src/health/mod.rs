@@ -1485,15 +1485,15 @@ fn load_health_baseline(
         .map_err(|e| emit_error(&format!("failed to parse health baseline: {e}"), 2, output))?;
     let baseline_entries = baseline.finding_entry_count();
     let before = findings.len();
+    let overlap_entries = baseline.overlap_entry_count(findings, root);
     *findings = filter_new_health_findings(std::mem::take(findings), &baseline, root);
-    let matched = before.saturating_sub(findings.len());
     if !quiet {
         eprintln!(
             "Comparing against health baseline: {}",
             baseline_path.display()
         );
     }
-    if baseline_entries > 0 && matched == 0 && !quiet {
+    if baseline_entries > 0 && before > 0 && overlap_entries == 0 && !quiet {
         eprintln!(
             "Warning: health baseline has {baseline_entries} entries but matched \
              0 current findings. Your paths may have changed, or the baseline \
