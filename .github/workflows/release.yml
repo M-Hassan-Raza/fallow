@@ -143,7 +143,7 @@ jobs:
             mcp_binary: fallow-mcp.exe
             npm_dir: win32-x64-msvc
           - target: aarch64-pc-windows-msvc
-            os: windows-latest
+            os: windows-11-arm
             binary: fallow.exe
             lsp_binary: fallow-lsp.exe
             mcp_binary: fallow-mcp.exe
