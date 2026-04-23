@@ -32,6 +32,7 @@ mod migrate;
 mod regression;
 mod report;
 mod schema;
+mod setup_hooks;
 mod validate;
 mod vital_signs;
 mod watch;
@@ -658,6 +659,37 @@ enum Command {
     Coverage {
         #[command(subcommand)]
         subcommand: CoverageCli,
+    },
+
+    /// Generate a Claude Code PreToolUse hook that gates `git commit` /
+    /// `git push` on `fallow audit`, so the agent cleans findings before
+    /// the command runs.
+    ///
+    /// Writes `.claude/settings.json` + `.claude/hooks/fallow-gate.sh` by
+    /// default. When an `AGENTS.md` or `.codex/` directory is present,
+    /// also maintains a Codex fallback block in `AGENTS.md` (experimental
+    /// Codex hooks are deliberately not used yet). See
+    /// `/integrations/claude-hooks` in the docs.
+    SetupHooks {
+        /// Target a specific agent surface (default: auto-detect).
+        #[arg(long, value_enum)]
+        agent: Option<setup_hooks::HookAgentArg>,
+
+        /// Print what would be written without touching the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Overwrite an existing hook script or invalid settings.json.
+        #[arg(long)]
+        force: bool,
+
+        /// Write to the user's home directory instead of the project root.
+        #[arg(long)]
+        user: bool,
+
+        /// Append `.claude/` to the project's `.gitignore`.
+        #[arg(long)]
+        gitignore_claude: bool,
     },
 }
 
@@ -1315,6 +1347,7 @@ fn main() -> ExitCode {
                     | Command::Migrate { .. }
                     | Command::License { .. }
                     | Command::Coverage { .. }
+                    | Command::SetupHooks { .. }
             )
         )
     {
@@ -1802,6 +1835,20 @@ fn dispatch_subcommand(
         Command::Coverage { subcommand } => {
             coverage::run(map_coverage_subcommand(&subcommand), root)
         }
+        Command::SetupHooks {
+            agent,
+            dry_run,
+            force,
+            user,
+            gitignore_claude,
+        } => setup_hooks::run_setup_hooks(&setup_hooks::SetupHooksOptions {
+            root,
+            agent,
+            dry_run,
+            force,
+            user,
+            gitignore_claude,
+        }),
     }
 }
 
