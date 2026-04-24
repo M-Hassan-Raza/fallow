@@ -7,7 +7,7 @@ paths:
 
 MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wraps `fallow` CLI via subprocess.
 
-## Tools (11 total)
+## Tools (15 total)
 - `analyze` - full dead code analysis (`fallow dead-code --format json`), supports `boundary_violations` convenience param
 - `check_changed` - incremental analysis (`fallow dead-code --changed-since`)
 - `find_dupes` - code duplication (`fallow dupes --format json`), supports `changed_since`
@@ -19,6 +19,10 @@ MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wra
 - `project_info` - project metadata (`fallow list --format json`), supports section params (`entry_points`, `files`, `plugins`, `boundaries`)
 - `list_boundaries` - architecture boundary zones and rules (`fallow list --boundaries --format json`)
 - `feature_flags` - detect feature flag patterns (`fallow flags --format json`), supports `flag_type`, `confidence`, `dead_code_only` params
+- `trace_export` - trace why an export is used/unused (`fallow dead-code --trace FILE:EXPORT_NAME --format json`). Required `file` and `export_name` params. Returns file reachability, entry-point status, direct references, re-export chains, and a reason summary. Use before deleting a supposedly-unused export.
+- `trace_file` - trace all graph edges for a file (`fallow dead-code --trace-file PATH --format json`). Required `file` param. Returns reachability, entry-point status, exports, imports-from, imported-by, and re-exports. Use to decide whether a file is isolated, barrel-only, or imported by live entry points.
+- `trace_dependency` - trace where a dependency is imported (`fallow dead-code --trace-dependency PACKAGE --format json`). Required `package_name` param. Returns importing files, type-only importers, and total import count. Use before removing a dependency or moving between `dependencies` and `devDependencies`.
+- `trace_clone` - trace duplicate-code groups at a location (`fallow dupes --trace FILE:LINE --format json`). Required `file` and `line` params. Returns the matched clone instance plus every clone group containing it. Supports `mode`, `min_tokens`, `min_lines`, `threshold`, `skip_local`, `cross_language`, `ignore_imports`. Use to consolidate duplication when you need exact sibling locations.
 
 ## Global flags (available on all tools)
 - `no_cache` (bool) — disable incremental parse cache
@@ -42,7 +46,7 @@ All JSON output includes structured `actions` arrays on every finding:
 - Dupes groups: `extract-shared` + suppress
 - Audit: inherits actions from all three sub-analyses
 
-All params structs derive `Default` for ergonomic test construction except `CheckChangedParams` and `CheckProductionCoverageParams`, which each have one required non-default field (`since` and `coverage` respectively). Their test helpers (`check_changed("main")`, `check_production_coverage("./coverage")`) substitute for `Default::default()`.
+All params structs derive `Default` for ergonomic test construction except those with required non-default fields: `CheckChangedParams` (`since`), `CheckProductionCoverageParams` (`coverage`), `TraceExportParams` (`file`, `export_name`), `TraceFileParams` (`file`), `TraceDependencyParams` (`package_name`), and `TraceCloneParams` (`file`, `line`). Trace param tests build struct literals directly; the first two use the helpers `check_changed("main")` and `check_production_coverage("./coverage")`.
 
 Built with `rmcp` (official Rust MCP SDK). Thin subprocess wrapper — all analysis logic stays in the CLI.
 - `FALLOW_BIN` — binary path (defaults to sibling binary or `fallow` in PATH)

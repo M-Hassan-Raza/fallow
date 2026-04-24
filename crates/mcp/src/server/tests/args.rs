@@ -3,7 +3,8 @@ use crate::tools::{
     ISSUE_TYPE_FLAGS, VALID_DUPES_MODES, build_analyze_args, build_audit_args,
     build_check_changed_args, build_check_production_coverage_args, build_feature_flags_args,
     build_find_dupes_args, build_fix_apply_args, build_fix_preview_args, build_health_args,
-    build_list_boundaries_args, build_project_info_args,
+    build_list_boundaries_args, build_project_info_args, build_trace_clone_args,
+    build_trace_dependency_args, build_trace_export_args, build_trace_file_args,
 };
 
 fn check_production_coverage(coverage: &str) -> CheckProductionCoverageParams {
@@ -536,6 +537,243 @@ fn project_info_args_with_all_options() {
     );
 }
 
+// ── Argument building: trace tools ───────────────────────────────
+
+#[test]
+fn trace_export_args_minimal() {
+    let args = build_trace_export_args(&TraceExportParams {
+        file: "src/utils.ts".to_string(),
+        export_name: "usedFunction".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    assert_eq!(
+        args,
+        [
+            "dead-code",
+            "--format",
+            "json",
+            "--quiet",
+            "--trace",
+            "src/utils.ts:usedFunction",
+        ]
+    );
+}
+
+#[test]
+fn trace_file_args_with_scope() {
+    let args = build_trace_file_args(&TraceFileParams {
+        file: "src/utils.ts".to_string(),
+        root: Some("/repo".to_string()),
+        config: Some("fallow.toml".to_string()),
+        production: Some(true),
+        workspace: Some("packages/web".to_string()),
+        no_cache: Some(true),
+        threads: Some(3),
+    })
+    .unwrap();
+    assert_eq!(
+        args,
+        [
+            "dead-code",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/repo",
+            "--config",
+            "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "3",
+            "--production",
+            "--workspace",
+            "packages/web",
+            "--trace-file",
+            "src/utils.ts",
+        ]
+    );
+}
+
+#[test]
+fn trace_dependency_args_minimal() {
+    let args = build_trace_dependency_args(&TraceDependencyParams {
+        package_name: "react".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    assert_eq!(
+        args,
+        [
+            "dead-code",
+            "--format",
+            "json",
+            "--quiet",
+            "--trace-dependency",
+            "react",
+        ]
+    );
+}
+
+#[test]
+fn trace_clone_args_with_all_options() {
+    let args = build_trace_clone_args(&TraceCloneParams {
+        file: "src/original.ts".to_string(),
+        line: 12,
+        root: Some("/repo".to_string()),
+        config: Some("fallow.toml".to_string()),
+        workspace: Some("packages/ui".to_string()),
+        mode: Some("semantic".to_string()),
+        min_tokens: Some(80),
+        min_lines: Some(7),
+        threshold: Some(3.5),
+        skip_local: Some(true),
+        cross_language: Some(true),
+        ignore_imports: Some(true),
+        no_cache: Some(true),
+        threads: Some(6),
+    })
+    .unwrap();
+    assert_eq!(
+        args,
+        [
+            "dupes",
+            "--format",
+            "json",
+            "--quiet",
+            "--root",
+            "/repo",
+            "--config",
+            "fallow.toml",
+            "--no-cache",
+            "--threads",
+            "6",
+            "--workspace",
+            "packages/ui",
+            "--mode",
+            "semantic",
+            "--min-tokens",
+            "80",
+            "--min-lines",
+            "7",
+            "--threshold",
+            "3.5",
+            "--skip-local",
+            "--cross-language",
+            "--ignore-imports",
+            "--trace",
+            "src/original.ts:12",
+        ]
+    );
+}
+
+#[test]
+fn trace_clone_args_invalid_mode_returns_error() {
+    let err = build_trace_clone_args(&TraceCloneParams {
+        file: "src/original.ts".to_string(),
+        line: 2,
+        root: None,
+        config: None,
+        workspace: None,
+        mode: Some("bogus".to_string()),
+        min_tokens: None,
+        min_lines: None,
+        threshold: None,
+        skip_local: None,
+        cross_language: None,
+        ignore_imports: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap_err();
+    assert!(err.contains("Invalid mode 'bogus'"));
+}
+
+#[test]
+fn trace_args_reject_blank_required_values() {
+    let export_err = build_trace_export_args(&TraceExportParams {
+        file: " ".to_string(),
+        export_name: "usedFunction".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap_err();
+    assert_eq!(export_err, "file must not be empty");
+
+    let export_name_err = build_trace_export_args(&TraceExportParams {
+        file: "src/utils.ts".to_string(),
+        export_name: String::new(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap_err();
+    assert_eq!(export_name_err, "export_name must not be empty");
+
+    let file_err = build_trace_file_args(&TraceFileParams {
+        file: "\t".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap_err();
+    assert_eq!(file_err, "file must not be empty");
+
+    let dependency_err = build_trace_dependency_args(&TraceDependencyParams {
+        package_name: String::new(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap_err();
+    assert_eq!(dependency_err, "package_name must not be empty");
+}
+
+#[test]
+fn trace_clone_args_reject_zero_line() {
+    let err = build_trace_clone_args(&TraceCloneParams {
+        file: "src/original.ts".to_string(),
+        line: 0,
+        root: None,
+        config: None,
+        workspace: None,
+        mode: None,
+        min_tokens: None,
+        min_lines: None,
+        threshold: None,
+        skip_local: None,
+        cross_language: None,
+        ignore_imports: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap_err();
+    assert_eq!(err, "line must be greater than 0");
+}
+
 // ── Argument building: health ─────────────────────────────────────
 
 #[test]
@@ -722,6 +960,54 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let fix_preview = build_fix_preview_args(&FixParams::default());
     let fix_apply = build_fix_apply_args(&FixParams::default());
     let project_info = build_project_info_args(&ProjectInfoParams::default());
+    let trace_export = build_trace_export_args(&TraceExportParams {
+        file: "src/utils.ts".to_string(),
+        export_name: "usedFunction".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    let trace_file = build_trace_file_args(&TraceFileParams {
+        file: "src/utils.ts".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    let trace_dependency = build_trace_dependency_args(&TraceDependencyParams {
+        package_name: "react".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    let trace_clone = build_trace_clone_args(&TraceCloneParams {
+        file: "src/original.ts".to_string(),
+        line: 2,
+        root: None,
+        config: None,
+        workspace: None,
+        mode: None,
+        min_tokens: None,
+        min_lines: None,
+        threshold: None,
+        skip_local: None,
+        cross_language: None,
+        ignore_imports: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
     let health = build_health_args(&HealthParams::default());
     let audit = build_audit_args(&AuditParams::default());
     let list_boundaries = build_list_boundaries_args(&ListBoundariesParams::default());
@@ -736,6 +1022,10 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("fix_preview", &fix_preview),
         ("fix_apply", &fix_apply),
         ("project_info", &project_info),
+        ("trace_export", &trace_export),
+        ("trace_file", &trace_file),
+        ("trace_dependency", &trace_dependency),
+        ("trace_clone", &trace_clone),
         ("health", &health),
         ("audit", &audit),
         ("list_boundaries", &list_boundaries),
@@ -781,6 +1071,66 @@ fn each_tool_uses_correct_subcommand() {
     assert_eq!(
         build_feature_flags_args(&FeatureFlagsParams::default())[0],
         "flags"
+    );
+    assert_eq!(
+        build_trace_export_args(&TraceExportParams {
+            file: "src/utils.ts".to_string(),
+            export_name: "usedFunction".to_string(),
+            root: None,
+            config: None,
+            production: None,
+            workspace: None,
+            no_cache: None,
+            threads: None,
+        })
+        .unwrap()[0],
+        "dead-code"
+    );
+    assert_eq!(
+        build_trace_file_args(&TraceFileParams {
+            file: "src/utils.ts".to_string(),
+            root: None,
+            config: None,
+            production: None,
+            workspace: None,
+            no_cache: None,
+            threads: None,
+        })
+        .unwrap()[0],
+        "dead-code"
+    );
+    assert_eq!(
+        build_trace_dependency_args(&TraceDependencyParams {
+            package_name: "react".to_string(),
+            root: None,
+            config: None,
+            production: None,
+            workspace: None,
+            no_cache: None,
+            threads: None,
+        })
+        .unwrap()[0],
+        "dead-code"
+    );
+    assert_eq!(
+        build_trace_clone_args(&TraceCloneParams {
+            file: "src/original.ts".to_string(),
+            line: 2,
+            root: None,
+            config: None,
+            workspace: None,
+            mode: None,
+            min_tokens: None,
+            min_lines: None,
+            threshold: None,
+            skip_local: None,
+            cross_language: None,
+            ignore_imports: None,
+            no_cache: None,
+            threads: None,
+        })
+        .unwrap()[0],
+        "dupes"
     );
     assert_eq!(
         build_check_production_coverage_args(&check_production_coverage("./coverage"))[0],
@@ -916,6 +1266,70 @@ fn project_info_does_not_include_explain() {
         !args.contains(&"--explain".to_string()),
         "project_info should not include --explain"
     );
+}
+
+#[test]
+fn trace_tools_do_not_include_explain() {
+    let export = build_trace_export_args(&TraceExportParams {
+        file: "src/utils.ts".to_string(),
+        export_name: "usedFunction".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    let file = build_trace_file_args(&TraceFileParams {
+        file: "src/utils.ts".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    let dep = build_trace_dependency_args(&TraceDependencyParams {
+        package_name: "react".to_string(),
+        root: None,
+        config: None,
+        production: None,
+        workspace: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+    let clone = build_trace_clone_args(&TraceCloneParams {
+        file: "src/original.ts".to_string(),
+        line: 2,
+        root: None,
+        config: None,
+        workspace: None,
+        mode: None,
+        min_tokens: None,
+        min_lines: None,
+        threshold: None,
+        skip_local: None,
+        cross_language: None,
+        ignore_imports: None,
+        no_cache: None,
+        threads: None,
+    })
+    .unwrap();
+
+    for (name, args) in [
+        ("trace_export", export),
+        ("trace_file", file),
+        ("trace_dependency", dep),
+        ("trace_clone", clone),
+    ] {
+        assert!(
+            !args.contains(&"--explain".to_string()),
+            "{name} should not include --explain"
+        );
+    }
 }
 
 // ── Global flags: no_cache boolean false is omitted ───────────────

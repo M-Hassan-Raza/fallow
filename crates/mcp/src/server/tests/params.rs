@@ -198,6 +198,65 @@ fn project_info_params_with_global_flags() {
 }
 
 #[test]
+fn trace_export_params_require_file_and_export_name() {
+    let json = "{}";
+    let result: Result<TraceExportParams, _> = serde_json::from_str(json);
+    assert!(result.is_err());
+
+    let json = r#"{"file":"src/utils.ts","export_name":"usedFunction"}"#;
+    let params: TraceExportParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.file, "src/utils.ts");
+    assert_eq!(params.export_name, "usedFunction");
+    assert!(params.root.is_none());
+}
+
+#[test]
+fn trace_file_params_require_file() {
+    let json = "{}";
+    let result: Result<TraceFileParams, _> = serde_json::from_str(json);
+    assert!(result.is_err());
+
+    let json = r#"{"file":"src/utils.ts","production":true,"workspace":"apps/web"}"#;
+    let params: TraceFileParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.file, "src/utils.ts");
+    assert_eq!(params.production, Some(true));
+    assert_eq!(params.workspace.as_deref(), Some("apps/web"));
+}
+
+#[test]
+fn trace_dependency_params_require_package_name() {
+    let json = "{}";
+    let result: Result<TraceDependencyParams, _> = serde_json::from_str(json);
+    assert!(result.is_err());
+
+    let json = r#"{"package_name":"react","root":"/repo"}"#;
+    let params: TraceDependencyParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.package_name, "react");
+    assert_eq!(params.root.as_deref(), Some("/repo"));
+}
+
+#[test]
+fn trace_clone_params_require_file_and_line() {
+    let json = "{}";
+    let result: Result<TraceCloneParams, _> = serde_json::from_str(json);
+    assert!(result.is_err());
+
+    let json = r#"{
+        "file": "src/original.ts",
+        "line": 2,
+        "mode": "semantic",
+        "min_tokens": 80,
+        "skip_local": true
+    }"#;
+    let params: TraceCloneParams = serde_json::from_str(json).unwrap();
+    assert_eq!(params.file, "src/original.ts");
+    assert_eq!(params.line, 2);
+    assert_eq!(params.mode.as_deref(), Some("semantic"));
+    assert_eq!(params.min_tokens, Some(80));
+    assert_eq!(params.skip_local, Some(true));
+}
+
+#[test]
 fn find_dupes_params_all_fields_deserialize() {
     let json = r#"{
         "root": "/project",

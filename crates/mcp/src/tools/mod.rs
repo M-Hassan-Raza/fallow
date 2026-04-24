@@ -8,6 +8,7 @@ mod flags;
 mod health;
 mod list_boundaries;
 mod project_info;
+mod trace;
 
 pub use analyze::build_analyze_args;
 pub use audit::build_audit_args;
@@ -19,6 +20,10 @@ pub use flags::build_feature_flags_args;
 pub use health::build_health_args;
 pub use list_boundaries::build_list_boundaries_args;
 pub use project_info::build_project_info_args;
+pub use trace::{
+    build_trace_clone_args, build_trace_dependency_args, build_trace_export_args,
+    build_trace_file_args,
+};
 
 use std::process::Stdio;
 use std::time::Duration;

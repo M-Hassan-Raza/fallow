@@ -6,13 +6,14 @@ use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 use crate::params::{
     AnalyzeParams, AuditParams, CheckChangedParams, CheckProductionCoverageParams,
     FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ListBoundariesParams,
-    ProjectInfoParams,
+    ProjectInfoParams, TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args,
     build_check_production_coverage_args, build_feature_flags_args, build_find_dupes_args,
     build_fix_apply_args, build_fix_preview_args, build_health_args, build_list_boundaries_args,
-    build_project_info_args, run_fallow,
+    build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args, run_fallow,
 };
 
 #[cfg(test)]
@@ -137,7 +138,63 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. Set score=true for a single 0-100 health score with letter grade (A/B/C/D/F); forces full pipeline for accuracy. Set min_score=N to fail if score drops below a threshold (CI quality gate). Set file_scores=true for per-file maintainability index (fan-in, fan-out, dead code ratio, complexity density). Set coverage_gaps=true to explicitly include static test coverage gaps: runtime files and exports with no test dependency path (not line-level coverage). A provided config file may also enable coverage gaps via rules.coverage-gaps when no health sections are explicitly selected. Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set ownership=true (implies hotspots) to attach per-file ownership signals: bus factor, contributor count, declared CODEOWNERS owner, drift, and unowned-hotspot flag. Use ownership_email_mode=raw|handle|hash for author email privacy (default handle). Set targets=true for ranked refactoring recommendations sorted by efficiency (quick wins first), with confidence scores and adaptive percentile-based thresholds. Set trend=true to compare current metrics against the most recent saved snapshot and show per-metric deltas with directional indicators (improving/declining/stable). Implies --score. Requires prior snapshots saved with save_snapshot. Set effort to control analysis depth: 'low' (fast, surface-level), 'medium' (balanced, default), or 'high' (thorough, all heuristics). Set summary=true to include a natural-language summary of findings alongside the structured JSON. Set coverage to a path to Istanbul-format coverage data (coverage-final.json from Jest, Vitest, c8, nyc) for accurate per-function CRAP scores instead of the default static binary model. Set production_coverage to a path (V8 coverage directory, V8 JSON file, or Istanbul JSON file) for merged runtime production-coverage findings (paid feature; requires an active license via `fallow license activate`). Set min_invocations_hot=N to tune the hot-path threshold used by production-coverage output (default 100), min_observation_volume=N to raise the high-confidence verdict floor (default 5000), and low_traffic_threshold=F to adjust the active/low_traffic split (default 0.001). All three take effect only when production_coverage is also set. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Supports config, baseline comparisons, and performance tuning (no_cache, threads). Useful for identifying hard-to-maintain code and prioritizing refactoring.",
+        description = "Trace why an export is considered used or unused. Returns file reachability, entry-point status, direct references, re-export chains, and a concise reason string. Use this when an agent needs evidence before deleting or rewriting a supposedly unused export.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn trace_export(
+        &self,
+        params: Parameters<TraceExportParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match build_trace_export_args(&params.0) {
+            Ok(args) => run_fallow(&self.binary, &args).await,
+            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        }
+    }
+
+    #[tool(
+        description = "Trace a file's graph context. Returns whether the file is reachable or an entry point, what it exports, what it imports, what imports it, and which re-exports it declares. Use this to understand whether a file is isolated, barrel-only, or imported by live entry points.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn trace_file(
+        &self,
+        params: Parameters<TraceFileParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match build_trace_file_args(&params.0) {
+            Ok(args) => run_fallow(&self.binary, &args).await,
+            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        }
+    }
+
+    #[tool(
+        description = "Trace where a dependency is used. Returns which files import the package, which imports are type-only, and whether the dependency is used at all. Useful before removing a dependency or moving it between dependencies and devDependencies.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn trace_dependency(
+        &self,
+        params: Parameters<TraceDependencyParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match build_trace_dependency_args(&params.0) {
+            Ok(args) => run_fallow(&self.binary, &args).await,
+            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        }
+    }
+
+    #[tool(
+        description = "Trace duplicate-code groups containing a given file and line. Returns the matched clone instance plus every clone group that contains it. Useful when an agent wants to consolidate duplication but needs the exact sibling locations first.",
+        annotations(read_only_hint = true, open_world_hint = true)
+    )]
+    async fn trace_clone(
+        &self,
+        params: Parameters<TraceCloneParams>,
+    ) -> Result<CallToolResult, McpError> {
+        match build_trace_clone_args(&params.0) {
+            Ok(args) => run_fallow(&self.binary, &args).await,
+            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        }
+    }
+
+    #[tool(
+        description = "Check code health metrics (cyclomatic and cognitive complexity) for functions in the project. Returns structured JSON with complexity scores per function, sorted by severity. Set score=true for a single 0-100 health score with letter grade (A/B/C/D/F); forces full pipeline for accuracy. Set min_score=N to fail if score drops below a threshold (CI quality gate). Set file_scores=true for per-file maintainability index (fan-in, fan-out, dead code ratio, complexity density). Set coverage_gaps=true to explicitly include static test coverage gaps: runtime files and exports with no test dependency path (not line-level coverage). A provided config file may also enable coverage gaps via rules.coverage-gaps when no health sections are explicitly selected. Set hotspots=true to identify files that are both complex and frequently changing (combines git churn with complexity). Set ownership=true (implies hotspots) to attach per-file ownership signals: bus factor, contributor count, declared CODEOWNERS owner, drift, and unowned-hotspot flag. Use ownership_email_mode=raw|handle|hash for author email privacy (default handle). Set targets=true for ranked refactoring recommendations sorted by efficiency (quick wins first), with confidence scores and adaptive percentile-based thresholds. Set trend=true to compare current metrics against the most recent saved snapshot and show per-metric deltas with directional indicators (improving/declining/stable). Implies --score. Requires prior snapshots saved with save_snapshot. Set effort to control analysis depth: 'low' (fast, surface-level), 'medium' (balanced, default), or 'high' (thorough, all heuristics). Set summary=true to include a natural-language summary of findings alongside the structured JSON. Set coverage to a path to Istanbul-format coverage data (coverage-final.json from Jest, Vitest, c8, nyc) for accurate per-function CRAP scores instead of the default static binary model. Set production_coverage to a path (V8 coverage directory, V8 JSON file, or Istanbul JSON file) for merged runtime production-coverage findings (paid feature; requires an active license via `fallow license activate`). Set min_invocations_hot=N to tune the hot-path threshold used by production-coverage output (default 100). Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Supports config, baseline comparisons, and performance tuning (no_cache, threads). Useful for identifying hard-to-maintain code and prioritizing refactoring.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn check_health(
@@ -209,6 +266,7 @@ impl ServerHandler for FallowMcp {
                  Tools: analyze (full analysis), check_changed (incremental/PR analysis), \
                  find_dupes (code duplication), fix_preview/fix_apply (auto-fix), \
                  project_info (plugins, files, entry points, boundary zones), \
+                 trace_export / trace_file / trace_dependency / trace_clone (graph and clone evidence), \
                  check_health (code complexity metrics), \
                  check_production_coverage (paid; merges a V8 or Istanbul production coverage dump into the health report), \
                  audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
