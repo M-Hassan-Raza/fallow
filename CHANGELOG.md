@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.48.4] - 2026-04-24
+
+### Fixed
+
+- **npm release pipeline recovery, second attempt.** v2.48.3 shipped on crates.io and GitHub Releases but the npm-publish job failed again: the v2.48.3 release commit had `crates/napi/package.json` at 2.48.3 while the lockfile's `packages.node_modules/@fallow-cli/fallow-node-*` entries pointed at 2.48.1, so CI's `npm ci --omit=optional` rejected the repo as out-of-sync. The working v2.48.1 pattern leaves `crates/napi/*` entirely unchanged in the release commit and lets CI's own "Update NAPI package version" step bump them at publish time. v2.48.4 reverts `crates/napi/package.json`, `crates/napi/package-lock.json`, and `crates/napi/index.js` to that in-sync 2.48.1 state; CI then bumps them from the tag after `npm ci` passes. No user-visible behavior change relative to v2.48.2 / v2.48.3; this ships the same PandaCSS plugin, Angular template fixes, and MCP rename in a form that finally makes it through the npm publish pipeline.
+
 ## [2.48.3] - 2026-04-24
 
 ### Fixed
@@ -1637,7 +1643,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.48.3...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.48.4...HEAD
+[2.48.4]: https://github.com/fallow-rs/fallow/compare/v2.48.3...v2.48.4
 [2.48.3]: https://github.com/fallow-rs/fallow/compare/v2.48.2...v2.48.3
 [2.48.2]: https://github.com/fallow-rs/fallow/compare/v2.48.1...v2.48.2
 [2.48.1]: https://github.com/fallow-rs/fallow/compare/v2.48.0...v2.48.1
