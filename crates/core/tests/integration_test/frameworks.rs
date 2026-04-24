@@ -267,6 +267,39 @@ fn css_apply_marks_tailwind_as_used() {
 }
 
 #[test]
+fn pandacss_config_is_not_flagged_unused() {
+    let root = fixture_path("pandacss-config");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_names: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|f| f.path.file_name())
+        .filter_map(|f| f.to_str())
+        .map(String::from)
+        .collect();
+    assert!(
+        !unused_file_names.contains(&"panda.config.ts".to_string()),
+        "panda.config.ts should not be flagged unused when @pandacss/dev is a dependency: {unused_file_names:?}"
+    );
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"@pandacss/dev"),
+        "@pandacss/dev should not be unused (it's tooling referenced by the config): {unused_dep_names:?}"
+    );
+    assert!(
+        !unused_dep_names.contains(&"@pandacss/preset-panda"),
+        "@pandacss/preset-panda should not be unused (it's imported by panda.config.ts): {unused_dep_names:?}"
+    );
+}
+
+#[test]
 fn vite_aliases_from_config_resolve_internal_modules() {
     let root = fixture_path("vite-alias-project");
     let config = create_config(root);

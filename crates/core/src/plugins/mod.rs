@@ -948,6 +948,7 @@ mod nx;
 mod nyc;
 mod openapi_ts;
 mod oxlint;
+mod pandacss;
 mod parcel;
 mod playwright;
 mod plop;
