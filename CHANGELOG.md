@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.48.1] - 2026-04-24
+
+### Fixed
+
+- **`fallow setup-hooks` now ships a gate script that refuses to run with a stale fallow on `PATH`.** A fallow older than v2.46.0 (before the uncommitted-changes inclusion fix, commit `aabb8e1b`) silently passed audits that newer fallow would fail, defeating the purpose of the Claude Code `git commit` / `git push` gate. The generated `.claude/hooks/fallow-gate.sh` now enforces a `FALLOW_GATE_MIN_VERSION` floor (default `2.46.0`) and blocks with a copy-pasteable upgrade hint when the binary resolved from `PATH` is below it. Override with `FALLOW_GATE_MIN_VERSION=<semver>` or disable with an empty string. Every verdict=fail block now also prepends `fallow-gate: blocked by fallow <version> at <binary>` to stderr so the responsible binary is identifiable without re-diagnosis, and the installed script stamps `# Installer version: <semver>` in its header for forensics (substituted at install time from `fallow setup-hooks`'s own version). See <https://docs.fallow.tools/integrations/claude-hooks#version-floor>.
+
+### Changed
+
+- **Internal unit-size refactors with no behavioral change.** `find_unused_members` class inheritance propagation split into `build_parent_to_children` + `propagate_class_inheritance` helpers; `build_human_lines` / `build_sarif` / `build_codeclimate` each split into per-section helpers; package-path dep sections in CodeClimate collapsed behind a `NamedPkgDep` trait. Output byte-identical across all formats; same fingerprints, same severities, same issue ordering.
+
 ## [2.48.0] - 2026-04-23
 
 ### Added
@@ -1607,7 +1617,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.48.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.48.1...HEAD
+[2.48.1]: https://github.com/fallow-rs/fallow/compare/v2.48.0...v2.48.1
 [2.48.0]: https://github.com/fallow-rs/fallow/compare/v2.47.1...v2.48.0
 [2.47.1]: https://github.com/fallow-rs/fallow/compare/v2.47.0...v2.47.1
 [2.47.0]: https://github.com/fallow-rs/fallow/compare/v2.46.0...v2.47.0
