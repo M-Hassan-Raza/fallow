@@ -263,6 +263,137 @@ pub struct ProjectInfoParams {
     pub threads: Option<usize>,
 }
 
+#[derive(Deserialize, JsonSchema)]
+pub struct TraceExportParams {
+    /// File containing the export to trace, relative to the project root.
+    #[schemars(length(min = 1))]
+    pub file: String,
+
+    /// Export name to trace (use "default" for default exports).
+    #[schemars(length(min = 1))]
+    pub export_name: String,
+
+    /// Root directory of the project. Defaults to current working directory.
+    pub root: Option<String>,
+
+    /// Path to fallow config file.
+    pub config: Option<String>,
+
+    /// Only analyze production code (excludes tests, stories, dev files).
+    pub production: Option<bool>,
+
+    /// Scope analysis to one or more workspaces. Accepts a single package name
+    /// for the common case, or a comma-separated list with globs and `!` negation.
+    pub workspace: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TraceFileParams {
+    /// File to trace, relative to the project root.
+    #[schemars(length(min = 1))]
+    pub file: String,
+
+    /// Root directory of the project. Defaults to current working directory.
+    pub root: Option<String>,
+
+    /// Path to fallow config file.
+    pub config: Option<String>,
+
+    /// Only analyze production code (excludes tests, stories, dev files).
+    pub production: Option<bool>,
+
+    /// Scope analysis to one or more workspaces. Accepts a single package name
+    /// for the common case, or a comma-separated list with globs and `!` negation.
+    pub workspace: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TraceDependencyParams {
+    /// Package name to trace (for example "react" or "@scope/pkg").
+    #[schemars(length(min = 1))]
+    pub package_name: String,
+
+    /// Root directory of the project. Defaults to current working directory.
+    pub root: Option<String>,
+
+    /// Path to fallow config file.
+    pub config: Option<String>,
+
+    /// Only analyze production code (excludes tests, stories, dev files).
+    pub production: Option<bool>,
+
+    /// Scope analysis to one or more workspaces. Accepts a single package name
+    /// for the common case, or a comma-separated list with globs and `!` negation.
+    pub workspace: Option<String>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+pub struct TraceCloneParams {
+    /// File containing the clone candidate, relative to the project root.
+    #[schemars(length(min = 1))]
+    pub file: String,
+
+    /// 1-based line number inside the clone candidate.
+    #[schemars(range(min = 1))]
+    pub line: usize,
+
+    /// Root directory of the project. Defaults to current working directory.
+    pub root: Option<String>,
+
+    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    pub config: Option<String>,
+
+    /// Scope analysis to one or more workspaces. Accepts a single package name
+    /// for the common case, or a comma-separated list with globs and `!` negation.
+    pub workspace: Option<String>,
+
+    /// Detection mode: "strict" (exact tokens), "mild" (normalized identifiers),
+    /// "weak" (structural only), or "semantic" (type-aware). Defaults to "mild".
+    pub mode: Option<String>,
+
+    /// Minimum token count for a clone to be reported. Default: 50.
+    pub min_tokens: Option<u32>,
+
+    /// Minimum line count for a clone to be reported. Default: 5.
+    pub min_lines: Option<u32>,
+
+    /// Fail if duplication percentage exceeds this value. 0 = no limit.
+    pub threshold: Option<f64>,
+
+    /// Skip file-local duplicates, only report cross-file clones.
+    pub skip_local: Option<bool>,
+
+    /// Enable cross-language detection (strip TS type annotations for TS<->JS matching).
+    pub cross_language: Option<bool>,
+
+    /// Exclude import declarations from clone detection (reduces noise from sorted import blocks).
+    pub ignore_imports: Option<bool>,
+
+    /// Disable the incremental parse cache. Forces a full re-parse of all files.
+    pub no_cache: Option<bool>,
+
+    /// Number of parser threads. Defaults to available CPU cores.
+    pub threads: Option<usize>,
+}
+
 #[derive(Default, Deserialize, JsonSchema)]
 pub struct HealthParams {
     /// Root directory of the project to analyze. Defaults to current working directory.

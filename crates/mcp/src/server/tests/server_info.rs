@@ -23,12 +23,16 @@ fn all_tools_registered() {
     assert!(names.contains(&"fix_preview".to_string()));
     assert!(names.contains(&"fix_apply".to_string()));
     assert!(names.contains(&"project_info".to_string()));
+    assert!(names.contains(&"trace_export".to_string()));
+    assert!(names.contains(&"trace_file".to_string()));
+    assert!(names.contains(&"trace_dependency".to_string()));
+    assert!(names.contains(&"trace_clone".to_string()));
     assert!(names.contains(&"check_health".to_string()));
     assert!(names.contains(&"audit".to_string()));
     assert!(names.contains(&"list_boundaries".to_string()));
     assert!(names.contains(&"feature_flags".to_string()));
     assert!(names.contains(&"check_production_coverage".to_string()));
-    assert_eq!(tools.len(), 11);
+    assert_eq!(tools.len(), 15);
 }
 
 #[test]
@@ -41,6 +45,10 @@ fn read_only_tools_have_annotations() {
         "find_dupes",
         "fix_preview",
         "project_info",
+        "trace_export",
+        "trace_file",
+        "trace_dependency",
+        "trace_clone",
         "check_health",
         "audit",
         "list_boundaries",
@@ -103,6 +111,10 @@ fn open_world_hint_on_analysis_tools() {
         "find_dupes",
         "fix_preview",
         "project_info",
+        "trace_export",
+        "trace_file",
+        "trace_dependency",
+        "trace_clone",
         "check_health",
         "audit",
         "list_boundaries",
@@ -157,6 +169,10 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("fix_preview"));
     assert!(instructions.contains("fix_apply"));
     assert!(instructions.contains("project_info"));
+    assert!(instructions.contains("trace_export"));
+    assert!(instructions.contains("trace_file"));
+    assert!(instructions.contains("trace_dependency"));
+    assert!(instructions.contains("trace_clone"));
     assert!(instructions.contains("check_health"));
     assert!(instructions.contains("audit"));
     assert!(instructions.contains("list_boundaries"));
@@ -342,6 +358,159 @@ fn project_info_schema_contains_expected_properties() {
         assert!(
             schema.contains(prop),
             "project_info schema should contain property '{prop}'"
+        );
+    }
+}
+
+#[test]
+fn trace_export_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "trace_export").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "file",
+        "export_name",
+        "root",
+        "config",
+        "production",
+        "workspace",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "trace_export schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["file", "export_name"]);
+    assert_eq!(
+        schema
+            .pointer("/properties/file/minLength")
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        schema
+            .pointer("/properties/export_name/minLength")
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+}
+
+#[test]
+fn trace_file_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "trace_file").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "file",
+        "root",
+        "config",
+        "production",
+        "workspace",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "trace_file schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["file"]);
+    assert_eq!(
+        schema
+            .pointer("/properties/file/minLength")
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+}
+
+#[test]
+fn trace_dependency_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "trace_dependency").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "package_name",
+        "root",
+        "config",
+        "production",
+        "workspace",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "trace_dependency schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["package_name"]);
+    assert_eq!(
+        schema
+            .pointer("/properties/package_name/minLength")
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+}
+
+#[test]
+fn trace_clone_schema_contains_expected_properties() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    let tool = tools.iter().find(|t| t.name == "trace_clone").unwrap();
+    let schema = serde_json::to_string(&tool.input_schema).unwrap();
+    for prop in [
+        "file",
+        "line",
+        "root",
+        "config",
+        "workspace",
+        "mode",
+        "min_tokens",
+        "min_lines",
+        "threshold",
+        "skip_local",
+        "cross_language",
+        "ignore_imports",
+        "no_cache",
+        "threads",
+    ] {
+        assert!(
+            schema.contains(prop),
+            "trace_clone schema should contain property '{prop}'"
+        );
+    }
+    let schema: serde_json::Value = serde_json::to_value(&tool.input_schema).unwrap();
+    assert_required_fields(&schema, &["file", "line"]);
+    assert_eq!(
+        schema
+            .pointer("/properties/file/minLength")
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+    assert_eq!(
+        schema
+            .pointer("/properties/line/minimum")
+            .and_then(|v| v.as_u64()),
+        Some(1)
+    );
+}
+
+fn assert_required_fields(schema: &serde_json::Value, expected: &[&str]) {
+    let required = schema
+        .get("required")
+        .and_then(|v| v.as_array())
+        .expect("schema should have required fields");
+    for field in expected {
+        assert!(
+            required.iter().any(|v| v.as_str() == Some(field)),
+            "schema should require {field}, got {required:?}"
         );
     }
 }
