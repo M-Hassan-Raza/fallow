@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.48.2] - 2026-04-24
+
+### Added
+
+- **PandaCSS framework plugin.** `panda.config.{ts,js,mjs,cjs}` is no longer flagged as an unused file when `@pandacss/dev` is a dependency. The Panda CLI (`panda codegen`, `panda`) discovers the config by filesystem convention with no import edge, so static analysis alone cannot see it as used. The new built-in plugin mirrors the UnoCSS / Tailwind pattern: enabler `@pandacss/dev`, config patterns and always-used on `panda.config.{ts,js,mjs,cjs}`, tooling dependencies for `@pandacss/dev` / `@pandacss/studio` / `@pandacss/eslint-plugin`, and `resolve_config` that captures both ES imports and shallow-string `presets` entries so preset packages like `@pandacss/preset-panda` and `@park-ui/panda-preset` are not flagged as unused. Closes [#175](https://github.com/fallow-rs/fallow/issues/175).
+
+### Changed
+
+- **MCP tool `health_production_coverage` renamed to `check_production_coverage`** for picker parallelism with `check_health` and `check_changed`. The tool description now leads with `(paid)`, and the server instructions gain a disambiguation line so agents pick the right tool between `check_health` (static, free) and `check_production_coverage` (V8-runtime-backed, paid). `check_health` also gains `min_observation_volume` and `low_traffic_threshold` params to reach parity with the underlying CLI flags, and `check_production_coverage` gains `group_by` for CODEOWNERS / directory / package / section grouping. Breaking change on the MCP wire protocol (tool name); accepted since this is a paid preview tool with no production users yet.
+
+### Fixed
+
+- **Angular inherited and DI-injected members referenced in external templates are no longer reported as unused.** Two independent root causes: (1) child-component template references bridged into `self_accessed_members` were not propagated up the `extends` chain to the base class's file (e.g., a base component's lifecycle hooks or helpers used in a child's `templateUrl`), and (2) the template scanner captured only top-level identifiers (losing `getTotal` in `{{ dataService.getTotal() }}`), and constructor-param types from DI were not exposed on `ModuleInfo`, so standalone-parsed HTML could not resolve chains to injected services. Scanner now returns member-access chains alongside identifiers; constructor params with accessibility modifiers and typed property declarations are captured into `ClassHeritageInfo.instance_bindings`; the analysis bridge resolves HTML chains through the importing component's bindings. Cache version bumped to 47. Closes [#174](https://github.com/fallow-rs/fallow/issues/174).
+
 ## [2.48.1] - 2026-04-24
 
 ### Fixed
@@ -1617,7 +1631,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.48.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.48.2...HEAD
+[2.48.2]: https://github.com/fallow-rs/fallow/compare/v2.48.1...v2.48.2
 [2.48.1]: https://github.com/fallow-rs/fallow/compare/v2.48.0...v2.48.1
 [2.48.0]: https://github.com/fallow-rs/fallow/compare/v2.47.1...v2.48.0
 [2.47.1]: https://github.com/fallow-rs/fallow/compare/v2.47.0...v2.47.1
