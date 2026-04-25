@@ -16,7 +16,7 @@ fn create_production_config(root: std::path::PathBuf) -> fallow_config::Resolved
         health: fallow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
         boundaries: fallow_config::BoundaryConfig::default(),
-        production: true,
+        production: true.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],

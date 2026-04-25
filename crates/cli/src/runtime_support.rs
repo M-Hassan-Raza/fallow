@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::{FallowConfig, OutputFormat, ResolvedConfig};
+use fallow_config::{FallowConfig, OutputFormat, ProductionAnalysis, ResolvedConfig};
 
 /// Analysis types for --only/--skip selection.
 #[derive(Clone, PartialEq, Eq, clap::ValueEnum)]
@@ -104,6 +104,33 @@ pub fn load_config(
     production: bool,
     quiet: bool,
 ) -> Result<ResolvedConfig, ExitCode> {
+    load_config_for_analysis(
+        root,
+        config_path,
+        output,
+        no_cache,
+        threads,
+        production.then_some(true),
+        quiet,
+        ProductionAnalysis::DeadCode,
+    )
+}
+
+#[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "central config loader mirrors CLI dispatch options"
+)]
+pub fn load_config_for_analysis(
+    root: &Path,
+    config_path: &Option<PathBuf>,
+    output: OutputFormat,
+    no_cache: bool,
+    threads: usize,
+    production_override: Option<bool>,
+    quiet: bool,
+    analysis: ProductionAnalysis,
+) -> Result<ResolvedConfig, ExitCode> {
     let user_config = if let Some(path) = config_path {
         match FallowConfig::load(path) {
             Ok(c) => {
@@ -130,13 +157,13 @@ pub fn load_config(
 
     Ok(match user_config {
         Some(mut config) => {
-            if production {
-                config.production = true;
-            }
+            let production =
+                production_override.unwrap_or_else(|| config.production.for_analysis(analysis));
+            config.production = production.into();
             config.resolve(root.to_path_buf(), output, threads, no_cache, quiet)
         }
         None => FallowConfig {
-            production,
+            production: production_override.unwrap_or(false).into(),
             ..FallowConfig::default()
         }
         .resolve(root.to_path_buf(), output, threads, no_cache, quiet),

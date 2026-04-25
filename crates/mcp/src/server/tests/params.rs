@@ -618,11 +618,13 @@ fn project_info_params_ignores_unknown_fields() {
 
 #[test]
 fn audit_params_deserialize() {
-    let json = r#"{"root":"/tmp/project","base":"main","production":true}"#;
+    let json =
+        r#"{"root":"/tmp/project","base":"main","production":true,"production_health":true}"#;
     let params: AuditParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/tmp/project"));
     assert_eq!(params.base.as_deref(), Some("main"));
     assert_eq!(params.production, Some(true));
+    assert_eq!(params.production_health, Some(true));
 }
 
 #[test]
@@ -631,6 +633,9 @@ fn audit_params_minimal() {
     assert!(params.root.is_none());
     assert!(params.base.is_none());
     assert!(params.production.is_none());
+    assert!(params.production_dead_code.is_none());
+    assert!(params.production_health.is_none());
+    assert!(params.production_dupes.is_none());
     assert!(params.workspace.is_none());
     assert!(params.no_cache.is_none());
     assert!(params.threads.is_none());
@@ -643,6 +648,9 @@ fn audit_params_with_all_fields() {
         "config": ".fallowrc.json",
         "base": "develop",
         "production": true,
+        "production_dead_code": true,
+        "production_health": true,
+        "production_dupes": true,
         "workspace": "@app/core",
         "no_cache": true,
         "threads": 8
@@ -652,6 +660,9 @@ fn audit_params_with_all_fields() {
     assert_eq!(params.config.as_deref(), Some(".fallowrc.json"));
     assert_eq!(params.base.as_deref(), Some("develop"));
     assert_eq!(params.production, Some(true));
+    assert_eq!(params.production_dead_code, Some(true));
+    assert_eq!(params.production_health, Some(true));
+    assert_eq!(params.production_dupes, Some(true));
     assert_eq!(params.workspace.as_deref(), Some("@app/core"));
     assert_eq!(params.no_cache, Some(true));
     assert_eq!(params.threads, Some(8));

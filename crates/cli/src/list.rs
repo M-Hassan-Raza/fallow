@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
 
-use crate::load_config;
+use crate::runtime_support::load_config;
 
 pub struct ListOptions<'a> {
     pub root: &'a std::path::Path,

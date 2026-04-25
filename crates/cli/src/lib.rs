@@ -89,4 +89,4 @@ mod validate;
 mod vital_signs;
 
 pub use runtime_support::{AnalysisKind, GroupBy};
-pub(crate) use runtime_support::{build_ownership_resolver, load_config};
+pub(crate) use runtime_support::{build_ownership_resolver, load_config_for_analysis};

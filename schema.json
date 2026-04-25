@@ -162,8 +162,8 @@
       "default": {}
     },
     "production": {
-      "description": "Production mode: exclude test/dev files, only start/build scripts.",
-      "type": "boolean",
+      "description": "Production mode: exclude test/dev files, only start/build scripts.\n\nAccepts the legacy boolean form (`true` applies to all analyses) or a\nper-analysis object (`{ \"deadCode\": false, \"health\": true, \"dupes\": false }`).",
+      "$ref": "#/$defs/ProductionConfig",
       "default": false
     },
     "plugins": {
@@ -995,6 +995,41 @@
           }
         }
       }
+    },
+    "ProductionConfig": {
+      "description": "Production-mode defaults.",
+      "anyOf": [
+        {
+          "description": "Legacy/global form: `production = true` or `\"production\": true`.",
+          "type": "boolean"
+        },
+        {
+          "description": "Per-analysis form.",
+          "$ref": "#/$defs/PerAnalysisProductionConfig"
+        }
+      ]
+    },
+    "PerAnalysisProductionConfig": {
+      "description": "Per-analysis production-mode defaults.",
+      "type": "object",
+      "properties": {
+        "deadCode": {
+          "description": "Production mode for dead-code analysis.",
+          "type": "boolean",
+          "default": false
+        },
+        "health": {
+          "description": "Production mode for health analysis.",
+          "type": "boolean",
+          "default": false
+        },
+        "dupes": {
+          "description": "Production mode for duplication analysis.",
+          "type": "boolean",
+          "default": false
+        }
+      },
+      "additionalProperties": false
     },
     "ConfigOverride": {
       "description": "Per-file override entry.",

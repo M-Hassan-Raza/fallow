@@ -326,7 +326,7 @@ mod tests {
             health: fallow_config::HealthConfig::default(),
             rules,
             boundaries: fallow_config::BoundaryConfig::default(),
-            production: false,
+            production: false.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
@@ -583,7 +583,7 @@ mod tests {
             health: fallow_config::HealthConfig::default(),
             rules: RulesConfig::default(), // all Error
             boundaries: fallow_config::BoundaryConfig::default(),
-            production: false,
+            production: false.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             regression: None,

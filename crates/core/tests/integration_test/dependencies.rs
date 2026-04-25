@@ -147,7 +147,7 @@ fn ignore_patterns_applied_to_workspace_package_json_for_unused_deps() {
         health: fallow_config::HealthConfig::default(),
         rules: RulesConfig::default(),
         boundaries: fallow_config::BoundaryConfig::default(),
-        production: false,
+        production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],

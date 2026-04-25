@@ -627,6 +627,15 @@ pub struct AuditParams {
     /// Only analyze production code (excludes tests, stories, dev files).
     pub production: Option<bool>,
 
+    /// Run only the dead-code sub-analysis in production mode.
+    pub production_dead_code: Option<bool>,
+
+    /// Run only the health sub-analysis in production mode.
+    pub production_health: Option<bool>,
+
+    /// Run only the duplication sub-analysis in production mode.
+    pub production_dupes: Option<bool>,
+
     /// Scope analysis to one or more workspaces. Accepts a single package name
     /// for the common case, or a comma-separated list with globs and `!` negation
     /// (e.g. `"web,admin"`, `"apps/*"`, `"apps/*,!apps/legacy"`). Patterns match

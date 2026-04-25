@@ -6,7 +6,7 @@ use fallow_core::results::AnalysisResults;
 
 use crate::baseline::{BaselineData, filter_new_issues};
 use crate::error::emit_error;
-use crate::load_config;
+use crate::load_config_for_analysis;
 use crate::regression::{self, RegressionOpts, RegressionOutcome};
 use crate::report;
 
@@ -133,6 +133,7 @@ pub struct CheckOptions<'a> {
     pub save_baseline: Option<&'a std::path::Path>,
     pub sarif_file: Option<&'a std::path::Path>,
     pub production: bool,
+    pub production_override: Option<bool>,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub group_by: Option<crate::GroupBy>,
@@ -178,14 +179,16 @@ pub struct CheckResult {
 pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
-    let mut config = load_config(
+    let mut config = load_config_for_analysis(
         opts.root,
         opts.config_path,
         opts.output,
         opts.no_cache,
         opts.threads,
-        opts.production,
+        opts.production_override
+            .or_else(|| opts.production.then_some(true)),
         opts.quiet,
+        fallow_config::ProductionAnalysis::DeadCode,
     )?;
 
     // Thread --include-entry-exports flag into config for analysis layer

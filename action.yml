@@ -26,6 +26,18 @@ inputs:
     description: 'Production mode: exclude test/dev files, only analyze start/build scripts'
     required: false
     default: 'false'
+  production-dead-code:
+    description: 'Combined mode only: run dead-code analysis in production mode'
+    required: false
+    default: 'false'
+  production-health:
+    description: 'Combined mode only: run health analysis in production mode'
+    required: false
+    default: 'false'
+  production-dupes:
+    description: 'Combined mode only: run duplication analysis in production mode'
+    required: false
+    default: 'false'
   fail-on-issues:
     description: 'Exit with code 1 if issues are found'
     required: false
@@ -251,6 +263,9 @@ runs:
         INPUT_CONFIG: ${{ inputs.config }}
         INPUT_FORMAT: ${{ inputs.format }}
         INPUT_PRODUCTION: ${{ inputs.production }}
+        INPUT_PRODUCTION_DEAD_CODE: ${{ inputs.production-dead-code }}
+        INPUT_PRODUCTION_HEALTH: ${{ inputs.production-health }}
+        INPUT_PRODUCTION_DUPES: ${{ inputs.production-dupes }}
         INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
         INPUT_AUTO_CHANGED_SINCE: ${{ inputs.auto-changed-since }}
         PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}

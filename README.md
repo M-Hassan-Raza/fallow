@@ -159,9 +159,24 @@ See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setu
 
 ```bash
 fallow audit                # Audit changed files (verdict: pass/warn/fail)
+fallow --production-health  # Combined mode: production health, full dead-code/dupes
 fallow watch                # Re-analyze on file changes
 fallow fix                  # Apply automatic cleanup after previewing
 ```
+
+Combined mode and `fallow audit` support per-analysis production mode. Precedence is CLI flags, then environment variables, then config:
+
+```jsonc
+{
+  "production": {
+    "health": true,
+    "deadCode": false,
+    "dupes": false
+  }
+}
+```
+
+Use `--production-health`, `--production-dead-code`, or `--production-dupes` for one invocation, or `FALLOW_PRODUCTION_HEALTH=true` and related env vars in CI. The global `--production` flag still enables production mode for every analysis. When both forms of env var are set, the per-analysis variable wins (e.g., `FALLOW_PRODUCTION=false FALLOW_PRODUCTION_HEALTH=true` runs health in production mode and the other analyses in non-production mode).
 
 ## Dead code
 
@@ -272,6 +287,7 @@ Quality gate for AI-generated code and PRs. Combines dead code + complexity + du
 fallow audit                              # Auto-detects base branch
 fallow audit --base main                  # Explicit base ref
 fallow audit --base HEAD~3               # Audit last 3 commits
+fallow audit --production-health          # Production health, full dead-code/dupes
 fallow audit --format json                # Structured output with verdict
 ```
 

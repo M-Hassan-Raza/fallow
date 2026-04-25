@@ -25,7 +25,8 @@ pub use rules::{PartialRulesConfig, RulesConfig, Severity};
 pub use used_class_members::{ScopedUsedClassMemberRule, UsedClassMemberRule};
 
 use schemars::JsonSchema;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+use std::ops::Not;
 
 use crate::external_plugin::ExternalPluginDef;
 use crate::workspace::WorkspaceConfig;
@@ -140,8 +141,11 @@ pub struct FallowConfig {
     pub resolve: ResolveConfig,
 
     /// Production mode: exclude test/dev files, only start/build scripts.
+    ///
+    /// Accepts the legacy boolean form (`true` applies to all analyses) or a
+    /// per-analysis object (`{ "deadCode": false, "health": true, "dupes": false }`).
     #[serde(default)]
-    pub production: bool,
+    pub production: ProductionConfig,
 
     /// Paths to external plugin files or directories containing plugin files.
     ///
@@ -201,6 +205,122 @@ pub struct FallowConfig {
     /// walk at the nearest config). This only constrains `extends`.
     #[serde(default)]
     pub sealed: bool,
+}
+
+/// Analysis-specific production-mode selector.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProductionAnalysis {
+    DeadCode,
+    Health,
+    Dupes,
+}
+
+/// Production-mode defaults.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(untagged)]
+pub enum ProductionConfig {
+    /// Legacy/global form: `production = true` or `"production": true`.
+    Global(bool),
+    /// Per-analysis form.
+    PerAnalysis(PerAnalysisProductionConfig),
+}
+
+impl<'de> Deserialize<'de> for ProductionConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ProductionConfigVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ProductionConfigVisitor {
+            type Value = ProductionConfig;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                formatter.write_str("a boolean or per-analysis production config object")
+            }
+
+            fn visit_bool<E>(self, value: bool) -> Result<Self::Value, E>
+            where
+                E: serde::de::Error,
+            {
+                Ok(ProductionConfig::Global(value))
+            }
+
+            fn visit_map<A>(self, map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                PerAnalysisProductionConfig::deserialize(
+                    serde::de::value::MapAccessDeserializer::new(map),
+                )
+                .map(ProductionConfig::PerAnalysis)
+            }
+        }
+
+        deserializer.deserialize_any(ProductionConfigVisitor)
+    }
+}
+
+impl Default for ProductionConfig {
+    fn default() -> Self {
+        Self::Global(false)
+    }
+}
+
+impl From<bool> for ProductionConfig {
+    fn from(value: bool) -> Self {
+        Self::Global(value)
+    }
+}
+
+impl Not for ProductionConfig {
+    type Output = bool;
+
+    fn not(self) -> Self::Output {
+        !self.any_enabled()
+    }
+}
+
+impl ProductionConfig {
+    #[must_use]
+    pub const fn for_analysis(self, analysis: ProductionAnalysis) -> bool {
+        match self {
+            Self::Global(value) => value,
+            Self::PerAnalysis(config) => match analysis {
+                ProductionAnalysis::DeadCode => config.dead_code,
+                ProductionAnalysis::Health => config.health,
+                ProductionAnalysis::Dupes => config.dupes,
+            },
+        }
+    }
+
+    #[must_use]
+    pub const fn global(self) -> bool {
+        match self {
+            Self::Global(value) => value,
+            Self::PerAnalysis(_) => false,
+        }
+    }
+
+    #[must_use]
+    pub const fn any_enabled(self) -> bool {
+        match self {
+            Self::Global(value) => value,
+            Self::PerAnalysis(config) => config.dead_code || config.health || config.dupes,
+        }
+    }
+}
+
+/// Per-analysis production-mode defaults.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(default, deny_unknown_fields, rename_all = "camelCase")]
+pub struct PerAnalysisProductionConfig {
+    /// Production mode for dead-code analysis.
+    pub dead_code: bool,
+    /// Production mode for health analysis.
+    pub health: bool,
+    /// Production mode for duplication analysis.
+    pub dupes: bool,
 }
 
 /// Per-analysis baseline paths for the `audit` command.
@@ -392,6 +512,27 @@ mod tests {
     }
 
     #[test]
+    fn deserialize_json_per_analysis_production_mode() {
+        let config: FallowConfig = serde_json::from_str(
+            r#"{"production": {"deadCode": false, "health": true, "dupes": false}}"#,
+        )
+        .unwrap();
+        assert!(!config.production.for_analysis(ProductionAnalysis::DeadCode));
+        assert!(config.production.for_analysis(ProductionAnalysis::Health));
+        assert!(!config.production.for_analysis(ProductionAnalysis::Dupes));
+    }
+
+    #[test]
+    fn deserialize_json_per_analysis_production_mode_rejects_unknown_fields() {
+        let err = serde_json::from_str::<FallowConfig>(r#"{"production": {"healthTypo": true}}"#)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("healthTypo"),
+            "error should name the unknown field: {err}"
+        );
+    }
+
+    #[test]
     fn deserialize_json_dynamically_loaded() {
         let json = r#"{"dynamicallyLoaded": ["plugins/**/*.ts", "locales/**/*.json"]}"#;
         let config: FallowConfig = serde_json::from_str(json).unwrap();
@@ -446,6 +587,35 @@ production = true
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert_eq!(config.entry, vec!["src/index.ts"]);
         assert!(config.production);
+    }
+
+    #[test]
+    fn deserialize_toml_per_analysis_production_mode() {
+        let toml_str = r"
+[production]
+deadCode = false
+health = true
+dupes = false
+";
+        let config: FallowConfig = toml::from_str(toml_str).unwrap();
+        assert!(!config.production.for_analysis(ProductionAnalysis::DeadCode));
+        assert!(config.production.for_analysis(ProductionAnalysis::Health));
+        assert!(!config.production.for_analysis(ProductionAnalysis::Dupes));
+    }
+
+    #[test]
+    fn deserialize_toml_per_analysis_production_mode_rejects_unknown_fields() {
+        let err = toml::from_str::<FallowConfig>(
+            r"
+[production]
+healthTypo = true
+",
+        )
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("healthTypo"),
+            "error should name the unknown field: {err}"
+        );
     }
 
     #[test]
@@ -541,7 +711,7 @@ usedClassMembers = [
     fn json_serialize_roundtrip() {
         let config = FallowConfig {
             entry: vec!["src/main.ts".to_string()],
-            production: true,
+            production: true.into(),
             ..FallowConfig::default()
         };
         let json = serde_json::to_string(&config).unwrap();

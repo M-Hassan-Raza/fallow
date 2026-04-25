@@ -164,12 +164,20 @@ pub fn build_cli_schema(cmd: &clap::Command) -> serde_json::Value {
             "1": "Error-severity issues found (per rules config, or --fail-on-issues promotes warn→error)",
             "2": "Error (invalid config, invalid input, etc.). When --format json is active, errors are emitted as structured JSON on stdout: {\"error\": true, \"message\": \"...\", \"exit_code\": 2}"
         },
-        "environment_variables": {
-            "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown). CLI --format flag overrides this.",
-            "FALLOW_QUIET": "Set to \"1\" or \"true\" to suppress progress output. CLI --quiet flag overrides this.",
-            "FALLOW_BIN": "Path to fallow binary (used by fallow-mcp server)."
-        },
+        "environment_variables": environment_variables_schema(),
         "severity_levels": ["error", "warn", "off"]
+    })
+}
+
+fn environment_variables_schema() -> serde_json::Value {
+    serde_json::json!({
+        "FALLOW_FORMAT": "Default output format (json/human/sarif/compact/markdown). CLI --format flag overrides this.",
+        "FALLOW_QUIET": "Set to \"1\" or \"true\" to suppress progress output. CLI --quiet flag overrides this.",
+        "FALLOW_PRODUCTION": "Set to true/false to override production mode for all analyses.",
+        "FALLOW_PRODUCTION_DEAD_CODE": "Set to true/false to override production mode for dead-code analysis.",
+        "FALLOW_PRODUCTION_HEALTH": "Set to true/false to override production mode for health analysis.",
+        "FALLOW_PRODUCTION_DUPES": "Set to true/false to override production mode for duplication analysis.",
+        "FALLOW_BIN": "Path to fallow binary (used by fallow-mcp server)."
     })
 }
 

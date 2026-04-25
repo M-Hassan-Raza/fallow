@@ -23,6 +23,15 @@ pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
         args.extend(["--base".to_string(), base.clone()]);
     }
     push_scope(&mut args, params.production, params.workspace.as_deref());
+    if params.production_dead_code == Some(true) {
+        args.push("--production-dead-code".to_string());
+    }
+    if params.production_health == Some(true) {
+        args.push("--production-health".to_string());
+    }
+    if params.production_dupes == Some(true) {
+        args.push("--production-dupes".to_string());
+    }
     if let Some(ref gb) = params.group_by {
         args.extend(["--group-by".to_string(), gb.clone()]);
     }

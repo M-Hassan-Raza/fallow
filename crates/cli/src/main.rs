@@ -43,7 +43,7 @@ use error::emit_error;
 use health::{HealthOptions, SortBy};
 use list::ListOptions;
 pub use runtime_support::{AnalysisKind, GroupBy};
-pub(crate) use runtime_support::{build_ownership_resolver, load_config};
+pub(crate) use runtime_support::{build_ownership_resolver, load_config, load_config_for_analysis};
 
 // ── CLI definition ───────────────────────────────────────────────
 
@@ -104,6 +104,18 @@ struct Cli {
     /// report type-only dependencies
     #[arg(long, global = true)]
     production: bool,
+
+    /// Run dead-code analysis in production mode when using bare combined mode.
+    #[arg(long = "production-dead-code")]
+    production_dead_code: bool,
+
+    /// Run health analysis in production mode when using bare combined mode.
+    #[arg(long = "production-health")]
+    production_health: bool,
+
+    /// Run duplication analysis in production mode when using bare combined mode.
+    #[arg(long = "production-dupes")]
+    production_dupes: bool,
 
     /// Scope output to one or more workspaces. Accepts exact package names, globs
     /// (matched against the package name AND the workspace path relative to the repo
@@ -613,6 +625,18 @@ enum Command {
     /// (or their config equivalents) because each sub-analysis uses a
     /// different baseline format.
     Audit {
+        /// Run dead-code analysis in production mode for this audit.
+        #[arg(long = "production-dead-code")]
+        production_dead_code: bool,
+
+        /// Run health analysis in production mode for this audit.
+        #[arg(long = "production-health")]
+        production_health: bool,
+
+        /// Run duplication analysis in production mode for this audit.
+        #[arg(long = "production-dupes")]
+        production_dupes: bool,
+
         /// Compare dead-code issues against a saved baseline
         /// (produced by `fallow dead-code --save-baseline`).
         #[arg(long)]
@@ -948,6 +972,15 @@ fn quiet_from_env() -> bool {
     std::env::var("FALLOW_QUIET").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
+fn bool_from_env(name: &str) -> Option<bool> {
+    let value = std::env::var(name).ok()?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
 /// Resolve an audit baseline path using CLI > config precedence.
 ///
 /// Both sources resolve relative paths against the project root. This keeps
@@ -1180,6 +1213,93 @@ fn build_regression_opts<'a>(
     }
 }
 
+#[derive(Clone, Copy)]
+struct ProductionModes {
+    dead_code: bool,
+    health: bool,
+    dupes: bool,
+}
+
+impl ProductionModes {
+    const fn for_analysis(self, analysis: fallow_config::ProductionAnalysis) -> bool {
+        match analysis {
+            fallow_config::ProductionAnalysis::DeadCode => self.dead_code,
+            fallow_config::ProductionAnalysis::Health => self.health,
+            fallow_config::ProductionAnalysis::Dupes => self.dupes,
+        }
+    }
+}
+
+fn load_config_production(
+    root: &std::path::Path,
+    config_path: Option<&PathBuf>,
+    output: fallow_config::OutputFormat,
+) -> Result<fallow_config::ProductionConfig, ExitCode> {
+    let loaded = if let Some(path) = config_path {
+        fallow_config::FallowConfig::load(path)
+            .map(Some)
+            .map_err(|e| {
+                emit_error(
+                    &format!("failed to load config '{}': {e}", path.display()),
+                    2,
+                    output,
+                )
+            })?
+    } else {
+        fallow_config::FallowConfig::find_and_load(root)
+            .map(|found| found.map(|(config, _)| config))
+            .map_err(|e| emit_error(&e, 2, output))?
+    };
+
+    Ok(match loaded {
+        Some(config) => config.production,
+        None => fallow_config::ProductionConfig::default(),
+    })
+}
+
+fn resolve_production_modes(
+    cli: &Cli,
+    root: &std::path::Path,
+    output: fallow_config::OutputFormat,
+    production_dead_code: bool,
+    production_health: bool,
+    production_dupes: bool,
+) -> Result<ProductionModes, ExitCode> {
+    let config = load_config_production(root, cli.config.as_ref(), output)?;
+    let env_global = bool_from_env("FALLOW_PRODUCTION");
+
+    let resolve_one =
+        |analysis: fallow_config::ProductionAnalysis, cli_specific: bool, env_name: &str| {
+            if cli.production || cli_specific {
+                true
+            } else if let Some(value) = bool_from_env(env_name) {
+                value
+            } else if let Some(value) = env_global {
+                value
+            } else {
+                config.for_analysis(analysis)
+            }
+        };
+
+    Ok(ProductionModes {
+        dead_code: resolve_one(
+            fallow_config::ProductionAnalysis::DeadCode,
+            production_dead_code,
+            "FALLOW_PRODUCTION_DEAD_CODE",
+        ),
+        health: resolve_one(
+            fallow_config::ProductionAnalysis::Health,
+            production_health,
+            "FALLOW_PRODUCTION_HEALTH",
+        ),
+        dupes: resolve_one(
+            fallow_config::ProductionAnalysis::Dupes,
+            production_dupes,
+            "FALLOW_PRODUCTION_DUPES",
+        ),
+    })
+}
+
 // ── Main ─────────────────────────────────────────────────────────
 
 fn main() -> ExitCode {
@@ -1240,6 +1360,15 @@ fn main() -> ExitCode {
     if (!cli.only.is_empty() || !cli.skip.is_empty()) && cli.command.is_some() {
         return emit_error(
             "--only and --skip can only be used without a subcommand",
+            2,
+            output,
+        );
+    }
+    if (cli.production_dead_code || cli.production_health || cli.production_dupes)
+        && cli.command.is_some()
+    {
+        return emit_error(
+            "--production-dead-code, --production-health, and --production-dupes can only be used without a subcommand. For audit, pass them after `audit`",
             2,
             output,
         );
@@ -1314,6 +1443,17 @@ fn dispatch_bare_command(
         cli_format_was_explicit,
     );
     let (run_check, run_dupes, run_health) = combined::resolve_analyses(&cli.only, &cli.skip);
+    let production = match resolve_production_modes(
+        cli,
+        root,
+        output,
+        cli.production_dead_code,
+        cli.production_health,
+        cli.production_dupes,
+    ) {
+        Ok(production) => production,
+        Err(code) => return code,
+    };
     combined::run_combined(&combined::CombinedOptions {
         root,
         config_path: &cli.config,
@@ -1327,6 +1467,9 @@ fn dispatch_bare_command(
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
         production: cli.production,
+        production_dead_code: Some(production.dead_code),
+        production_health: Some(production.health),
+        production_dupes: Some(production.dupes),
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         group_by: cli.group_by,
@@ -1404,6 +1547,11 @@ fn dispatch_subcommand(
                 quiet,
                 cli_format_was_explicit,
             );
+            let production = match resolve_production_modes(cli, root, output, false, false, false)
+            {
+                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+                Err(code) => return code,
+            };
             let filters = IssueFilters {
                 unused_files,
                 unused_exports,
@@ -1437,7 +1585,8 @@ fn dispatch_subcommand(
                 baseline: cli.baseline.as_deref(),
                 save_baseline: cli.save_baseline.as_deref(),
                 sarif_file: cli.sarif_file.as_deref(),
-                production: cli.production,
+                production,
+                production_override: Some(production),
                 workspace: cli.workspace.as_deref(),
                 changed_workspaces: cli.changed_workspaces.as_deref(),
                 group_by: cli.group_by,
@@ -1463,28 +1612,42 @@ fn dispatch_subcommand(
                 retain_modules_for_health: false,
             })
         }
-        Command::Watch { no_clear } => watch::run_watch(&watch::WatchOptions {
-            root,
-            config_path: &cli.config,
-            output,
-            no_cache: cli.no_cache,
-            threads,
-            quiet,
-            production: cli.production,
-            clear_screen: !no_clear,
-            explain: cli.explain,
-        }),
-        Command::Fix { dry_run, yes } => fix::run_fix(&fix::FixOptions {
-            root,
-            config_path: &cli.config,
-            output,
-            no_cache: cli.no_cache,
-            threads,
-            quiet,
-            dry_run,
-            yes,
-            production: cli.production,
-        }),
+        Command::Watch { no_clear } => {
+            let production = match resolve_production_modes(cli, root, output, false, false, false)
+            {
+                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+                Err(code) => return code,
+            };
+            watch::run_watch(&watch::WatchOptions {
+                root,
+                config_path: &cli.config,
+                output,
+                no_cache: cli.no_cache,
+                threads,
+                quiet,
+                production,
+                clear_screen: !no_clear,
+                explain: cli.explain,
+            })
+        }
+        Command::Fix { dry_run, yes } => {
+            let production = match resolve_production_modes(cli, root, output, false, false, false)
+            {
+                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+                Err(code) => return code,
+            };
+            fix::run_fix(&fix::FixOptions {
+                root,
+                config_path: &cli.config,
+                output,
+                no_cache: cli.no_cache,
+                threads,
+                quiet,
+                dry_run,
+                yes,
+                production,
+            })
+        }
         Command::Init {
             toml,
             hooks,
@@ -1503,18 +1666,25 @@ fn dispatch_subcommand(
             files,
             plugins,
             boundaries,
-        } => list::run_list(&ListOptions {
-            root,
-            config_path: &cli.config,
-            output,
-            threads,
-            no_cache: cli.no_cache,
-            entry_points,
-            files,
-            plugins,
-            boundaries,
-            production: cli.production,
-        }),
+        } => {
+            let production = match resolve_production_modes(cli, root, output, false, false, false)
+            {
+                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+                Err(code) => return code,
+            };
+            list::run_list(&ListOptions {
+                root,
+                config_path: &cli.config,
+                output,
+                threads,
+                no_cache: cli.no_cache,
+                entry_points,
+                files,
+                plugins,
+                boundaries,
+                production,
+            })
+        }
         Command::Dupes {
             mode,
             min_tokens,
@@ -1533,6 +1703,11 @@ fn dispatch_subcommand(
                 quiet,
                 cli_format_was_explicit,
             );
+            let production = match resolve_production_modes(cli, root, output, false, false, false)
+            {
+                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::Dupes),
+                Err(code) => return code,
+            };
             dupes::run_dupes(&DupesOptions {
                 root,
                 config_path: &cli.config,
@@ -1550,7 +1725,8 @@ fn dispatch_subcommand(
                 top,
                 baseline_path: cli.baseline.as_deref(),
                 save_baseline_path: cli.save_baseline.as_deref(),
-                production: cli.production,
+                production,
+                production_override: Some(production),
                 trace: trace.as_deref(),
                 changed_since: cli.changed_since.as_deref(),
                 workspace: cli.workspace.as_deref(),
@@ -1629,21 +1805,31 @@ fn dispatch_subcommand(
                 low_traffic_threshold,
             )
         }
-        Command::Flags { top } => flags::run_flags(&flags::FlagsOptions {
-            root,
-            config_path: &cli.config,
-            output,
-            no_cache: cli.no_cache,
-            threads,
-            quiet,
-            production: cli.production,
-            workspace: cli.workspace.as_deref(),
-            changed_workspaces: cli.changed_workspaces.as_deref(),
-            changed_since: cli.changed_since.as_deref(),
-            explain: cli.explain,
-            top,
-        }),
+        Command::Flags { top } => {
+            let production = match resolve_production_modes(cli, root, output, false, false, false)
+            {
+                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+                Err(code) => return code,
+            };
+            flags::run_flags(&flags::FlagsOptions {
+                root,
+                config_path: &cli.config,
+                output,
+                no_cache: cli.no_cache,
+                threads,
+                quiet,
+                production,
+                workspace: cli.workspace.as_deref(),
+                changed_workspaces: cli.changed_workspaces.as_deref(),
+                changed_since: cli.changed_since.as_deref(),
+                explain: cli.explain,
+                top,
+            })
+        }
         Command::Audit {
+            production_dead_code,
+            production_health,
+            production_dupes,
             dead_code_baseline,
             health_baseline,
             dupes_baseline,
@@ -1666,6 +1852,17 @@ fn dispatch_subcommand(
                 quiet,
             ) {
                 Ok(c) => c.audit,
+                Err(code) => return code,
+            };
+            let production = match resolve_production_modes(
+                cli,
+                root,
+                output,
+                production_dead_code,
+                production_health,
+                production_dupes,
+            ) {
+                Ok(production) => production,
                 Err(code) => return code,
             };
             let resolved_dead_code_baseline = resolve_audit_baseline_path(
@@ -1692,6 +1889,9 @@ fn dispatch_subcommand(
                 quiet,
                 changed_since: cli.changed_since.as_deref(),
                 production: cli.production,
+                production_dead_code: Some(production.dead_code),
+                production_health: Some(production.health),
+                production_dupes: Some(production.dupes),
                 workspace: cli.workspace.as_deref(),
                 changed_workspaces: cli.changed_workspaces.as_deref(),
                 explain: cli.explain,
@@ -1864,6 +2064,10 @@ fn dispatch_health(
     } else {
         None
     };
+    let production = match resolve_production_modes(cli, root, output, false, false, false) {
+        Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::Health),
+        Err(code) => return code,
+    };
     health::run_health(&HealthOptions {
         root,
         config_path: &cli.config,
@@ -1876,7 +2080,8 @@ fn dispatch_health(
         max_crap,
         top,
         sort,
-        production: cli.production,
+        production,
+        production_override: Some(production),
         changed_since: cli.changed_since.as_deref(),
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),

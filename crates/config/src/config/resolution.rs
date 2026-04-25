@@ -138,7 +138,7 @@ impl FallowConfig {
         let mut rules = self.rules;
 
         // In production mode, force unused_dev_dependencies and unused_optional_dependencies off
-        let production = self.production;
+        let production = self.production.global();
         if production {
             rules.unused_dev_dependencies = Severity::Off;
             rules.unused_optional_dependencies = Severity::Off;
@@ -299,7 +299,7 @@ mod tests {
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
-            production: false,
+            production: false.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],
@@ -338,7 +338,7 @@ mod tests {
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
-            production: false,
+            production: false.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             overrides: vec![ConfigOverride {
@@ -390,7 +390,7 @@ mod tests {
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
-            production: false,
+            production: false.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             overrides: vec![
@@ -450,7 +450,7 @@ mod tests {
             health: HealthConfig::default(),
             rules: RulesConfig::default(),
             boundaries: BoundaryConfig::default(),
-            production,
+            production: production.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],

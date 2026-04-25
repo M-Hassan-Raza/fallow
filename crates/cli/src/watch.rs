@@ -8,8 +8,8 @@ use fallow_config::OutputFormat;
 use notify_debouncer_mini::{DebouncedEventKind, new_debouncer};
 use rustc_hash::FxHashSet;
 
-use crate::load_config;
 use crate::report;
+use crate::runtime_support::load_config;
 
 /// ANSI escape: clear screen + scrollback + move cursor home (same sequence as tsc --watch).
 const CLEAR_SCREEN: &str = "\x1B[2J\x1B[3J\x1B[H";
@@ -385,7 +385,7 @@ mod tests {
             health: fallow_config::HealthConfig::default(),
             rules: fallow_config::RulesConfig::default(),
             boundaries: fallow_config::BoundaryConfig::default(),
-            production: false,
+            production: false.into(),
             plugins: vec![],
             dynamically_loaded: vec![],
             overrides: vec![],

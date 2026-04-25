@@ -43,6 +43,8 @@ Key modules:
 - `FALLOW_COV_BIN` — explicit override for the closed-source `fallow-cov` sidecar binary (wins over project-local `node_modules/.bin`, package-manager `bin`, `~/.fallow/bin/`, and `PATH`). When set but the path is not a file, sidecar discovery fails fast with a targeted error rather than silently falling through.
 - `FALLOW_API_URL`: base URL for fallow cloud API calls (license refresh, trial, inventory upload). Trailing slashes are trimmed. Used for staging / local-dev overrides.
 - `FALLOW_API_KEY`: fallow cloud bearer token. Consumed by `fallow coverage upload-inventory` (flag `--api-key` wins).
+- `FALLOW_PRODUCTION`: global production-mode override for all analyses (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`).
+- `FALLOW_PRODUCTION_DEAD_CODE`, `FALLOW_PRODUCTION_HEALTH`, `FALLOW_PRODUCTION_DUPES`: per-analysis overrides for combined mode and `fallow audit`. Precedence (highest to lowest): CLI flags (`--production`, `--production-{dead-code,health,dupes}`), per-analysis env var, global `FALLOW_PRODUCTION`, config (`production: true` legacy, `production: { health: true, ... }` per-analysis).
 
 ## JSON error format
 Structured JSON errors on stdout when `--format json` is active: `{"error": true, "message": "...", "exit_code": 2}`

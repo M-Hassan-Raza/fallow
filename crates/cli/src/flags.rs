@@ -69,7 +69,7 @@ pub struct FlagsOptions<'a> {
 pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
     let start = Instant::now();
 
-    let config = match crate::load_config(
+    let config = match crate::runtime_support::load_config(
         opts.root,
         opts.config_path,
         opts.output,

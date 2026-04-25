@@ -7,7 +7,7 @@ use fallow_core::duplicates::DuplicationReport;
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups, recompute_stats};
 use crate::check::{get_changed_files, resolve_workspace_scope};
 use crate::report;
-use crate::{error::emit_error, load_config};
+use crate::{error::emit_error, load_config_for_analysis};
 
 #[derive(Clone, Copy, clap::ValueEnum)]
 pub enum DupesMode {
@@ -46,6 +46,7 @@ pub struct DupesOptions<'a> {
     pub baseline_path: Option<&'a std::path::Path>,
     pub save_baseline_path: Option<&'a std::path::Path>,
     pub production: bool,
+    pub production_override: Option<bool>,
     pub trace: Option<&'a str>,
     pub changed_since: Option<&'a str>,
     pub workspace: Option<&'a [String]>,
@@ -165,14 +166,16 @@ pub struct DupesResult {
 pub fn execute_dupes(opts: &DupesOptions<'_>) -> Result<DupesResult, ExitCode> {
     let start = Instant::now();
 
-    let config = load_config(
+    let config = load_config_for_analysis(
         opts.root,
         opts.config_path,
         opts.output,
         opts.no_cache,
         opts.threads,
-        opts.production,
+        opts.production_override
+            .or_else(|| opts.production.then_some(true)),
         opts.quiet,
+        fallow_config::ProductionAnalysis::Dupes,
     )?;
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
@@ -464,6 +467,7 @@ mod tests {
             baseline_path: None,
             save_baseline_path: None,
             production: false,
+            production_override: None,
             trace: None,
             changed_since: None,
             workspace: None,

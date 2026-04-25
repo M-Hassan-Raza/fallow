@@ -384,7 +384,7 @@ mod tests {
         /// Create a minimal ResolvedConfig pointing at the given root directory.
         fn make_config(root: PathBuf, production: bool) -> ResolvedConfig {
             FallowConfig {
-                production,
+                production: production.into(),
                 ..Default::default()
             }
             .resolve(root, OutputFormat::Human, 1, true, true)
@@ -706,7 +706,7 @@ mod tests {
                 health: HealthConfig::default(),
                 rules: RulesConfig::default(),
                 boundaries: fallow_config::BoundaryConfig::default(),
-                production: false,
+                production: false.into(),
                 plugins: vec![],
                 dynamically_loaded: vec![],
                 overrides: vec![],

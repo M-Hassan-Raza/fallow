@@ -9,7 +9,7 @@ use crate::dupes::{DupesMode, DupesOptions, DupesResult};
 use crate::health::{HealthOptions, HealthResult, SortBy};
 use crate::regression;
 use crate::report;
-use crate::{AnalysisKind, error::emit_error, load_config};
+use crate::{AnalysisKind, error::emit_error, load_config_for_analysis};
 
 pub struct CombinedOptions<'a> {
     pub root: &'a std::path::Path,
@@ -24,6 +24,9 @@ pub struct CombinedOptions<'a> {
     pub baseline: Option<&'a std::path::Path>,
     pub save_baseline: Option<&'a std::path::Path>,
     pub production: bool,
+    pub production_dead_code: Option<bool>,
+    pub production_health: Option<bool>,
+    pub production_dupes: Option<bool>,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub group_by: Option<crate::GroupBy>,
@@ -89,7 +92,8 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
             baseline: opts.baseline,
             save_baseline: opts.save_baseline,
             sarif_file: opts.sarif_file,
-            production: opts.production,
+            production: opts.production_dead_code.unwrap_or(opts.production),
+            production_override: opts.production_dead_code,
             workspace: opts.workspace,
             changed_workspaces: opts.changed_workspaces,
             group_by: opts.group_by,
@@ -113,14 +117,16 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
 
     // Run dupes (duplication analysis)
     if opts.run_dupes {
-        let dupes_cfg = match load_config(
+        let dupes_cfg = match load_config_for_analysis(
             opts.root,
             opts.config_path,
             opts.output,
             opts.no_cache,
             opts.threads,
-            opts.production,
+            opts.production_dupes
+                .or_else(|| opts.production.then_some(true)),
             opts.quiet,
+            fallow_config::ProductionAnalysis::Dupes,
         ) {
             Ok(c) => c.duplicates,
             Err(code) => return code,
@@ -144,7 +150,8 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
             top: None,
             baseline_path: None,
             save_baseline_path: None,
-            production: opts.production,
+            production: opts.production_dupes.unwrap_or(opts.production),
+            production_override: opts.production_dupes,
             trace: None,
             changed_since: opts.changed_since,
             workspace: opts.workspace,
@@ -166,7 +173,13 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     // re-parsing all files. Saves ~1.9s on 21K-file projects like next.js.
     if opts.run_health {
         let health_opts = build_health_opts(opts);
-        let shared = check_result.as_mut().and_then(|r| r.shared_parse.take());
+        let check_production = opts.production_dead_code.unwrap_or(opts.production);
+        let health_production = opts.production_health.unwrap_or(opts.production);
+        let shared = if check_production == health_production {
+            check_result.as_mut().and_then(|r| r.shared_parse.take())
+        } else {
+            None
+        };
         let health_run = if let Some(shared_data) = shared {
             crate::health::execute_health_with_shared_parse(&health_opts, shared_data)
         } else {
@@ -647,7 +660,8 @@ fn build_health_opts<'a>(opts: &'a CombinedOptions<'a>) -> HealthOptions<'a> {
         max_crap: None,
         top: None,
         sort: SortBy::Cyclomatic,
-        production: opts.production,
+        production: opts.production_health.unwrap_or(opts.production),
+        production_override: opts.production_health,
         changed_since: opts.changed_since,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,

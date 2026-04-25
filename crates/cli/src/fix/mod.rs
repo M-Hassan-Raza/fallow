@@ -31,7 +31,7 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         return crate::error::emit_error(msg, 2, opts.output);
     }
 
-    let config = match super::load_config(
+    let config = match crate::runtime_support::load_config(
         opts.root,
         opts.config_path,
         opts.output,

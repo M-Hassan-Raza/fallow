@@ -26,7 +26,7 @@ fn create_boundary_config(
             ..RulesConfig::default()
         },
         boundaries,
-        production: false,
+        production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
@@ -162,7 +162,7 @@ fn no_violations_when_rule_is_off() {
             ..RulesConfig::default()
         },
         boundaries,
-        production: false,
+        production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
@@ -210,7 +210,7 @@ fn preset_detects_boundary_violation() {
             ..RulesConfig::default()
         },
         boundaries,
-        production: false,
+        production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],
@@ -274,7 +274,7 @@ fn bulletproof_preset_detects_violation() {
             ..RulesConfig::default()
         },
         boundaries,
-        production: false,
+        production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],

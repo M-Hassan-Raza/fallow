@@ -19,7 +19,6 @@ use crate::baseline::{
 use crate::check::{get_changed_files, resolve_workspace_scope};
 use crate::error::emit_error;
 pub use crate::health_types::*;
-use crate::load_config;
 use crate::report;
 use crate::vital_signs;
 
@@ -74,6 +73,7 @@ pub struct HealthOptions<'a> {
     pub top: Option<usize>,
     pub sort: SortBy,
     pub production: bool,
+    pub production_override: Option<bool>,
     pub changed_since: Option<&'a str>,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
@@ -132,14 +132,16 @@ pub fn execute_health_with_shared_parse(
     opts: &HealthOptions<'_>,
     shared: SharedParseData,
 ) -> Result<HealthResult, ExitCode> {
-    let config = load_config(
+    let config = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
         opts.output,
         opts.no_cache,
         opts.threads,
-        opts.production,
+        opts.production_override
+            .or_else(|| opts.production.then_some(true)),
         opts.quiet,
+        fallow_config::ProductionAnalysis::Health,
     )?;
     execute_health_inner(
         opts,
@@ -155,14 +157,16 @@ pub fn execute_health_with_shared_parse(
 
 pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode> {
     let t = Instant::now();
-    let config = load_config(
+    let config = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
         opts.output,
         opts.no_cache,
         opts.threads,
-        opts.production,
+        opts.production_override
+            .or_else(|| opts.production.then_some(true)),
         opts.quiet,
+        fallow_config::ProductionAnalysis::Health,
     )?;
     let config_ms = t.elapsed().as_secs_f64() * 1000.0;
 

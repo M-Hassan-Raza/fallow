@@ -2289,7 +2289,7 @@ minTokens = 100
     #[test]
     fn resolve_production_mode_disables_dev_deps() {
         let config = FallowConfig {
-            production: true,
+            production: true.into(),
             ..Default::default()
         };
         let resolved = config.resolve(

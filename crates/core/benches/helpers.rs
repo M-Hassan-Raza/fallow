@@ -24,7 +24,7 @@ pub fn make_config(root: PathBuf, no_cache: bool) -> fallow_config::ResolvedConf
         health: fallow_config::HealthConfig::default(),
         rules: fallow_config::RulesConfig::default(),
         boundaries: BoundaryConfig::default(),
-        production: false,
+        production: false.into(),
         plugins: vec![],
         dynamically_loaded: vec![],
         overrides: vec![],

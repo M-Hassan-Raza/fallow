@@ -1550,6 +1550,9 @@ fn audit_args_with_all_options() {
         config: Some(".fallowrc.json".to_string()),
         base: Some("develop".to_string()),
         production: Some(true),
+        production_dead_code: None,
+        production_health: Some(true),
+        production_dupes: None,
         workspace: Some("@app/core".to_string()),
         no_cache: Some(true),
         threads: Some(4),
@@ -1566,6 +1569,7 @@ fn audit_args_with_all_options() {
     assert!(args.contains(&"--base".to_string()));
     assert!(args.contains(&"develop".to_string()));
     assert!(args.contains(&"--production".to_string()));
+    assert!(args.contains(&"--production-health".to_string()));
     assert!(args.contains(&"--workspace".to_string()));
     assert!(args.contains(&"@app/core".to_string()));
     assert!(args.contains(&"--no-cache".to_string()));
