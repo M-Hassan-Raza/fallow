@@ -196,7 +196,7 @@ fn compute_crap_scores_istanbul(
     let mut per_function = Vec::with_capacity(complexity.len());
     for f in complexity {
         let cc = f64::from(f.cyclomatic);
-        let lookup = file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line));
+        let lookup = file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line, f.col));
         let (crap, coverage_pct) = if let Some(cov_pct) = lookup {
             matched += 1;
             (crap_formula(cc, cov_pct), Some(cov_pct))
@@ -337,56 +337,84 @@ fn crap_formula(cc: f64, coverage_pct: f64) -> f64 {
 /// Pre-processed per-function coverage data for a single file,
 /// derived from Istanbul `coverage-final.json`.
 pub(super) struct IstanbulFileCoverage {
-    /// Per-function coverage percentages, keyed by (name, line).
+    /// Per-function coverage percentages, keyed by (name, line, col).
     /// Line is 1-based, matching both fallow's `FunctionComplexity.line`
     /// and Istanbul's effective declaration line (`FnEntry.line` when
-    /// present, otherwise `FnEntry.decl.start.line`).
-    functions: rustc_hash::FxHashMap<(String, u32), f64>,
+    /// present, otherwise `FnEntry.decl.start.line`). Col is 0-based,
+    /// matching both fallow's `FunctionComplexity.col` and Istanbul's
+    /// `Position::column`. Including col in the key disambiguates curried
+    /// arrows like `(x) => (y) => {...}` where two functions share a line.
+    functions: rustc_hash::FxHashMap<(String, u32, u32), f64>,
 }
 
 impl IstanbulFileCoverage {
-    /// Look up coverage for a function by name and start line.
+    /// Look up coverage for a function by name, start line, and start column.
     ///
     /// Resolution order:
-    /// 1. Exact `(name, line)` match.
-    /// 2. Name-only fuzzy match within ±2 lines (tolerates formatter drift).
-    /// 3. Anonymous fallback: if exactly one Istanbul entry with an
-    ///    `(anonymous_N)` name starts within ±2 lines, use it.
+    /// 1. Exact `(name, line, col)` match.
+    /// 2. Name-only fuzzy match within ±2 lines (tolerates formatter drift),
+    ///    tie-broken by smallest `(line, col)` distance from the target.
+    /// 3. Anonymous fallback: among Istanbul `(anonymous_N)` entries within
+    ///    ±2 lines, pick the one closest in `(line, col)` to the target.
+    ///    Bail only if two candidates tie on distance, which would be
+    ///    genuinely ambiguous.
     ///
     /// Step 3 covers arrow-function exports where fallow extracts the binding
     /// identifier (`const myHandler = () => {...}` yields `myHandler`) while
     /// Istanbul records the function as anonymous. `load_istanbul_coverage`
     /// normalizes missing `FnEntry.line` values to `decl.start.line` so
-    /// standard Istanbul producers still participate in this fallback. The
-    /// single-candidate guard keeps the match unambiguous so we never silently
-    /// attribute the wrong coverage to a function. See issues #155 and #166.
-    pub(super) fn lookup(&self, name: &str, line: u32) -> Option<f64> {
+    /// standard Istanbul producers still participate in this fallback. See
+    /// issues #155, #166, and #181.
+    pub(super) fn lookup(&self, name: &str, line: u32, col: u32) -> Option<f64> {
         // 1. Exact match.
-        if let Some(&pct) = self.functions.get(&(name.to_string(), line)) {
+        if let Some(&pct) = self.functions.get(&(name.to_string(), line, col)) {
             return Some(pct);
         }
-        // 2. Fuzzy: match by name, pick the closest line within offset of 2.
-        // Uses min_by_key for determinism (FxHashMap iteration order is arbitrary).
+        // 2. Fuzzy: match by name, pick the closest line within offset of 2;
+        // when two entries are equally close on line, prefer the smaller col
+        // distance so curried arrows with distinct cols still resolve.
         if let Some(pct) = self
             .functions
             .iter()
-            .filter(|((n, l), _)| n == name && l.abs_diff(line) <= 2)
-            .min_by_key(|((_, l), _)| l.abs_diff(line))
+            .filter(|((n, l, _), _)| n == name && l.abs_diff(line) <= 2)
+            .min_by_key(|((_, l, c), _)| (l.abs_diff(line), c.abs_diff(col)))
             .map(|(_, &pct)| pct)
         {
             return Some(pct);
         }
-        // 3. Anonymous-by-line fallback: exactly one `(anonymous_N)` entry
-        // within ±2 lines. Multiple candidates would be ambiguous, so bail.
-        let mut anonymous_near = self
-            .functions
-            .iter()
-            .filter(|((n, l), _)| n.starts_with("(anonymous_") && l.abs_diff(line) <= 2);
-        let first = anonymous_near.next()?;
-        if anonymous_near.next().is_some() {
-            return None;
+        // 3. Anonymous-by-position fallback: among `(anonymous_N)` entries
+        // within ±2 lines, pick the one whose (line, col) is closest. If two
+        // candidates tie on distance, the match is genuinely ambiguous and
+        // we bail rather than silently attribute the wrong coverage.
+        let mut nearest_distance: Option<(u32, u32)> = None;
+        let mut nearest_pct: Option<f64> = None;
+        let mut tied = false;
+        for ((n, l, c), &pct) in &self.functions {
+            if !n.starts_with("(anonymous_") {
+                continue;
+            }
+            if l.abs_diff(line) > 2 {
+                continue;
+            }
+            let dist = (l.abs_diff(line), c.abs_diff(col));
+            match nearest_distance {
+                None => {
+                    nearest_distance = Some(dist);
+                    nearest_pct = Some(pct);
+                    tied = false;
+                }
+                Some(prev) if dist < prev => {
+                    nearest_distance = Some(dist);
+                    nearest_pct = Some(pct);
+                    tied = false;
+                }
+                Some(prev) if dist == prev => {
+                    tied = true;
+                }
+                Some(_) => {}
+            }
         }
-        Some(*first.1)
+        if tied { None } else { nearest_pct }
     }
 }
 
@@ -471,7 +499,11 @@ pub(super) fn load_istanbul_coverage(
         for (fn_id, fn_entry) in &file_cov.fn_map {
             let coverage_pct = compute_function_statement_coverage(file_cov, fn_id, fn_entry);
             functions.insert(
-                (fn_entry.name.clone(), effective_istanbul_fn_line(fn_entry)),
+                (
+                    fn_entry.name.clone(),
+                    effective_istanbul_fn_line(fn_entry),
+                    effective_istanbul_fn_col(fn_entry),
+                ),
                 coverage_pct,
             );
         }
@@ -488,6 +520,14 @@ fn effective_istanbul_fn_line(fn_entry: &oxc_coverage_instrument::FnEntry) -> u3
     } else {
         fn_entry.decl.start.line
     }
+}
+
+/// Effective 0-based start column for an Istanbul function entry. `FnEntry`
+/// has no top-level `column` field, so we always read it off
+/// `decl.start.column`. Both fallow's `FunctionComplexity.col` and Istanbul's
+/// `Position::column` are 0-based, so they match directly.
+fn effective_istanbul_fn_col(fn_entry: &oxc_coverage_instrument::FnEntry) -> u32 {
+    fn_entry.decl.start.column
 }
 
 /// Compute statement-level coverage percentage for a single function.
@@ -2801,7 +2841,7 @@ mod tests {
         let funcs = vec![make_fn_complexity(10)];
         let mut functions = rustc_hash::FxHashMap::default();
         // 80% coverage: CRAP = 100 * 0.008 + 10 = 10.8
-        functions.insert(("test_fn".to_string(), 1), 80.0);
+        functions.insert(("test_fn".to_string(), 1, 0), 80.0);
         let file_cov = IstanbulFileCoverage { functions };
         let result = compute_crap_scores_istanbul(&funcs, Some(&file_cov), false);
         assert!((result.max_crap - 10.8).abs() < 0.1);
@@ -2833,7 +2873,7 @@ mod tests {
     fn istanbul_crap_zero_coverage_matches_binary_untested() {
         let funcs = vec![make_fn_complexity(5)];
         let mut functions = rustc_hash::FxHashMap::default();
-        functions.insert(("test_fn".to_string(), 1), 0.0);
+        functions.insert(("test_fn".to_string(), 1, 0), 0.0);
         let file_cov = IstanbulFileCoverage { functions };
         // 0% coverage: CRAP = 25 * 1 + 5 = 30 (same as binary untested)
         let result = compute_crap_scores_istanbul(&funcs, Some(&file_cov), false);
@@ -3036,8 +3076,8 @@ mod tests {
 
         // Standard Istanbul omits `FnEntry.line` here, so the loader must fall
         // back to `decl.start.line` for the anonymous-by-line lookup to work.
-        assert_eq!(file_coverage.lookup("processData", 5), Some(100.0));
-        assert_eq!(file_coverage.lookup("handleSpecial", 20), Some(0.0));
+        assert_eq!(file_coverage.lookup("processData", 5, 0), Some(100.0));
+        assert_eq!(file_coverage.lookup("handleSpecial", 20, 0), Some(0.0));
     }
 
     #[test]
@@ -3076,8 +3116,8 @@ mod tests {
 
         // Preserve the explicit line from `oxc_coverage_instrument` output so
         // we do not regress the precise-name fast path for existing producers.
-        assert_eq!(file_coverage.lookup("handleClick", 40), Some(100.0));
-        assert!(file_coverage.lookup("handleClick", 22).is_none());
+        assert_eq!(file_coverage.lookup("handleClick", 40, 0), Some(100.0));
+        assert!(file_coverage.lookup("handleClick", 22, 0).is_none());
     }
 
     // --- IstanbulFileCoverage::lookup ---
@@ -3085,37 +3125,37 @@ mod tests {
     #[test]
     fn istanbul_lookup_exact_match() {
         let mut functions = rustc_hash::FxHashMap::default();
-        functions.insert(("handleClick".to_string(), 10), 85.0);
+        functions.insert(("handleClick".to_string(), 10, 0), 85.0);
         let fc = IstanbulFileCoverage { functions };
-        assert!((fc.lookup("handleClick", 10).unwrap() - 85.0).abs() < f64::EPSILON);
+        assert!((fc.lookup("handleClick", 10, 0).unwrap() - 85.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn istanbul_lookup_fuzzy_match_within_offset() {
         let mut functions = rustc_hash::FxHashMap::default();
-        functions.insert(("handleClick".to_string(), 10), 72.0);
+        functions.insert(("handleClick".to_string(), 10, 0), 72.0);
         let fc = IstanbulFileCoverage { functions };
         // Line 11 is within offset of 2 from line 10
-        assert!((fc.lookup("handleClick", 11).unwrap() - 72.0).abs() < f64::EPSILON);
+        assert!((fc.lookup("handleClick", 11, 0).unwrap() - 72.0).abs() < f64::EPSILON);
         // Line 12 is within offset of 2
-        assert!((fc.lookup("handleClick", 12).unwrap() - 72.0).abs() < f64::EPSILON);
+        assert!((fc.lookup("handleClick", 12, 0).unwrap() - 72.0).abs() < f64::EPSILON);
     }
 
     #[test]
     fn istanbul_lookup_fuzzy_match_outside_offset() {
         let mut functions = rustc_hash::FxHashMap::default();
-        functions.insert(("handleClick".to_string(), 10), 72.0);
+        functions.insert(("handleClick".to_string(), 10, 0), 72.0);
         let fc = IstanbulFileCoverage { functions };
         // Line 13 is 3 away from line 10, exceeds offset of 2
-        assert!(fc.lookup("handleClick", 13).is_none());
+        assert!(fc.lookup("handleClick", 13, 0).is_none());
     }
 
     #[test]
     fn istanbul_lookup_name_mismatch() {
         let mut functions = rustc_hash::FxHashMap::default();
-        functions.insert(("handleClick".to_string(), 10), 85.0);
+        functions.insert(("handleClick".to_string(), 10, 0), 85.0);
         let fc = IstanbulFileCoverage { functions };
-        assert!(fc.lookup("handleSubmit", 10).is_none());
+        assert!(fc.lookup("handleSubmit", 10, 0).is_none());
     }
 
     #[test]
@@ -3123,19 +3163,19 @@ mod tests {
         let fc = IstanbulFileCoverage {
             functions: rustc_hash::FxHashMap::default(),
         };
-        assert!(fc.lookup("anything", 1).is_none());
+        assert!(fc.lookup("anything", 1, 0).is_none());
     }
 
     #[test]
     fn istanbul_lookup_fuzzy_picks_closest() {
         let mut functions = rustc_hash::FxHashMap::default();
         // Two entries for same name at lines 8 and 12
-        functions.insert(("render".to_string(), 8), 60.0);
-        functions.insert(("render".to_string(), 12), 90.0);
+        functions.insert(("render".to_string(), 8, 0), 60.0);
+        functions.insert(("render".to_string(), 12, 0), 90.0);
         let fc = IstanbulFileCoverage { functions };
         // Looking up line 10: distance to 8 is 2, distance to 12 is 2
         // Both within offset, min_by_key picks closest (tie broken by iteration)
-        let result = fc.lookup("render", 10);
+        let result = fc.lookup("render", 10, 0);
         assert!(result.is_some());
         // Either match is acceptable since both are distance 2
         let pct = result.unwrap();
@@ -3148,31 +3188,63 @@ mod tests {
     #[test]
     fn istanbul_lookup_anonymous_fallback_single_candidate() {
         let mut functions = rustc_hash::FxHashMap::default();
-        functions.insert(("(anonymous_0)".to_string(), 28), 75.0);
+        functions.insert(("(anonymous_0)".to_string(), 28, 0), 75.0);
         let fc = IstanbulFileCoverage { functions };
         // fallow asks for `myHandler` at line 28; no name match, but exactly
         // one anonymous entry within ±2 lines, so fall back to it.
-        assert!((fc.lookup("myHandler", 28).unwrap() - 75.0).abs() < f64::EPSILON);
-        assert!((fc.lookup("myHandler", 30).unwrap() - 75.0).abs() < f64::EPSILON);
+        assert!((fc.lookup("myHandler", 28, 0).unwrap() - 75.0).abs() < f64::EPSILON);
+        assert!((fc.lookup("myHandler", 30, 0).unwrap() - 75.0).abs() < f64::EPSILON);
     }
 
     #[test]
-    fn istanbul_lookup_anonymous_fallback_ambiguous_returns_none() {
+    fn istanbul_lookup_anonymous_fallback_picks_closest_when_lines_differ() {
+        // After issue #181, the anonymous fallback uses (line, col) distance
+        // to disambiguate instead of bailing on multiple candidates. The
+        // closer line wins over the farther one.
         let mut functions = rustc_hash::FxHashMap::default();
-        // Two anonymous entries within ±2 lines of 28: ambiguous, bail out.
-        functions.insert(("(anonymous_0)".to_string(), 28), 75.0);
-        functions.insert(("(anonymous_1)".to_string(), 29), 50.0);
+        functions.insert(("(anonymous_0)".to_string(), 28, 0), 75.0);
+        functions.insert(("(anonymous_1)".to_string(), 29, 0), 50.0);
         let fc = IstanbulFileCoverage { functions };
-        assert!(fc.lookup("myHandler", 28).is_none());
+        // Target is at line 28: anonymous_0 has dist (0, 0), anonymous_1 has
+        // dist (1, 0). Closest wins.
+        assert!((fc.lookup("myHandler", 28, 0).unwrap() - 75.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn istanbul_lookup_anonymous_fallback_picks_closest_by_col_on_same_line() {
+        // Regression test for issue #181: when two anonymous arrows share a
+        // start line (curried `(x) => (y) => {...}`), col disambiguates.
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("(anonymous_0)".to_string(), 1, 23), 90.0); // outer
+        functions.insert(("(anonymous_1)".to_string(), 1, 43), 10.0); // inner
+        let fc = IstanbulFileCoverage { functions };
+        // Looking up the inner arrow's coverage by its (line, col) must
+        // return the inner's percentage, not the outer's.
+        assert!((fc.lookup("<arrow>", 1, 43).unwrap() - 10.0).abs() < f64::EPSILON);
+        // Symmetric: the outer's lookup must return the outer's percentage.
+        assert!((fc.lookup("<arrow>", 1, 23).unwrap() - 90.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn istanbul_lookup_anonymous_fallback_bails_only_on_true_tie() {
+        // When two anonymous entries sit at exactly the same (line, col)
+        // distance from the target, the match is genuinely ambiguous and
+        // the lookup must bail out rather than guess.
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("(anonymous_0)".to_string(), 27, 0), 75.0);
+        functions.insert(("(anonymous_1)".to_string(), 29, 0), 50.0);
+        let fc = IstanbulFileCoverage { functions };
+        // Target at line 28, col 0: both candidates are dist (1, 0). Tied.
+        assert!(fc.lookup("myHandler", 28, 0).is_none());
     }
 
     #[test]
     fn istanbul_lookup_anonymous_fallback_outside_offset() {
         let mut functions = rustc_hash::FxHashMap::default();
-        functions.insert(("(anonymous_0)".to_string(), 28), 75.0);
+        functions.insert(("(anonymous_0)".to_string(), 28, 0), 75.0);
         let fc = IstanbulFileCoverage { functions };
         // Line 31 is 3 away from 28, outside the ±2 window.
-        assert!(fc.lookup("myHandler", 31).is_none());
+        assert!(fc.lookup("myHandler", 31, 0).is_none());
     }
 
     #[test]
@@ -3181,10 +3253,10 @@ mod tests {
         // A real name match at line 10 and an anonymous entry at line 11.
         // The name match must win; the anonymous fallback only fires when
         // no name-based match exists.
-        functions.insert(("handleClick".to_string(), 10), 90.0);
-        functions.insert(("(anonymous_7)".to_string(), 11), 10.0);
+        functions.insert(("handleClick".to_string(), 10, 0), 90.0);
+        functions.insert(("(anonymous_7)".to_string(), 11, 0), 10.0);
         let fc = IstanbulFileCoverage { functions };
-        assert!((fc.lookup("handleClick", 10).unwrap() - 90.0).abs() < f64::EPSILON);
+        assert!((fc.lookup("handleClick", 10, 0).unwrap() - 90.0).abs() < f64::EPSILON);
     }
 
     // --- build_test_referenced_exports ---
@@ -3226,7 +3298,7 @@ mod tests {
         }];
         let mut functions = rustc_hash::FxHashMap::default();
         // Only match first function
-        functions.insert(("test_fn".to_string(), 1), 80.0);
+        functions.insert(("test_fn".to_string(), 1, 0), 80.0);
         let file_cov = IstanbulFileCoverage { functions };
         let result = compute_crap_scores_istanbul(&funcs, Some(&file_cov), true);
         assert_eq!(result.matched, 1);
