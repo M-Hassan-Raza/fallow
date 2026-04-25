@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.49.0] - 2026-04-25
+
+### Added
+
+- **Per-analysis production mode for the programmatic API.** `analyze_project` now accepts an optional `production` configuration that overrides the global `FallowConfig.production` flag for that single call, so an embedder can run a check pass with `production: false` (developer-mode entry points, full graph) and a follow-up health pass with `production: true` (start/build entries only, type-only deps detected) against the same project state without rebuilding config. CLI users get the same toggle via the existing `--production` flag, but the new path is the embedder API surface (Vite plugin, GitHub Action library mode, IDE plugins). Programmatic callers see `production: bool` on the analysis options struct; CLI callers see no behavior change.
+
+### Fixed
+
+- **Cross-package enum and class members are no longer flagged as unused when consumed through a barrel re-export.** When `enum Foo { A, B, C }` is defined in `lib/types.ts`, re-exported by `lib/index.ts` (`export { Foo } from './types'`), and consumed by another workspace package via `import { Foo } from '@scope/lib'; Foo.A`, every member of `Foo` was reported unused. Phase 4 chain resolution synthesizes a stub `ExportSymbol` on barrel files for reference tracking, which is indistinguishable from a real local declaration by name alone, so the access map keyed at the barrel while the detection loop looked up accesses at the origin file (where `members` are populated). `find_unused_members` now walks each access key through `ReExportEdge` chains (named, renamed, and `export *` fan-out) to every defining-site export and copies the access set. Same fix applies to `whole_object_used_exports` for `Object.values(Foo)` patterns. Covers both `unused_enum_members` and `unused_class_members`. Real-world impact on vue-core: 17 false positives eliminated (12 enum + 5 class). Closes [#178](https://github.com/fallow-rs/fallow/issues/178).
+- **Embedder API now respects per-analysis production config end-to-end.** `analyze_project` was reading the global `FallowConfig.production` flag for downstream filtering even when the per-call options overrode it, so the new per-analysis production mode silently fell back to the project default in the trace and reachability passes. The flatten step now threads the resolved per-analysis flag through every detector consistently.
+- **GitLab CI template defaults FALLOW_PRODUCTION* variables to empty strings.** The `.fallow:base` template previously set `FALLOW_PRODUCTION_CHECK: "false"` and similar; pipelines that overrode these via `extends:` could not unset them because GitLab merges variable values rather than replacing. Switching the defaults to `""` makes the template idempotent under user overrides.
+- **Health Istanbul coverage now keys by `(name, line, col)` instead of `(name, line)`.** Curried arrow functions that share a start line on the same column would merge their coverage records and double-count one branch. Adding the column disambiguates the rare collision without affecting any other coverage shape.
+
 ## [2.48.5] - 2026-04-25
 
 ### Added
@@ -1654,7 +1667,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.48.4...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.49.0...HEAD
+[2.49.0]: https://github.com/fallow-rs/fallow/compare/v2.48.5...v2.49.0
 [2.48.5]: https://github.com/fallow-rs/fallow/compare/v2.48.4...v2.48.5
 [2.48.4]: https://github.com/fallow-rs/fallow/compare/v2.48.3...v2.48.4
 [2.48.3]: https://github.com/fallow-rs/fallow/compare/v2.48.2...v2.48.3
