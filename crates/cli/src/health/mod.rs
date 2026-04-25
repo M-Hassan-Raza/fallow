@@ -1305,25 +1305,31 @@ fn merge_crap_findings(
     max_cyclomatic: u16,
     max_cognitive: u16,
 ) {
-    // Index existing findings by (path, line) so we can update in place.
-    let finding_index: rustc_hash::FxHashMap<(std::path::PathBuf, u32), usize> = findings
+    // Index existing findings by (path, line, col) so we can update in place.
+    // The column is part of the key because curried arrows like
+    // `(x) => (y) => {...}` produce two `FunctionComplexity` records on the
+    // same line; keying on (path, line) alone would collide and let one
+    // function's CRAP score be attached to the other function's identity.
+    let finding_index: rustc_hash::FxHashMap<(std::path::PathBuf, u32, u32), usize> = findings
         .iter()
         .enumerate()
-        .map(|(idx, f)| ((f.path.clone(), f.line), idx))
+        .map(|(idx, f)| ((f.path.clone(), f.line, f.col), idx))
         .collect();
-    // Build (path -> line -> &FunctionComplexity) for creating new findings
-    // for CRAP-only violations.
-    let mut complexity_by_line: rustc_hash::FxHashMap<
+    // Build (path -> (line, col) -> &FunctionComplexity) for creating new
+    // findings for CRAP-only violations. Same rationale: (line, col) is the
+    // unique anchor for a function so nested arrows on the same line don't
+    // overwrite each other.
+    let mut complexity_by_pos: rustc_hash::FxHashMap<
         &std::path::Path,
-        rustc_hash::FxHashMap<u32, &fallow_types::extract::FunctionComplexity>,
+        rustc_hash::FxHashMap<(u32, u32), &fallow_types::extract::FunctionComplexity>,
     > = rustc_hash::FxHashMap::default();
     for module in modules {
         let Some(&path) = file_paths.get(&module.file_id) else {
             continue;
         };
-        let entry = complexity_by_line.entry(path.as_path()).or_default();
+        let entry = complexity_by_pos.entry(path.as_path()).or_default();
         for fc in &module.complexity {
-            entry.insert(fc.line, fc);
+            entry.insert((fc.line, fc.col), fc);
         }
     }
     // Track suppressions per file so we can honor `// fallow-ignore-*
@@ -1370,7 +1376,7 @@ fn merge_crap_findings(
                 continue;
             }
 
-            if let Some(&idx) = finding_index.get(&(path.clone(), pf.line)) {
+            if let Some(&idx) = finding_index.get(&(path.clone(), pf.line, pf.col)) {
                 let finding = &mut findings[idx];
                 finding.crap = Some(pf.crap);
                 finding.coverage_pct = pf.coverage_pct;
@@ -1388,9 +1394,9 @@ fn merge_crap_findings(
                     DEFAULT_CYCLOMATIC_CRITICAL,
                 );
             } else {
-                let Some(fc) = complexity_by_line
+                let Some(fc) = complexity_by_pos
                     .get(path.as_path())
-                    .and_then(|m| m.get(&pf.line).copied())
+                    .and_then(|m| m.get(&(pf.line, pf.col)).copied())
                 else {
                     continue;
                 };
@@ -1972,6 +1978,187 @@ mod tests {
         assert_eq!(f.cognitive, 18);
         assert_eq!(f.line_count, 75);
         assert_eq!(f.path, PathBuf::from("/project/src/a.ts"));
+    }
+
+    // Regression test for issue #181: curried arrows like
+    // `(x) => (y) => {...}` produce two FunctionComplexity records on the
+    // same line. Indexing CRAP findings by (path, line) alone collided so
+    // the inner arrow's CRAP score was attached to the outer arrow's
+    // identity (CC=1, CRAP=56, mathematically impossible because CRAP at
+    // 0% coverage is CC^2 + CC).
+    #[test]
+    fn merge_crap_findings_disambiguates_same_line_functions() {
+        let path = PathBuf::from("/project/src/curried.ts");
+        // Outer arrow: cyclomatic=1, body is just `return inner_arrow`.
+        // Inner arrow: cyclomatic=7, body has the switch cases.
+        let outer = FunctionComplexity {
+            name: "handler".to_string(),
+            line: 1,
+            col: 23,
+            cyclomatic: 1,
+            cognitive: 0,
+            line_count: 11,
+            param_count: 1,
+        };
+        let inner = FunctionComplexity {
+            name: "<arrow>".to_string(),
+            line: 1,
+            col: 43,
+            cyclomatic: 7,
+            cognitive: 0,
+            line_count: 10,
+            param_count: 1,
+        };
+        // Inner is pushed first because pop_function() is LIFO; matches the
+        // production order out of `complexity.rs`.
+        let modules = vec![make_module(FileId(0), vec![inner.clone(), outer.clone()])];
+        let mut file_paths: FxHashMap<FileId, &PathBuf> = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        // Neither function exceeds the cyclomatic (20) or cognitive (15)
+        // thresholds, so collect_findings would emit zero findings. The CRAP
+        // pass is what surfaces the inner arrow.
+        let mut findings: Vec<HealthFinding> = Vec::new();
+
+        let mut per_function_crap: FxHashMap<PathBuf, Vec<scoring::PerFunctionCrap>> =
+            FxHashMap::default();
+        per_function_crap.insert(
+            path.clone(),
+            vec![
+                // Order matches `module.complexity` order (inner first).
+                scoring::PerFunctionCrap {
+                    line: inner.line,
+                    col: inner.col,
+                    crap: 56.0,
+                    coverage_pct: None,
+                },
+                scoring::PerFunctionCrap {
+                    line: outer.line,
+                    col: outer.col,
+                    crap: 2.0,
+                    coverage_pct: None,
+                },
+            ],
+        );
+
+        merge_crap_findings(
+            &mut findings,
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            None,
+            &per_function_crap,
+            30.0,
+            20,
+            15,
+        );
+
+        // Only the inner arrow's CRAP exceeds the threshold (56 >= 30); the
+        // outer arrow's CRAP (2) does not. So exactly one finding emitted.
+        assert_eq!(
+            findings.len(),
+            1,
+            "expected one CRAP finding for inner arrow"
+        );
+        let f = &findings[0];
+        // The bug attached inner CRAP (56) to outer identity (handler/CC=1).
+        // After the fix, identity and CRAP must come from the same function.
+        assert_eq!(f.name, "<arrow>", "name must come from inner arrow");
+        assert_eq!(f.line, 1);
+        assert_eq!(f.col, 43, "col must disambiguate same-line arrows");
+        assert_eq!(f.cyclomatic, 7, "cyclomatic must come from inner arrow");
+        assert_eq!(f.cognitive, 0);
+        assert_eq!(
+            f.crap,
+            Some(56.0),
+            "CRAP must match the function it's reported against"
+        );
+        // Sanity check: CRAP at 0% coverage equals CC^2 + CC. CC=7 implies 56.
+        let cc = f64::from(f.cyclomatic);
+        #[expect(
+            clippy::suboptimal_flops,
+            reason = "cc * cc + cc matches the CRAP formula specification"
+        )]
+        let expected_crap = cc * cc + cc;
+        assert!(
+            (f.crap.unwrap() - expected_crap).abs() < 0.01,
+            "CRAP must be consistent with reported CC: cc={cc}, crap={:?}, expected={expected_crap}",
+            f.crap,
+        );
+    }
+
+    // Companion regression test: when the OUTER arrow is the one above the
+    // CRAP threshold (i.e. its CC is large), the OUTER's identity must be
+    // reported with the OUTER's CRAP, even though both arrows still sit on
+    // the same line.
+    #[test]
+    fn merge_crap_findings_picks_outer_when_outer_exceeds() {
+        let path = PathBuf::from("/project/src/curried_outer.ts");
+        let outer = FunctionComplexity {
+            name: "complex".to_string(),
+            line: 5,
+            col: 10,
+            cyclomatic: 8,
+            cognitive: 0,
+            line_count: 20,
+            param_count: 1,
+        };
+        let inner = FunctionComplexity {
+            name: "<arrow>".to_string(),
+            line: 5,
+            col: 30,
+            cyclomatic: 1,
+            cognitive: 0,
+            line_count: 1,
+            param_count: 1,
+        };
+        let modules = vec![make_module(FileId(0), vec![inner.clone(), outer.clone()])];
+        let mut file_paths: FxHashMap<FileId, &PathBuf> = FxHashMap::default();
+        file_paths.insert(FileId(0), &path);
+
+        let mut findings: Vec<HealthFinding> = Vec::new();
+        let mut per_function_crap: FxHashMap<PathBuf, Vec<scoring::PerFunctionCrap>> =
+            FxHashMap::default();
+        per_function_crap.insert(
+            path.clone(),
+            vec![
+                scoring::PerFunctionCrap {
+                    line: inner.line,
+                    col: inner.col,
+                    crap: 2.0,
+                    coverage_pct: None,
+                },
+                scoring::PerFunctionCrap {
+                    line: outer.line,
+                    col: outer.col,
+                    crap: 72.0,
+                    coverage_pct: None,
+                },
+            ],
+        );
+
+        merge_crap_findings(
+            &mut findings,
+            &modules,
+            &file_paths,
+            Path::new("/project"),
+            &globset::GlobSet::empty(),
+            None,
+            None,
+            &per_function_crap,
+            30.0,
+            20,
+            15,
+        );
+
+        assert_eq!(findings.len(), 1);
+        let f = &findings[0];
+        assert_eq!(f.name, "complex");
+        assert_eq!(f.col, 10);
+        assert_eq!(f.cyclomatic, 8);
+        assert_eq!(f.crap, Some(72.0));
     }
 
     fn fx_summary(

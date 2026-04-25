@@ -137,6 +137,12 @@ fn compute_crap_scores_binary(
 pub(super) struct PerFunctionCrap {
     /// 1-based line number of the function's definition.
     pub line: u32,
+    /// 0-based column of the function's definition. Required alongside `line`
+    /// to disambiguate curried arrows that share a start line, e.g.
+    /// `(x) => (y) => {...}`. Without `col`, two `PerFunctionCrap` entries
+    /// would collide in the (path, line) finding index and one function's
+    /// CRAP score could be attached to another function's identity.
+    pub col: u32,
     /// Computed CRAP score, rounded to one decimal place.
     pub crap: f64,
     /// Coverage percentage used to compute `crap`, when Istanbul matched the
@@ -206,6 +212,7 @@ fn compute_crap_scores_istanbul(
         }
         per_function.push(PerFunctionCrap {
             line: f.line,
+            col: f.col,
             crap: crap_rounded,
             coverage_pct,
         });
@@ -279,6 +286,7 @@ fn compute_crap_scores_estimated(
         // as "the function's real coverage" would be misleading.
         per_function.push(PerFunctionCrap {
             line: f.line,
+            col: f.col,
             crap: crap_rounded,
             coverage_pct: None,
         });
