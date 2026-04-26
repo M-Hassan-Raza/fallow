@@ -53,10 +53,6 @@ pub struct DupesOptions<'a> {
     pub changed_workspaces: Option<&'a str>,
     pub explain: bool,
     /// When true, emit a condensed summary instead of full item-level output.
-    #[allow(
-        dead_code,
-        reason = "wired from CLI but consumed by combined mode, not standalone dupes"
-    )]
     pub summary: bool,
     /// `dupes` accepts `--group-by` for parity with `check` / `health`. The
     /// standalone report remains ungrouped, but the shared resolver still

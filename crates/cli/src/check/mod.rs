@@ -147,10 +147,6 @@ pub struct CheckOptions<'a> {
     pub include_entry_exports: bool,
     /// When true, emit a condensed summary instead of full item-level output.
     /// Consumed by combined mode only; standalone check ignores this flag.
-    #[allow(
-        dead_code,
-        reason = "wired from CLI but consumed by combined mode, not standalone check"
-    )]
     pub summary: bool,
     pub regression_opts: RegressionOpts<'a>,
     /// When true, retain parsed modules and discovered files for sharing with health.
