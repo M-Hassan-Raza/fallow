@@ -2131,6 +2131,91 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    /// Guard against deferred-work wording leaking into clap-rendered help.
+    /// `stub`, `placeholder`, and `not yet` framings tell users the feature
+    /// is broken or pending; they belong in tracked issues, not in `--help`.
+    /// Walk every (sub)command and assert each rendered long-help is clean.
+    #[test]
+    fn cli_help_text_contains_no_implementation_status_wording() {
+        use clap::CommandFactory;
+        let mut root = Cli::command();
+        let mut violations: Vec<(String, String)> = Vec::new();
+        visit_help(&mut root, "fallow", &mut violations);
+        assert!(
+            violations.is_empty(),
+            "found implementation-status wording in --help output:\n{}",
+            violations
+                .iter()
+                .map(|(cmd, line)| format!("  {cmd}: {line}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    fn visit_help(
+        cmd: &mut clap::Command,
+        path: &str,
+        violations: &mut Vec<(String, String)>,
+    ) {
+        let help = cmd.render_long_help().to_string();
+        for line in scan_forbidden(&help) {
+            violations.push((path.to_owned(), line));
+        }
+        let names: Vec<String> = cmd
+            .get_subcommands()
+            .map(|sub| sub.get_name().to_owned())
+            .collect();
+        for name in names {
+            // Skip the synthetic `help` subcommand clap injects automatically.
+            if name == "help" {
+                continue;
+            }
+            if let Some(sub) = cmd.find_subcommand_mut(&name) {
+                let sub_path = format!("{path} {name}");
+                visit_help(sub, &sub_path, violations);
+            }
+        }
+    }
+
+    fn scan_forbidden(s: &str) -> Vec<String> {
+        let lower = s.to_ascii_lowercase();
+        let mut out = Vec::new();
+        for word in ["stub", "placeholder"] {
+            if let Some(idx) = find_whole_word(&lower, word) {
+                out.push(extract_line(s, idx));
+            }
+        }
+        if let Some(idx) = lower.find("not yet") {
+            out.push(extract_line(s, idx));
+        }
+        out
+    }
+
+    fn find_whole_word(haystack: &str, word: &str) -> Option<usize> {
+        let bytes = haystack.as_bytes();
+        let mut start = 0;
+        while let Some(rel) = haystack[start..].find(word) {
+            let abs = start + rel;
+            let before_ok = abs == 0 || !bytes[abs - 1].is_ascii_alphanumeric();
+            let after_idx = abs + word.len();
+            let after_ok =
+                after_idx >= bytes.len() || !bytes[after_idx].is_ascii_alphanumeric();
+            if before_ok && after_ok {
+                return Some(abs);
+            }
+            start = abs + word.len();
+        }
+        None
+    }
+
+    fn extract_line(s: &str, byte_idx: usize) -> String {
+        let line_start = s[..byte_idx].rfind('\n').map_or(0, |i| i + 1);
+        let line_end = s[byte_idx..]
+            .find('\n')
+            .map_or(s.len(), |i| byte_idx + i);
+        s[line_start..line_end].trim().to_owned()
+    }
+
     // ── emit_error ──────────────────────────────────────────────────
 
     #[test]
