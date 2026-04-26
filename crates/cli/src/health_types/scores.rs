@@ -121,7 +121,7 @@ pub const fn letter_grade(score: f64) -> &'static str {
 }
 
 /// A single function that exceeds a complexity threshold.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct HealthFinding {
     /// Absolute file path.
     pub path: std::path::PathBuf,
@@ -155,7 +155,7 @@ pub struct HealthFinding {
 }
 
 /// Which complexity threshold was exceeded.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ExceededThreshold {
     /// Only cyclomatic exceeded.
@@ -198,7 +198,7 @@ impl ExceededThreshold {
 
     /// True when the cyclomatic threshold contributed to the finding.
     #[must_use]
-    pub const fn includes_cyclomatic(&self) -> bool {
+    pub const fn includes_cyclomatic(self) -> bool {
         matches!(
             self,
             Self::Cyclomatic | Self::Both | Self::CyclomaticCrap | Self::All
@@ -207,7 +207,7 @@ impl ExceededThreshold {
 
     /// True when the cognitive threshold contributed to the finding.
     #[must_use]
-    pub const fn includes_cognitive(&self) -> bool {
+    pub const fn includes_cognitive(self) -> bool {
         matches!(
             self,
             Self::Cognitive | Self::Both | Self::CognitiveCrap | Self::All
@@ -225,7 +225,7 @@ impl ExceededThreshold {
         dead_code,
         reason = "symmetry with includes_cyclomatic/cognitive; consumed by tests and intended for report format extensions"
     )]
-    pub const fn includes_crap(&self) -> bool {
+    pub const fn includes_crap(self) -> bool {
         matches!(
             self,
             Self::Crap | Self::CyclomaticCrap | Self::CognitiveCrap | Self::All
@@ -300,7 +300,7 @@ pub fn compute_finding_severity(
 }
 
 /// A function exceeding the very-high-risk size threshold (>60 LOC).
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct LargeFunctionEntry {
     /// Absolute file path.
     pub path: std::path::PathBuf,

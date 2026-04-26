@@ -1052,6 +1052,80 @@ pub(super) fn print_health_json(
     }
 }
 
+/// Build a grouped health JSON envelope when `--group-by` is active.
+///
+/// The envelope keeps the active run's `summary`, `vital_signs`, and
+/// `health_score` at the top level (so consumers that ignore grouping still
+/// see meaningful aggregates) and adds:
+///
+/// - `grouped_by`: the resolver mode (`"package"`, `"owner"`, etc.).
+/// - `groups`: one entry per resolver bucket. Each entry carries its own
+///   `vital_signs`, `health_score`, `findings`, `file_scores`, `hotspots`,
+///   `large_functions`, `targets`, plus `key`, `owners` (section mode), and
+///   the per-group `files_analyzed` / `functions_above_threshold` counts.
+///
+/// Paths inside groups are relativised the same way as the project-level
+/// payload.
+///
+/// # Errors
+///
+/// Returns an error if either the project report or any group cannot be
+/// serialised to JSON.
+pub fn build_grouped_health_json(
+    report: &crate::health_types::HealthReport,
+    grouping: &crate::health_types::HealthGrouping,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let root_prefix = format!("{}/", root.display());
+    let report_value = serde_json::to_value(report)?;
+    let mut output = build_json_envelope(report_value, elapsed);
+    strip_root_prefix(&mut output, &root_prefix);
+    inject_health_actions(&mut output);
+
+    if let serde_json::Value::Object(ref mut map) = output {
+        map.insert("grouped_by".to_string(), serde_json::json!(grouping.mode));
+    }
+
+    let group_values: Vec<serde_json::Value> = grouping
+        .groups
+        .iter()
+        .map(|g| {
+            let mut value = serde_json::to_value(g)?;
+            strip_root_prefix(&mut value, &root_prefix);
+            inject_health_actions(&mut value);
+            Ok(value)
+        })
+        .collect::<Result<_, serde_json::Error>>()?;
+
+    if let serde_json::Value::Object(ref mut map) = output {
+        map.insert("groups".to_string(), serde_json::Value::Array(group_values));
+    }
+
+    if explain {
+        insert_meta(&mut output, explain::health_meta());
+    }
+
+    Ok(output)
+}
+
+pub(super) fn print_grouped_health_json(
+    report: &crate::health_types::HealthReport,
+    grouping: &crate::health_types::HealthGrouping,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> ExitCode {
+    match build_grouped_health_json(report, grouping, root, elapsed, explain) {
+        Ok(output) => emit_json(&output, "JSON"),
+        Err(e) => {
+            eprintln!("Error: failed to serialize grouped health report: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 /// Build the JSON envelope + duplication payload shared by `print_duplication_json`
 /// and the programmatic API surface.
 ///

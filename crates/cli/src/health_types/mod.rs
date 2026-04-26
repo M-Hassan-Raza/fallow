@@ -5,6 +5,7 @@
 //! reference these types without pulling in binary-only dependencies.
 
 mod coverage;
+mod grouped;
 mod production_coverage;
 mod scores;
 mod targets;
@@ -12,6 +13,7 @@ mod trends;
 mod vital_signs;
 
 pub use coverage::*;
+pub use grouped::*;
 pub use production_coverage::*;
 pub use scores::*;
 pub use targets::*;

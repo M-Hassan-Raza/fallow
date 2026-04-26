@@ -971,6 +971,51 @@ pub(super) fn print_health_sarif(
     emit_json(&sarif, "SARIF")
 }
 
+/// Print health SARIF with a per-result `properties.group` tag.
+///
+/// Mirrors the dead-code grouped SARIF pattern (`print_grouped_sarif`):
+/// build the standard SARIF first, then post-process each result to inject
+/// the resolver-derived group key on `properties.group`. Consumers that read
+/// SARIF (GitHub Code Scanning, GitLab Code Quality) can then partition
+/// findings per team / package / directory without dropping out of the
+/// SARIF pipeline. Each finding's URI is decoded (`%5B` -> `[`, `%5D` -> `]`)
+/// before resolution, matching the dead-code behaviour for paths containing
+/// brackets like Next.js dynamic routes.
+pub(super) fn print_grouped_health_sarif(
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) -> ExitCode {
+    let mut sarif = build_health_sarif(report, root);
+
+    if let Some(runs) = sarif.get_mut("runs").and_then(|r| r.as_array_mut()) {
+        for run in runs {
+            if let Some(results) = run.get_mut("results").and_then(|r| r.as_array_mut()) {
+                for result in results {
+                    let uri = result
+                        .pointer("/locations/0/physicalLocation/artifactLocation/uri")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    let decoded = uri.replace("%5B", "[").replace("%5D", "]");
+                    let group =
+                        grouping::resolve_owner(Path::new(&decoded), Path::new(""), resolver);
+                    let props = result
+                        .as_object_mut()
+                        .expect("SARIF result should be an object")
+                        .entry("properties")
+                        .or_insert_with(|| serde_json::json!({}));
+                    props
+                        .as_object_mut()
+                        .expect("properties should be an object")
+                        .insert("group".to_string(), serde_json::Value::String(group));
+                }
+            }
+        }
+    }
+
+    emit_json(&sarif, "SARIF")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

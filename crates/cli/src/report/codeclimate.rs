@@ -785,6 +785,38 @@ pub(super) fn print_health_codeclimate(report: &HealthReport, root: &Path) -> Ex
     emit_json(&value, "CodeClimate")
 }
 
+/// Print health CodeClimate output with a per-issue `group` field.
+///
+/// Mirrors the dead-code grouped CodeClimate pattern
+/// (`print_grouped_codeclimate`): build the standard payload first, then
+/// post-process each issue to attach a `group` key derived from the
+/// `OwnershipResolver`. Lets GitLab Code Quality and other CodeClimate
+/// consumers partition findings per team / package without re-parsing the
+/// project structure.
+pub(super) fn print_grouped_health_codeclimate(
+    report: &HealthReport,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) -> ExitCode {
+    let mut value = build_health_codeclimate(report, root);
+
+    if let Some(issues) = value.as_array_mut() {
+        for issue in issues {
+            let path = issue
+                .pointer("/location/path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            let group = grouping::resolve_owner(Path::new(path), Path::new(""), resolver);
+            issue
+                .as_object_mut()
+                .expect("CodeClimate issue should be an object")
+                .insert("group".to_string(), serde_json::Value::String(group));
+        }
+    }
+
+    emit_json(&value, "CodeClimate")
+}
+
 /// Build CodeClimate JSON array from duplication analysis results.
 #[must_use]
 #[expect(

@@ -346,7 +346,75 @@
           "$ref": "#/definitions/ProductionCoverageReport",
           "description": "Merged production coverage findings from V8 or Istanbul input. Only present when --production-coverage is used."
         },
+        "grouped_by": {
+          "type": "string",
+          "enum": ["owner", "directory", "package", "section"],
+          "description": "Resolver mode used when --group-by is active. Present only on grouped output. The top-level `vital_signs`, `health_score`, and `summary` keep the active run scope (for example after --workspace); per-group versions live inside each entry of `groups`."
+        },
+        "groups": {
+          "type": "array",
+          "description": "Per-group health output, present only when --group-by is active. Each group recomputes its own vital_signs and health_score from the files in that group, mirroring how --workspace scopes a single subset.",
+          "items": { "$ref": "#/definitions/HealthGroup" }
+        },
         "_meta": { "$ref": "#/definitions/Meta" }
+      }
+    },
+
+    "HealthGroup": {
+      "description": "A health report scoped to a single resolver bucket (workspace package, CODEOWNERS owner, directory, or GitLab CODEOWNERS section). Carries per-group vital_signs / health_score plus the per-file output (findings, file scores, hotspots, large functions, refactoring targets) restricted to the same subset.",
+      "type": "object",
+      "required": ["key", "files_analyzed", "functions_above_threshold"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Group identifier produced by the resolver. For 'package' grouping: workspace package name (e.g. '@scope/app-a') or '(root)' for files outside any workspace. For 'owner' grouping: the CODEOWNERS team. For 'directory' grouping: the top-level directory prefix. For 'section' grouping: the GitLab CODEOWNERS section name, or '(no section)' / '(unowned)' for unmatched files."
+        },
+        "owners": {
+          "type": "array",
+          "description": "Section default owners (GitLab CODEOWNERS `[Section] @owner1 @owner2`). Present only when grouped_by is 'section'.",
+          "items": { "type": "string" }
+        },
+        "files_analyzed": {
+          "type": "integer",
+          "description": "Number of files in this group after workspace, ignore, and changed-since filters."
+        },
+        "functions_above_threshold": {
+          "type": "integer",
+          "description": "Number of findings rendered for this group (post-baseline / post-`--top` truncation, mirroring HealthSummary semantics)."
+        },
+        "vital_signs": {
+          "$ref": "#/definitions/VitalSigns",
+          "description": "Per-group vital signs recomputed from the files in this group. Absent when --score-only suppressed top-level vital signs."
+        },
+        "health_score": {
+          "$ref": "#/definitions/HealthScore",
+          "description": "Per-group health score recomputed from the per-group vital signs. Absent when --score was not requested."
+        },
+        "findings": {
+          "type": "array",
+          "description": "Findings restricted to files in this group. Omitted when empty.",
+          "items": { "$ref": "#/definitions/HealthFinding" }
+        },
+        "file_scores": {
+          "type": "array",
+          "description": "File scores restricted to files in this group. Omitted when empty.",
+          "items": { "$ref": "#/definitions/FileHealthScore" }
+        },
+        "hotspots": {
+          "type": "array",
+          "description": "Hotspots restricted to files in this group. Omitted when empty.",
+          "items": { "$ref": "#/definitions/HotspotEntry" }
+        },
+        "large_functions": {
+          "type": "array",
+          "description": "Large functions in files belonging to this group. Omitted when empty.",
+          "items": { "$ref": "#/definitions/LargeFunctionEntry" }
+        },
+        "targets": {
+          "type": "array",
+          "description": "Refactoring targets in files belonging to this group. Omitted when empty.",
+          "items": { "$ref": "#/definitions/RefactoringTarget" }
+        }
       }
     },
 

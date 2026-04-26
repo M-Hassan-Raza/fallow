@@ -884,6 +884,485 @@ export const shared = sharedGap();
 }
 
 #[test]
+fn health_workspace_scopes_vital_signs_and_health_score() {
+    // Regression: --workspace scoped findings/file_scores correctly but left
+    // vital_signs and health_score at monorepo-wide values, masking a
+    // significant divergence between project- and workspace-level health.
+    // Issue #184.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    write_file(
+        &root.join("package.json"),
+        r#"{
+  "name": "ws-health-scope",
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    );
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"duplicates":{"min_tokens":10,"min_lines":3}}"#,
+    );
+    // app: small, simple package
+    write_file(
+        &root.join("packages/app/package.json"),
+        r#"{ "name": "app", "main": "src/index.ts" }"#,
+    );
+    write_file(
+        &root.join("packages/app/src/index.ts"),
+        r"export const greet = (name: string): string => `hello ${name}`;
+",
+    );
+    // lib: a larger package (more files contribute to LOC / file count)
+    write_file(
+        &root.join("packages/lib/package.json"),
+        r#"{ "name": "lib", "main": "src/index.ts" }"#,
+    );
+    for i in 0..5 {
+        write_file(
+            &root.join(format!("packages/lib/src/util_{i}.ts")),
+            &format!("export const fn_{i} = (a: number, b: number): number => a + b + {i};\n"),
+        );
+    }
+    write_file(
+        &root.join("packages/lib/src/index.ts"),
+        r#"export * from "./util_0";
+export * from "./util_1";
+export * from "./util_2";
+export * from "./util_3";
+export * from "./util_4";
+"#,
+    );
+    let duplicated_lib_function = r"export function duplicated(input: number): number {
+  const first = input + 1;
+  const second = first * 2;
+  const third = second - 3;
+  const fourth = third / 4;
+  const fifth = fourth + 5;
+  return fifth;
+}
+";
+    write_file(
+        &root.join("packages/lib/src/dup_a.ts"),
+        duplicated_lib_function,
+    );
+    write_file(
+        &root.join("packages/lib/src/dup_b.ts"),
+        duplicated_lib_function,
+    );
+
+    // `--score` forces hotspot analysis, which requires a git repo.
+    git(root, &["init"]);
+    git(root, &["config", "user.name", "Test User"]);
+    git(root, &["config", "user.email", "test@example.com"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "initial"]);
+
+    let monorepo = common::run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--score",
+            "--complexity",
+            "--file-scores",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(monorepo.code, 0, "monorepo health run should succeed");
+    let monorepo_json = parse_json(&monorepo);
+
+    let snapshot_path = root.join(".fallow/app-snapshot.json");
+    let snapshot_arg = snapshot_path.to_string_lossy().to_string();
+    let scoped = common::run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--score",
+            "--complexity",
+            "--file-scores",
+            "--workspace",
+            "app",
+            "--save-snapshot",
+            &snapshot_arg,
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(scoped.code, 0, "workspace-scoped health run should succeed");
+    let scoped_json = parse_json(&scoped);
+
+    let monorepo_files = monorepo_json["summary"]["files_analyzed"]
+        .as_u64()
+        .expect("monorepo summary.files_analyzed");
+    let scoped_files = scoped_json["summary"]["files_analyzed"]
+        .as_u64()
+        .expect("scoped summary.files_analyzed");
+    assert!(
+        scoped_files < monorepo_files,
+        "summary.files_analyzed must scope to workspace (monorepo: {monorepo_files}, scoped: {scoped_files})"
+    );
+
+    let monorepo_loc = monorepo_json["vital_signs"]["total_loc"]
+        .as_u64()
+        .expect("monorepo vital_signs.total_loc");
+    let scoped_loc = scoped_json["vital_signs"]["total_loc"]
+        .as_u64()
+        .expect("scoped vital_signs.total_loc");
+    assert!(
+        scoped_loc < monorepo_loc,
+        "vital_signs.total_loc must scope to workspace (monorepo: {monorepo_loc}, scoped: {scoped_loc})"
+    );
+
+    let monorepo_duplication = monorepo_json["vital_signs"]["duplication_pct"]
+        .as_f64()
+        .expect("monorepo vital_signs.duplication_pct");
+    let scoped_duplication = scoped_json["vital_signs"]["duplication_pct"]
+        .as_f64()
+        .expect("scoped vital_signs.duplication_pct");
+    assert!(
+        monorepo_duplication > scoped_duplication,
+        "workspace score must not inherit duplication from another workspace (monorepo: {monorepo_duplication}, scoped: {scoped_duplication})"
+    );
+    assert!(
+        scoped_duplication.abs() < f64::EPSILON,
+        "app workspace has no duplicates, so scoped duplication should be zero"
+    );
+    assert_eq!(
+        scoped_json["health_score"]["penalties"]["duplication"].as_f64(),
+        Some(0.0),
+        "app health score should not carry lib's duplication penalty"
+    );
+
+    let snapshot: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(&snapshot_path).expect("read saved app snapshot"),
+    )
+    .expect("parse saved app snapshot");
+    assert_eq!(
+        snapshot["counts"]["total_lines"], scoped_json["vital_signs"]["counts"]["total_lines"],
+        "snapshot count totals must use the same workspace scope as JSON vital signs"
+    );
+}
+
+#[test]
+fn health_group_by_package_emits_per_workspace_envelope() {
+    // Regression: --group-by package was accepted by `fallow health` but the
+    // resolver was silently discarded; consumers got monorepo-wide output
+    // with no `grouped_by` or `groups` keys. Issue #184.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    write_file(
+        &root.join("package.json"),
+        r#"{
+  "name": "ws-grouped",
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    );
+    write_file(
+        &root.join(".fallowrc.json"),
+        r#"{"duplicates":{"min_tokens":10,"min_lines":3}}"#,
+    );
+    write_file(
+        &root.join("packages/alpha/package.json"),
+        r#"{ "name": "alpha", "main": "src/index.ts" }"#,
+    );
+    write_file(
+        &root.join("packages/alpha/src/index.ts"),
+        "export const a = (n: number): number => n * 2;\n",
+    );
+    write_file(
+        &root.join("packages/beta/package.json"),
+        r#"{ "name": "beta", "main": "src/index.ts" }"#,
+    );
+    write_file(
+        &root.join("packages/beta/src/index.ts"),
+        "export const b = (n: number): number => n + 1;\n",
+    );
+    let duplicated_beta_function = r"export function duplicated(input: number): number {
+  const first = input + 1;
+  const second = first * 2;
+  const third = second - 3;
+  const fourth = third / 4;
+  const fifth = fourth + 5;
+  return fifth;
+}
+";
+    write_file(
+        &root.join("packages/beta/src/dup_a.ts"),
+        duplicated_beta_function,
+    );
+    write_file(
+        &root.join("packages/beta/src/dup_b.ts"),
+        duplicated_beta_function,
+    );
+
+    git(root, &["init"]);
+    git(root, &["config", "user.name", "Test User"]);
+    git(root, &["config", "user.email", "test@example.com"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-m", "initial"]);
+
+    let output = common::run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--score",
+            "--complexity",
+            "--file-scores",
+            "--group-by",
+            "package",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "grouped health run should succeed");
+    let json = parse_json(&output);
+
+    assert_eq!(
+        json["grouped_by"].as_str(),
+        Some("package"),
+        "grouped_by should be 'package'"
+    );
+    let groups = json["groups"]
+        .as_array()
+        .expect("groups should be an array");
+    let keys: Vec<&str> = groups.iter().filter_map(|g| g["key"].as_str()).collect();
+    assert!(
+        keys.contains(&"alpha"),
+        "groups must include alpha workspace: {keys:?}"
+    );
+    assert!(
+        keys.contains(&"beta"),
+        "groups must include beta workspace: {keys:?}"
+    );
+
+    for group in groups {
+        let key = group["key"].as_str().unwrap_or("?");
+        assert!(
+            group.get("vital_signs").is_some(),
+            "group {key} must carry per-group vital_signs"
+        );
+        assert!(
+            group.get("health_score").is_some(),
+            "group {key} must carry per-group health_score"
+        );
+        assert!(
+            group["files_analyzed"].as_u64().is_some(),
+            "group {key} must report files_analyzed"
+        );
+    }
+    let alpha = groups
+        .iter()
+        .find(|g| g["key"] == "alpha")
+        .expect("alpha group");
+    let beta = groups
+        .iter()
+        .find(|g| g["key"] == "beta")
+        .expect("beta group");
+    assert_eq!(
+        alpha["vital_signs"]["duplication_pct"].as_f64(),
+        Some(0.0),
+        "alpha must not inherit beta's duplicate-code score input"
+    );
+    assert!(
+        beta["vital_signs"]["duplication_pct"]
+            .as_f64()
+            .unwrap_or(0.0)
+            > 0.0,
+        "beta should carry its own duplicate-code score input"
+    );
+    assert_eq!(
+        alpha["health_score"]["penalties"]["duplication"].as_f64(),
+        Some(0.0),
+        "alpha health score should not be penalized for beta duplication"
+    );
+    assert!(
+        beta["health_score"]["penalties"]["duplication"]
+            .as_f64()
+            .unwrap_or(0.0)
+            > 0.0,
+        "beta health score should include its duplicate-code penalty"
+    );
+
+    // Top-level vital_signs / health_score remain monorepo-wide so consumers
+    // that ignore grouping still see the project headline.
+    assert!(
+        json["vital_signs"].is_object(),
+        "top-level vital_signs must remain populated alongside groups"
+    );
+    assert!(
+        json["health_score"].is_object(),
+        "top-level health_score must remain populated alongside groups"
+    );
+}
+
+#[test]
+fn health_group_by_package_tags_sarif_results_with_group() {
+    // Regression: ship per-finding `properties.group` on SARIF (and the
+    // top-level `group` field on CodeClimate) so CI surfaces like GitHub
+    // Code Scanning and GitLab Code Quality can partition findings per
+    // workspace package without dropping out of the SARIF/CodeClimate
+    // pipeline. Companion to the JSON envelope work in #184.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    write_file(
+        &root.join("package.json"),
+        r#"{
+  "name": "ws-grouped-sarif",
+  "private": true,
+  "workspaces": ["packages/*"]
+}"#,
+    );
+    write_file(
+        &root.join("packages/alpha/package.json"),
+        r#"{ "name": "alpha", "main": "src/index.ts" }"#,
+    );
+    // Functions branchy enough to exceed the very-low cyclomatic threshold below.
+    write_file(
+        &root.join("packages/alpha/src/index.ts"),
+        r"export const branchy = (n: number): number => {
+  if (n > 0) return 1;
+  if (n < 0) return -1;
+  if (n === 42) return 42;
+  return 0;
+};
+",
+    );
+    write_file(
+        &root.join("packages/beta/package.json"),
+        r#"{ "name": "beta", "main": "src/index.ts" }"#,
+    );
+    write_file(
+        &root.join("packages/beta/src/index.ts"),
+        r"export const branchy = (n: number): number => {
+  if (n > 0) return 1;
+  if (n < 0) return -1;
+  if (n === 42) return 42;
+  return 0;
+};
+",
+    );
+
+    let sarif = common::run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "1",
+            "--group-by",
+            "package",
+            "--format",
+            "sarif",
+            "--quiet",
+        ],
+    );
+    let sarif_json = parse_json(&sarif);
+    let runs = sarif_json["runs"]
+        .as_array()
+        .expect("SARIF runs should be an array");
+    let mut sarif_groups: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    let mut sarif_results = 0usize;
+    for run in runs {
+        if let Some(results) = run["results"].as_array() {
+            for r in results {
+                sarif_results += 1;
+                if let Some(g) = r["properties"]["group"].as_str() {
+                    sarif_groups.insert(g.to_owned());
+                }
+            }
+        }
+    }
+    assert!(
+        sarif_results > 0,
+        "SARIF should contain at least one result"
+    );
+    assert!(
+        sarif_groups.contains("alpha") && sarif_groups.contains("beta"),
+        "SARIF results should tag alpha and beta groups: {sarif_groups:?}"
+    );
+
+    let cc = common::run_fallow_in_root(
+        "health",
+        root,
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "1",
+            "--group-by",
+            "package",
+            "--format",
+            "codeclimate",
+            "--quiet",
+        ],
+    );
+    let cc_json = parse_json(&cc);
+    let issues = cc_json
+        .as_array()
+        .expect("CodeClimate output should be an array");
+    let mut cc_groups: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+    for issue in issues {
+        if let Some(g) = issue["group"].as_str() {
+            cc_groups.insert(g.to_owned());
+        }
+    }
+    assert!(
+        !issues.is_empty(),
+        "CodeClimate should emit at least one issue"
+    );
+    assert!(
+        cc_groups.contains("alpha") && cc_groups.contains("beta"),
+        "CodeClimate issues should tag alpha and beta groups: {cc_groups:?}"
+    );
+}
+
+#[test]
+fn health_group_by_non_monorepo_emits_single_json_error() {
+    // Regression: panel review caught that `--group-by package --format json`
+    // on a non-monorepo emitted TWO top-level JSON objects (the hotspot-needs-git
+    // error + the group-by-needs-monorepo error), producing invalid JSON for any
+    // pipeline doing `jq .`. Resolver validation now runs upfront so misconfig
+    // fails before the rest of the pipeline.
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+
+    write_file(
+        &root.join("package.json"),
+        r#"{ "name": "single", "main": "src/index.ts" }"#,
+    );
+    write_file(&root.join("src/index.ts"), "export const x = 1;\n");
+
+    let output = common::run_fallow_in_root(
+        "health",
+        root,
+        &["--group-by", "package", "--format", "json", "--quiet"],
+    );
+    assert_ne!(
+        output.code, 0,
+        "non-monorepo --group-by package should fail"
+    );
+
+    // Critical: stdout must be exactly ONE JSON object, parseable by `jq .`.
+    let parsed: serde_json::Value =
+        serde_json::from_str(&output.stdout).expect("stdout should be a single valid JSON object");
+    assert_eq!(parsed["error"], serde_json::json!(true));
+    let msg = parsed["message"]
+        .as_str()
+        .expect("error message should be a string");
+    assert!(
+        msg.contains("monorepo"),
+        "error message should mention 'monorepo': {msg}"
+    );
+}
+
+#[test]
 fn health_coverage_gaps_changed_since_scopes_results() {
     let dir = tempfile::tempdir().expect("create temp dir");
     let root = dir.path();

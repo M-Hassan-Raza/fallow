@@ -11,7 +11,7 @@ Key modules:
 - `audit.rs` — Audit command: combined dead-code + complexity + duplication for changed files, verdict (pass/warn/fail)
 - `check.rs` — Analysis pipeline, tracing, filtering, output
 - `dupes.rs` — Duplication detection, baseline, cross-reference
-- `health/` — Complexity analysis: `mod.rs` (orchestration), `scoring.rs`, `hotspots.rs`, `targets.rs`, `ownership.rs` (bus factor, drift, declared owner cross-ref for `--ownership`)
+- `health/` — Complexity analysis: `mod.rs` (orchestration + `SubsetFilter` for workspace/group scoping), `scoring.rs` (file scoring + `AnalysisCountsSnapshot` for per-subset analysis-count recomputation), `hotspots.rs`, `targets.rs`, `ownership.rs` (bus factor, drift, declared owner cross-ref for `--ownership`), `grouping.rs` (per-group `vital_signs` / `health_score` recomputation for `--group-by package|owner|directory|section`, reuses `SubsetFilter::Paths`)
 - `watch.rs` — File watcher with debounced re-analysis
 - `fix/` — Auto-fix: `exports.rs`, `enum_members.rs`, `deps.rs`, `io.rs` (atomic writes)
 - `codeowners.rs` — CODEOWNERS file parser, ownership lookup for `--group-by owner`

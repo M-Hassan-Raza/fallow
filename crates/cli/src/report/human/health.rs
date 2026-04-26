@@ -1,3 +1,4 @@
+use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
@@ -1601,6 +1602,127 @@ pub(in crate::report) fn print_health_summary(
             .green()
             .bold()
         );
+    }
+}
+
+/// Render a per-group summary block beneath the project-level human report.
+///
+/// Layout: a header row (`key  score  grade  files  hot  p90`) followed by
+/// one row per group. The `score`/`grade` columns are omitted entirely when
+/// no group carries a health score (no `--score` requested). The `p90`
+/// column is omitted entirely when no group carries vital signs
+/// (`--score-only` was active).
+///
+/// When scores are present, groups are sorted ascending by score (worst
+/// first) so the rows match the user's "where do I refactor first?"
+/// question. Otherwise the resolver's own ordering (descending by file
+/// count, unowned last) is preserved.
+///
+/// Grade is colored to match the project-level grade: A/B green, C yellow,
+/// D/F red.
+///
+/// Goes to stdout (the rows are content, not progress) so the block survives
+/// `fallow health --group-by package > out.txt`. The leading blank line,
+/// the `(root)` legend, and the JSON-parity hint go to stderr because they
+/// are display affordances, not data.
+pub(in crate::report) fn print_health_grouping(
+    grouping: &crate::health_types::HealthGrouping,
+    _root: &Path,
+    quiet: bool,
+) {
+    if grouping.groups.is_empty() {
+        return;
+    }
+    if !quiet {
+        eprintln!();
+    }
+    println!(
+        "{} {}",
+        "\u{25cf}".cyan(),
+        format!("Per-{} health", grouping.mode).cyan().bold()
+    );
+    let key_width = grouping
+        .groups
+        .iter()
+        .map(|g| g.key.len())
+        .max()
+        .unwrap_or(0)
+        .max(8);
+    let any_score = grouping.groups.iter().any(|g| g.health_score.is_some());
+    let any_vitals = grouping.groups.iter().any(|g| g.vital_signs.is_some());
+
+    // Sort by score ascending (worst first) when scores are present so the
+    // visual order matches "where do I refactor first?". Resolver order
+    // (descending by file count, unowned last) is preserved otherwise.
+    let mut ordered: Vec<&crate::health_types::HealthGroup> = grouping.groups.iter().collect();
+    if any_score {
+        ordered.sort_by(|a, b| {
+            let a_score = a.health_score.as_ref().map_or(f64::INFINITY, |hs| hs.score);
+            let b_score = b.health_score.as_ref().map_or(f64::INFINITY, |hs| hs.score);
+            a_score
+                .partial_cmp(&b_score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    // Header row: dimmed, aligned to the data rows below.
+    let mut header = format!("  {:<width$}", "", width = key_width);
+    if any_score {
+        let _ = write!(header, "  {:>9}  grade", "score");
+    }
+    let _ = write!(header, "  {:>5}", "files");
+    let _ = write!(header, "  {:>3}", "hot");
+    if any_vitals {
+        let _ = write!(header, "  {:>3}", "p90");
+    }
+    println!("{}", header.dimmed());
+
+    let mut has_root_bucket = false;
+    for group in ordered {
+        if group.key == "(root)" {
+            has_root_bucket = true;
+        }
+        let mut row = format!("  {:<width$}", group.key, width = key_width);
+        if any_score {
+            if let Some(ref hs) = group.health_score {
+                let grade_colored = colorize_grade(hs.grade);
+                let _ = write!(row, "  {:>9.1}  {}", hs.score, grade_colored);
+            } else {
+                row.push_str("                  ");
+            }
+        }
+        let _ = write!(row, "  {:>5}", group.files_analyzed);
+        let _ = write!(row, "  {:>3}", group.hotspots.len());
+        if any_vitals {
+            if let Some(ref vs) = group.vital_signs {
+                let _ = write!(row, "  {:>3}", vs.p90_cyclomatic);
+            } else {
+                row.push_str("     ");
+            }
+        }
+        println!("{row}");
+    }
+    if !quiet {
+        if has_root_bucket {
+            eprintln!(
+                "  {}",
+                "(root) = files outside any workspace package".dimmed()
+            );
+        }
+        eprintln!(
+            "  {}",
+            "per-group summary only; --format json includes per-group findings, file scores, and hotspots"
+                .dimmed()
+        );
+    }
+}
+
+/// Color a grade letter to match the project-level grade rendering.
+fn colorize_grade(grade: &str) -> String {
+    match grade {
+        "A" | "B" => grade.green().to_string(),
+        "C" => grade.yellow().to_string(),
+        _ => grade.red().to_string(),
     }
 }
 

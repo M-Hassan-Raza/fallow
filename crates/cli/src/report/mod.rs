@@ -289,9 +289,26 @@ pub fn print_duplication_report(
 // ── Health / complexity report ─────────────────────────────────────
 
 /// Print health (complexity) analysis results in the configured format.
+///
+/// `grouping` and `group_resolver` carry per-group output produced by
+/// `--group-by`:
+/// - **JSON** renders the grouped envelope (`{ grouped_by, vital_signs,
+///   health_score, groups: [...] }`).
+/// - **Human** prints a per-group summary block (score / files / hot / p90)
+///   after the project-level report.
+/// - **SARIF** and **CodeClimate** tag every per-finding result with the
+///   resolver-derived group key (`properties.group` for SARIF, top-level
+///   `group` for CodeClimate) so CI consumers like GitHub Code Scanning
+///   and GitLab Code Quality can partition findings per team / package
+///   without re-parsing the project structure.
+/// - **Compact**, **Markdown**, and **Badge** fall back to ungrouped output
+///   and emit a one-line stderr note pointing at `--format json` for the
+///   richer grouped envelope.
 #[must_use]
 pub fn print_health_report(
     report: &crate::health_types::HealthReport,
+    grouping: Option<&crate::health_types::HealthGrouping>,
+    group_resolver: Option<&grouping::OwnershipResolver>,
     ctx: &ReportContext<'_>,
     output: OutputFormat,
 ) -> ExitCode {
@@ -301,21 +318,56 @@ pub fn print_health_report(
                 human::health::print_health_summary(report, ctx.elapsed, ctx.quiet);
             } else {
                 human::print_health_human(report, ctx.root, ctx.elapsed, ctx.quiet);
+                if let Some(grouping) = grouping {
+                    human::print_health_grouping(grouping, ctx.root, ctx.quiet);
+                }
             }
             ExitCode::SUCCESS
         }
         OutputFormat::Compact => {
             compact::print_health_compact(report, ctx.root);
+            warn_grouping_unsupported(grouping, "compact");
             ExitCode::SUCCESS
         }
         OutputFormat::Markdown => {
             markdown::print_health_markdown(report, ctx.root);
+            warn_grouping_unsupported(grouping, "markdown");
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => sarif::print_health_sarif(report, ctx.root),
-        OutputFormat::Json => json::print_health_json(report, ctx.root, ctx.elapsed, ctx.explain),
-        OutputFormat::CodeClimate => codeclimate::print_health_codeclimate(report, ctx.root),
-        OutputFormat::Badge => badge::print_health_badge(report),
+        OutputFormat::Sarif => match group_resolver {
+            Some(resolver) => sarif::print_grouped_health_sarif(report, ctx.root, resolver),
+            None => sarif::print_health_sarif(report, ctx.root),
+        },
+        OutputFormat::Json => match grouping {
+            Some(grouping) => json::print_grouped_health_json(
+                report,
+                grouping,
+                ctx.root,
+                ctx.elapsed,
+                ctx.explain,
+            ),
+            None => json::print_health_json(report, ctx.root, ctx.elapsed, ctx.explain),
+        },
+        OutputFormat::CodeClimate => match group_resolver {
+            Some(resolver) => {
+                codeclimate::print_grouped_health_codeclimate(report, ctx.root, resolver)
+            }
+            None => codeclimate::print_health_codeclimate(report, ctx.root),
+        },
+        OutputFormat::Badge => {
+            warn_grouping_unsupported(grouping, "badge");
+            badge::print_health_badge(report)
+        }
+    }
+}
+
+fn warn_grouping_unsupported(grouping: Option<&crate::health_types::HealthGrouping>, format: &str) {
+    if let Some(g) = grouping {
+        eprintln!(
+            "note: --group-by {} output for {format} is not yet supported, falling back to \
+             ungrouped output (use --format json for the full grouped envelope)",
+            g.mode
+        );
     }
 }
 

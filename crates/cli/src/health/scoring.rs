@@ -24,8 +24,12 @@ pub(super) struct FileScoreOutput {
     pub unused_export_names: rustc_hash::FxHashMap<std::path::PathBuf, Vec<String>>,
     /// Cycle members per file: maps each file to the other files in its cycle.
     pub cycle_members: rustc_hash::FxHashMap<std::path::PathBuf, Vec<std::path::PathBuf>>,
-    /// Aggregate counts from AnalysisResults for vital signs.
+    /// Aggregate counts from AnalysisResults for vital signs (project-wide).
     pub analysis_counts: crate::vital_signs::AnalysisCounts,
+    /// Per-path snapshot of analysis findings, used to recompute
+    /// [`crate::vital_signs::AnalysisCounts`] for an arbitrary subset of files
+    /// (workspace scoping, `--group-by` partitioning).
+    pub analysis_snapshot: AnalysisCountsSnapshot,
     /// Istanbul match stats: functions matched / total (only meaningful with Istanbul model).
     pub istanbul_matched: usize,
     pub istanbul_total: usize,
@@ -33,6 +37,109 @@ pub(super) struct FileScoreOutput {
     /// Absolute paths match `FileHealthScore.path`. Absent entries indicate the
     /// file had zero functions.
     pub per_function_crap: rustc_hash::FxHashMap<std::path::PathBuf, Vec<PerFunctionCrap>>,
+}
+
+/// Per-path snapshot of analysis-pipeline findings, retained alongside the
+/// pre-aggregated `analysis_counts` so that workspace- or group-scoped runs
+/// can recompute counts without re-running the full pipeline.
+///
+/// All paths are absolute (matching `AnalysisResults` and `FileHealthScore`).
+#[derive(Clone, Default)]
+pub(super) struct AnalysisCountsSnapshot {
+    /// One entry per unused file.
+    pub unused_file_paths: Vec<std::path::PathBuf>,
+    /// One entry per unused value or type export, keyed by the file containing
+    /// the export.
+    pub unused_export_paths: Vec<std::path::PathBuf>,
+    /// One entry per unused dependency across `dependencies`,
+    /// `devDependencies`, and `optionalDependencies`, keyed by the
+    /// `package.json` path that declared it.
+    pub unused_dep_package_paths: Vec<std::path::PathBuf>,
+    /// Each cycle as the set of file paths it contains. Used to count cycles
+    /// that touch any file inside a workspace.
+    pub circular_dep_groups: Vec<Vec<std::path::PathBuf>>,
+    /// Total exports per module (`module.exports.len()` in the graph), used
+    /// as the denominator for `dead_export_pct`.
+    pub module_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize>,
+}
+
+impl AnalysisCountsSnapshot {
+    /// Compute analysis counts for the file subset selected by `subset`.
+    ///
+    /// Returns `*defaults` when `subset.is_full()`. Otherwise recomputes
+    /// every count by retaining paths the subset accepts. Cycles are counted
+    /// when any cycle member is in the subset.
+    ///
+    /// Unused-dep counting is special-cased: dep entries are keyed by their
+    /// `package.json` path, which is never a source file and therefore never
+    /// matches the source-file membership of a `Paths` subset. For
+    /// [`crate::health::SubsetFilter::Paths`], a `package.json` is considered
+    /// in scope when at least one source file in the subset sits inside its
+    /// directory (the dep's owning workspace).
+    ///
+    /// `total_deps` is propagated unchanged from `defaults`; it is not
+    /// available per-subset today (mirrors the project-wide behaviour).
+    pub fn counts_for(
+        &self,
+        subset: &crate::health::SubsetFilter<'_>,
+        defaults: &crate::vital_signs::AnalysisCounts,
+    ) -> crate::vital_signs::AnalysisCounts {
+        if subset.is_full() {
+            return *defaults;
+        }
+        let dead_files = self
+            .unused_file_paths
+            .iter()
+            .filter(|p| subset.matches(p))
+            .count();
+        let dead_exports = self
+            .unused_export_paths
+            .iter()
+            .filter(|p| subset.matches(p))
+            .count();
+        let unused_deps = self
+            .unused_dep_package_paths
+            .iter()
+            .filter(|dep_path| dep_in_subset(subset, dep_path))
+            .count();
+        let circular_deps = self
+            .circular_dep_groups
+            .iter()
+            .filter(|cycle| cycle.iter().any(|p| subset.matches(p)))
+            .count();
+        let total_exports = self
+            .module_export_counts
+            .iter()
+            .filter(|(p, _)| subset.matches(p))
+            .map(|(_, n)| *n)
+            .sum();
+        crate::vital_signs::AnalysisCounts {
+            total_exports,
+            dead_files,
+            dead_exports,
+            unused_deps,
+            circular_deps,
+            total_deps: defaults.total_deps,
+        }
+    }
+}
+
+/// Return true when an unused dependency's `package.json` path belongs to
+/// the subset.
+///
+/// For [`crate::health::SubsetFilter::Paths`] the dep's containing workspace
+/// (its `package.json` parent directory) is considered in scope when at
+/// least one source file in the subset lives under that directory.
+fn dep_in_subset(subset: &crate::health::SubsetFilter<'_>, dep_path: &std::path::Path) -> bool {
+    match subset {
+        crate::health::SubsetFilter::Full => true,
+        crate::health::SubsetFilter::Paths(set) => {
+            let Some(workspace_root) = dep_path.parent() else {
+                return false;
+            };
+            set.iter().any(|p| p.starts_with(workspace_root))
+        }
+    }
 }
 
 /// Aggregate complexity totals from a parsed module.
@@ -1026,9 +1133,55 @@ pub(super) fn compute_file_scores(
     let unused_deps = results.unused_dependencies.len()
         + results.unused_dev_dependencies.len()
         + results.unused_optional_dependencies.len();
-    // Total deps not available from ResolvedConfig — approximate as 0.
+    // Total deps not available from ResolvedConfig (approximate as 0).
     // The snapshot counts.total_deps will be 0 until package.json data is plumbed.
     let total_deps = 0usize;
+
+    // Build the per-path snapshot used to recompute counts for
+    // workspace-scoped or grouped runs (avoids re-running the analyzer).
+    let mut module_export_counts: rustc_hash::FxHashMap<std::path::PathBuf, usize> =
+        rustc_hash::FxHashMap::with_capacity_and_hasher(
+            graph.modules.len(),
+            rustc_hash::FxBuildHasher,
+        );
+    for module in &graph.modules {
+        if let Some(path) = file_paths.get(&module.file_id) {
+            module_export_counts.insert((*path).clone(), module.exports.len());
+        }
+    }
+    let mut unused_export_paths: Vec<std::path::PathBuf> =
+        Vec::with_capacity(results.unused_exports.len() + results.unused_types.len());
+    unused_export_paths.extend(results.unused_exports.iter().map(|e| e.path.clone()));
+    unused_export_paths.extend(results.unused_types.iter().map(|e| e.path.clone()));
+    let mut unused_dep_package_paths: Vec<std::path::PathBuf> = Vec::with_capacity(unused_deps);
+    unused_dep_package_paths.extend(results.unused_dependencies.iter().map(|d| d.path.clone()));
+    unused_dep_package_paths.extend(
+        results
+            .unused_dev_dependencies
+            .iter()
+            .map(|d| d.path.clone()),
+    );
+    unused_dep_package_paths.extend(
+        results
+            .unused_optional_dependencies
+            .iter()
+            .map(|d| d.path.clone()),
+    );
+    let analysis_snapshot = AnalysisCountsSnapshot {
+        unused_file_paths: results
+            .unused_files
+            .iter()
+            .map(|f| f.path.clone())
+            .collect(),
+        unused_export_paths,
+        unused_dep_package_paths,
+        circular_dep_groups: results
+            .circular_dependencies
+            .iter()
+            .map(|c| c.files.clone())
+            .collect(),
+        module_export_counts,
+    };
 
     Ok(FileScoreOutput {
         scores,
@@ -1047,6 +1200,7 @@ pub(super) fn compute_file_scores(
             circular_deps: results.circular_dependencies.len(),
             total_deps,
         },
+        analysis_snapshot,
         istanbul_matched,
         istanbul_total,
         per_function_crap,

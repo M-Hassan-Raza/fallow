@@ -1,4 +1,5 @@
 pub mod coverage;
+mod grouping;
 mod hotspots;
 pub mod ownership;
 mod scoring;
@@ -241,23 +242,42 @@ fn execute_health_inner(
         opts.output,
     )?;
 
+    // Validate `--group-by` upfront so misconfigured invocations
+    // (`--group-by package` on a non-monorepo, missing CODEOWNERS) fail
+    // before any expensive pipeline stage runs and emit exactly one
+    // structured error rather than chaining a later git/hotspot error
+    // with the group-by error in the same JSON stream.
+    let group_resolver = if opts.group_by.is_some() {
+        crate::build_ownership_resolver(
+            opts.group_by,
+            opts.root,
+            config.codeowners.as_deref(),
+            opts.output,
+        )?
+    } else {
+        None
+    };
+
     // Build FileId -> path lookup for O(1) access
     let file_paths: rustc_hash::FxHashMap<_, _> = files.iter().map(|f| (f.id, &f.path)).collect();
 
-    // Collect and filter complexity findings
+    // Collect and filter complexity findings.
+    //
+    // The workspace filter is pushed inside `collect_findings` so the
+    // `files_analyzed` and `total_functions` counters (which feed the report
+    // summary) reflect the workspace subset rather than the entire monorepo.
     let t = Instant::now();
-    let (mut findings, files_analyzed, total_functions) = collect_findings(
+    let (findings, files_analyzed, total_functions) = collect_findings(
         &modules,
         &file_paths,
         &config.root,
         &ignore_set,
         changed_files.as_ref(),
+        ws_roots.as_deref(),
         max_cyclomatic,
         max_cognitive,
     );
-    if let Some(ref ws) = ws_roots {
-        findings.retain(|f| ws.iter().any(|r| f.path.starts_with(r)));
-    }
+    let mut findings = findings;
     let complexity_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     // Coverage gaps have two separate concerns:
@@ -524,36 +544,60 @@ fn execute_health_inner(
         )?;
     }
 
-    // Compute vital signs (always needed for report summary)
+    let candidate_paths = collect_candidate_paths(
+        &files,
+        &config,
+        changed_files.as_ref(),
+        ws_roots.as_deref(),
+        &ignore_set,
+    );
+
+    // Compute vital signs (always needed for report summary).
+    //
+    // When `--workspace` (or `--changed-workspaces`) restricts the run to a
+    // subset of files, every per-module aggregate, dead-code denominator,
+    // and total-file count must reflect that subset rather than the full
+    // monorepo. The same `ws_roots` slice that already filters findings,
+    // file scores, and hotspots is forwarded here so the produced
+    // `vital_signs` and downstream `health_score` are coherent with what
+    // the user asked for. Use the already-filtered candidate path set so
+    // workspace, changed-since, and health ignore filters all share one scope.
+    let project_subset = if candidate_paths.len() == files.len() {
+        SubsetFilter::Full
+    } else {
+        SubsetFilter::Paths(&candidate_paths)
+    };
+    let total_files_scoped = candidate_paths.len();
     let (mut vital_signs, mut counts) = compute_vital_signs_and_counts(
         score_output.as_ref(),
         &modules,
+        &file_paths,
         needs_file_scores,
         file_scores_slice,
         opts.hotspots || opts.targets,
         &hotspots,
-        files.len(),
+        total_files_scoped,
+        &project_subset,
     );
 
     // Run duplication analysis when --score is active to populate the duplication penalty.
     let t = Instant::now();
     if opts.score {
-        let dupes_report =
-            fallow_core::duplicates::find_duplicates(&config.root, &files, &config.duplicates);
-        let pct = dupes_report.stats.duplication_percentage;
-        vital_signs.duplication_pct = Some((pct * 10.0).round() / 10.0);
-        // Update duplicated_lines on both the snapshot counts and the embedded vital signs
-        // counts so JSON consumers can see raw numerator alongside the percentage.
-        // total_lines is already populated unconditionally from parsed modules.
-        counts.duplicated_lines = Some(dupes_report.stats.duplicated_lines);
-        if let Some(ref mut vc) = vital_signs.counts {
-            vc.duplicated_lines = Some(dupes_report.stats.duplicated_lines);
-        }
+        let scoped_files = filter_files_to_paths(&files, &candidate_paths);
+        let dupes_report = fallow_core::duplicates::find_duplicates(
+            &config.root,
+            &scoped_files,
+            &config.duplicates,
+        );
+        apply_duplication_metrics(&mut vital_signs, &mut counts, &dupes_report);
     }
     let duplication_ms = t.elapsed().as_secs_f64() * 1000.0;
 
     let health_score = if opts.score {
-        Some(vital_signs::compute_health_score(&vital_signs, files.len()))
+        Some(vital_signs::compute_health_score(
+            &vital_signs,
+            total_files_scoped,
+        ))
     } else {
         None
     };
@@ -594,6 +638,34 @@ fn execute_health_inner(
     let coverage_gaps_has_findings = score_output
         .as_ref()
         .is_some_and(|output| !output.coverage.report.is_empty());
+
+    // Build per-group output when `--group-by` resolved a resolver upfront.
+    // The grouping borrows the post-baseline / post-truncation findings,
+    // hotspots, file scores, large functions, and targets so each group's
+    // data is consistent with the project-level report.
+    let grouping = if let Some(ref resolver) = group_resolver {
+        Some(grouping::build_health_grouping(
+            resolver,
+            &config.root,
+            &files,
+            &modules,
+            &file_paths,
+            &candidate_paths,
+            score_output.as_ref(),
+            file_scores_slice,
+            &findings,
+            &hotspots,
+            &large_functions,
+            &targets,
+            opts.score,
+            opts.score.then_some(&config.duplicates),
+            needs_file_scores,
+            opts.hotspots || opts.targets,
+            !opts.score_only_output,
+        ))
+    } else {
+        None
+    };
 
     let report = assemble_health_report(
         opts,
@@ -643,6 +715,8 @@ fn execute_health_inner(
 
     Ok(HealthResult {
         report,
+        grouping,
+        group_resolver,
         config,
         elapsed: start.elapsed(),
         timings,
@@ -709,6 +783,49 @@ fn refresh_production_coverage_verdict(
     } else {
         crate::health_types::ProductionCoverageReportVerdict::Clean
     };
+}
+
+fn collect_candidate_paths(
+    files: &[fallow_types::discover::DiscoveredFile],
+    config: &ResolvedConfig,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
+    ignore_set: &globset::GlobSet,
+) -> rustc_hash::FxHashSet<std::path::PathBuf> {
+    files
+        .iter()
+        .filter(|file| {
+            path_in_health_scope(&file.path, config, changed_files, ws_roots, ignore_set)
+        })
+        .map(|file| file.path.clone())
+        .collect()
+}
+
+fn filter_files_to_paths(
+    files: &[fallow_types::discover::DiscoveredFile],
+    candidate_paths: &rustc_hash::FxHashSet<std::path::PathBuf>,
+) -> Vec<fallow_types::discover::DiscoveredFile> {
+    files
+        .iter()
+        .filter(|file| candidate_paths.contains(&file.path))
+        .cloned()
+        .collect()
+}
+
+fn apply_duplication_metrics(
+    vital_signs: &mut crate::health_types::VitalSigns,
+    counts: &mut crate::health_types::VitalSignsCounts,
+    dupes_report: &fallow_core::duplicates::DuplicationReport,
+) {
+    let pct = dupes_report.stats.duplication_percentage;
+    vital_signs.duplication_pct = Some((pct * 10.0).round() / 10.0);
+    // Update duplicated_lines on both the snapshot counts and the embedded
+    // vital signs counts so JSON consumers can see the raw numerator
+    // alongside the percentage.
+    counts.duplicated_lines = Some(dupes_report.stats.duplicated_lines);
+    if let Some(ref mut vc) = vital_signs.counts {
+        vc.duplicated_lines = Some(dupes_report.stats.duplicated_lines);
+    }
 }
 
 /// Sort findings by the specified criteria.
@@ -876,29 +993,79 @@ fn filter_coverage_gaps(
     );
 }
 
-/// Build vital signs and counts from available analysis data.
+/// Subset selector used when scoping `vital_signs`, `health_score`, and
+/// `analysis_counts` to a workspace package or a `--group-by` bucket.
+///
+/// `Full` skips filtering entirely (project-wide). `Paths` matches files whose
+/// absolute path is in the given set (exact match), which is what scoped
+/// project runs and `--group-by` use to keep every score input on the same
+/// filtered file set.
+pub enum SubsetFilter<'a> {
+    Full,
+    Paths(&'a rustc_hash::FxHashSet<std::path::PathBuf>),
+}
+
+impl SubsetFilter<'_> {
+    pub fn is_full(&self) -> bool {
+        matches!(self, Self::Full)
+    }
+    pub fn matches(&self, path: &std::path::Path) -> bool {
+        match self {
+            Self::Full => true,
+            Self::Paths(set) => set.contains(path),
+        }
+    }
+}
+
+/// Build vital signs and counts for the slice of files selected by `subset`.
+///
+/// When `subset` is anything other than `SubsetFilter::Full`, per-module
+/// aggregates (cyclomatic distribution, total LOC, unit profiles) are
+/// restricted to modules in the subset, the analysis counts (`dead_files`,
+/// `dead_exports`, `unused_deps`, `circular_deps`, `total_exports`) are
+/// recomputed from the snapshot for the same subset, and `total_files` should
+/// already reflect the subset-scoped count.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "vital signs aggregate inputs from many pipeline stages"
+)]
 fn compute_vital_signs_and_counts(
     score_output: Option<&scoring::FileScoreOutput>,
     modules: &[fallow_core::extract::ModuleInfo],
+    file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
     needs_file_scores: bool,
     file_scores_slice: &[FileHealthScore],
     needs_hotspots: bool,
     hotspots: &[HotspotEntry],
     total_files: usize,
+    subset: &SubsetFilter<'_>,
 ) -> (
     crate::health_types::VitalSigns,
     crate::health_types::VitalSignsCounts,
 ) {
-    let analysis_counts = score_output.map(|o| crate::vital_signs::AnalysisCounts {
-        total_exports: o.analysis_counts.total_exports,
-        dead_files: o.analysis_counts.dead_files,
-        dead_exports: o.analysis_counts.dead_exports,
-        unused_deps: o.analysis_counts.unused_deps,
-        circular_deps: o.analysis_counts.circular_deps,
-        total_deps: o.analysis_counts.total_deps,
-    });
+    let analysis_counts =
+        score_output.map(|o| o.analysis_snapshot.counts_for(subset, &o.analysis_counts));
+    let module_filter_set: Option<rustc_hash::FxHashSet<fallow_core::discover::FileId>> =
+        if subset.is_full() {
+            None
+        } else {
+            Some(
+                modules
+                    .iter()
+                    .filter_map(|m| {
+                        let path = file_paths.get(&m.file_id)?;
+                        if subset.matches(path) {
+                            Some(m.file_id)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect(),
+            )
+        };
     let vs_input = vital_signs::VitalSignsInput {
         modules,
+        module_filter: module_filter_set.as_ref(),
         file_scores: if needs_file_scores {
             Some(file_scores_slice)
         } else {
@@ -1209,13 +1376,21 @@ fn build_ignore_set(patterns: &[String]) -> globset::GlobSet {
         .unwrap_or_else(|_| globset::GlobSet::empty())
 }
 
-/// Collect health findings from parsed modules, applying ignore and changed-since filters.
+/// Collect health findings from parsed modules, applying ignore, changed-since,
+/// and workspace filters. The returned `files_analyzed` / `total_functions`
+/// counters reflect only modules that pass every filter so the rendered
+/// summary matches the produced findings.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "filter pipeline mirrors compute_filtered_file_scores"
+)]
 fn collect_findings(
     modules: &[fallow_core::extract::ModuleInfo],
     file_paths: &rustc_hash::FxHashMap<fallow_core::discover::FileId, &std::path::PathBuf>,
     config_root: &std::path::Path,
     ignore_set: &globset::GlobSet,
     changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    ws_roots: Option<&[std::path::PathBuf]>,
     max_cyclomatic: u16,
     max_cognitive: u16,
 ) -> (Vec<HealthFinding>, usize, usize) {
@@ -1235,6 +1410,12 @@ fn collect_findings(
 
         if let Some(changed) = changed_files
             && !changed.contains(path)
+        {
+            continue;
+        }
+
+        if let Some(ws) = ws_roots
+            && !ws.iter().any(|r| path.starts_with(r))
         {
             continue;
         }
@@ -1527,21 +1708,13 @@ fn load_health_baseline(
 
 /// Run health analysis, print results, and return exit code.
 pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
+    // `execute_health` validates `--group-by` early and produces per-group
+    // output on `HealthResult.grouping`, so the explicit `build_ownership_resolver`
+    // probe in this dispatcher is no longer needed.
     let result = match execute_health(opts) {
         Ok(r) => r,
         Err(code) => return code,
     };
-    // Build resolver for --group-by (passed through to report context)
-    let _resolver = match crate::build_ownership_resolver(
-        opts.group_by,
-        opts.root,
-        result.config.codeowners.as_deref(),
-        opts.output,
-    ) {
-        Ok(r) => r,
-        Err(code) => return code,
-    };
-    // Health grouping is a follow-up — for now, validate the flag and pass None
     if let Some(ref timings) = result.timings {
         report::print_health_performance(timings, opts.output);
     }
@@ -1558,6 +1731,19 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
 /// Result of executing health analysis without printing.
 pub struct HealthResult {
     pub report: HealthReport,
+    /// Per-group health output when `--group-by` is active.
+    ///
+    /// `None` for the default run; `Some` for any
+    /// `--group-by package|owner|directory|section` invocation. The top-level
+    /// `report` reflects the active run scope (for example, after
+    /// `--workspace`); consumers that want per-group metrics read from
+    /// `grouping.groups`.
+    pub grouping: Option<crate::health_types::HealthGrouping>,
+    /// Resolver retained alongside `grouping` so per-result formats
+    /// (SARIF, CodeClimate) can tag findings with the active group key
+    /// without re-discovering CODEOWNERS or workspace info at print time.
+    /// Always `None` when `grouping` is `None`.
+    pub group_resolver: Option<crate::report::OwnershipResolver>,
     pub config: ResolvedConfig,
     pub elapsed: Duration,
     pub timings: Option<HealthTimings>,
@@ -1585,7 +1771,13 @@ pub fn print_health_result(
         summary,
         baseline_matched: None,
     };
-    let report_code = report::print_health_report(&result.report, &ctx, result.config.output);
+    let report_code = report::print_health_report(
+        &result.report,
+        result.grouping.as_ref(),
+        result.group_resolver.as_ref(),
+        &ctx,
+        result.config.output,
+    );
     if report_code != ExitCode::SUCCESS {
         return report_code;
     }
@@ -1727,6 +1919,7 @@ mod tests {
             Path::new("/project"),
             &globset::GlobSet::empty(),
             None,
+            None,
             20,
             15,
         );
@@ -1747,6 +1940,7 @@ mod tests {
             &file_paths,
             Path::new("/project"),
             &globset::GlobSet::empty(),
+            None,
             None,
             20,
             15,
@@ -1772,6 +1966,7 @@ mod tests {
             Path::new("/project"),
             &globset::GlobSet::empty(),
             None,
+            None,
             20,
             15,
         );
@@ -1796,6 +1991,7 @@ mod tests {
             Path::new("/project"),
             &globset::GlobSet::empty(),
             None,
+            None,
             20,
             15,
         );
@@ -1818,6 +2014,7 @@ mod tests {
             &file_paths,
             Path::new("/project"),
             &globset::GlobSet::empty(),
+            None,
             None,
             20,
             15,
@@ -1846,6 +2043,7 @@ mod tests {
             Path::new("/project"),
             &globset::GlobSet::empty(),
             None,
+            None,
             20,
             15,
         );
@@ -1867,6 +2065,7 @@ mod tests {
             &file_paths,
             Path::new("/project"),
             &ignore_set,
+            None,
             None,
             20,
             15,
@@ -1896,6 +2095,7 @@ mod tests {
             Path::new("/project"),
             &globset::GlobSet::empty(),
             Some(&changed),
+            None,
             20,
             15,
         );
@@ -1915,6 +2115,7 @@ mod tests {
             &file_paths,
             Path::new("/project"),
             &globset::GlobSet::empty(),
+            None,
             None,
             20,
             15,
@@ -1939,6 +2140,7 @@ mod tests {
             &file_paths,
             Path::new("/project"),
             &globset::GlobSet::empty(),
+            None,
             None,
             20,
             15,
@@ -1969,6 +2171,7 @@ mod tests {
             &file_paths,
             Path::new("/project"),
             &globset::GlobSet::empty(),
+            None,
             None,
             20,
             15,
@@ -2436,6 +2639,8 @@ mod tests {
                 }),
                 ..crate::health_types::HealthReport::default()
             },
+            grouping: None,
+            group_resolver: None,
             config: test_resolved_config(),
             elapsed: Duration::default(),
             timings: None,

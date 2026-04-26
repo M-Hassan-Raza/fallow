@@ -21,17 +21,37 @@ use crate::health_types::{
 pub struct VitalSignsInput<'a> {
     /// All parsed modules (always available).
     pub modules: &'a [fallow_core::extract::ModuleInfo],
+    /// Optional file-id allowlist used to restrict per-module aggregates
+    /// (cyclomatic distribution, total LOC, unit profiles) to a subset.
+    /// Used by `--workspace` and `--group-by` to scope project-wide metrics
+    /// to a single workspace package without re-parsing.
+    /// `None` includes every module in `modules`.
+    pub module_filter: Option<&'a rustc_hash::FxHashSet<fallow_core::discover::FileId>>,
     /// File health scores (available when file_scores/hotspots/targets are computed).
     pub file_scores: Option<&'a [FileHealthScore]>,
     /// Hotspot entries (available when hotspots are computed).
     pub hotspots: Option<&'a [HotspotEntry]>,
-    /// Total discovered files.
+    /// Total discovered files (already scoped to the workspace when `--workspace` is set).
     pub total_files: usize,
-    /// Analysis results (available when file_scores pipeline ran).
+    /// Analysis results (available when file_scores pipeline ran). When a
+    /// `module_filter` is also set, callers should pass workspace-scoped
+    /// counts here so `dead_*_pct` denominators line up with the rest of the
+    /// metrics.
     pub analysis_counts: Option<AnalysisCounts>,
 }
 
+impl<'a> VitalSignsInput<'a> {
+    /// Iterate the modules selected by `module_filter`.
+    fn selected_modules(&self) -> impl Iterator<Item = &'a fallow_core::extract::ModuleInfo> + '_ {
+        let filter = self.module_filter;
+        self.modules
+            .iter()
+            .filter(move |m| filter.is_none_or(|set| set.contains(&m.file_id)))
+    }
+}
+
 /// Aggregate counts from the analysis pipeline.
+#[derive(Clone, Copy)]
 pub struct AnalysisCounts {
     pub total_exports: usize,
     pub dead_files: usize,
@@ -49,8 +69,7 @@ pub struct AnalysisCounts {
 pub fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
     // Cyclomatic complexity: always available from parsed modules
     let mut all_cyclomatic: Vec<u16> = input
-        .modules
-        .iter()
+        .selected_modules()
         .flat_map(|m| m.complexity.iter().map(|c| c.cyclomatic))
         .collect();
     all_cyclomatic.sort_unstable();
@@ -115,8 +134,7 @@ pub fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
 
     // Total LOC: always available from parsed modules
     let total_loc: u64 = input
-        .modules
-        .iter()
+        .selected_modules()
         .map(|m| m.line_offsets.len() as u64)
         .sum();
 
@@ -137,8 +155,7 @@ pub fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
         None
     } else {
         let all_line_counts: Vec<u32> = input
-            .modules
-            .iter()
+            .selected_modules()
             .flat_map(|m| m.complexity.iter().map(|c| c.line_count))
             .collect();
         Some(compute_size_risk_profile(&all_line_counts))
@@ -149,8 +166,7 @@ pub fn compute_vital_signs(input: &VitalSignsInput<'_>) -> VitalSigns {
         None
     } else {
         let all_param_counts: Vec<u8> = input
-            .modules
-            .iter()
+            .selected_modules()
             .flat_map(|m| m.complexity.iter().map(|c| c.param_count))
             .collect();
         Some(compute_interfacing_risk_profile(&all_param_counts))
@@ -401,7 +417,7 @@ pub fn build_counts(input: &VitalSignsInput<'_>) -> VitalSignsCounts {
             )
         });
 
-    let total_lines: usize = input.modules.iter().map(|m| m.line_offsets.len()).sum();
+    let total_lines: usize = input.selected_modules().map(|m| m.line_offsets.len()).sum();
 
     VitalSignsCounts {
         total_files: input.total_files,
@@ -916,6 +932,7 @@ mod tests {
         let modules = make_modules();
         let input = VitalSignsInput {
             modules: &modules,
+            module_filter: None,
             file_scores: None,
             hotspots: None,
             total_files: 10,
@@ -933,6 +950,7 @@ mod tests {
         let modules = make_modules();
         let input = VitalSignsInput {
             modules: &modules,
+            module_filter: None,
             file_scores: None,
             hotspots: None,
             total_files: 100,
@@ -998,6 +1016,7 @@ mod tests {
         let modules = Vec::new();
         let input = VitalSignsInput {
             modules: &modules,
+            module_filter: None,
             file_scores: None,
             hotspots: Some(&hotspots),
             total_files: 10,
@@ -1012,6 +1031,7 @@ mod tests {
         let modules = Vec::new();
         let input = VitalSignsInput {
             modules: &modules,
+            module_filter: None,
             file_scores: None,
             hotspots: None,
             total_files: 0,
