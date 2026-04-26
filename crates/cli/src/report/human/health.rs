@@ -821,7 +821,29 @@ fn render_findings(
         )
         .dimmed()
     ));
-    if report.findings.len() >= 3 {
+    let has_html_template = report.findings.iter().any(|finding| {
+        finding.name == "<template>"
+            && finding
+                .path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+    });
+    let has_function_finding = report
+        .findings
+        .iter()
+        .any(|finding| finding.name != "<template>");
+    // Show the HTML-template hint whenever any synthetic <template> finding is
+    // present (the suppression syntax is non-obvious, so don't gate on count).
+    // Keep the existing >=3 threshold for the function hint to avoid noise on
+    // tiny reports.
+    if has_html_template {
+        lines.push(format!(
+            "  {}",
+            "To suppress HTML templates: <!-- fallow-ignore-file complexity -->".dimmed()
+        ));
+    }
+    if has_function_finding && report.findings.len() >= 3 {
         lines.push(format!(
             "  {}",
             "To suppress: // fallow-ignore-next-line complexity".dimmed()

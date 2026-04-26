@@ -1,7 +1,7 @@
 //! Inline suppression comment parsing.
 //!
 //! Parses `fallow-ignore-file` and `fallow-ignore-next-line` comments from
-//! source files, supporting both `//` and `/* */` styles.
+//! source files, supporting `//`, `/* */`, and `<!-- -->` styles.
 
 use oxc_ast::ast::Comment;
 
@@ -26,6 +26,7 @@ fn byte_offset_to_line(source: &str, byte_offset: u32) -> u32 {
 /// - `// fallow-ignore-file unused-export` — suppress specific issue type for the file
 /// - `// fallow-ignore-next-line` — suppress all issues on the next line
 /// - `// fallow-ignore-next-line unused-export` — suppress specific issue type on the next line
+/// - `<!-- fallow-ignore-file complexity -->` — suppress specific issue type in HTML-like files
 #[must_use]
 #[expect(
     clippy::cast_possible_truncation,
@@ -94,11 +95,13 @@ pub fn parse_suppressions_from_source(source: &str) -> Vec<Suppression> {
     for (line_idx, line) in source.lines().enumerate() {
         let trimmed = line.trim();
 
-        // Match both // and /* */ style comments
+        // Match line, block, and HTML comment styles.
         let comment_text = if let Some(rest) = trimmed.strip_prefix("//") {
             Some(rest.trim())
         } else if let Some(rest) = trimmed.strip_prefix("/*") {
             rest.strip_suffix("*/").map(str::trim)
+        } else if let Some(rest) = trimmed.strip_prefix("<!--") {
+            rest.strip_suffix("-->").map(str::trim)
         } else {
             None
         };
@@ -226,6 +229,15 @@ mod tests {
         assert!(suppressions[0].kind.is_none());
     }
 
+    #[test]
+    fn parse_html_comment_file_suppression() {
+        let source = "<!-- fallow-ignore-file complexity -->\n@if (enabled) { <p /> }\n";
+        let suppressions = parse_suppressions_from_source(source);
+        assert_eq!(suppressions.len(), 1);
+        assert_eq!(suppressions[0].line, 0);
+        assert_eq!(suppressions[0].kind, Some(IssueKind::Complexity));
+    }
+
     // ── Additional coverage ─────────────────────────────────────
 
     #[test]
@@ -235,6 +247,15 @@ mod tests {
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
         assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+    }
+
+    #[test]
+    fn parse_html_comment_next_line_suppression() {
+        let source = "<!-- fallow-ignore-next-line complexity -->\n@if (enabled) { <p /> }\n";
+        let suppressions = parse_suppressions_from_source(source);
+        assert_eq!(suppressions.len(), 1);
+        assert_eq!(suppressions[0].line, 2);
+        assert_eq!(suppressions[0].kind, Some(IssueKind::Complexity));
     }
 
     #[test]

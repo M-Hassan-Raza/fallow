@@ -104,7 +104,18 @@ pub(crate) fn collect_asset_refs(source: &str) -> Vec<String> {
 }
 
 /// Parse an HTML file, extracting script and stylesheet references as imports.
+#[cfg(test)]
 pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+    parse_html_to_module_with_complexity(file_id, source, content_hash, false)
+}
+
+/// Parse an HTML file and optionally compute Angular template complexity.
+pub(crate) fn parse_html_to_module_with_complexity(
+    file_id: FileId,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+) -> ModuleInfo {
     let suppressions = crate::suppress::parse_suppressions_from_source(source);
 
     // Bare filenames (e.g., `src="app.js"`) are normalized to `./app.js` so
@@ -149,6 +160,14 @@ pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: 
         .collect();
     member_accesses.extend(template_refs.member_accesses);
 
+    let complexity = if need_complexity {
+        crate::template_complexity::compute_angular_template_complexity(source)
+            .into_iter()
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     ModuleInfo {
         file_id,
         exports: Vec::new(),
@@ -166,7 +185,7 @@ pub(crate) fn parse_html_to_module(file_id: FileId, source: &str, content_hash: 
         type_referenced_import_bindings: Vec::new(),
         value_referenced_import_bindings: Vec::new(),
         line_offsets: fallow_types::extract::compute_line_offsets(source),
-        complexity: Vec::new(),
+        complexity,
         flag_uses: Vec::new(),
         class_heritage: vec![],
     }

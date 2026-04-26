@@ -77,6 +77,93 @@ fn health_json_has_findings() {
 }
 
 #[test]
+fn health_reports_angular_template_complexity() {
+    let output = run_fallow(
+        "health",
+        "angular-template-complexity",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let template = findings
+        .iter()
+        .find(|finding| {
+            finding["name"] == "<template>"
+                && finding["path"]
+                    .as_str()
+                    .is_some_and(|path| path.ends_with("permissions.component.html"))
+        })
+        .unwrap_or_else(|| panic!("expected template complexity finding, got: {findings:#?}"));
+
+    assert!(
+        template["cyclomatic"].as_u64().unwrap_or_default() > 3,
+        "template should exceed cyclomatic threshold: {template:#?}"
+    );
+    assert!(
+        template["cognitive"].as_u64().unwrap_or_default() > 3,
+        "template should exceed cognitive threshold: {template:#?}"
+    );
+    let actions = template["actions"].as_array().expect("actions array");
+    let suppress = actions
+        .iter()
+        .find(|action| action["type"] == "suppress-file")
+        .unwrap_or_else(|| panic!("expected HTML suppress action, got: {actions:#?}"));
+    assert_eq!(
+        suppress["comment"],
+        "<!-- fallow-ignore-file complexity -->"
+    );
+}
+
+#[test]
+fn health_html_template_complexity_can_be_suppressed() {
+    let dir = tempdir().unwrap();
+    let fixture = fixture_path("angular-template-complexity");
+    copy_dir_recursive(&fixture, dir.path());
+
+    let template_path = dir.path().join("src/permissions.component.html");
+    let original = std::fs::read_to_string(&template_path).expect("read template");
+    std::fs::write(
+        &template_path,
+        format!("<!-- fallow-ignore-file complexity -->\n{original}"),
+    )
+    .expect("write suppressed template");
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 0, "suppressed template should not fail health");
+    let json = parse_json(&output);
+    assert!(
+        json["findings"].as_array().is_none_or(Vec::is_empty),
+        "suppressed template should not emit findings: {json:#?}"
+    );
+}
+
+#[test]
 fn health_save_baseline_creates_parent_directory() {
     let dir = tempdir().unwrap();
     write_file(
@@ -669,13 +756,13 @@ fn health_coverage_gaps_production_excludes_dead_test_helpers() {
     );
     assert_eq!(
         output.code, 0,
-        "production coverage gaps default to warn severity (exit 0)"
+        "runtime coverage gaps default to warn severity (exit 0)"
     );
 
     let json = parse_json(&output);
     let coverage = json["coverage_gaps"]
         .as_object()
-        .expect("production coverage_gaps should be an object");
+        .expect("runtime coverage_gaps should be an object");
 
     let export_names: Vec<_> = coverage["exports"]
         .as_array()
@@ -689,7 +776,7 @@ fn health_coverage_gaps_production_excludes_dead_test_helpers() {
     );
     assert!(
         export_names.contains(&"app") && export_names.contains(&"helper"),
-        "production coverage gaps should still report runtime exports lacking test reachability: {export_names:?}"
+        "runtime coverage gaps should still report runtime exports lacking test reachability: {export_names:?}"
     );
 
     let summary = coverage["summary"]
@@ -698,7 +785,7 @@ fn health_coverage_gaps_production_excludes_dead_test_helpers() {
     assert_eq!(
         summary["untested_exports"].as_u64(),
         Some(2),
-        "production coverage gaps should exclude dead exports from the export count"
+        "runtime coverage gaps should exclude dead exports from the export count"
     );
 }
 

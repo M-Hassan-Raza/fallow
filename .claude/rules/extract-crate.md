@@ -18,4 +18,5 @@ Key modules:
 - `parse.rs` — File type dispatcher. Runs `oxc_semantic` after parsing to detect unused import bindings (imports where the binding is never read in the file).
 - `cache.rs` — Incremental bitcode cache with xxh3 hashing. Unchanged files skip parsing and load from cache. Pruned of stale entries on each run.
 - `complexity.rs` — Per-function cyclomatic/cognitive complexity via single-pass `ComplexityVisitor`
+- `template_complexity.rs` — Synthetic `<template>` cyclomatic/cognitive complexity for Angular `.html` templates. Hand-rolled scanner covering Angular control-flow blocks (`@if`/`@else`/`@for`/`@switch`/`@case`/`@defer (when ...)`/`@let`), legacy structural directives (`*ngIf`, `*ngFor`), bound attributes (`[x]`, `(x)`, `bind-x`, `on-x`), and `{{ }}` interpolations. Malformed templates short-circuit via a unit `ScanError` and produce no finding rather than recovered noise. Invoked from `parse_html_to_module_with_complexity` only when the caller requests complexity (the dead-code pipeline skips it).
 - `tests/` — Integration tests split by parser type: `js_ts.rs`, `sfc.rs`, `astro.rs`, `mdx.rs`, `css.rs`

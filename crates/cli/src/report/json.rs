@@ -726,6 +726,10 @@ fn build_health_finding_actions(
         .get("name")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("function");
+    let path = item
+        .get("path")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("");
     let exceeded = item
         .get("exceeded")
         .and_then(serde_json::Value::as_str)
@@ -791,13 +795,27 @@ fn build_health_finding_actions(
     }
 
     if !opts.omit_suppress_line {
-        actions.push(serde_json::json!({
-            "type": "suppress-line",
-            "auto_fixable": false,
-            "description": "Suppress with an inline comment above the function declaration",
-            "comment": "// fallow-ignore-next-line complexity",
-            "placement": "above-function-declaration",
-        }));
+        if name == "<template>"
+            && Path::new(path)
+                .extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("html"))
+        {
+            actions.push(serde_json::json!({
+                "type": "suppress-file",
+                "auto_fixable": false,
+                "description": "Suppress with an HTML comment at the top of the template",
+                "comment": "<!-- fallow-ignore-file complexity -->",
+                "placement": "top-of-template",
+            }));
+        } else {
+            actions.push(serde_json::json!({
+                "type": "suppress-line",
+                "auto_fixable": false,
+                "description": "Suppress with an inline comment above the function declaration",
+                "comment": "// fallow-ignore-next-line complexity",
+                "placement": "above-function-declaration",
+            }));
+        }
     }
 
     serde_json::Value::Array(actions)
@@ -2817,6 +2835,32 @@ mod tests {
 
         let suppress = &output["findings"][0]["actions"][1];
         assert_eq!(suppress["placement"], "above-function-declaration");
+    }
+
+    #[test]
+    fn html_template_health_finding_uses_html_suppression() {
+        let mut output = serde_json::json!({
+            "findings": [{
+                "path": "src/app.component.html",
+                "name": "<template>",
+                "line": 1,
+                "col": 0,
+                "cyclomatic": 25,
+                "cognitive": 30,
+                "line_count": 40,
+                "exceeded": "both"
+            }]
+        });
+
+        inject_health_actions(&mut output, HealthActionOptions::default());
+
+        let suppress = &output["findings"][0]["actions"][1];
+        assert_eq!(suppress["type"], "suppress-file");
+        assert_eq!(
+            suppress["comment"],
+            "<!-- fallow-ignore-file complexity -->"
+        );
+        assert_eq!(suppress["placement"], "top-of-template");
     }
 
     // ── Duplication actions injection ─────────────────────────────

@@ -230,7 +230,7 @@ Four detection modes: **strict** (exact tokens), **mild** (default, AST-based), 
 
 ## Complexity
 
-Surfaces the most complex functions in your codebase and identifies where to spend refactoring effort.
+Surfaces the most complex functions in your codebase and identifies where to spend refactoring effort. Angular `.html` templates are included as synthetic `<template>` entries when they use control flow or complex bindings.
 
 ```bash
 fallow health                             # Functions exceeding thresholds

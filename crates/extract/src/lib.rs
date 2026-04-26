@@ -19,6 +19,7 @@ mod parse;
 pub mod sfc;
 mod sfc_template;
 pub mod suppress;
+pub(crate) mod template_complexity;
 mod template_usage;
 pub mod visitor;
 
