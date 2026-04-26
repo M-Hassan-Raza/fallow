@@ -2841,6 +2841,78 @@ fn angular_inline_template_no_side_effect_imports() {
     assert_eq!(side_effects, 0);
 }
 
+#[test]
+fn angular_inline_template_complexity_anchored_at_decorator() {
+    // Inline `template: \`...\`` literals with non-trivial control-flow density
+    // emit a synthetic `<template>` finding on the host `.ts` file. The
+    // finding's line/col anchors at the `@Component` decorator so existing
+    // line-level suppression and jump-to-source land usefully.
+    let source = "import { Component } from '@angular/core';\n\
+@Component({\n\
+  selector: 'host-game',\n\
+  template: `\n\
+    @if (game(); as g) {\n\
+      @if (g.state === 'lobby') {\n\
+        <host-lobby [code]=\"g.code\" />\n\
+      } @else if (g.state === 'question') {\n\
+        @for (player of g.players; track player.id) {\n\
+          <player-tile [player]=\"player\" [score]=\"g.scores[player.id] ?? 0\" />\n\
+        }\n\
+      }\n\
+    }\n\
+  `,\n\
+})\n\
+export class HostGameComponent {}\n";
+    let info = crate::tests::parse_ts_with_complexity(source);
+    let template = info
+        .complexity
+        .iter()
+        .find(|fc| fc.name == "<template>")
+        .expect("inline template emits a synthetic <template> finding");
+    assert!(
+        template.cyclomatic >= 4,
+        "control-flow blocks contribute to cyclomatic: {template:?}"
+    );
+    assert!(
+        template.cognitive >= 4,
+        "nested control-flow contributes to cognitive: {template:?}"
+    );
+    // The decorator starts on line 2 (after the import on line 1).
+    assert_eq!(template.line, 2, "anchored at @Component line");
+    assert_eq!(template.col, 0, "anchored at @ column");
+}
+
+#[test]
+fn angular_inline_template_with_simple_template_emits_no_finding() {
+    // Trivial templates without control-flow should not produce a finding,
+    // matching the existing external-template behaviour.
+    let info = crate::tests::parse_ts_with_complexity(
+        "import { Component } from '@angular/core';\n\
+@Component({ selector: 'a', template: '<p>hi</p>' })\n\
+export class A {}\n",
+    );
+    assert!(
+        !info.complexity.iter().any(|fc| fc.name == "<template>"),
+        "trivial template emits nothing"
+    );
+}
+
+#[test]
+fn angular_template_with_interpolation_expressions_is_skipped() {
+    // Tagged template literals with `${...}` interpolations are skipped
+    // (variable-substituted templates are out of scope for the first cut).
+    let info = crate::tests::parse_ts_with_complexity(
+        "import { Component } from '@angular/core';\n\
+const HEADER = 'h1';\n\
+@Component({ selector: 'a', template: `<${HEADER}>x</${HEADER}>` })\n\
+export class A {}\n",
+    );
+    assert!(
+        !info.complexity.iter().any(|fc| fc.name == "<template>"),
+        "interpolated templates are skipped"
+    );
+}
+
 // ── Angular host binding detection ────────────────────────────
 
 #[test]

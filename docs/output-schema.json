@@ -295,7 +295,7 @@
         "summary": { "$ref": "#/definitions/HealthSummary" },
         "findings": {
           "type": "array",
-          "description": "Functions exceeding complexity thresholds, sorted by the --sort criteria.",
+          "description": "Functions and synthetic template entries exceeding complexity thresholds, sorted by the --sort criteria.",
           "items": { "$ref": "#/definitions/HealthFinding" }
         },
         "file_scores": {
@@ -853,7 +853,7 @@
         },
         "name": {
           "type": "string",
-          "description": "Function name, or \"<anonymous>\" for unnamed functions/arrows."
+          "description": "Function name, \"<anonymous>\" for unnamed functions/arrows, or \"<template>\" for synthetic Angular template findings."
         },
         "line": {
           "type": "integer",
@@ -882,7 +882,7 @@
         "exceeded": {
           "type": "string",
           "enum": ["cyclomatic", "cognitive", "both", "crap", "cyclomatic_crap", "cognitive_crap", "all"],
-          "description": "Which threshold(s) this function exceeds. `crap` and its combinations are emitted when `max_crap_threshold` is crossed."
+          "description": "Which threshold(s) this finding exceeds. `crap` and its combinations are emitted when `max_crap_threshold` is crossed."
         },
         "crap": {
           "type": "number",
@@ -905,7 +905,7 @@
         "actions": {
           "type": "array",
           "items": { "$ref": "#/definitions/HealthFindingAction" },
-          "description": "Suggested actions to address this complex function."
+          "description": "Suggested actions to address this complex finding."
         }
       }
     },

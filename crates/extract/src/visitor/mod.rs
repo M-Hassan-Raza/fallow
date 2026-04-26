@@ -26,6 +26,21 @@ struct LocalClassExportInfo {
     instance_bindings: Vec<(String, String)>,
 }
 
+/// One Angular `@Component({ template: \`...\` })` decorator captured during
+/// the visit pass, awaiting synthetic `<template>` complexity computation in
+/// `parse.rs` (where `line_offsets` is available).
+#[derive(Debug, Clone)]
+pub(crate) struct InlineTemplateFinding {
+    /// Template source content (already escape-interpreted when possible).
+    pub(crate) template_source: String,
+    /// Byte offset of the matched `@Component`/`@Directive` decorator's `@`
+    /// in the host file. Used to remap the synthetic finding's line/col so
+    /// jump-to-source lands on the decorator and `// fallow-ignore-next-line`
+    /// comments above the decorator suppress the finding via the existing
+    /// health-side check.
+    pub(crate) decorator_start: u32,
+}
+
 /// AST visitor that extracts all import/export information in a single pass.
 #[derive(Default)]
 pub(crate) struct ModuleInfoExtractor {
@@ -71,6 +86,11 @@ pub(crate) struct ModuleInfoExtractor {
     /// Read when a `super.member` access is encountered, so it can be recorded as
     /// `MemberAccess { object: <super_local>, member }`. Dropped when the entry is `None`.
     pub(crate) class_super_stack: Vec<Option<String>>,
+    /// Inline `@Component({ template: ... })` decorator entries captured during
+    /// the visit pass. `parse.rs` reads these after the visit completes (so
+    /// `line_offsets` is available) and synthesises `<template>` complexity
+    /// findings on the host `.ts` file's `complexity` vec.
+    pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
 }
 
 impl ModuleInfoExtractor {

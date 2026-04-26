@@ -888,6 +888,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     });
                 }
                 self.member_accesses.extend(refs.member_accesses);
+
+                // Defer template-complexity scanning to `parse.rs`, where the
+                // per-file `line_offsets` table is available to remap the
+                // synthetic finding onto the host `.ts` file's coordinates.
+                if let Some(decorator_span) = meta.decorator_span {
+                    self.inline_template_findings
+                        .push(super::InlineTemplateFinding {
+                            template_source: template.clone(),
+                            decorator_start: decorator_span.start,
+                        });
+                }
             }
 
             // Emit sentinel accesses for host binding member references

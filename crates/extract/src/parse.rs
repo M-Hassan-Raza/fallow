@@ -79,6 +79,13 @@ pub fn parse_source_to_module(
     } else {
         Vec::new()
     };
+    if need_complexity {
+        append_inline_template_complexity(
+            &mut complexity,
+            &extractor.inline_template_findings,
+            &line_offsets,
+        );
+    }
 
     // Feature flag detection: always extracted (lightweight pattern matching).
     // Custom SDK patterns/env prefixes are applied post-parse via config.
@@ -115,6 +122,11 @@ pub fn parse_source_to_module(
             if need_complexity {
                 complexity =
                     crate::complexity::compute_complexity(&retry_return.program, &line_offsets);
+                append_inline_template_complexity(
+                    &mut complexity,
+                    &retry_extractor.inline_template_findings,
+                    &line_offsets,
+                );
             }
             // Recompute flag extraction from the successful retry parse
             flag_uses =
@@ -162,6 +174,35 @@ pub fn parse_source_to_module(
     info.flag_uses = flag_uses;
 
     info
+}
+
+/// Synthesise `<template>` complexity findings for inline `@Component({ template: \`...\` })`
+/// decorators captured by the visitor pass.
+///
+/// The template-complexity scanner returns line/col relative to the template
+/// body itself; we replace those with the host file's line/col for the
+/// matched `@Component`/`@Directive` decorator. Anchoring at the decorator
+/// (rather than the literal's opening backtick) gives a useful jump-to-source
+/// landing inside the decorator block and lets `// fallow-ignore-next-line
+/// complexity` comments placed directly above the decorator suppress the
+/// finding through the existing health-side check, with no extra plumbing.
+fn append_inline_template_complexity(
+    complexity: &mut Vec<fallow_types::extract::FunctionComplexity>,
+    findings: &[crate::visitor::InlineTemplateFinding],
+    line_offsets: &[u32],
+) {
+    for finding in findings {
+        let Some(mut fc) = crate::template_complexity::compute_angular_template_complexity(
+            &finding.template_source,
+        ) else {
+            continue;
+        };
+        let (line, col) =
+            fallow_types::extract::byte_offset_to_line_col(line_offsets, finding.decorator_start);
+        fc.line = line;
+        fc.col = col;
+        complexity.push(fc);
+    }
 }
 
 /// Apply JSDoc visibility tags (`@public`, `@internal`, `@alpha`, `@beta`) to exports by

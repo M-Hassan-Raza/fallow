@@ -230,10 +230,10 @@ Four detection modes: **strict** (exact tokens), **mild** (default, AST-based), 
 
 ## Complexity
 
-Surfaces the most complex functions in your codebase and identifies where to spend refactoring effort. Angular `.html` templates are included as synthetic `<template>` entries when they use control flow or complex bindings.
+Surfaces the most complex functions in your codebase and identifies where to spend refactoring effort. Angular templates are included as synthetic `<template>` entries when they use control flow or complex bindings, both for external `templateUrl` files and inline `@Component({ template: \`...\` })` decorators.
 
 ```bash
-fallow health                             # Functions exceeding thresholds
+fallow health                             # Functions/templates exceeding thresholds
 fallow health --score                     # Project health score (0-100) with letter grade
 fallow health --min-score 70              # CI gate: fail if score drops below 70
 fallow health --top 20                    # 20 most complex functions

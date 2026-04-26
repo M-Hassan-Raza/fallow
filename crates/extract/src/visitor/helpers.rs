@@ -7,6 +7,7 @@ use oxc_ast::ast::{
     Expression, MethodDefinitionKind, ObjectPropertyKind, Statement, TSAccessibility, TSType,
     TSTypeAnnotation, TSTypeName,
 };
+use oxc_span::{GetSpan, Span};
 
 use crate::{MemberInfo, MemberKind};
 
@@ -18,6 +19,11 @@ pub struct AngularComponentMetadata {
     pub style_urls: Vec<String>,
     /// Inline `template:` string literal content.
     pub inline_template: Option<String>,
+    /// Source span of the matched `@Component`/`@Directive` decorator.
+    /// Used to anchor synthetic `<template>` complexity findings to a useful
+    /// line/col in the host `.ts` file, and to honour `// fallow-ignore-next-line`
+    /// comments placed above the decorator.
+    pub decorator_span: Option<Span>,
     /// Class member names referenced in `host:` binding expressions.
     pub host_member_refs: Vec<String>,
     /// Class member names listed in `inputs:` and `outputs:` metadata arrays.
@@ -84,7 +90,17 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
                         && tpl.expressions.is_empty()
                         && let Some(quasi) = tpl.quasis.first()
                     {
-                        inline_template = Some(quasi.value.raw.to_string());
+                        // Prefer the cooked (escape-interpreted) value so newline
+                        // and other escapes feed the template-complexity scanner
+                        // correctly. Fall back to raw when the cooked value is
+                        // unavailable (parse-level escape errors).
+                        let source = quasi
+                            .value
+                            .cooked
+                            .as_ref()
+                            .map_or_else(|| quasi.value.raw.as_str(), |c| c.as_str())
+                            .to_string();
+                        inline_template = Some(source);
                     }
                 }
                 "styleUrl" => {
@@ -127,6 +143,7 @@ pub fn extract_angular_component_metadata(class: &Class<'_>) -> Option<AngularCo
                 template_url,
                 style_urls,
                 inline_template,
+                decorator_span: Some(decorator.span()),
                 host_member_refs,
                 input_output_members,
             });

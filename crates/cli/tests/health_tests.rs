@@ -126,6 +126,116 @@ fn health_reports_angular_template_complexity() {
 }
 
 #[test]
+fn health_reports_angular_inline_template_complexity() {
+    let output = run_fallow(
+        "health",
+        "angular-inline-template-complexity",
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array().expect("findings array");
+    let template = findings
+        .iter()
+        .find(|finding| {
+            finding["name"] == "<template>"
+                && finding["path"]
+                    .as_str()
+                    .is_some_and(|path| path.ends_with("host-game.component.ts"))
+        })
+        .unwrap_or_else(|| {
+            panic!("expected inline template complexity finding, got: {findings:#?}")
+        });
+
+    assert!(
+        template["cyclomatic"].as_u64().unwrap_or_default() > 3,
+        "inline template should exceed cyclomatic threshold: {template:#?}"
+    );
+    assert!(
+        template["cognitive"].as_u64().unwrap_or_default() > 3,
+        "inline template should exceed cognitive threshold: {template:#?}"
+    );
+    // Anchored at the `@Component` decorator (line 16 of host-game.component.ts).
+    assert_eq!(
+        template["line"].as_u64(),
+        Some(16),
+        "inline template finding should anchor at the @Component decorator: {template:#?}"
+    );
+    // The .ts host file uses TS-style suppression actions, not the HTML
+    // suppress-file action that external `templateUrl` files emit.
+    let actions = template["actions"].as_array().expect("actions array");
+    assert!(
+        actions
+            .iter()
+            .any(|action| action["type"] == "suppress-line"),
+        "inline template finding should expose a suppress-line action: {actions:#?}"
+    );
+    assert!(
+        actions
+            .iter()
+            .all(|action| action["type"] != "suppress-file"),
+        "inline template finding should not emit the HTML suppress-file action: {actions:#?}"
+    );
+}
+
+#[test]
+fn health_inline_template_complexity_can_be_suppressed() {
+    let dir = tempdir().unwrap();
+    let fixture = fixture_path("angular-inline-template-complexity");
+    copy_dir_recursive(&fixture, dir.path());
+
+    let component_path = dir.path().join("src/host-game.component.ts");
+    let original = std::fs::read_to_string(&component_path).expect("read component");
+    let prefixed = original.replacen(
+        "@Component({",
+        "// fallow-ignore-next-line complexity\n@Component({",
+        1,
+    );
+    assert_ne!(
+        original, prefixed,
+        "fixture should contain a @Component decorator"
+    );
+    std::fs::write(&component_path, prefixed).expect("write suppressed component");
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--max-cyclomatic",
+            "3",
+            "--max-cognitive",
+            "3",
+            "--max-crap",
+            "10000",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 0,
+        "suppressed inline template should not fail health"
+    );
+    let json = parse_json(&output);
+    let findings = json["findings"].as_array();
+    assert!(
+        findings.is_none_or(|arr| arr.iter().all(|f| f["name"] != "<template>")),
+        "suppressed inline template should not emit a <template> finding: {json:#?}"
+    );
+}
+
+#[test]
 fn health_html_template_complexity_can_be_suppressed() {
     let dir = tempdir().unwrap();
     let fixture = fixture_path("angular-template-complexity");
