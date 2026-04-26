@@ -58,6 +58,13 @@ pub struct DupesOptions<'a> {
         reason = "wired from CLI but consumed by combined mode, not standalone dupes"
     )]
     pub summary: bool,
+    /// `dupes` accepts `--group-by` for parity with `check` / `health` but
+    /// does not yet partition output. Wired from CLI; will be consumed once
+    /// grouped dupes output ships.
+    #[allow(
+        dead_code,
+        reason = "accepted for CLI parity; consumed by future grouped-dupes output"
+    )]
     pub group_by: Option<crate::GroupBy>,
 }
 
@@ -346,17 +353,10 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
-    // Build resolver for --group-by (validates the flag, loads CODEOWNERS if needed).
-    // Dupes grouped output is a follow-up — for now, validate and discard.
-    let _resolver = match crate::build_ownership_resolver(
-        opts.group_by,
-        opts.root,
-        result.config.codeowners.as_deref(),
-        opts.output,
-    ) {
-        Ok(r) => r,
-        Err(code) => return code,
-    };
+    // `dupes` accepts --group-by for parity with check/health but does not yet
+    // partition output. The flag value is intentionally unused here; once
+    // grouped dupes output ships, build the resolver and route through
+    // print_dupes_result_with_grouping with a Some(...).
     print_dupes_result_with_grouping(&result, opts.quiet, opts.explain, None, opts.summary)
 }
 

@@ -377,7 +377,7 @@ pub fn print_health_report(
 fn warn_grouping_unsupported(grouping: Option<&crate::health_types::HealthGrouping>, format: &str) {
     if let Some(g) = grouping {
         eprintln!(
-            "note: --group-by {} output for {format} is not yet supported, falling back to \
+            "note: --group-by {} is not supported for {format} output, falling back to \
              ungrouped output (use --format json for the full grouped envelope)",
             g.mode
         );

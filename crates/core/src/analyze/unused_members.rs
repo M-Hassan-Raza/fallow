@@ -668,9 +668,10 @@ pub fn find_unused_members(
             let file_self_accesses = self_accessed_members.get(&module.file_id);
 
             for member in &export.members {
-                // Skip namespace members for now — individual namespace member
-                // unused detection is a future enhancement. The namespace as a
-                // whole is already tracked via unused export detection.
+                // Per-member unused detection on TS namespaces is not yet
+                // wired; the namespace as a whole is still tracked via the
+                // unused-export detector, so a fully-unused namespace remains
+                // reported and only the per-member granularity is missing.
                 if matches!(member.kind, MemberKind::NamespaceMember) {
                     continue;
                 }

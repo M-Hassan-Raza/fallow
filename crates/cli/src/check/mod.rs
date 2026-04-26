@@ -146,7 +146,7 @@ pub struct CheckOptions<'a> {
     /// Report unused exports in entry files instead of auto-marking them as used.
     pub include_entry_exports: bool,
     /// When true, emit a condensed summary instead of full item-level output.
-    /// Read by combined mode; not yet consumed by standalone check.
+    /// Consumed by combined mode only; standalone check ignores this flag.
     #[allow(
         dead_code,
         reason = "wired from CLI but consumed by combined mode, not standalone check"
