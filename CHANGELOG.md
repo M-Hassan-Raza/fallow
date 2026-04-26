@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.51.0] - 2026-04-26
+
+### Added
+
+- **Synthetic `<template>` complexity findings for Angular HTML templates.** `fallow health --complexity` now scans standalone `.html` files for Angular template syntax and emits a synthetic finding named `<template>` whenever the template uses control-flow blocks (`@if`/`@else`/`@for`/`@switch`/`@case`/`@defer (when ...)`/`@let`), legacy structural directives (`*ngIf`, `*ngFor`, `[ngFor]`, `[ngForOf]`), expression-bound attributes (`[x]`, `(x)`, `bind-x`, `on-x`), or `{{ }}` interpolations. Cyclomatic increments per branch; cognitive accumulates with nesting and resets logical-operator runs across ternary branches. The finding flows through every output format (human, JSON, SARIF, CodeClimate, markdown, compact) and feeds the existing health score, hotspot, and refactoring-target pipelines. Suppress with `<!-- fallow-ignore-file complexity -->` at the top of the template; the JSON `actions` array carries a `suppress-file` entry with the exact comment so AI agents can apply it. Closes [#183](https://github.com/fallow-rs/fallow/issues/183). The CRAP-coverage story for `<template>` findings (JIT inherit-from-`.ts`, AOT source-map back-mapping) is tracked separately in [#186](https://github.com/fallow-rs/fallow/issues/186).
+- **Tier-aware CRAP refactoring actions and baseline-aware suppression.** `fallow health --complexity` now emits coverage-leaning actions tailored to the function's coverage tier when CRAP triggers a finding: `add-tests` for `coverage_tier: none`, `increase-coverage` for `partial`/`high`, and `refactor-function` when even 100% coverage cannot bring CRAP below the threshold. CRAP-only findings within five of the cyclomatic threshold also append a secondary `refactor-function` action when cognitive complexity passes the cognitive floor (suppresses false positives on flat type-tag dispatchers and JSX render maps). Baseline-active runs and projects with `health.suggestInlineSuppression: false` no longer emit `suppress-line` actions; the report root carries an `actions_meta: { suppression_hints_omitted: true, reason: "baseline-active" }` breadcrumb so consumers can detect the omission.
+
+### Changed
+
+- **`--production-coverage` renamed to `--runtime-coverage` (no backwards-compatibility alias).** V8 and Istanbul measure invocations at runtime regardless of environment, so "production coverage" implied a restriction that did not exist; the beacon ships from any environment the operator points it at (staging, dev, load test, production). Surface changes: CLI flag `--production-coverage` → `--runtime-coverage`; MCP tool `check_production_coverage` → `check_runtime_coverage`; JWT feature claim `production_coverage` → `runtime_coverage`; SARIF rule IDs `fallow/production-*` → `fallow/runtime-*` (subtypes `safe-to-delete`/`review-required`/`low-traffic`); Rust types `ProductionCoverage*` → `RuntimeCoverage*`; source files `health_types/production_coverage.rs` → `runtime_coverage.rs`; tests `production_coverage_tests.rs` → `runtime_coverage_tests.rs`; snapshots `*_with_production_coverage.snap` → `*_with_runtime_coverage.snap`. The unrelated `--production` static-analysis flag (excludes test/dev files) is unchanged; only the paid V8/Istanbul coverage feature is renamed. SARIF / CodeClimate consumers that filter by `ruleId` need to update their selectors. Counterpart changes ship in fallow-cloud (sidecar + dashboard) and the companion repos (fallow-docs, fallow-skills) so the protocol, server, docs, and skill references stay in sync.
+
 ## [2.50.0] - 2026-04-26
 
 ### Added
@@ -1681,6 +1692,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
 [Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.50.0...HEAD
+[2.51.0]: https://github.com/fallow-rs/fallow/compare/v2.50.0...v2.51.0
 [2.50.0]: https://github.com/fallow-rs/fallow/compare/v2.49.0...v2.50.0
 [2.49.0]: https://github.com/fallow-rs/fallow/compare/v2.48.5...v2.49.0
 [2.48.5]: https://github.com/fallow-rs/fallow/compare/v2.48.4...v2.48.5
