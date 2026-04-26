@@ -1,6 +1,6 @@
 //! V8 `ScriptCoverage` JSON parser and Istanbul-compatible normalizer.
 //!
-//! This is the open-source layer of fallow's production-coverage pipeline.
+//! This is the open-source layer of fallow's runtime-coverage pipeline.
 //! It performs the mechanical conversion from V8's byte-offset-based coverage
 //! format (as emitted by `node --experimental-test-coverage`, `c8`, the
 //! Inspector protocol, or any V8 isolate) into the line/column-based
@@ -56,7 +56,7 @@ pub struct FunctionCoverage {
     pub ranges: Vec<CoverageRange>,
     /// True when V8 emitted block-level data for this function (instrumented
     /// coverage). False when only the outer function range is reliable
-    /// (best-effort / production coverage).
+    /// (best-effort / runtime coverage).
     #[serde(rename = "isBlockCoverage", default)]
     pub is_block_coverage: bool,
 }

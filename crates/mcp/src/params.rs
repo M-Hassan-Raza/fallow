@@ -509,17 +509,17 @@ pub struct HealthParams {
     /// Use when coverage was generated in a different environment (CI runner, Docker).
     pub coverage_root: Option<String>,
 
-    /// Path to production coverage input (paid feature). Accepts a V8
+    /// Path to runtime coverage input (paid feature). Accepts a V8
     /// coverage directory (`NODE_V8_COVERAGE=...`), a single V8 coverage
     /// JSON file, or an Istanbul `coverage-final.json`. Requires an active
     /// license; run `fallow license activate --trial --email <addr>` first.
-    /// Production coverage can exceed the default 120s MCP subprocess timeout
+    /// Runtime coverage can exceed the default 120s MCP subprocess timeout
     /// on large dumps; raise `FALLOW_TIMEOUT_SECS` accordingly.
-    pub production_coverage: Option<String>,
+    pub runtime_coverage: Option<String>,
 
     /// Minimum invocation count for a function to be classified as a hot
-    /// path in production-coverage output. Inherits the CLI default (100)
-    /// when omitted. Takes effect only when `production_coverage` is also
+    /// path in runtime-coverage output. Inherits the CLI default (100)
+    /// when omitted. Takes effect only when `runtime_coverage` is also
     /// set; silently ignored otherwise.
     pub min_invocations_hot: Option<u64>,
 
@@ -527,14 +527,14 @@ pub struct HealthParams {
     /// `safe_to_delete` or `review_required` verdicts. Below this threshold,
     /// confidence is capped at `medium` to protect against overconfident
     /// verdicts on new or low-traffic services. Inherits the sidecar default
-    /// (5000) when omitted. Takes effect only when `production_coverage` is
+    /// (5000) when omitted. Takes effect only when `runtime_coverage` is
     /// also set; silently ignored otherwise.
     pub min_observation_volume: Option<u32>,
 
     /// Fraction of `trace_count` below which an invoked function is
     /// classified `low_traffic` rather than `active`. Expressed as a
     /// decimal (0.001 = 0.1%). Inherits the sidecar default (0.001) when
-    /// omitted. Takes effect only when `production_coverage` is also set;
+    /// omitted. Takes effect only when `runtime_coverage` is also set;
     /// silently ignored otherwise.
     pub low_traffic_threshold: Option<f64>,
 
@@ -545,17 +545,17 @@ pub struct HealthParams {
     pub group_by: Option<String>,
 }
 
-/// Parameters for `check_production_coverage`, the focused paid-tier
-/// production-coverage entry point. A thin wrapper around
-/// `fallow health --production-coverage <path>` with a narrow surface area
+/// Parameters for `check_runtime_coverage`, the focused paid-tier
+/// runtime-coverage entry point. A thin wrapper around
+/// `fallow health --runtime-coverage <path>` with a narrow surface area
 /// so agents can pick the right tool by name and pass exactly the knobs
-/// that apply to production coverage. Requires an active license JWT
+/// that apply to runtime coverage. Requires an active license JWT
 /// (`fallow license activate --trial --email <addr>` to start a 30-day
 /// trial). Long V8 dumps can exceed the default 120s MCP subprocess
 /// timeout; raise `FALLOW_TIMEOUT_SECS` for multi-megabyte inputs.
 #[derive(Deserialize, JsonSchema)]
-pub struct CheckProductionCoverageParams {
-    /// Path to production coverage input. Accepts a V8 coverage directory
+pub struct CheckRuntimeCoverageParams {
+    /// Path to runtime coverage input. Accepts a V8 coverage directory
     /// (`NODE_V8_COVERAGE=<dir>`), a single V8 coverage JSON file, or an
     /// Istanbul `coverage-final.json`. Required.
     pub coverage: String,

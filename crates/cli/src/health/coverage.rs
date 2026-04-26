@@ -24,13 +24,13 @@ use tempfile::TempDir;
 use url::Url;
 
 use crate::error::emit_error;
-use crate::health::ProductionCoverageOptions;
+use crate::health::RuntimeCoverageOptions;
 use crate::health::scoring::IstanbulCoverage;
 use crate::health_types::{
-    ProductionCoverageAction, ProductionCoverageConfidence, ProductionCoverageEvidence,
-    ProductionCoverageFinding, ProductionCoverageHotPath, ProductionCoverageMessage,
-    ProductionCoverageReport, ProductionCoverageReportVerdict, ProductionCoverageSummary,
-    ProductionCoverageVerdict, ProductionCoverageWatermark,
+    RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageEvidence,
+    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageReport,
+    RuntimeCoverageReportVerdict, RuntimeCoverageSummary, RuntimeCoverageVerdict,
+    RuntimeCoverageWatermark,
 };
 use crate::license::verifying_key;
 
@@ -156,7 +156,7 @@ pub fn prepare_options(
     min_observation_volume: Option<u32>,
     low_traffic_threshold: Option<f64>,
     output: OutputFormat,
-) -> Result<ProductionCoverageOptions, ExitCode> {
+) -> Result<RuntimeCoverageOptions, ExitCode> {
     let key = match verifying_key() {
         Ok(key) => key,
         Err(message) => return Err(emit_error(&message, 3, output)),
@@ -179,14 +179,14 @@ pub fn prepare_options(
 
     validate_license_status(&status, &key, output)?;
 
-    Ok(ProductionCoverageOptions {
+    Ok(RuntimeCoverageOptions {
         path: path.to_path_buf(),
         min_invocations_hot,
         min_observation_volume,
         low_traffic_threshold,
         license_jwt: jwt,
         watermark: if status.show_watermark() {
-            Some(ProductionCoverageWatermark::LicenseExpiredGrace)
+            Some(RuntimeCoverageWatermark::LicenseExpiredGrace)
         } else {
             None
         },
@@ -198,7 +198,7 @@ pub fn prepare_options(
     reason = "sidecar invocation needs the same filter context as health analysis"
 )]
 pub(super) fn analyze(
-    options: &ProductionCoverageOptions,
+    options: &RuntimeCoverageOptions,
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
     analysis_output: &fallow_core::AnalysisOutput,
@@ -210,7 +210,7 @@ pub(super) fn analyze(
     top: Option<usize>,
     quiet: bool,
     output: OutputFormat,
-) -> Result<ProductionCoverageReport, ExitCode> {
+) -> Result<RuntimeCoverageReport, ExitCode> {
     let sidecar =
         discover_sidecar(Some(root)).map_err(|message| emit_error(&message, 4, output))?;
     let prepared_sources = prepare_coverage_sources(&options.path)
@@ -255,8 +255,8 @@ fn validate_license_status(
             3,
             output,
         )),
-        _ if !status.permits(&Feature::ProductionCoverage) => Err(emit_error(
-            "License is valid but does not include 'production_coverage'. Upgrade at fallow.tools/upgrade.",
+        _ if !status.permits(&Feature::RuntimeCoverage) => Err(emit_error(
+            "License is valid but does not include 'runtime_coverage'. Upgrade at fallow.tools/upgrade.",
             3,
             output,
         )),
@@ -607,7 +607,7 @@ impl LocalPackageManager {
     reason = "request assembly mirrors the health analysis filter context plus prepared coverage inputs"
 )]
 fn build_request(
-    options: &ProductionCoverageOptions,
+    options: &RuntimeCoverageOptions,
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
     static_signals: &StaticSignalIndex,
@@ -730,7 +730,7 @@ fn build_static_signal_index(
     let graph = analysis_output
         .graph
         .as_ref()
-        .ok_or_else(|| "analysis graph not available for production coverage".to_owned())?;
+        .ok_or_else(|| "analysis graph not available for runtime coverage".to_owned())?;
     let mut index = StaticSignalIndex::default();
 
     for file in &analysis_output.results.unused_files {
@@ -1529,7 +1529,7 @@ fn run_sidecar(
             return Err(emit_error(
                 &stderr_message(
                     &output_data.stderr,
-                    "failed to parse production coverage input",
+                    "failed to parse runtime coverage input",
                 ),
                 5,
                 output,
@@ -1594,17 +1594,17 @@ fn stderr_message(stderr: &[u8], fallback: &str) -> String {
 fn convert_response(
     response: Response,
     _locations: &FunctionLocations,
-    watermark: Option<ProductionCoverageWatermark>,
-) -> ProductionCoverageReport {
+    watermark: Option<RuntimeCoverageWatermark>,
+) -> RuntimeCoverageReport {
     let mut findings = response
         .findings
         .into_iter()
         .filter_map(|finding| {
             let verdict = map_verdict(finding.verdict);
-            if matches!(verdict, ProductionCoverageVerdict::Active) {
+            if matches!(verdict, RuntimeCoverageVerdict::Active) {
                 return None;
             }
-            Some(ProductionCoverageFinding {
+            Some(RuntimeCoverageFinding {
                 id: finding.id,
                 path: PathBuf::from(finding.file),
                 function: finding.function,
@@ -1616,7 +1616,7 @@ fn convert_response(
                 actions: finding
                     .actions
                     .into_iter()
-                    .map(|action| ProductionCoverageAction {
+                    .map(|action| RuntimeCoverageAction {
                         kind: action.kind,
                         description: action.description,
                         auto_fixable: action.auto_fixable,
@@ -1636,7 +1636,7 @@ fn convert_response(
     let mut hot_paths = response
         .hot_paths
         .into_iter()
-        .map(|entry| ProductionCoverageHotPath {
+        .map(|entry| RuntimeCoverageHotPath {
             id: entry.id,
             path: PathBuf::from(entry.file),
             function: entry.function,
@@ -1664,9 +1664,9 @@ fn convert_response(
         0.0
     };
 
-    ProductionCoverageReport {
+    RuntimeCoverageReport {
         verdict: map_report_verdict(&response.verdict),
-        summary: ProductionCoverageSummary {
+        summary: RuntimeCoverageSummary {
             functions_tracked: response.summary.functions_tracked as usize,
             functions_hit: response.summary.functions_hit as usize,
             functions_unhit: response.summary.functions_unhit as usize,
@@ -1687,7 +1687,7 @@ fn convert_response(
         warnings: response
             .warnings
             .into_iter()
-            .map(|warning| ProductionCoverageMessage {
+            .map(|warning| RuntimeCoverageMessage {
                 code: warning.code,
                 message: warning.message,
             })
@@ -1695,30 +1695,30 @@ fn convert_response(
     }
 }
 
-const fn map_verdict(verdict: Verdict) -> ProductionCoverageVerdict {
+const fn map_verdict(verdict: Verdict) -> RuntimeCoverageVerdict {
     match verdict {
-        Verdict::SafeToDelete => ProductionCoverageVerdict::SafeToDelete,
-        Verdict::ReviewRequired => ProductionCoverageVerdict::ReviewRequired,
-        Verdict::CoverageUnavailable => ProductionCoverageVerdict::CoverageUnavailable,
-        Verdict::LowTraffic => ProductionCoverageVerdict::LowTraffic,
-        Verdict::Active => ProductionCoverageVerdict::Active,
-        Verdict::Unknown => ProductionCoverageVerdict::Unknown,
+        Verdict::SafeToDelete => RuntimeCoverageVerdict::SafeToDelete,
+        Verdict::ReviewRequired => RuntimeCoverageVerdict::ReviewRequired,
+        Verdict::CoverageUnavailable => RuntimeCoverageVerdict::CoverageUnavailable,
+        Verdict::LowTraffic => RuntimeCoverageVerdict::LowTraffic,
+        Verdict::Active => RuntimeCoverageVerdict::Active,
+        Verdict::Unknown => RuntimeCoverageVerdict::Unknown,
     }
 }
 
-const fn map_confidence(confidence: Confidence) -> ProductionCoverageConfidence {
+const fn map_confidence(confidence: Confidence) -> RuntimeCoverageConfidence {
     match confidence {
-        Confidence::VeryHigh => ProductionCoverageConfidence::VeryHigh,
-        Confidence::High => ProductionCoverageConfidence::High,
-        Confidence::Medium => ProductionCoverageConfidence::Medium,
-        Confidence::Low => ProductionCoverageConfidence::Low,
-        Confidence::None => ProductionCoverageConfidence::None,
-        Confidence::Unknown => ProductionCoverageConfidence::Unknown,
+        Confidence::VeryHigh => RuntimeCoverageConfidence::VeryHigh,
+        Confidence::High => RuntimeCoverageConfidence::High,
+        Confidence::Medium => RuntimeCoverageConfidence::Medium,
+        Confidence::Low => RuntimeCoverageConfidence::Low,
+        Confidence::None => RuntimeCoverageConfidence::None,
+        Confidence::Unknown => RuntimeCoverageConfidence::Unknown,
     }
 }
 
-fn map_evidence(evidence: Evidence) -> ProductionCoverageEvidence {
-    ProductionCoverageEvidence {
+fn map_evidence(evidence: Evidence) -> RuntimeCoverageEvidence {
+    RuntimeCoverageEvidence {
         static_status: evidence.static_status,
         test_coverage: evidence.test_coverage,
         v8_tracking: evidence.v8_tracking,
@@ -1728,30 +1728,28 @@ fn map_evidence(evidence: Evidence) -> ProductionCoverageEvidence {
     }
 }
 
-fn map_report_verdict(verdict: &ReportVerdict) -> ProductionCoverageReportVerdict {
+fn map_report_verdict(verdict: &ReportVerdict) -> RuntimeCoverageReportVerdict {
     match verdict {
-        ReportVerdict::Clean => ProductionCoverageReportVerdict::Clean,
-        ReportVerdict::HotPathChangesNeeded => {
-            ProductionCoverageReportVerdict::HotPathChangesNeeded
-        }
-        ReportVerdict::ColdCodeDetected => ProductionCoverageReportVerdict::ColdCodeDetected,
-        ReportVerdict::LicenseExpiredGrace => ProductionCoverageReportVerdict::LicenseExpiredGrace,
-        ReportVerdict::Unknown => ProductionCoverageReportVerdict::Unknown,
+        ReportVerdict::Clean => RuntimeCoverageReportVerdict::Clean,
+        ReportVerdict::HotPathChangesNeeded => RuntimeCoverageReportVerdict::HotPathChangesNeeded,
+        ReportVerdict::ColdCodeDetected => RuntimeCoverageReportVerdict::ColdCodeDetected,
+        ReportVerdict::LicenseExpiredGrace => RuntimeCoverageReportVerdict::LicenseExpiredGrace,
+        ReportVerdict::Unknown => RuntimeCoverageReportVerdict::Unknown,
     }
 }
 
-fn map_watermark(watermark: &Watermark) -> ProductionCoverageWatermark {
+fn map_watermark(watermark: &Watermark) -> RuntimeCoverageWatermark {
     match watermark {
-        Watermark::TrialExpired => ProductionCoverageWatermark::TrialExpired,
-        Watermark::LicenseExpiredGrace => ProductionCoverageWatermark::LicenseExpiredGrace,
-        Watermark::Unknown => ProductionCoverageWatermark::Unknown,
+        Watermark::TrialExpired => RuntimeCoverageWatermark::TrialExpired,
+        Watermark::LicenseExpiredGrace => RuntimeCoverageWatermark::LicenseExpiredGrace,
+        Watermark::Unknown => RuntimeCoverageWatermark::Unknown,
     }
 }
 
 fn map_capture_quality(
     quality: &CaptureQuality,
-) -> crate::health_types::ProductionCoverageCaptureQuality {
-    crate::health_types::ProductionCoverageCaptureQuality {
+) -> crate::health_types::RuntimeCoverageCaptureQuality {
+    crate::health_types::RuntimeCoverageCaptureQuality {
         window_seconds: quality.window_seconds,
         instances_observed: quality.instances_observed,
         lazy_parse_warning: quality.lazy_parse_warning,
@@ -1760,14 +1758,14 @@ fn map_capture_quality(
 }
 
 /// Sort order for finding rendering: strongest deletion signal first, noise last.
-const fn verdict_rank(verdict: ProductionCoverageVerdict) -> u8 {
+const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
     match verdict {
-        ProductionCoverageVerdict::SafeToDelete => 0,
-        ProductionCoverageVerdict::ReviewRequired => 1,
-        ProductionCoverageVerdict::LowTraffic => 2,
-        ProductionCoverageVerdict::CoverageUnavailable => 3,
-        ProductionCoverageVerdict::Active => 4,
-        ProductionCoverageVerdict::Unknown => 5,
+        RuntimeCoverageVerdict::SafeToDelete => 0,
+        RuntimeCoverageVerdict::ReviewRequired => 1,
+        RuntimeCoverageVerdict::LowTraffic => 2,
+        RuntimeCoverageVerdict::CoverageUnavailable => 3,
+        RuntimeCoverageVerdict::Active => 4,
+        RuntimeCoverageVerdict::Unknown => 5,
     }
 }
 
@@ -1780,7 +1778,7 @@ mod tests {
         path_binary_candidates, prepare_coverage_sources, resolve_original_source_path,
         resolve_sidecar_via_command, verify_sidecar_signature, write_istanbul_coverage_file,
     };
-    use crate::health::ProductionCoverageOptions;
+    use crate::health::RuntimeCoverageOptions;
     use fallow_config::{FallowConfig, OutputFormat};
     use fallow_cov_protocol::{
         Confidence, CoverageSource, DiagnosticMessage, Evidence, Finding, HotPath, ReportVerdict,
@@ -1824,15 +1822,15 @@ mod tests {
         );
     }
 
-    // Structural invariant: the production-coverage analysis path must not
+    // Structural invariant: the runtime-coverage analysis path must not
     // perform any network I/O. Enterprise / air-gapped buyers depend on this.
     // The gate for Phase 2 step 4 of the roadmap is explicitly "integration
     // test asserting zero network calls during analysis"; this source-level
     // assertion is the fastest regression guard for that contract. The sibling
-    // integration tests in `crates/cli/tests/production_coverage_tests.rs`
+    // integration tests in `crates/cli/tests/runtime_coverage_tests.rs`
     // exercise the full spawn pipeline with a signed stub sidecar.
     #[test]
-    fn production_coverage_module_has_no_network_code() {
+    fn runtime_coverage_module_has_no_network_code() {
         // Scan only the non-test portion of the file; the FORBIDDEN list below
         // would otherwise match its own entries.
         let full = include_str!("coverage.rs");
@@ -1854,7 +1852,7 @@ mod tests {
         for needle in FORBIDDEN {
             assert!(
                 !analysis_source.contains(needle),
-                "crates/cli/src/health/coverage.rs must not reference `{needle}`; the production-coverage analysis path is sealed and cannot make network calls",
+                "crates/cli/src/health/coverage.rs must not reference `{needle}`; the runtime-coverage analysis path is sealed and cannot make network calls",
             );
         }
     }
@@ -2243,7 +2241,7 @@ mod tests {
         assert_eq!(report.findings[0].line, 8);
         assert_eq!(
             report.findings[0].verdict,
-            crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+            crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
         );
         assert_eq!(report.findings[0].evidence.static_status, "used");
         assert_eq!(report.hot_paths[0].id, "fallow:hot:def67890");
@@ -2255,7 +2253,7 @@ mod tests {
         let root = PathBuf::from("/repo");
         let ws_root = root.join("packages/app");
         let ws_roots = [ws_root.clone()];
-        let options = ProductionCoverageOptions {
+        let options = RuntimeCoverageOptions {
             path: root.join("coverage"),
             min_invocations_hot: 100,
             min_observation_volume: None,
@@ -2351,7 +2349,7 @@ mod tests {
             .or_default()
             .insert(tested_line);
 
-        let options = ProductionCoverageOptions {
+        let options = RuntimeCoverageOptions {
             path: root.join("coverage"),
             min_invocations_hot: 100,
             min_observation_volume: None,

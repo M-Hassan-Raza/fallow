@@ -22,7 +22,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/production-review-required",
-    "description": "'coldPath' production coverage verdict: review required (0 invocations)",
+    "description": "'coldPath' runtime coverage verdict: review required (0 invocations)",
     "categories": [
       "Bug Risk"
     ],
@@ -37,13 +37,13 @@ expression: json_str
   },
   {
     "type": "issue",
-    "check_name": "fallow/production-coverage-unavailable",
-    "description": "'lateBound' production coverage verdict: coverage unavailable (untracked)",
+    "check_name": "fallow/runtime-coverage-unavailable",
+    "description": "'lateBound' runtime coverage verdict: coverage unavailable (untracked)",
     "categories": [
       "Bug Risk"
     ],
     "severity": "minor",
-    "fingerprint": "25b3f5df2071893a",
+    "fingerprint": "a4bc61bb1ba59529",
     "location": {
       "path": "src/unknown.ts",
       "lines": {

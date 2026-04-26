@@ -96,8 +96,8 @@ jobs:
       - name: Run tests
         run: cargo test --workspace --all-targets
 
-      - name: Run production-coverage integration tests (feature-gated stub sidecar)
-        run: cargo test -p fallow-cli --features test-sidecar-key --test production_coverage_tests
+      - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
+        run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests
 
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings

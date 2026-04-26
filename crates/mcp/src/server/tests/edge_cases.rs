@@ -670,7 +670,7 @@ fn health_args_with_all_options_including_targets_and_snapshot() {
         summary: Some(true),
         coverage: Some("coverage/coverage-final.json".to_string()),
         coverage_root: Some("/home/runner/work/myapp".to_string()),
-        production_coverage: Some("./coverage".to_string()),
+        runtime_coverage: Some("./coverage".to_string()),
         min_invocations_hot: Some(500),
         min_observation_volume: Some(10_000),
         low_traffic_threshold: Some(0.005),

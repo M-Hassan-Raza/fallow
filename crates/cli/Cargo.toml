@@ -24,7 +24,7 @@ required-features = ["test-sidecar-key"]
 default = []
 # Test-only feature that swaps the sidecar binary-signing verify key and the
 # license JWT verify key for deterministic keypairs derived from fixed seeds.
-# Used by the end-to-end production-coverage integration tests. MUST NOT be
+# Used by the end-to-end runtime-coverage integration tests. MUST NOT be
 # enabled in release builds; a compile_error! at
 # crates/cli/src/health/coverage.rs guards against that.
 test-sidecar-key = []

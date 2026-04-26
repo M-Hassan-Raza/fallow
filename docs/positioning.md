@@ -10,7 +10,7 @@ This document is the canonical copy guide for all fallow repos (fallow, fallow-d
 
 **Why now:** Two drifts are compounding at once. AI-accelerated code generation is creating structural drift faster than humans can review it, so teams need cross-file structural analysis that runs on every commit, not once a quarter. At the same time, teams still ship code with no execution evidence, so they guess which paths are hot, which are cold, and which flags are dead. That is execution drift, and the traditional coverage tools that could answer it were built for tests, not production. Fallow closes both gaps in one pipeline.
 
-**Why fallow:** The only tool that combines cross-file static analysis with production runtime evidence in a single Rust-native pipeline. Sub-second static analysis on typical projects, optional production coverage collection when teams are ready to upgrade, and a single report that speaks both languages. Zero configuration on the static layer, explicit licensed onboarding on the runtime layer.
+**Why fallow:** The only tool that combines cross-file static analysis with production runtime evidence in a single Rust-native pipeline. Sub-second static analysis on typical projects, optional runtime coverage collection when teams are ready to upgrade, and a single report that speaks both languages. Zero configuration on the static layer, explicit licensed onboarding on the runtime layer.
 
 ## Tagline
 
@@ -42,7 +42,7 @@ Fallow ships as two layers on a single pipeline.
 
 **Free static layer.** Open source under MIT. Rust-native binary with an npm wrapper, a VS Code extension, an LSP, an MCP server, a GitHub Action, and a CLI. Finds unused code, duplication, circular dependencies, complexity hotspots, architecture boundaries, feature-flag usage, and more. Zero configuration on typical projects. Sub-second on most codebases. This is the layer we describe as "static codebase intelligence" in long-form copy.
 
-**Paid runtime layer (Fallow Runtime).** Commercial add-on. Ingests production V8 coverage, normalizes it, and joins it back to the static graph. Surfaces hot paths, cold code, runtime-backed review, runtime-weighted health, stale-flag evidence, trends, and alerts. Licensed via a signed JWT, offline-verified by the CLI. The public engine term in docs and CLI output is "production coverage"; the commercial product name is "Fallow Runtime."
+**Paid runtime layer (Fallow Runtime).** Commercial add-on. Ingests production V8 coverage, normalizes it, and joins it back to the static graph. Surfaces hot paths, cold code, runtime-backed review, runtime-weighted health, stale-flag evidence, trends, and alerts. Licensed via a signed JWT, offline-verified by the CLI. The public engine term in docs and CLI output is "runtime coverage"; the commercial product name is "Fallow Runtime."
 
 **One-sentence claim:** Static analysis is free and open source. Runtime intelligence is the paid team layer.
 
@@ -84,7 +84,7 @@ Use these terms consistently. The brand comes first, the category phrase explain
 - **Category phrase:** Codebase intelligence for TypeScript and JavaScript
 - **Free product descriptor:** Static codebase intelligence (the open-source layer)
 - **Paid product name:** Fallow Runtime
-- **Technical engine term (docs + CLI):** production coverage (the collection mechanism that powers Fallow Runtime)
+- **Technical engine term (docs + CLI):** runtime coverage (the collection mechanism that powers Fallow Runtime)
 - **Outcome language:** cold code, hot paths, runtime-backed review, stale flags, runtime-weighted health
 
 ## What not to say
@@ -93,7 +93,7 @@ Do not ship these phrases. They either muddy the category, undersell the product
 
 - "developer intelligence platform" (generic, reads like an enterprise pitch)
 - "better knip" (private comparison only, never on marketing surfaces)
-- "production coverage" as the hero headline (engine term, not category; keep it in docs and CLI)
+- "runtime coverage" as the hero headline (engine term, not category; keep it in docs and CLI)
 - "dead code tool" as the identity (too narrow, loses the runtime layer entirely)
 - "AI-first" as the category (fallow is deterministic; AI is an audience, not an ingredient)
 - "zero config" adjacent to Fallow Runtime onboarding copy (the static layer is zero-config, the runtime layer is licensed and explicit)
@@ -106,6 +106,6 @@ Use this checklist on every new piece of copy before shipping.
 - [ ] The free static layer and the paid runtime layer are clearly separated. A reader should never confuse which is which.
 - [ ] On any surface with room, include the sentence: "Static analysis is free and open source. Runtime intelligence is the paid team layer."
 - [ ] The category phrase "codebase intelligence" appears before any outcome language (delete, refactor, hot paths, stale flags).
-- [ ] "Fallow Runtime" is used for the commercial product; "production coverage" is used for the engine in docs and CLI output.
+- [ ] "Fallow Runtime" is used for the commercial product; "runtime coverage" is used for the engine in docs and CLI output.
 - [ ] No phrase from the "What not to say" list has slipped in.
 - [ ] Primary stack line is "Linters check files. TypeScript checks types. Fallow checks the codebase." The secondary form only appears in long-form prose.

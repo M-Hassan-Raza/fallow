@@ -1,7 +1,7 @@
 mod analyze;
 mod audit;
 mod check_changed;
-mod check_production_coverage;
+mod check_runtime_coverage;
 mod dupes;
 mod fix;
 mod flags;
@@ -13,7 +13,7 @@ mod trace;
 pub use analyze::build_analyze_args;
 pub use audit::build_audit_args;
 pub use check_changed::build_check_changed_args;
-pub use check_production_coverage::build_check_production_coverage_args;
+pub use check_runtime_coverage::build_check_runtime_coverage_args;
 pub use dupes::build_find_dupes_args;
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
 pub use flags::build_feature_flags_args;

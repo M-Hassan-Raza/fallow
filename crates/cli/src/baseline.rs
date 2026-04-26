@@ -500,9 +500,9 @@ pub struct HealthBaselineData {
     /// Count-per-category-per-file baseline buckets.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub finding_counts: HealthFindingCountMap,
-    /// Stable production-coverage finding IDs from the sidecar.
+    /// Stable runtime-coverage finding IDs from the sidecar.
     #[serde(default)]
-    pub production_coverage_findings: Vec<String>,
+    pub runtime_coverage_findings: Vec<String>,
     /// Refactoring target keys: `relative_path:category`.
     #[serde(default)]
     pub target_keys: Vec<String>,
@@ -563,16 +563,16 @@ impl HealthBaselineData {
     /// Build a health baseline from findings and targets.
     pub fn from_findings(
         findings: &[crate::health_types::HealthFinding],
-        production_coverage_findings: &[crate::health_types::ProductionCoverageFinding],
+        runtime_coverage_findings: &[crate::health_types::RuntimeCoverageFinding],
         targets: &[crate::health_types::RefactoringTarget],
         root: &Path,
     ) -> Self {
         Self {
             findings: Vec::new(),
             finding_counts: health_finding_counts(findings, root),
-            production_coverage_findings: production_coverage_findings
+            runtime_coverage_findings: runtime_coverage_findings
                 .iter()
-                .map(|f| production_coverage_finding_key(f, root))
+                .map(|f| runtime_coverage_finding_key(f, root))
                 .collect(),
             target_keys: targets
                 .iter()
@@ -788,8 +788,8 @@ fn health_overlap_entry_count(
     overlap
 }
 
-fn production_coverage_finding_key(
-    finding: &crate::health_types::ProductionCoverageFinding,
+fn runtime_coverage_finding_key(
+    finding: &crate::health_types::RuntimeCoverageFinding,
     _root: &Path,
 ) -> String {
     // Use the stable content-hash ID from the sidecar (e.g.
@@ -829,18 +829,18 @@ pub fn filter_new_health_findings(
     findings
 }
 
-pub fn filter_new_production_coverage_findings(
-    mut findings: Vec<crate::health_types::ProductionCoverageFinding>,
+pub fn filter_new_runtime_coverage_findings(
+    mut findings: Vec<crate::health_types::RuntimeCoverageFinding>,
     baseline: &HealthBaselineData,
     root: &Path,
-) -> Vec<crate::health_types::ProductionCoverageFinding> {
+) -> Vec<crate::health_types::RuntimeCoverageFinding> {
     let baseline_keys: FxHashSet<&str> = baseline
-        .production_coverage_findings
+        .runtime_coverage_findings
         .iter()
         .map(String::as_str)
         .collect();
     findings.retain(|finding| {
-        let key = production_coverage_finding_key(finding, root);
+        let key = runtime_coverage_finding_key(finding, root);
         !baseline_keys.contains(key.as_str())
     });
     findings
@@ -1389,7 +1389,7 @@ mod tests {
             findings: vec!["src/utils.ts:parseExpression:42".to_owned()],
             finding_counts: BTreeMap::new(),
             target_keys: vec![],
-            production_coverage_findings: vec![],
+            runtime_coverage_findings: vec![],
         };
         let filtered = filter_new_health_findings(
             vec![make_health_finding(&root, "parseExpression", 42)],
@@ -1522,7 +1522,7 @@ mod tests {
             findings: vec![],
             finding_counts: BTreeMap::new(),
             target_keys: vec![],
-            production_coverage_findings: vec![],
+            runtime_coverage_findings: vec![],
         };
         let filtered = filter_new_health_findings(findings, &baseline, &root);
         assert_eq!(filtered.len(), 1);

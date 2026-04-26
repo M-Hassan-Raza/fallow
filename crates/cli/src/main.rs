@@ -575,11 +575,11 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         coverage_root: Option<PathBuf>,
 
-        /// File or directory containing production coverage input. Accepts a
+        /// File or directory containing runtime coverage input. Accepts a
         /// V8 coverage directory, a single V8 JSON file, or a single
         /// Istanbul coverage map JSON file (commonly coverage-final.json).
         #[arg(long, value_name = "PATH")]
-        production_coverage: Option<PathBuf>,
+        runtime_coverage: Option<PathBuf>,
 
         /// Threshold for hot-path classification
         #[arg(long, default_value_t = 100)]
@@ -677,7 +677,7 @@ enum Command {
         from: Option<PathBuf>,
     },
 
-    /// Manage paid-feature license (Phase 2 production coverage).
+    /// Manage paid-feature license (Phase 2 runtime coverage).
     ///
     /// Verification is offline against an Ed25519 public key compiled into
     /// the binary. The license file lives at `~/.fallow/license.jwt` (or
@@ -688,11 +688,11 @@ enum Command {
         subcommand: LicenseCli,
     },
 
-    /// Production coverage workflow.
+    /// Runtime coverage workflow.
     ///
     /// `setup` is the resumable single-entry-point first-run flow: license
     /// check → sidecar install → coverage recipe → analysis. Spec:
-    /// `.internal/spec-production-coverage-phase-2.md` (private repo).
+    /// `.internal/spec-runtime-coverage-phase-2.md` (private repo).
     Coverage {
         #[command(subcommand)]
         subcommand: CoverageCli,
@@ -796,7 +796,7 @@ enum CoverageCli {
     /// Upload a static function inventory to fallow cloud (Production
     /// Coverage, paid). Unlocks the `untracked` filter on the dashboard by
     /// pairing runtime coverage data with the AST view of "every function
-    /// that exists". See <https://docs.fallow.tools/analysis/production-coverage>.
+    /// that exists". See <https://docs.fallow.tools/analysis/runtime-coverage>.
     ///
     /// This command is the only fallow subcommand that makes network calls
     /// outside of `fallow license`. `fallow check` stays offline.
@@ -1759,7 +1759,7 @@ fn dispatch_subcommand(
             trend,
             coverage,
             coverage_root,
-            production_coverage,
+            runtime_coverage,
             min_invocations_hot,
             min_observation_volume,
             low_traffic_threshold,
@@ -1799,7 +1799,7 @@ fn dispatch_subcommand(
                 trend,
                 coverage.as_deref(),
                 coverage_root.as_deref(),
-                production_coverage.as_deref(),
+                runtime_coverage.as_deref(),
                 min_invocations_hot,
                 min_observation_volume,
                 low_traffic_threshold,
@@ -2019,7 +2019,7 @@ fn dispatch_health(
     trend: bool,
     coverage: Option<&std::path::Path>,
     coverage_root: Option<&std::path::Path>,
-    production_coverage: Option<&std::path::Path>,
+    runtime_coverage: Option<&std::path::Path>,
     min_invocations_hot: u64,
     min_observation_volume: Option<u32>,
     low_traffic_threshold: Option<f64>,
@@ -2050,7 +2050,7 @@ fn dispatch_health(
     let eff_hotspots = if any_section { hotspots } else { true } || force_full;
     let eff_complexity = if any_section { complexity } else { true };
     let eff_targets = if any_section { targets } else { true };
-    let production_coverage = if let Some(path) = production_coverage {
+    let runtime_coverage = if let Some(path) = runtime_coverage {
         match health::coverage::prepare_options(
             path,
             min_invocations_hot,
@@ -2112,7 +2112,7 @@ fn dispatch_health(
         coverage,
         coverage_root,
         performance: cli.performance,
-        production_coverage,
+        runtime_coverage,
     })
 }
 

@@ -336,7 +336,7 @@ export interface HealthReport {
   coverage_gaps?: CoverageGaps;
   hotspots?: Array<Record<string, unknown>>;
   hotspot_summary?: Record<string, unknown>;
-  production_coverage?: Record<string, unknown>;
+  runtime_coverage?: Record<string, unknown>;
   large_functions?: Array<Record<string, unknown>>;
   targets?: RefactoringTarget[];
   target_thresholds?: Record<string, unknown>;

@@ -693,7 +693,7 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
 #[must_use]
 #[expect(
     clippy::too_many_lines,
-    reason = "flat rules + results table: adding production-coverage rules pushed past the 150 line threshold but each section is a straightforward sequence of sarif_rule / sarif_result calls"
+    reason = "flat rules + results table: adding runtime-coverage rules pushed past the 150 line threshold but each section is a straightforward sequence of sarif_rule / sarif_result calls"
 )]
 pub fn build_health_sarif(
     report: &crate::health_types::HealthReport,
@@ -771,8 +771,8 @@ pub fn build_health_sarif(
         ));
     }
 
-    if let Some(ref production) = report.production_coverage {
-        append_production_coverage_sarif_results(&mut sarif_results, production, root);
+    if let Some(ref production) = report.runtime_coverage {
+        append_runtime_coverage_sarif_results(&mut sarif_results, production, root);
     }
 
     // Refactoring targets as SARIF results (warning level — advisory recommendations)
@@ -885,13 +885,13 @@ pub fn build_health_sarif(
             "note",
         ),
         sarif_rule(
-            "fallow/production-coverage-unavailable",
-            "Production coverage could not be resolved for this function",
+            "fallow/runtime-coverage-unavailable",
+            "Runtime coverage could not be resolved for this function",
             "note",
         ),
         sarif_rule(
-            "fallow/production-coverage",
-            "Production coverage finding",
+            "fallow/runtime-coverage",
+            "Runtime coverage finding",
             "note",
         ),
     ];
@@ -913,34 +913,32 @@ pub fn build_health_sarif(
     })
 }
 
-fn append_production_coverage_sarif_results(
+fn append_runtime_coverage_sarif_results(
     sarif_results: &mut Vec<serde_json::Value>,
-    production: &crate::health_types::ProductionCoverageReport,
+    production: &crate::health_types::RuntimeCoverageReport,
     root: &Path,
 ) {
     for finding in &production.findings {
         let uri = relative_uri(&finding.path, root);
         let rule_id = match finding.verdict {
-            crate::health_types::ProductionCoverageVerdict::SafeToDelete => {
+            crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
                 "fallow/production-safe-to-delete"
             }
-            crate::health_types::ProductionCoverageVerdict::ReviewRequired => {
+            crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
                 "fallow/production-review-required"
             }
-            crate::health_types::ProductionCoverageVerdict::LowTraffic => {
+            crate::health_types::RuntimeCoverageVerdict::LowTraffic => {
                 "fallow/production-low-traffic"
             }
-            crate::health_types::ProductionCoverageVerdict::CoverageUnavailable => {
-                "fallow/production-coverage-unavailable"
+            crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable => {
+                "fallow/runtime-coverage-unavailable"
             }
-            crate::health_types::ProductionCoverageVerdict::Active
-            | crate::health_types::ProductionCoverageVerdict::Unknown => {
-                "fallow/production-coverage"
-            }
+            crate::health_types::RuntimeCoverageVerdict::Active
+            | crate::health_types::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
         };
         let level = match finding.verdict {
-            crate::health_types::ProductionCoverageVerdict::SafeToDelete
-            | crate::health_types::ProductionCoverageVerdict::ReviewRequired => "warning",
+            crate::health_types::RuntimeCoverageVerdict::SafeToDelete
+            | crate::health_types::RuntimeCoverageVerdict::ReviewRequired => "warning",
             _ => "note",
         };
         let invocations_hint = finding.invocations.map_or_else(
@@ -948,7 +946,7 @@ fn append_production_coverage_sarif_results(
             |hits| format!("{hits} invocations"),
         );
         let message = format!(
-            "'{}' production coverage verdict: {} ({})",
+            "'{}' runtime coverage verdict: {} ({})",
             finding.function,
             finding.verdict.human_label(),
             invocations_hint,

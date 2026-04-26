@@ -464,7 +464,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
         && report.coverage_gaps.is_none()
         && report.hotspots.is_empty()
         && report.targets.is_empty()
-        && report.production_coverage.is_none()
+        && report.runtime_coverage.is_none()
     {
         if report.vital_signs.is_none() {
             let _ = write!(
@@ -481,7 +481,7 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     }
 
     write_findings_section(&mut out, report, root);
-    write_production_coverage_section(&mut out, report, root);
+    write_runtime_coverage_section(&mut out, report, root);
     write_coverage_gaps_section(&mut out, report, root);
     write_file_scores_section(&mut out, report, root);
     write_hotspots_section(&mut out, report, root);
@@ -491,12 +491,12 @@ pub fn build_health_markdown(report: &crate::health_types::HealthReport, root: &
     out
 }
 
-fn write_production_coverage_section(
+fn write_runtime_coverage_section(
     out: &mut String,
     report: &crate::health_types::HealthReport,
     root: &Path,
 ) {
-    let Some(ref production) = report.production_coverage else {
+    let Some(ref production) = report.runtime_coverage else {
         return;
     };
     // Prepend a blank line so the heading is not concatenated to the previous
@@ -507,7 +507,7 @@ fn write_production_coverage_section(
     }
     let _ = writeln!(
         out,
-        "## Production Coverage\n\n- Verdict: {}\n- Functions tracked: {}\n- Hit: {}\n- Unhit: {}\n- Untracked: {}\n- Coverage: {:.1}%\n- Traces observed: {}\n- Period: {} day(s), {} deployment(s)\n",
+        "## Runtime Coverage\n\n- Verdict: {}\n- Functions tracked: {}\n- Hit: {}\n- Unhit: {}\n- Untracked: {}\n- Coverage: {:.1}%\n- Traces observed: {}\n- Period: {} day(s), {} deployment(s)\n",
         production.verdict,
         production.summary.functions_tracked,
         production.summary.functions_hit,

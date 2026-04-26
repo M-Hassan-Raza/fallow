@@ -244,8 +244,8 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
             );
         }
     }
-    if let Some(ref production) = report.production_coverage {
-        for line in build_production_coverage_compact_lines(production, root) {
+    if let Some(ref production) = report.runtime_coverage {
+        for line in build_runtime_coverage_compact_lines(production, root) {
             println!("{line}");
         }
     }
@@ -319,12 +319,12 @@ pub(super) fn print_health_compact(report: &crate::health_types::HealthReport, r
     }
 }
 
-fn build_production_coverage_compact_lines(
-    production: &crate::health_types::ProductionCoverageReport,
+fn build_runtime_coverage_compact_lines(
+    production: &crate::health_types::RuntimeCoverageReport,
     root: &Path,
 ) -> Vec<String> {
     let mut lines = vec![format!(
-        "production-coverage-summary:functions_tracked={},functions_hit={},functions_unhit={},functions_untracked={},coverage_percent={:.1},trace_count={},period_days={},deployments_seen={}",
+        "runtime-coverage-summary:functions_tracked={},functions_hit={},functions_unhit={},functions_untracked={},coverage_percent={:.1},trace_count={},period_days={},deployments_seen={}",
         production.summary.functions_tracked,
         production.summary.functions_hit,
         production.summary.functions_unhit,
@@ -340,7 +340,7 @@ fn build_production_coverage_compact_lines(
             .invocations
             .map_or_else(|| "null".to_owned(), |hits| hits.to_string());
         lines.push(format!(
-            "production-coverage:{}:{}:{}:id={},verdict={},invocations={},confidence={}",
+            "runtime-coverage:{}:{}:{}:id={},verdict={},invocations={},confidence={}",
             relative,
             finding.line,
             finding.function,
@@ -381,9 +381,9 @@ pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path)
 mod tests {
     use super::*;
     use crate::health_types::{
-        ProductionCoverageConfidence, ProductionCoverageEvidence, ProductionCoverageFinding,
-        ProductionCoverageHotPath, ProductionCoverageReport, ProductionCoverageReportVerdict,
-        ProductionCoverageSummary, ProductionCoverageVerdict,
+        RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
+        RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+        RuntimeCoverageSummary, RuntimeCoverageVerdict,
     };
     use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
@@ -430,12 +430,12 @@ mod tests {
     }
 
     #[test]
-    fn compact_health_includes_production_coverage_lines() {
+    fn compact_health_includes_runtime_coverage_lines() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            production_coverage: Some(ProductionCoverageReport {
-                verdict: ProductionCoverageReportVerdict::ColdCodeDetected,
-                summary: ProductionCoverageSummary {
+            runtime_coverage: Some(RuntimeCoverageReport {
+                verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
+                summary: RuntimeCoverageSummary {
                     functions_tracked: 4,
                     functions_hit: 2,
                     functions_unhit: 1,
@@ -446,15 +446,15 @@ mod tests {
                     deployments_seen: 2,
                     capture_quality: None,
                 },
-                findings: vec![ProductionCoverageFinding {
+                findings: vec![RuntimeCoverageFinding {
                     id: "fallow:prod:deadbeef".to_owned(),
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
                     line: 14,
-                    verdict: ProductionCoverageVerdict::ReviewRequired,
+                    verdict: RuntimeCoverageVerdict::ReviewRequired,
                     invocations: Some(0),
-                    confidence: ProductionCoverageConfidence::Medium,
-                    evidence: ProductionCoverageEvidence {
+                    confidence: RuntimeCoverageConfidence::Medium,
+                    evidence: RuntimeCoverageEvidence {
                         static_status: "used".to_owned(),
                         test_coverage: "not_covered".to_owned(),
                         v8_tracking: "tracked".to_owned(),
@@ -464,7 +464,7 @@ mod tests {
                     },
                     actions: vec![],
                 }],
-                hot_paths: vec![ProductionCoverageHotPath {
+                hot_paths: vec![RuntimeCoverageHotPath {
                     id: "fallow:hot:cafebabe".to_owned(),
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
@@ -479,20 +479,20 @@ mod tests {
             ..Default::default()
         };
 
-        let lines = build_production_coverage_compact_lines(
+        let lines = build_runtime_coverage_compact_lines(
             report
-                .production_coverage
+                .runtime_coverage
                 .as_ref()
-                .expect("production coverage should be set"),
+                .expect("runtime coverage should be set"),
             &root,
         );
         assert_eq!(
             lines[0],
-            "production-coverage-summary:functions_tracked=4,functions_hit=2,functions_unhit=1,functions_untracked=1,coverage_percent=50.0,trace_count=512,period_days=7,deployments_seen=2"
+            "runtime-coverage-summary:functions_tracked=4,functions_hit=2,functions_unhit=1,functions_untracked=1,coverage_percent=50.0,trace_count=512,period_days=7,deployments_seen=2"
         );
         assert_eq!(
             lines[1],
-            "production-coverage:src/cold.ts:14:coldPath:id=fallow:prod:deadbeef,verdict=review_required,invocations=0,confidence=medium"
+            "runtime-coverage:src/cold.ts:14:coldPath:id=fallow:prod:deadbeef,verdict=review_required,invocations=0,confidence=medium"
         );
         assert_eq!(
             lines[2],

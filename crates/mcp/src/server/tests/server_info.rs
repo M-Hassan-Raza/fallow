@@ -31,7 +31,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"audit".to_string()));
     assert!(names.contains(&"list_boundaries".to_string()));
     assert!(names.contains(&"feature_flags".to_string()));
-    assert!(names.contains(&"check_production_coverage".to_string()));
+    assert!(names.contains(&"check_runtime_coverage".to_string()));
     assert_eq!(tools.len(), 15);
 }
 
@@ -53,7 +53,7 @@ fn read_only_tools_have_annotations() {
         "audit",
         "list_boundaries",
         "feature_flags",
-        "check_production_coverage",
+        "check_runtime_coverage",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -119,7 +119,7 @@ fn open_world_hint_on_analysis_tools() {
         "audit",
         "list_boundaries",
         "feature_flags",
-        "check_production_coverage",
+        "check_runtime_coverage",
     ];
     for tool in &tools {
         let name = tool.name.to_string();
@@ -177,7 +177,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("audit"));
     assert!(instructions.contains("list_boundaries"));
     assert!(instructions.contains("feature_flags"));
-    assert!(instructions.contains("check_production_coverage"));
+    assert!(instructions.contains("check_runtime_coverage"));
 }
 
 #[test]
@@ -543,7 +543,7 @@ fn check_health_schema_contains_expected_properties() {
         "save_baseline",
         "no_cache",
         "threads",
-        "production_coverage",
+        "runtime_coverage",
         "min_invocations_hot",
         "min_observation_volume",
         "low_traffic_threshold",
@@ -556,14 +556,14 @@ fn check_health_schema_contains_expected_properties() {
 }
 
 #[test]
-fn check_health_description_mentions_production_coverage() {
+fn check_health_description_mentions_runtime_coverage() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools.iter().find(|t| t.name == "check_health").unwrap();
     let desc = tool.description.as_deref().unwrap();
     assert!(
-        desc.contains("production_coverage"),
-        "check_health description should mention production_coverage (paid feature wiring)"
+        desc.contains("runtime_coverage"),
+        "check_health description should mention runtime_coverage (paid feature wiring)"
     );
     assert!(
         desc.contains("min_invocations_hot"),
@@ -613,12 +613,12 @@ fn list_boundaries_schema_contains_expected_properties() {
 }
 
 #[test]
-fn check_production_coverage_schema_contains_expected_properties() {
+fn check_runtime_coverage_schema_contains_expected_properties() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools
         .iter()
-        .find(|t| t.name == "check_production_coverage")
+        .find(|t| t.name == "check_runtime_coverage")
         .unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
     for prop in [
@@ -637,28 +637,28 @@ fn check_production_coverage_schema_contains_expected_properties() {
     ] {
         assert!(
             schema.contains(prop),
-            "check_production_coverage schema should contain property '{prop}'"
+            "check_runtime_coverage schema should contain property '{prop}'"
         );
     }
 }
 
 #[test]
-fn check_production_coverage_schema_requires_coverage() {
+fn check_runtime_coverage_schema_requires_coverage() {
     let server = FallowMcp::new();
     let tools = server.tool_router.list_all();
     let tool = tools
         .iter()
-        .find(|t| t.name == "check_production_coverage")
+        .find(|t| t.name == "check_runtime_coverage")
         .unwrap();
     let schema = serde_json::to_string(&tool.input_schema).unwrap();
     let schema_value: serde_json::Value = serde_json::from_str(&schema).unwrap();
     let required = schema_value
         .get("required")
         .and_then(|r| r.as_array())
-        .expect("check_production_coverage schema should have a required array");
+        .expect("check_runtime_coverage schema should have a required array");
     assert!(
         required.iter().any(|v| v.as_str() == Some("coverage")),
-        "check_production_coverage schema should require 'coverage'"
+        "check_runtime_coverage schema should require 'coverage'"
     );
 }
 

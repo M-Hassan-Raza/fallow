@@ -1,16 +1,16 @@
-use crate::params::CheckProductionCoverageParams;
+use crate::params::CheckRuntimeCoverageParams;
 
 use super::{push_global, push_scope};
 
-/// Build CLI arguments for the `check_production_coverage` tool.
-pub fn build_check_production_coverage_args(params: &CheckProductionCoverageParams) -> Vec<String> {
+/// Build CLI arguments for the `check_runtime_coverage` tool.
+pub fn build_check_runtime_coverage_args(params: &CheckRuntimeCoverageParams) -> Vec<String> {
     let mut args = vec![
         "health".to_string(),
         "--format".to_string(),
         "json".to_string(),
         "--quiet".to_string(),
         "--explain".to_string(),
-        "--production-coverage".to_string(),
+        "--runtime-coverage".to_string(),
         params.coverage.clone(),
     ];
 

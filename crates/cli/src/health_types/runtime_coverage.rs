@@ -1,11 +1,11 @@
 use std::fmt;
 use std::path::PathBuf;
 
-/// Top-level verdict for the whole production-coverage report. Mirrors
+/// Top-level verdict for the whole runtime-coverage report. Mirrors
 /// `fallow_cov_protocol::ReportVerdict`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ProductionCoverageReportVerdict {
+pub enum RuntimeCoverageReportVerdict {
     Clean,
     HotPathChangesNeeded,
     ColdCodeDetected,
@@ -14,7 +14,7 @@ pub enum ProductionCoverageReportVerdict {
     Unknown,
 }
 
-impl ProductionCoverageReportVerdict {
+impl RuntimeCoverageReportVerdict {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -27,7 +27,7 @@ impl ProductionCoverageReportVerdict {
     }
 }
 
-impl fmt::Display for ProductionCoverageReportVerdict {
+impl fmt::Display for RuntimeCoverageReportVerdict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -36,7 +36,7 @@ impl fmt::Display for ProductionCoverageReportVerdict {
 /// Per-finding verdict. Replaces the 0.1 `state` field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProductionCoverageVerdict {
+pub enum RuntimeCoverageVerdict {
     SafeToDelete,
     ReviewRequired,
     CoverageUnavailable,
@@ -45,7 +45,7 @@ pub enum ProductionCoverageVerdict {
     Unknown,
 }
 
-impl ProductionCoverageVerdict {
+impl RuntimeCoverageVerdict {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -71,7 +71,7 @@ impl ProductionCoverageVerdict {
     }
 }
 
-impl fmt::Display for ProductionCoverageVerdict {
+impl fmt::Display for RuntimeCoverageVerdict {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -79,7 +79,7 @@ impl fmt::Display for ProductionCoverageVerdict {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ProductionCoverageConfidence {
+pub enum RuntimeCoverageConfidence {
     VeryHigh,
     High,
     Medium,
@@ -88,7 +88,7 @@ pub enum ProductionCoverageConfidence {
     Unknown,
 }
 
-impl ProductionCoverageConfidence {
+impl RuntimeCoverageConfidence {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -102,7 +102,7 @@ impl ProductionCoverageConfidence {
     }
 }
 
-impl fmt::Display for ProductionCoverageConfidence {
+impl fmt::Display for RuntimeCoverageConfidence {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -110,13 +110,13 @@ impl fmt::Display for ProductionCoverageConfidence {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub enum ProductionCoverageWatermark {
+pub enum RuntimeCoverageWatermark {
     TrialExpired,
     LicenseExpiredGrace,
     Unknown,
 }
 
-impl ProductionCoverageWatermark {
+impl RuntimeCoverageWatermark {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
@@ -127,7 +127,7 @@ impl ProductionCoverageWatermark {
     }
 }
 
-impl fmt::Display for ProductionCoverageWatermark {
+impl fmt::Display for RuntimeCoverageWatermark {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
@@ -135,7 +135,7 @@ impl fmt::Display for ProductionCoverageWatermark {
 
 /// Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
 #[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct ProductionCoverageSummary {
+pub struct RuntimeCoverageSummary {
     pub functions_tracked: usize,
     pub functions_hit: usize,
     pub functions_unhit: usize,
@@ -149,12 +149,12 @@ pub struct ProductionCoverageSummary {
     /// and the quantified trial CTA, and is passed through to JSON consumers so
     /// agent pipelines can surface the same signal.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub capture_quality: Option<ProductionCoverageCaptureQuality>,
+    pub capture_quality: Option<RuntimeCoverageCaptureQuality>,
 }
 
 /// Capture-quality telemetry (mirrors `fallow_cov_protocol::CaptureQuality`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
-pub struct ProductionCoverageCaptureQuality {
+pub struct RuntimeCoverageCaptureQuality {
     pub window_seconds: u64,
     pub instances_observed: u32,
     pub lazy_parse_warning: bool,
@@ -163,7 +163,7 @@ pub struct ProductionCoverageCaptureQuality {
 
 /// Supporting evidence for a finding (mirrors `fallow_cov_protocol::Evidence`).
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ProductionCoverageEvidence {
+pub struct RuntimeCoverageEvidence {
     pub static_status: String,
     pub test_coverage: String,
     pub v8_tracking: String,
@@ -174,7 +174,7 @@ pub struct ProductionCoverageEvidence {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ProductionCoverageAction {
+pub struct RuntimeCoverageAction {
     /// Stable action identifier. Serialized as `type` in JSON to match the
     /// `actions[].type` contract shared with every other `fallow health` finding.
     #[serde(rename = "type")]
@@ -184,31 +184,31 @@ pub struct ProductionCoverageAction {
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ProductionCoverageMessage {
+pub struct RuntimeCoverageMessage {
     pub code: String,
     pub message: String,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ProductionCoverageFinding {
+pub struct RuntimeCoverageFinding {
     /// Stable content-hash ID of the form `fallow:prod:<hash>`.
     pub id: String,
     pub path: PathBuf,
     pub function: String,
     pub line: u32,
-    pub verdict: ProductionCoverageVerdict,
+    pub verdict: RuntimeCoverageVerdict,
     /// Raw V8 invocation count. `None` when the function was untracked
     /// (lazy-parsed, worker thread, or dynamic code).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invocations: Option<u64>,
-    pub confidence: ProductionCoverageConfidence,
-    pub evidence: ProductionCoverageEvidence,
+    pub confidence: RuntimeCoverageConfidence,
+    pub evidence: RuntimeCoverageEvidence,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub actions: Vec<ProductionCoverageAction>,
+    pub actions: Vec<RuntimeCoverageAction>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
-pub struct ProductionCoverageHotPath {
+pub struct RuntimeCoverageHotPath {
     /// Stable content-hash ID of the form `fallow:hot:<hash>`.
     pub id: String,
     pub path: PathBuf,
@@ -219,21 +219,21 @@ pub struct ProductionCoverageHotPath {
     /// means the busiest, `0` means the quietest function that qualified.
     pub percentile: u8,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub actions: Vec<ProductionCoverageAction>,
+    pub actions: Vec<RuntimeCoverageAction>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
-pub struct ProductionCoverageReport {
-    pub verdict: ProductionCoverageReportVerdict,
-    pub summary: ProductionCoverageSummary,
+pub struct RuntimeCoverageReport {
+    pub verdict: RuntimeCoverageReportVerdict,
+    pub summary: RuntimeCoverageSummary,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub findings: Vec<ProductionCoverageFinding>,
+    pub findings: Vec<RuntimeCoverageFinding>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub hot_paths: Vec<ProductionCoverageHotPath>,
+    pub hot_paths: Vec<RuntimeCoverageHotPath>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub watermark: Option<ProductionCoverageWatermark>,
+    pub watermark: Option<RuntimeCoverageWatermark>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub warnings: Vec<ProductionCoverageMessage>,
+    pub warnings: Vec<RuntimeCoverageMessage>,
 }
 
 #[cfg(test)]
@@ -242,74 +242,68 @@ mod tests {
 
     #[test]
     fn report_verdict_display_matches_kebab_case_serde() {
-        assert_eq!(ProductionCoverageReportVerdict::Clean.to_string(), "clean");
+        assert_eq!(RuntimeCoverageReportVerdict::Clean.to_string(), "clean");
         assert_eq!(
-            ProductionCoverageReportVerdict::HotPathChangesNeeded.to_string(),
+            RuntimeCoverageReportVerdict::HotPathChangesNeeded.to_string(),
             "hot-path-changes-needed",
         );
         assert_eq!(
-            ProductionCoverageReportVerdict::ColdCodeDetected.to_string(),
+            RuntimeCoverageReportVerdict::ColdCodeDetected.to_string(),
             "cold-code-detected",
         );
         assert_eq!(
-            ProductionCoverageReportVerdict::LicenseExpiredGrace.to_string(),
+            RuntimeCoverageReportVerdict::LicenseExpiredGrace.to_string(),
             "license-expired-grace",
         );
-        assert_eq!(
-            ProductionCoverageReportVerdict::Unknown.to_string(),
-            "unknown",
-        );
+        assert_eq!(RuntimeCoverageReportVerdict::Unknown.to_string(), "unknown",);
     }
 
     #[test]
     fn verdict_display_matches_snake_case_serde() {
         assert_eq!(
-            ProductionCoverageVerdict::SafeToDelete.to_string(),
+            RuntimeCoverageVerdict::SafeToDelete.to_string(),
             "safe_to_delete",
         );
         assert_eq!(
-            ProductionCoverageVerdict::ReviewRequired.to_string(),
+            RuntimeCoverageVerdict::ReviewRequired.to_string(),
             "review_required",
         );
         assert_eq!(
-            ProductionCoverageVerdict::CoverageUnavailable.to_string(),
+            RuntimeCoverageVerdict::CoverageUnavailable.to_string(),
             "coverage_unavailable",
         );
         assert_eq!(
-            ProductionCoverageVerdict::LowTraffic.to_string(),
+            RuntimeCoverageVerdict::LowTraffic.to_string(),
             "low_traffic",
         );
-        assert_eq!(ProductionCoverageVerdict::Active.to_string(), "active");
+        assert_eq!(RuntimeCoverageVerdict::Active.to_string(), "active");
     }
 
     #[test]
     fn confidence_display_matches_snake_case_serde() {
-        assert_eq!(
-            ProductionCoverageConfidence::VeryHigh.to_string(),
-            "very_high",
-        );
-        assert_eq!(ProductionCoverageConfidence::High.to_string(), "high");
-        assert_eq!(ProductionCoverageConfidence::Medium.to_string(), "medium");
-        assert_eq!(ProductionCoverageConfidence::Low.to_string(), "low");
-        assert_eq!(ProductionCoverageConfidence::None.to_string(), "none");
-        assert_eq!(ProductionCoverageConfidence::Unknown.to_string(), "unknown");
+        assert_eq!(RuntimeCoverageConfidence::VeryHigh.to_string(), "very_high",);
+        assert_eq!(RuntimeCoverageConfidence::High.to_string(), "high");
+        assert_eq!(RuntimeCoverageConfidence::Medium.to_string(), "medium");
+        assert_eq!(RuntimeCoverageConfidence::Low.to_string(), "low");
+        assert_eq!(RuntimeCoverageConfidence::None.to_string(), "none");
+        assert_eq!(RuntimeCoverageConfidence::Unknown.to_string(), "unknown");
     }
 
     #[test]
     fn watermark_display_matches_kebab_case_serde() {
         assert_eq!(
-            ProductionCoverageWatermark::TrialExpired.to_string(),
+            RuntimeCoverageWatermark::TrialExpired.to_string(),
             "trial-expired",
         );
         assert_eq!(
-            ProductionCoverageWatermark::LicenseExpiredGrace.to_string(),
+            RuntimeCoverageWatermark::LicenseExpiredGrace.to_string(),
             "license-expired-grace",
         );
     }
 
     #[test]
     fn action_serializes_kind_as_type() {
-        let action = ProductionCoverageAction {
+        let action = RuntimeCoverageAction {
             kind: "review-deletion".to_owned(),
             description: "Remove the function.".to_owned(),
             auto_fixable: false,

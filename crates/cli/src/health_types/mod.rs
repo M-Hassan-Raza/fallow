@@ -6,7 +6,7 @@
 
 mod coverage;
 mod grouped;
-mod production_coverage;
+mod runtime_coverage;
 mod scores;
 mod targets;
 mod trends;
@@ -14,7 +14,7 @@ mod vital_signs;
 
 pub use coverage::*;
 pub use grouped::*;
-pub use production_coverage::*;
+pub use runtime_coverage::*;
 pub use scores::*;
 pub use targets::*;
 pub use trends::*;
@@ -67,10 +67,10 @@ pub struct HealthReport {
     /// Hotspot analysis summary (only set with `--hotspots`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hotspot_summary: Option<HotspotSummary>,
-    /// Production coverage findings from the paid sidecar (only populated with
-    /// `--production-coverage`).
+    /// Runtime coverage findings from the paid sidecar (only populated with
+    /// `--runtime-coverage`).
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub production_coverage: Option<ProductionCoverageReport>,
+    pub runtime_coverage: Option<RuntimeCoverageReport>,
     /// Functions exceeding 60 LOC (only populated when unit size very-high-risk >= 3%).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub large_functions: Vec<LargeFunctionEntry>,
@@ -101,7 +101,7 @@ impl Default for HealthReport {
             coverage_gaps: None,
             hotspots: vec![],
             hotspot_summary: None,
-            production_coverage: None,
+            runtime_coverage: None,
             large_functions: vec![],
             targets: vec![],
             target_thresholds: None,
@@ -122,7 +122,7 @@ mod tests {
         assert!(!json.contains("file_scores"));
         assert!(!json.contains("hotspots"));
         assert!(!json.contains("hotspot_summary"));
-        assert!(!json.contains("production_coverage"));
+        assert!(!json.contains("runtime_coverage"));
         assert!(!json.contains("large_functions"));
         assert!(!json.contains("targets"));
         assert!(!json.contains("vital_signs"));

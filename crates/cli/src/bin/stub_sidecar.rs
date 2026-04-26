@@ -1,5 +1,5 @@
 //! Test-only stub `fallow-cov` sidecar used by
-//! `crates/cli/tests/production_coverage_tests.rs` to exercise the full
+//! `crates/cli/tests/runtime_coverage_tests.rs` to exercise the full
 //! spawn/marshalling pipeline without depending on the closed-source sidecar.
 //!
 //! Gated behind the `test-sidecar-key` cargo feature; the `compile_error!` in

@@ -10,7 +10,7 @@ expression: output
 
 **50** files, **200** functions analyzed (thresholds: cyclomatic > 20, cognitive > 15, CRAP >= 30.0)
 
-## Production Coverage
+## Runtime Coverage
 
 - Verdict: cold-code-detected
 - Functions tracked: 6

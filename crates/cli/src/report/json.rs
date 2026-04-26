@@ -672,9 +672,9 @@ pub(crate) fn inject_health_actions(output: &mut serde_json::Value, opts: Health
         }
     }
 
-    // Production coverage actions are emitted by the sidecar and serialized
-    // directly via serde (see `ProductionCoverageAction` in
-    // `crates/cli/src/health_types/production_coverage.rs`), so no post-hoc
+    // Runtime coverage actions are emitted by the sidecar and serialized
+    // directly via serde (see `RuntimeCoverageAction` in
+    // `crates/cli/src/health_types/runtime_coverage.rs`), so no post-hoc
     // injection is needed here.
 
     // Auditable breadcrumb: when the suppress-line hint was omitted, record
@@ -1370,10 +1370,10 @@ pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
 mod tests {
     use super::*;
     use crate::health_types::{
-        ProductionCoverageAction, ProductionCoverageConfidence, ProductionCoverageEvidence,
-        ProductionCoverageFinding, ProductionCoverageHotPath, ProductionCoverageMessage,
-        ProductionCoverageReport, ProductionCoverageReportVerdict, ProductionCoverageSummary,
-        ProductionCoverageVerdict, ProductionCoverageWatermark,
+        RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageEvidence,
+        RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
+        RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
+        RuntimeCoverageVerdict, RuntimeCoverageWatermark,
     };
     use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
@@ -1422,12 +1422,12 @@ mod tests {
     }
 
     #[test]
-    fn health_json_includes_production_coverage_with_relative_paths_and_actions() {
+    fn health_json_includes_runtime_coverage_with_relative_paths_and_actions() {
         let root = PathBuf::from("/project");
         let report = crate::health_types::HealthReport {
-            production_coverage: Some(ProductionCoverageReport {
-                verdict: ProductionCoverageReportVerdict::ColdCodeDetected,
-                summary: ProductionCoverageSummary {
+            runtime_coverage: Some(RuntimeCoverageReport {
+                verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
+                summary: RuntimeCoverageSummary {
                     functions_tracked: 3,
                     functions_hit: 1,
                     functions_unhit: 1,
@@ -1436,22 +1436,22 @@ mod tests {
                     trace_count: 2_847_291,
                     period_days: 30,
                     deployments_seen: 14,
-                    capture_quality: Some(crate::health_types::ProductionCoverageCaptureQuality {
+                    capture_quality: Some(crate::health_types::RuntimeCoverageCaptureQuality {
                         window_seconds: 720,
                         instances_observed: 1,
                         lazy_parse_warning: true,
                         untracked_ratio_percent: 42.5,
                     }),
                 },
-                findings: vec![ProductionCoverageFinding {
+                findings: vec![RuntimeCoverageFinding {
                     id: "fallow:prod:deadbeef".to_owned(),
                     path: root.join("src/cold.ts"),
                     function: "coldPath".to_owned(),
                     line: 12,
-                    verdict: ProductionCoverageVerdict::ReviewRequired,
+                    verdict: RuntimeCoverageVerdict::ReviewRequired,
                     invocations: Some(0),
-                    confidence: ProductionCoverageConfidence::Medium,
-                    evidence: ProductionCoverageEvidence {
+                    confidence: RuntimeCoverageConfidence::Medium,
+                    evidence: RuntimeCoverageEvidence {
                         static_status: "used".to_owned(),
                         test_coverage: "not_covered".to_owned(),
                         v8_tracking: "tracked".to_owned(),
@@ -1459,14 +1459,14 @@ mod tests {
                         observation_days: 30,
                         deployments_observed: 14,
                     },
-                    actions: vec![ProductionCoverageAction {
+                    actions: vec![RuntimeCoverageAction {
                         kind: "review-deletion".to_owned(),
-                        description: "Tracked in production coverage with zero invocations."
+                        description: "Tracked in runtime coverage with zero invocations."
                             .to_owned(),
                         auto_fixable: false,
                     }],
                 }],
-                hot_paths: vec![ProductionCoverageHotPath {
+                hot_paths: vec![RuntimeCoverageHotPath {
                     id: "fallow:hot:cafebabe".to_owned(),
                     path: root.join("src/hot.ts"),
                     function: "hotPath".to_owned(),
@@ -1475,8 +1475,8 @@ mod tests {
                     percentile: 99,
                     actions: vec![],
                 }],
-                watermark: Some(ProductionCoverageWatermark::LicenseExpiredGrace),
-                warnings: vec![ProductionCoverageMessage {
+                watermark: Some(RuntimeCoverageWatermark::LicenseExpiredGrace),
+                warnings: vec![RuntimeCoverageMessage {
                     code: "partial-merge".to_owned(),
                     message: "Merged coverage omitted one chunk.".to_owned(),
                 }],
@@ -1490,32 +1490,32 @@ mod tests {
         inject_health_actions(&mut output, HealthActionOptions::default());
 
         assert_eq!(
-            output["production_coverage"]["verdict"],
+            output["runtime_coverage"]["verdict"],
             serde_json::Value::String("cold-code-detected".to_owned())
         );
         assert_eq!(
-            output["production_coverage"]["summary"]["functions_tracked"],
+            output["runtime_coverage"]["summary"]["functions_tracked"],
             serde_json::Value::from(3)
         );
         assert_eq!(
-            output["production_coverage"]["summary"]["coverage_percent"],
+            output["runtime_coverage"]["summary"]["coverage_percent"],
             serde_json::Value::from(33.3)
         );
-        let finding = &output["production_coverage"]["findings"][0];
+        let finding = &output["runtime_coverage"]["findings"][0];
         assert_eq!(finding["path"], "src/cold.ts");
         assert_eq!(finding["verdict"], "review_required");
         assert_eq!(finding["id"], "fallow:prod:deadbeef");
         assert_eq!(finding["actions"][0]["type"], "review-deletion");
-        let hot_path = &output["production_coverage"]["hot_paths"][0];
+        let hot_path = &output["runtime_coverage"]["hot_paths"][0];
         assert_eq!(hot_path["path"], "src/hot.ts");
         assert_eq!(hot_path["function"], "hotPath");
         assert_eq!(hot_path["percentile"], 99);
         assert_eq!(
-            output["production_coverage"]["watermark"],
+            output["runtime_coverage"]["watermark"],
             serde_json::Value::String("license-expired-grace".to_owned())
         );
         assert_eq!(
-            output["production_coverage"]["warnings"][0]["code"],
+            output["runtime_coverage"]["warnings"][0]["code"],
             serde_json::Value::String("partial-merge".to_owned())
         );
     }

@@ -106,11 +106,8 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if let Some(ref coverage_root) = params.coverage_root {
         args.extend(["--coverage-root".to_string(), coverage_root.clone()]);
     }
-    if let Some(ref production_coverage) = params.production_coverage {
-        args.extend([
-            "--production-coverage".to_string(),
-            production_coverage.clone(),
-        ]);
+    if let Some(ref runtime_coverage) = params.runtime_coverage {
+        args.extend(["--runtime-coverage".to_string(), runtime_coverage.clone()]);
     }
     if let Some(min_invocations_hot) = params.min_invocations_hot {
         args.extend([

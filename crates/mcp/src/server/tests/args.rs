@@ -1,7 +1,7 @@
 use crate::params::*;
 use crate::tools::{
     ISSUE_TYPE_FLAGS, VALID_DUPES_MODES, build_analyze_args, build_audit_args,
-    build_check_changed_args, build_check_production_coverage_args, build_feature_flags_args,
+    build_check_changed_args, build_check_runtime_coverage_args, build_feature_flags_args,
     build_find_dupes_args, build_fix_apply_args, build_fix_preview_args, build_health_args,
     build_list_boundaries_args, build_project_info_args, build_trace_clone_args,
     build_trace_dependency_args, build_trace_export_args, build_trace_file_args,
@@ -29,8 +29,8 @@ fn parse_validation_message(err: &str) -> String {
         .to_string()
 }
 
-fn check_production_coverage(coverage: &str) -> CheckProductionCoverageParams {
-    CheckProductionCoverageParams {
+fn check_runtime_coverage(coverage: &str) -> CheckRuntimeCoverageParams {
+    CheckRuntimeCoverageParams {
         coverage: coverage.to_string(),
         root: None,
         config: None,
@@ -928,7 +928,7 @@ fn health_args_with_all_options() {
         summary: Some(true),
         coverage: Some("coverage/coverage-final.json".to_string()),
         coverage_root: Some("/ci/build".to_string()),
-        production_coverage: Some("./coverage".to_string()),
+        runtime_coverage: Some("./coverage".to_string()),
         min_invocations_hot: Some(250),
         min_observation_volume: Some(7500),
         low_traffic_threshold: Some(0.002),
@@ -987,7 +987,7 @@ fn health_args_with_all_options() {
             "coverage/coverage-final.json",
             "--coverage-root",
             "/ci/build",
-            "--production-coverage",
+            "--runtime-coverage",
             "./coverage",
             "--min-invocations-hot",
             "250",
@@ -1126,8 +1126,8 @@ fn all_arg_builders_include_format_json_and_quiet() {
     let audit = build_audit_args(&AuditParams::default());
     let list_boundaries = build_list_boundaries_args(&ListBoundariesParams::default());
     let feature_flags = build_feature_flags_args(&FeatureFlagsParams::default());
-    let check_production_coverage =
-        build_check_production_coverage_args(&check_production_coverage("./coverage"));
+    let check_runtime_coverage =
+        build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
 
     for (name, args) in [
         ("analyze", &analyze),
@@ -1144,7 +1144,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
         ("audit", &audit),
         ("list_boundaries", &list_boundaries),
         ("feature_flags", &feature_flags),
-        ("check_production_coverage", &check_production_coverage),
+        ("check_runtime_coverage", &check_runtime_coverage),
     ] {
         assert!(
             args.contains(&"--format".to_string()),
@@ -1247,22 +1247,19 @@ fn each_tool_uses_correct_subcommand() {
         "dupes"
     );
     assert_eq!(
-        build_check_production_coverage_args(&check_production_coverage("./coverage"))[0],
+        build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"))[0],
         "health"
     );
 }
 
-// ── Argument building: check_production_coverage ─────────────────
+// ── Argument building: check_runtime_coverage ─────────────────
 
 #[test]
-fn check_production_coverage_minimal_emits_coverage_flag() {
-    let args = build_check_production_coverage_args(&check_production_coverage("./coverage"));
+fn check_runtime_coverage_minimal_emits_coverage_flag() {
+    let args = build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
     assert_eq!(args[0], "health");
-    assert!(args.contains(&"--production-coverage".to_string()));
-    let idx = args
-        .iter()
-        .position(|a| a == "--production-coverage")
-        .unwrap();
+    assert!(args.contains(&"--runtime-coverage".to_string()));
+    let idx = args.iter().position(|a| a == "--runtime-coverage").unwrap();
     assert_eq!(args[idx + 1], "./coverage");
     // Minimal params should NOT emit the tuning flags.
     assert!(!args.contains(&"--min-invocations-hot".to_string()));
@@ -1272,8 +1269,8 @@ fn check_production_coverage_minimal_emits_coverage_flag() {
 }
 
 #[test]
-fn check_production_coverage_all_tuning_flags_emit() {
-    let params = CheckProductionCoverageParams {
+fn check_runtime_coverage_all_tuning_flags_emit() {
+    let params = CheckRuntimeCoverageParams {
         coverage: "./coverage/coverage-final.json".to_string(),
         root: Some("/my/project".to_string()),
         config: Some(".fallowrc.json".to_string()),
@@ -1287,7 +1284,7 @@ fn check_production_coverage_all_tuning_flags_emit() {
         max_crap: Some(42.5),
         group_by: Some("owner".to_string()),
     };
-    let args = build_check_production_coverage_args(&params);
+    let args = build_check_runtime_coverage_args(&params);
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/my/project".to_string()));
     assert!(args.contains(&"--config".to_string()));
@@ -1315,11 +1312,11 @@ fn check_production_coverage_all_tuning_flags_emit() {
 }
 
 #[test]
-fn check_production_coverage_includes_explain() {
-    let args = build_check_production_coverage_args(&check_production_coverage("./coverage"));
+fn check_runtime_coverage_includes_explain() {
+    let args = build_check_runtime_coverage_args(&check_runtime_coverage("./coverage"));
     assert!(
         args.contains(&"--explain".to_string()),
-        "check_production_coverage should include --explain"
+        "check_runtime_coverage should include --explain"
     );
 }
 

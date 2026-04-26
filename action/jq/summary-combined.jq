@@ -10,12 +10,12 @@ def suppression_docs: "https://docs.fallow.tools/configuration/suppression";
 def metric_delta(name):
   (.health.health_trend.metrics // []) | map(select(.name == name)) | first // null;
 def prod_failing_findings:
-  (.health.production_coverage.findings // [])
+  (.health.runtime_coverage.findings // [])
   | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic"));
 def prod_advisory_findings:
-  (.health.production_coverage.findings // [])
+  (.health.runtime_coverage.findings // [])
   | map(select(.verdict != "safe_to_delete" and .verdict != "review_required" and .verdict != "low_traffic"));
-def prod_hot_paths: (.health.production_coverage.hot_paths // []);
+def prod_hot_paths: (.health.runtime_coverage.hot_paths // []);
 
 (count(.check; "total_issues")) as $check |
 (count(.dupes.stats; "clone_groups")) as $dupes |
@@ -55,7 +55,7 @@ if $total == 0 then
   (if $prod_advisory > 0 or $hot_paths > 0 then
     "> [!NOTE]\n> **No blocking issues found**\n\n" +
     ":white_check_mark: No code issues \u00b7 :white_check_mark: No duplication \u00b7 :white_check_mark: No blocking health findings" +
-    (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** production coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
+    (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** runtime coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
     (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end)
   else
     "> [!NOTE]\n> **No issues found**\n\n" +
@@ -129,10 +129,10 @@ else
   else "" end) +
 
   (if $prod_failing > 0 or $prod_advisory > 0 or $hot_paths > 0 then
-    "<details>\n<summary><strong><a href=\"\(health_docs)#production-coverage\">Production coverage</a> (\($prod_failing + $prod_advisory) finding\(if ($prod_failing + $prod_advisory) == 1 then "" else "s" end)\(if $hot_paths > 0 then ", \($hot_paths) hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end))</strong></summary>\n\n" +
+    "<details>\n<summary><strong><a href=\"\(health_docs)#runtime-coverage\">Runtime coverage</a> (\($prod_failing + $prod_advisory) finding\(if ($prod_failing + $prod_advisory) == 1 then "" else "s" end)\(if $hot_paths > 0 then ", \($hot_paths) hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end))</strong></summary>\n\n" +
     (if $prod_failing + $prod_advisory > 0 then
       "| File | Function | Verdict | Invocations | Confidence |\n|:-----|:---------|:--------|------------:|:-----------|\n" +
-      ([(.health.production_coverage.findings // [])[:5][] |
+      ([(.health.runtime_coverage.findings // [])[:5][] |
         "| `\(.path | rel_path):\(.line)` | `\(.function)` | `\(.verdict)` | \(if .invocations == null then "\u2014" else (.invocations | tostring) end) | \(.confidence) |"
       ] | join("\n")) +
       (if $hot_paths > 0 then "\n\n" else "" end)

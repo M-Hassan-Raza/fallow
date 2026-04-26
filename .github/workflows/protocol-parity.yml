@@ -3,7 +3,7 @@ name: Protocol parity
 # Asserts the `fallow-cov-protocol` version this fallow CLI is pinned to matches
 # the protocol version the latest published `@fallow-cli/fallow-cov` sidecar was
 # built against. If fallow main bumps the protocol minor without a matching
-# sidecar release, every user running `fallow health --production-coverage`
+# sidecar release, every user running `fallow health --runtime-coverage`
 # after the next fallow release would hit a wire-contract break.
 #
 # The runtime handshake at crates/cli/src/health/coverage.rs only checks

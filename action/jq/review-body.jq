@@ -1,11 +1,11 @@
 def count(obj; key): obj | if . then .[key] // 0 else 0 end;
 def prod_failing_findings:
-  (.health.production_coverage.findings // [])
+  (.health.runtime_coverage.findings // [])
   | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic"));
 def prod_advisory_findings:
-  (.health.production_coverage.findings // [])
+  (.health.runtime_coverage.findings // [])
   | map(select(.verdict != "safe_to_delete" and .verdict != "review_required" and .verdict != "low_traffic"));
-def prod_hot_paths: (.health.production_coverage.hot_paths // []);
+def prod_hot_paths: (.health.runtime_coverage.hot_paths // []);
 
 (count(.check; "total_issues") // 0) as $check |
 (count(.dupes.stats; "clone_groups") // 0) as $dupes |
@@ -37,7 +37,7 @@ def prod_hot_paths: (.health.production_coverage.hot_paths // []);
 else "" end) +
 
 (if $prod_advisory > 0 or $hot_paths > 0 then
-  "Production coverage: " +
+  "Runtime coverage: " +
   (if $prod_advisory > 0 then "**\($prod_advisory)** advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
   (if $prod_advisory > 0 and $hot_paths > 0 then " \u00b7 " else "" end) +
   (if $hot_paths > 0 then "**\($hot_paths)** hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end) +

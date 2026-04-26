@@ -1801,15 +1801,15 @@ fn sample_health_report(root: &Path) -> HealthReport {
         targets: vec![],
         target_thresholds: None,
         health_trend: None,
-        production_coverage: None,
+        runtime_coverage: None,
     }
 }
 
-fn health_report_with_production_coverage(root: &Path) -> HealthReport {
+fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
     let mut report = sample_health_report(root);
-    report.production_coverage = Some(ProductionCoverageReport {
-        verdict: ProductionCoverageReportVerdict::ColdCodeDetected,
-        summary: ProductionCoverageSummary {
+    report.runtime_coverage = Some(RuntimeCoverageReport {
+        verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
+        summary: RuntimeCoverageSummary {
             functions_tracked: 6,
             functions_hit: 3,
             functions_unhit: 2,
@@ -1821,15 +1821,15 @@ fn health_report_with_production_coverage(root: &Path) -> HealthReport {
             capture_quality: None,
         },
         findings: vec![
-            ProductionCoverageFinding {
+            RuntimeCoverageFinding {
                 id: "fallow:prod:deadbeef".to_string(),
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_string(),
                 line: 14,
-                verdict: ProductionCoverageVerdict::ReviewRequired,
+                verdict: RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: ProductionCoverageConfidence::Medium,
-                evidence: ProductionCoverageEvidence {
+                confidence: RuntimeCoverageConfidence::Medium,
+                evidence: RuntimeCoverageEvidence {
                     static_status: "used".to_string(),
                     test_coverage: "not_covered".to_string(),
                     v8_tracking: "tracked".to_string(),
@@ -1837,22 +1837,21 @@ fn health_report_with_production_coverage(root: &Path) -> HealthReport {
                     observation_days: 30,
                     deployments_observed: 14,
                 },
-                actions: vec![ProductionCoverageAction {
+                actions: vec![RuntimeCoverageAction {
                     kind: "review-deletion".to_string(),
-                    description: "Tracked in production coverage with zero invocations."
-                        .to_string(),
+                    description: "Tracked in runtime coverage with zero invocations.".to_string(),
                     auto_fixable: false,
                 }],
             },
-            ProductionCoverageFinding {
+            RuntimeCoverageFinding {
                 id: "fallow:prod:feedface".to_string(),
                 path: root.join("src/unknown.ts"),
                 function: "lateBound".to_string(),
                 line: 8,
-                verdict: ProductionCoverageVerdict::CoverageUnavailable,
+                verdict: RuntimeCoverageVerdict::CoverageUnavailable,
                 invocations: None,
-                confidence: ProductionCoverageConfidence::None,
-                evidence: ProductionCoverageEvidence {
+                confidence: RuntimeCoverageConfidence::None,
+                evidence: RuntimeCoverageEvidence {
                     static_status: "used".to_string(),
                     test_coverage: "not_covered".to_string(),
                     v8_tracking: "untracked".to_string(),
@@ -1860,14 +1859,14 @@ fn health_report_with_production_coverage(root: &Path) -> HealthReport {
                     observation_days: 30,
                     deployments_observed: 14,
                 },
-                actions: vec![ProductionCoverageAction {
-                    kind: "collect-production-coverage".to_string(),
+                actions: vec![RuntimeCoverageAction {
+                    kind: "collect-runtime-coverage".to_string(),
                     description: "Collect a broader production dump.".to_string(),
                     auto_fixable: false,
                 }],
             },
         ],
-        hot_paths: vec![ProductionCoverageHotPath {
+        hot_paths: vec![RuntimeCoverageHotPath {
             id: "fallow:hot:cafebabe".to_string(),
             path: root.join("src/hot.ts"),
             function: "hotPath".to_string(),
@@ -1876,8 +1875,8 @@ fn health_report_with_production_coverage(root: &Path) -> HealthReport {
             percentile: 99,
             actions: vec![],
         }],
-        watermark: Some(ProductionCoverageWatermark::LicenseExpiredGrace),
-        warnings: vec![ProductionCoverageMessage {
+        watermark: Some(RuntimeCoverageWatermark::LicenseExpiredGrace),
+        warnings: vec![RuntimeCoverageMessage {
             code: "partial-input".to_string(),
             message: "One dump was incomplete.".to_string(),
         }],
@@ -1915,7 +1914,7 @@ const fn empty_health_report() -> HealthReport {
         targets: vec![],
         target_thresholds: None,
         health_trend: None,
-        production_coverage: None,
+        runtime_coverage: None,
     }
 }
 
@@ -2010,38 +2009,38 @@ fn codeclimate_health_empty_snapshot() {
 }
 
 #[test]
-fn markdown_health_with_production_coverage_snapshot() {
+fn markdown_health_with_runtime_coverage_snapshot() {
     let root = PathBuf::from("/project");
-    let report = health_report_with_production_coverage(&root);
+    let report = health_report_with_runtime_coverage(&root);
     let output = build_health_markdown(&report, &root);
-    insta::assert_snapshot!("markdown_health_with_production_coverage", output);
+    insta::assert_snapshot!("markdown_health_with_runtime_coverage", output);
 }
 
 #[test]
-fn sarif_health_with_production_coverage_snapshot() {
+fn sarif_health_with_runtime_coverage_snapshot() {
     let root = PathBuf::from("/project");
-    let report = health_report_with_production_coverage(&root);
+    let report = health_report_with_runtime_coverage(&root);
     let sarif = build_health_sarif(&report, &root);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
     insta::assert_snapshot!(
-        "sarif_health_with_production_coverage",
+        "sarif_health_with_runtime_coverage",
         redact_health_sarif_version(&json_str)
     );
 }
 
 #[test]
-fn codeclimate_health_with_production_coverage_snapshot() {
+fn codeclimate_health_with_runtime_coverage_snapshot() {
     let root = PathBuf::from("/project");
-    let report = health_report_with_production_coverage(&root);
+    let report = health_report_with_runtime_coverage(&root);
     let cc = build_health_codeclimate(&report, &root);
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
-    insta::assert_snapshot!("codeclimate_health_with_production_coverage", json_str);
+    insta::assert_snapshot!("codeclimate_health_with_runtime_coverage", json_str);
 }
 
 #[test]
-fn json_health_with_production_coverage_snapshot() {
+fn json_health_with_runtime_coverage_snapshot() {
     let root = PathBuf::from("/project");
-    let report = health_report_with_production_coverage(&root);
+    let report = health_report_with_runtime_coverage(&root);
     let value = build_health_json(
         &report,
         &root,
@@ -2052,7 +2051,7 @@ fn json_health_with_production_coverage_snapshot() {
     .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
-        "json_health_with_production_coverage",
+        "json_health_with_runtime_coverage",
         redact_version(&json_str)
     );
 }

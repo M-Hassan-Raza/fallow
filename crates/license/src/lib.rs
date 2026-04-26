@@ -78,7 +78,7 @@ pub struct LicenseClaims {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Feature {
     /// The Phase-2 paid local analyzer.
-    ProductionCoverage,
+    RuntimeCoverage,
     /// Phase-3+ cloud features (placeholder).
     PortfolioDashboard,
     /// Phase-4+ MCP cloud tools (placeholder).
@@ -96,7 +96,7 @@ impl Feature {
     #[must_use]
     pub fn parse(s: &str) -> Self {
         match s {
-            "production_coverage" => Self::ProductionCoverage,
+            "runtime_coverage" => Self::RuntimeCoverage,
             "portfolio_dashboard" => Self::PortfolioDashboard,
             "mcp_cloud_tools" => Self::McpCloudTools,
             "cross_repo_aggregation" => Self::CrossRepoAggregation,
@@ -345,7 +345,7 @@ pub fn load_raw_jwt() -> Result<Option<String>, LicenseError> {
 /// default-path discovery; otherwise returns the trimmed path. Without this,
 /// shells that export `FALLOW_LICENSE_PATH=""` (empty-string) produced a
 /// cryptic `license I/O error: No such file or directory` on `health
-/// --production-coverage` because `read_jwt_file(Path::new(""))` fails at the
+/// --runtime-coverage` because `read_jwt_file(Path::new(""))` fails at the
 /// fs layer.
 fn resolve_license_path_env(raw: Option<String>) -> Option<PathBuf> {
     let raw = raw?;
@@ -455,7 +455,7 @@ mod tests {
             tid: "tenant_test".into(),
             seats: 5,
             tier: "team".into(),
-            features: vec!["production_coverage".into()],
+            features: vec!["runtime_coverage".into()],
             iat: 1_700_000_000,
             exp,
             jti: "jti_test".into(),
@@ -470,7 +470,7 @@ mod tests {
         let jwt = sign_jwt(&signing, &claims);
         let status = verify_jwt(&jwt, &verifying, 1_900_000_000, DEFAULT_HARD_FAIL_DAYS).unwrap();
         assert!(matches!(status, LicenseStatus::Valid { .. }));
-        assert!(status.permits(&Feature::ProductionCoverage));
+        assert!(status.permits(&Feature::RuntimeCoverage));
         assert!(!status.permits(&Feature::PortfolioDashboard));
     }
 
@@ -595,7 +595,7 @@ mod tests {
     fn permits_short_circuits_on_hard_fail() {
         let claims = make_claims(1_000_000_000);
         let hard = grace_state(claims, 1_000_000_000 + 60 * SECONDS_PER_DAY, 30);
-        assert!(!hard.permits(&Feature::ProductionCoverage));
+        assert!(!hard.permits(&Feature::RuntimeCoverage));
     }
 
     #[test]
@@ -612,7 +612,7 @@ mod tests {
             "tid": "tenant_test",
             "seats": 5,
             "tier": "team",
-            "features": ["production_coverage"],
+            "features": ["runtime_coverage"],
             "iat": 1_700_000_000,
             "exp": 2_000_000_000_i64,
             "jti": "jti_test",
@@ -627,7 +627,7 @@ mod tests {
             "tid": "tenant_test",
             "seats": 5,
             "tier": "team",
-            "features": ["production_coverage"],
+            "features": ["runtime_coverage"],
             "iat": 1_700_000_000,
             "exp": 2_000_000_000_i64,
             "jti": "jti_test",

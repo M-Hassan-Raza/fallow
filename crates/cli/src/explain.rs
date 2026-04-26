@@ -203,36 +203,36 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         id: "fallow/production-safe-to-delete",
         name: "Production Safe To Delete",
         short: "Statically unused AND never invoked in production with V8 tracking",
-        full: "The function is both statically unreachable in the module graph and was never invoked during the observed production coverage window. This is the highest-confidence delete signal fallow emits.",
-        docs_path: "explanations/health#production-coverage",
+        full: "The function is both statically unreachable in the module graph and was never invoked during the observed runtime coverage window. This is the highest-confidence delete signal fallow emits.",
+        docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
         id: "fallow/production-review-required",
         name: "Production Review Required",
         short: "Statically used but never invoked in production",
-        full: "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed production coverage window. Needs a human look — may be seasonal, error-path only, or legitimately unused.",
-        docs_path: "explanations/health#production-coverage",
+        full: "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look — may be seasonal, error-path only, or legitimately unused.",
+        docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
         id: "fallow/production-low-traffic",
         name: "Production Low Traffic",
         short: "Function was invoked below the low-traffic threshold",
         full: "The function was invoked in production but below the configured `--low-traffic-threshold` fraction of total trace count (spec default 0.1%). Effectively dead for the current period.",
-        docs_path: "explanations/health#production-coverage",
+        docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
-        id: "fallow/production-coverage-unavailable",
-        name: "Production Coverage Unavailable",
-        short: "Production coverage could not be resolved for this function",
+        id: "fallow/runtime-coverage-unavailable",
+        name: "Runtime Coverage Unavailable",
+        short: "Runtime coverage could not be resolved for this function",
         full: "The function could not be matched to a V8-tracked coverage entry. Common causes: the function lives in a worker thread (separate V8 isolate), it is lazy-parsed and never reached the JIT tier, or its source map did not resolve to the expected source path. This is advisory, not a dead-code signal.",
-        docs_path: "explanations/health#production-coverage",
+        docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
-        id: "fallow/production-coverage",
-        name: "Production Coverage",
-        short: "Production coverage finding",
-        full: "Generic production-coverage finding for verdicts not covered by a more specific rule. Covers the forward-compat `unknown` sentinel; the CLI filters `active` entries out of `production_coverage.findings` so the surfaced list stays actionable.",
-        docs_path: "explanations/health#production-coverage",
+        id: "fallow/runtime-coverage",
+        name: "Runtime Coverage",
+        short: "Runtime coverage finding",
+        full: "Generic runtime-coverage finding for verdicts not covered by a more specific rule. Covers the forward-compat `unknown` sentinel; the CLI filters `active` entries out of `runtime_coverage.findings` so the surfaced list stays actionable.",
+        docs_path: "explanations/health#runtime-coverage",
     },
 ];
 
@@ -424,21 +424,21 @@ pub fn health_meta() -> Value {
                 "values": [true, false, null],
                 "interpretation": "true on a hotspot is a review-bottleneck risk; null means the signal is unavailable, not absent"
             },
-            "production_coverage_verdict": {
-                "name": "Production Coverage Verdict",
-                "description": "Overall verdict across all production-coverage findings. `clean` = nothing cold; `cold-code-detected` = one or more tracked functions had zero invocations; `hot-path-changes-needed` = a function modified in the current change set is on the hot path; `license-expired-grace` = analysis ran but the license is in its post-expiry grace window; `unknown` = verdict could not be computed (degenerate input).",
+            "runtime_coverage_verdict": {
+                "name": "Runtime Coverage Verdict",
+                "description": "Overall verdict across all runtime-coverage findings. `clean` = nothing cold; `cold-code-detected` = one or more tracked functions had zero invocations; `hot-path-changes-needed` = a function modified in the current change set is on the hot path; `license-expired-grace` = analysis ran but the license is in its post-expiry grace window; `unknown` = verdict could not be computed (degenerate input).",
                 "values": ["clean", "hot-path-changes-needed", "cold-code-detected", "license-expired-grace", "unknown"],
                 "interpretation": "`cold-code-detected` is the primary actionable signal; `hot-path-changes-needed` elevates code-review attention for touched hot paths"
             },
-            "production_coverage_state": {
-                "name": "Production Coverage State",
+            "runtime_coverage_state": {
+                "name": "Runtime Coverage State",
                 "description": "Per-function observation: `called` = V8 saw at least one invocation; `never-called` = V8 tracked the function but it never ran; `coverage-unavailable` = the function was not in the V8 tracking set (e.g., lazy-parsed, worker thread, dynamic code); `unknown` = forward-compat sentinel for newer sidecar states.",
                 "values": ["called", "never-called", "coverage-unavailable", "unknown"],
                 "interpretation": "`never-called` in combination with static `unused` is the highest-confidence delete signal"
             },
-            "production_coverage_confidence": {
-                "name": "Production Coverage Confidence",
-                "description": "Confidence in a production-coverage finding. `high` = tracked by V8 with a statistically meaningful observation volume; `medium` = either low observation volume or indirect evidence; `low` = minimal data; `unknown` = insufficient information to classify.",
+            "runtime_coverage_confidence": {
+                "name": "Runtime Coverage Confidence",
+                "description": "Confidence in a runtime-coverage finding. `high` = tracked by V8 with a statistically meaningful observation volume; `medium` = either low observation volume or indirect evidence; `low` = minimal data; `unknown` = insufficient information to classify.",
                 "values": ["high", "medium", "low", "unknown"],
                 "interpretation": "high = act on it; medium = verify context; low = treat as a signal only"
             },
@@ -807,9 +807,9 @@ mod tests {
             "stale_days",
             "drift",
             "unowned",
-            "production_coverage_verdict",
-            "production_coverage_state",
-            "production_coverage_confidence",
+            "runtime_coverage_verdict",
+            "runtime_coverage_state",
+            "runtime_coverage_confidence",
             "production_invocations",
             "percent_dead_in_production",
         ];

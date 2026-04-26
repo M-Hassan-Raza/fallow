@@ -15,7 +15,7 @@ use rustc_hash::FxHashSet;
 
 use crate::baseline::{
     HealthBaselineData, filter_new_health_findings, filter_new_health_targets,
-    filter_new_production_coverage_findings,
+    filter_new_runtime_coverage_findings,
 };
 use crate::check::{get_changed_files, resolve_workspace_scope};
 use crate::error::emit_error;
@@ -35,7 +35,7 @@ pub struct SharedParseData {
 }
 use targets::{TargetAuxData, compute_refactoring_targets};
 
-pub struct ProductionCoverageOptions {
+pub struct RuntimeCoverageOptions {
     pub path: std::path::PathBuf,
     pub min_invocations_hot: u64,
     /// Minimum total trace volume before high-confidence `safe_to_delete` /
@@ -48,7 +48,7 @@ pub struct ProductionCoverageOptions {
     /// sidecar use its spec-default (0.001 = 0.1%).
     pub low_traffic_threshold: Option<f64>,
     pub license_jwt: String,
-    pub watermark: Option<crate::health_types::ProductionCoverageWatermark>,
+    pub watermark: Option<crate::health_types::RuntimeCoverageWatermark>,
 }
 
 /// Sort criteria for complexity output.
@@ -122,8 +122,8 @@ pub struct HealthOptions<'a> {
     pub performance: bool,
     /// Only exit with error for findings at or above this severity level.
     pub min_severity: Option<FindingSeverity>,
-    /// Paid production coverage sidecar input.
-    pub production_coverage: Option<ProductionCoverageOptions>,
+    /// Paid runtime coverage sidecar input.
+    pub runtime_coverage: Option<RuntimeCoverageOptions>,
 }
 
 /// Run health analysis using pre-parsed modules from the dead-code pipeline.
@@ -329,7 +329,7 @@ fn execute_health_inner(
         || opts.targets
         || opts.force_full
         || enforce_crap;
-    let needs_analysis_output = needs_file_scores || opts.production_coverage.is_some();
+    let needs_analysis_output = needs_file_scores || opts.runtime_coverage.is_some();
     let mut shared_analysis_output = if needs_analysis_output {
         if let Some(pre) = pre_computed_analysis {
             Some(pre)
@@ -343,10 +343,10 @@ fn execute_health_inner(
         None
     };
 
-    let mut production_coverage = if let Some(ref production_options) = opts.production_coverage {
+    let mut runtime_coverage = if let Some(ref production_options) = opts.runtime_coverage {
         let analysis_output = shared_analysis_output
             .as_ref()
-            .expect("production coverage requires analysis output");
+            .expect("runtime coverage requires analysis output");
         Some(coverage::analyze(
             production_options,
             &config.root,
@@ -520,8 +520,8 @@ fn execute_health_inner(
     );
     let targets_ms = t.elapsed().as_secs_f64() * 1000.0;
 
-    if let Some(report) = production_coverage.as_mut() {
-        apply_production_coverage_filters(
+    if let Some(report) = runtime_coverage.as_mut() {
+        apply_runtime_coverage_filters(
             report,
             loaded_baseline.as_ref(),
             &config.root,
@@ -534,7 +534,7 @@ fn execute_health_inner(
         save_health_baseline(
             save_path,
             &findings,
-            production_coverage
+            runtime_coverage
                 .as_ref()
                 .map_or(&[], |report| report.findings.as_slice()),
             &targets,
@@ -688,7 +688,7 @@ fn execute_health_inner(
         target_thresholds,
         health_trend,
         istanbul_coverage.is_some(),
-        production_coverage,
+        runtime_coverage,
         large_functions,
         sev_critical,
         sev_high,
@@ -726,15 +726,15 @@ fn execute_health_inner(
     })
 }
 
-fn apply_production_coverage_filters(
-    report: &mut crate::health_types::ProductionCoverageReport,
+fn apply_runtime_coverage_filters(
+    report: &mut crate::health_types::RuntimeCoverageReport,
     baseline: Option<&HealthBaselineData>,
     root: &std::path::Path,
     top: Option<usize>,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) {
     if let Some(baseline) = baseline {
-        report.findings = filter_new_production_coverage_findings(
+        report.findings = filter_new_runtime_coverage_findings(
             std::mem::take(&mut report.findings),
             baseline,
             root,
@@ -747,7 +747,7 @@ fn apply_production_coverage_filters(
             .retain(|hot_path| changed_files.contains(&hot_path.path));
     }
 
-    refresh_production_coverage_verdict(report, changed_files.is_some());
+    refresh_runtime_coverage_verdict(report, changed_files.is_some());
 
     if let Some(top) = top {
         report.findings.truncate(top);
@@ -755,34 +755,34 @@ fn apply_production_coverage_filters(
     }
 }
 
-fn refresh_production_coverage_verdict(
-    report: &mut crate::health_types::ProductionCoverageReport,
+fn refresh_runtime_coverage_verdict(
+    report: &mut crate::health_types::RuntimeCoverageReport,
     changed_review: bool,
 ) {
     let has_cold_signal = report.findings.iter().any(|finding| {
         matches!(
             finding.verdict,
-            crate::health_types::ProductionCoverageVerdict::SafeToDelete
-                | crate::health_types::ProductionCoverageVerdict::ReviewRequired
-                | crate::health_types::ProductionCoverageVerdict::LowTraffic
+            crate::health_types::RuntimeCoverageVerdict::SafeToDelete
+                | crate::health_types::RuntimeCoverageVerdict::ReviewRequired
+                | crate::health_types::RuntimeCoverageVerdict::LowTraffic
         )
     });
     let has_changed_hot_path = changed_review && !report.hot_paths.is_empty();
 
     report.verdict = if matches!(
         report.verdict,
-        crate::health_types::ProductionCoverageReportVerdict::LicenseExpiredGrace
+        crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace
     ) || matches!(
         report.watermark,
-        Some(crate::health_types::ProductionCoverageWatermark::LicenseExpiredGrace)
+        Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace)
     ) {
-        crate::health_types::ProductionCoverageReportVerdict::LicenseExpiredGrace
+        crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace
     } else if has_cold_signal {
-        crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected
+        crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected
     } else if has_changed_hot_path {
-        crate::health_types::ProductionCoverageReportVerdict::HotPathChangesNeeded
+        crate::health_types::RuntimeCoverageReportVerdict::HotPathChangesNeeded
     } else {
-        crate::health_types::ProductionCoverageReportVerdict::Clean
+        crate::health_types::RuntimeCoverageReportVerdict::Clean
     };
 }
 
@@ -1175,7 +1175,7 @@ fn assemble_health_report(
     target_thresholds: Option<TargetThresholds>,
     health_trend: Option<crate::health_types::HealthTrend>,
     has_istanbul_coverage: bool,
-    production_coverage: Option<crate::health_types::ProductionCoverageReport>,
+    runtime_coverage: Option<crate::health_types::RuntimeCoverageReport>,
     large_functions: Vec<LargeFunctionEntry>,
     sev_critical: usize,
     sev_high: usize,
@@ -1284,7 +1284,7 @@ fn assemble_health_report(
         } else {
             report_hotspot_summary
         },
-        production_coverage,
+        runtime_coverage,
         large_functions: if opts.score_only_output {
             Vec::new()
         } else {
@@ -1632,7 +1632,7 @@ fn merge_crap_findings(
 fn save_health_baseline(
     save_path: &std::path::Path,
     findings: &[HealthFinding],
-    production_coverage_findings: &[crate::health_types::ProductionCoverageFinding],
+    runtime_coverage_findings: &[crate::health_types::RuntimeCoverageFinding],
     targets: &[RefactoringTarget],
     config_root: &std::path::Path,
     quiet: bool,
@@ -1640,7 +1640,7 @@ fn save_health_baseline(
 ) -> Result<(), ExitCode> {
     let baseline = HealthBaselineData::from_findings(
         findings,
-        production_coverage_findings,
+        runtime_coverage_findings,
         targets,
         config_root,
     );
@@ -1836,22 +1836,22 @@ pub fn print_health_result(
     } else {
         !result.report.findings.is_empty()
     };
-    let has_failing_production_coverage =
+    let has_failing_runtime_coverage =
         result
             .report
-            .production_coverage
+            .runtime_coverage
             .as_ref()
             .is_some_and(|report| {
                 report.findings.iter().any(|finding| {
                     matches!(
                         finding.verdict,
-                        crate::health_types::ProductionCoverageVerdict::SafeToDelete
-                            | crate::health_types::ProductionCoverageVerdict::ReviewRequired
-                            | crate::health_types::ProductionCoverageVerdict::LowTraffic
+                        crate::health_types::RuntimeCoverageVerdict::SafeToDelete
+                            | crate::health_types::RuntimeCoverageVerdict::ReviewRequired
+                            | crate::health_types::RuntimeCoverageVerdict::LowTraffic
                     )
                 })
             });
-    if has_failing_findings || has_failing_production_coverage {
+    if has_failing_findings || has_failing_runtime_coverage {
         return ExitCode::from(1);
     }
 
@@ -2411,7 +2411,7 @@ mod tests {
         hit: usize,
         unhit: usize,
         untracked: usize,
-    ) -> crate::health_types::ProductionCoverageSummary {
+    ) -> crate::health_types::RuntimeCoverageSummary {
         #[expect(
             clippy::cast_precision_loss,
             reason = "test fixture totals are tiny — f64 precision is fine"
@@ -2421,7 +2421,7 @@ mod tests {
         } else {
             (hit as f64 / tracked as f64) * 100.0
         };
-        crate::health_types::ProductionCoverageSummary {
+        crate::health_types::RuntimeCoverageSummary {
             functions_tracked: tracked,
             functions_hit: hit,
             functions_unhit: unhit,
@@ -2438,8 +2438,8 @@ mod tests {
         static_status: &str,
         test_coverage: &str,
         v8_tracking: &str,
-    ) -> crate::health_types::ProductionCoverageEvidence {
-        crate::health_types::ProductionCoverageEvidence {
+    ) -> crate::health_types::RuntimeCoverageEvidence {
+        crate::health_types::RuntimeCoverageEvidence {
             static_status: static_status.to_owned(),
             test_coverage: test_coverage.to_owned(),
             v8_tracking: v8_tracking.to_owned(),
@@ -2460,57 +2460,57 @@ mod tests {
     }
 
     #[test]
-    fn production_coverage_top_applies_after_baseline_filtering() {
+    fn runtime_coverage_top_applies_after_baseline_filtering() {
         let root = Path::new("/project");
         let baseline = HealthBaselineData {
             findings: vec![],
             finding_counts: std::collections::BTreeMap::new(),
-            production_coverage_findings: vec![
+            runtime_coverage_findings: vec![
                 "fallow:prod:aaaaaaaa".to_owned(),
                 "fallow:prod:bbbbbbbb".to_owned(),
             ],
             target_keys: vec![],
         };
-        let mut report = crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected,
+        let mut report = crate::health_types::RuntimeCoverageReport {
+            verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
             summary: fx_summary(3, 0, 2, 1),
             findings: vec![
-                crate::health_types::ProductionCoverageFinding {
+                crate::health_types::RuntimeCoverageFinding {
                     id: "fallow:prod:aaaaaaaa".to_owned(),
                     path: PathBuf::from("/project/src/a.ts"),
                     function: "alpha".to_owned(),
                     line: 10,
-                    verdict: crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+                    verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
                     invocations: Some(0),
-                    confidence: crate::health_types::ProductionCoverageConfidence::Medium,
+                    confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
                     evidence: fx_evidence("used", "not_covered", "tracked"),
                     actions: vec![],
                 },
-                crate::health_types::ProductionCoverageFinding {
+                crate::health_types::RuntimeCoverageFinding {
                     id: "fallow:prod:bbbbbbbb".to_owned(),
                     path: PathBuf::from("/project/src/b.ts"),
                     function: "beta".to_owned(),
                     line: 20,
-                    verdict: crate::health_types::ProductionCoverageVerdict::CoverageUnavailable,
+                    verdict: crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable,
                     invocations: None,
-                    confidence: crate::health_types::ProductionCoverageConfidence::None,
+                    confidence: crate::health_types::RuntimeCoverageConfidence::None,
                     evidence: fx_evidence("used", "not_covered", "untracked"),
                     actions: vec![],
                 },
-                crate::health_types::ProductionCoverageFinding {
+                crate::health_types::RuntimeCoverageFinding {
                     id: "fallow:prod:cccccccc".to_owned(),
                     path: PathBuf::from("/project/src/c.ts"),
                     function: "gamma".to_owned(),
                     line: 30,
-                    verdict: crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+                    verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
                     invocations: Some(0),
-                    confidence: crate::health_types::ProductionCoverageConfidence::Medium,
+                    confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
                     evidence: fx_evidence("used", "not_covered", "tracked"),
                     actions: vec![],
                 },
             ],
             hot_paths: vec![
-                crate::health_types::ProductionCoverageHotPath {
+                crate::health_types::RuntimeCoverageHotPath {
                     id: "fallow:hot:11111111".to_owned(),
                     path: PathBuf::from("/project/src/hot-a.ts"),
                     function: "hotAlpha".to_owned(),
@@ -2519,7 +2519,7 @@ mod tests {
                     percentile: 99,
                     actions: vec![],
                 },
-                crate::health_types::ProductionCoverageHotPath {
+                crate::health_types::RuntimeCoverageHotPath {
                     id: "fallow:hot:22222222".to_owned(),
                     path: PathBuf::from("/project/src/hot-b.ts"),
                     function: "hotBeta".to_owned(),
@@ -2533,13 +2533,13 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_production_coverage_filters(&mut report, Some(&baseline), root, Some(1), None);
+        apply_runtime_coverage_filters(&mut report, Some(&baseline), root, Some(1), None);
 
         assert_eq!(report.findings.len(), 1);
         assert_eq!(report.findings[0].function, "gamma");
         assert_eq!(
             report.verdict,
-            crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected
+            crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected
         );
         assert_eq!(report.summary.functions_tracked, 3);
         assert_eq!(report.summary.functions_hit, 0);
@@ -2551,25 +2551,25 @@ mod tests {
     }
 
     #[test]
-    fn production_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_remain() {
+    fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_remain() {
         let root = Path::new("/project");
         let baseline = HealthBaselineData {
             findings: vec![],
             finding_counts: std::collections::BTreeMap::new(),
-            production_coverage_findings: vec!["fallow:prod:aaaaaaaa".to_owned()],
+            runtime_coverage_findings: vec!["fallow:prod:aaaaaaaa".to_owned()],
             target_keys: vec![],
         };
-        let mut report = crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected,
+        let mut report = crate::health_types::RuntimeCoverageReport {
+            verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
             summary: fx_summary(2, 1, 1, 0),
-            findings: vec![crate::health_types::ProductionCoverageFinding {
+            findings: vec![crate::health_types::RuntimeCoverageFinding {
                 id: "fallow:prod:aaaaaaaa".to_owned(),
                 path: PathBuf::from("/project/src/a.ts"),
                 function: "alpha".to_owned(),
                 line: 10,
-                verdict: crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+                verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: crate::health_types::ProductionCoverageConfidence::Medium,
+                confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
                 evidence: fx_evidence("used", "not_covered", "tracked"),
                 actions: vec![],
             }],
@@ -2578,12 +2578,12 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_production_coverage_filters(&mut report, Some(&baseline), root, None, None);
+        apply_runtime_coverage_filters(&mut report, Some(&baseline), root, None, None);
 
         assert!(report.findings.is_empty());
         assert_eq!(
             report.verdict,
-            crate::health_types::ProductionCoverageReportVerdict::Clean
+            crate::health_types::RuntimeCoverageReportVerdict::Clean
         );
         assert_eq!(report.summary.functions_tracked, 2);
         assert_eq!(report.summary.functions_hit, 1);
@@ -2593,15 +2593,15 @@ mod tests {
     }
 
     #[test]
-    fn production_coverage_changed_review_uses_hot_path_verdict() {
+    fn runtime_coverage_changed_review_uses_hot_path_verdict() {
         let root = Path::new("/project");
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/hot.ts"));
-        let mut report = crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageReportVerdict::Clean,
+        let mut report = crate::health_types::RuntimeCoverageReport {
+            verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             summary: fx_summary(2, 2, 0, 0),
             findings: vec![],
-            hot_paths: vec![crate::health_types::ProductionCoverageHotPath {
+            hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
                 id: "fallow:hot:33333333".to_owned(),
                 path: PathBuf::from("/project/src/hot.ts"),
                 function: "renderHotPath".to_owned(),
@@ -2614,24 +2614,24 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_production_coverage_filters(&mut report, None, root, None, Some(&changed_files));
+        apply_runtime_coverage_filters(&mut report, None, root, None, Some(&changed_files));
 
         assert_eq!(
             report.verdict,
-            crate::health_types::ProductionCoverageReportVerdict::HotPathChangesNeeded
+            crate::health_types::RuntimeCoverageReportVerdict::HotPathChangesNeeded
         );
     }
 
     #[test]
-    fn production_coverage_changed_review_ignores_unmodified_hot_paths() {
+    fn runtime_coverage_changed_review_ignores_unmodified_hot_paths() {
         let root = Path::new("/project");
         let mut changed_files = FxHashSet::default();
         changed_files.insert(PathBuf::from("/project/src/other.ts"));
-        let mut report = crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageReportVerdict::Clean,
+        let mut report = crate::health_types::RuntimeCoverageReport {
+            verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             summary: fx_summary(2, 2, 0, 0),
             findings: vec![],
-            hot_paths: vec![crate::health_types::ProductionCoverageHotPath {
+            hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
                 id: "fallow:hot:44444444".to_owned(),
                 path: PathBuf::from("/project/src/hot.ts"),
                 function: "renderHotPath".to_owned(),
@@ -2644,30 +2644,30 @@ mod tests {
             warnings: vec![],
         };
 
-        apply_production_coverage_filters(&mut report, None, root, None, Some(&changed_files));
+        apply_runtime_coverage_filters(&mut report, None, root, None, Some(&changed_files));
 
         assert!(report.hot_paths.is_empty());
         assert_eq!(
             report.verdict,
-            crate::health_types::ProductionCoverageReportVerdict::Clean
+            crate::health_types::RuntimeCoverageReportVerdict::Clean
         );
     }
 
     #[test]
-    fn print_health_result_fails_on_low_traffic_production_coverage() {
+    fn print_health_result_fails_on_low_traffic_runtime_coverage() {
         let result = HealthResult {
             report: crate::health_types::HealthReport {
-                production_coverage: Some(crate::health_types::ProductionCoverageReport {
-                    verdict: crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected,
+                runtime_coverage: Some(crate::health_types::RuntimeCoverageReport {
+                    verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
                     summary: fx_summary(1, 0, 1, 0),
-                    findings: vec![crate::health_types::ProductionCoverageFinding {
+                    findings: vec![crate::health_types::RuntimeCoverageFinding {
                         id: "fallow:prod:lowtraffic".to_owned(),
                         path: PathBuf::from("/project/src/cold.ts"),
                         function: "coldPath".to_owned(),
                         line: 14,
-                        verdict: crate::health_types::ProductionCoverageVerdict::LowTraffic,
+                        verdict: crate::health_types::RuntimeCoverageVerdict::LowTraffic,
                         invocations: Some(1),
-                        confidence: crate::health_types::ProductionCoverageConfidence::Low,
+                        confidence: crate::health_types::RuntimeCoverageConfidence::Low,
                         evidence: fx_evidence("used", "not_covered", "tracked"),
                         actions: vec![],
                     }],

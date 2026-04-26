@@ -46,7 +46,7 @@ expression: redact_version(&json_str)
     "severity_high_count": 1,
     "severity_moderate_count": 0
   },
-  "production_coverage": {
+  "runtime_coverage": {
     "verdict": "cold-code-detected",
     "summary": {
       "functions_tracked": 6,
@@ -77,7 +77,7 @@ expression: redact_version(&json_str)
         "actions": [
           {
             "type": "review-deletion",
-            "description": "Tracked in production coverage with zero invocations.",
+            "description": "Tracked in runtime coverage with zero invocations.",
             "auto_fixable": false
           }
         ]
@@ -99,7 +99,7 @@ expression: redact_version(&json_str)
         },
         "actions": [
           {
-            "type": "collect-production-coverage",
+            "type": "collect-runtime-coverage",
             "description": "Collect a broader production dump.",
             "auto_fixable": false
           }

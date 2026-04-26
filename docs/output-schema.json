@@ -342,9 +342,9 @@
           "$ref": "#/definitions/CoverageGaps",
           "description": "Static test coverage gaps. Present when --coverage-gaps is used, or when top-level health reporting enables coverage gaps via config severity."
         },
-        "production_coverage": {
-          "$ref": "#/definitions/ProductionCoverageReport",
-          "description": "Merged production coverage findings from V8 or Istanbul input. Only present when --production-coverage is used."
+        "runtime_coverage": {
+          "$ref": "#/definitions/RuntimeCoverageReport",
+          "description": "Merged runtime coverage findings from V8 or Istanbul input. Only present when --runtime-coverage is used."
         },
         "grouped_by": {
           "type": "string",
@@ -438,42 +438,42 @@
       }
     },
 
-    "ProductionCoverageReport": {
+    "RuntimeCoverageReport": {
       "type": "object",
       "required": ["verdict", "summary"],
-      "description": "Production coverage findings merged into the health report. Present only when --production-coverage is used. Shape mirrors fallow-cov-protocol 0.3.",
+      "description": "Runtime coverage findings merged into the health report. Present only when --runtime-coverage is used. Shape mirrors fallow-cov-protocol 0.3.",
       "properties": {
         "verdict": {
-          "$ref": "#/definitions/ProductionCoverageReportVerdict",
-          "description": "Overall production coverage verdict after baseline filtering and changed-review adjustments."
+          "$ref": "#/definitions/RuntimeCoverageReportVerdict",
+          "description": "Overall runtime coverage verdict after baseline filtering and changed-review adjustments."
         },
         "summary": {
-          "$ref": "#/definitions/ProductionCoverageSummary",
-          "description": "Aggregate tracked / hit / unhit / untracked counts for the analyzed production coverage input."
+          "$ref": "#/definitions/RuntimeCoverageSummary",
+          "description": "Aggregate tracked / hit / unhit / untracked counts for the analyzed runtime coverage input."
         },
         "findings": {
           "type": "array",
-          "description": "Surfaced production coverage findings (`safe_to_delete`, `review_required`, `low_traffic`, `coverage_unavailable`). Omitted when empty. `active` functions stay out of this list so the CLI output remains actionable.",
-          "items": { "$ref": "#/definitions/ProductionCoverageFinding" }
+          "description": "Surfaced runtime coverage findings (`safe_to_delete`, `review_required`, `low_traffic`, `coverage_unavailable`). Omitted when empty. `active` functions stay out of this list so the CLI output remains actionable.",
+          "items": { "$ref": "#/definitions/RuntimeCoverageFinding" }
         },
         "hot_paths": {
           "type": "array",
           "description": "Top runtime functions by invocation count. Omitted when empty.",
-          "items": { "$ref": "#/definitions/ProductionCoverageHotPath" }
+          "items": { "$ref": "#/definitions/RuntimeCoverageHotPath" }
         },
         "watermark": {
-          "$ref": "#/definitions/ProductionCoverageWatermark",
+          "$ref": "#/definitions/RuntimeCoverageWatermark",
           "description": "License/trial watermark for grace-mode output. Omitted when not applicable."
         },
         "warnings": {
           "type": "array",
           "description": "Non-fatal merge or coverage diagnostics. Omitted when empty.",
-          "items": { "$ref": "#/definitions/ProductionCoverageMessage" }
+          "items": { "$ref": "#/definitions/RuntimeCoverageMessage" }
         }
       }
     },
 
-    "ProductionCoverageSummary": {
+    "RuntimeCoverageSummary": {
       "type": "object",
       "required": ["functions_tracked", "functions_hit", "functions_unhit", "functions_untracked", "coverage_percent", "trace_count", "period_days", "deployments_seen"],
       "properties": {
@@ -519,13 +519,13 @@
           "description": "Distinct deployments contributing to the supplied dump (Phase 2 local analysis emits 0)."
         },
         "capture_quality": {
-          "$ref": "#/definitions/ProductionCoverageCaptureQuality",
+          "$ref": "#/definitions/RuntimeCoverageCaptureQuality",
           "description": "Capture-quality telemetry. Present on protocol-0.3+ sidecar responses; omitted when the sidecar predates protocol 0.3. Signals whether the capture window was long enough to produce trustworthy coverage numbers."
         }
       }
     },
 
-    "ProductionCoverageCaptureQuality": {
+    "RuntimeCoverageCaptureQuality": {
       "type": "object",
       "required": ["window_seconds", "instances_observed", "lazy_parse_warning", "untracked_ratio_percent"],
       "description": "Quality-of-capture signals emitted by the sidecar so the CLI can explain short-window captures honestly instead of letting users blame the tool.",
@@ -553,28 +553,28 @@
       }
     },
 
-    "ProductionCoverageReportVerdict": {
+    "RuntimeCoverageReportVerdict": {
       "type": "string",
       "enum": ["clean", "hot-path-changes-needed", "cold-code-detected", "license-expired-grace", "unknown"],
       "description": "Overall report verdict. Independent of the per-finding verdict."
     },
 
-    "ProductionCoverageVerdict": {
+    "RuntimeCoverageVerdict": {
       "type": "string",
       "enum": ["safe_to_delete", "review_required", "coverage_unavailable", "low_traffic", "active", "unknown"],
-      "description": "Protocol-level per-function production coverage verdict derived from the decision table in fallow-cov-protocol. The CLI's `production_coverage.findings` array omits `active` entries even though the underlying enum still includes it."
+      "description": "Protocol-level per-function runtime coverage verdict derived from the decision table in fallow-cov-protocol. The CLI's `runtime_coverage.findings` array omits `active` entries even though the underlying enum still includes it."
     },
 
-    "ProductionCoverageConfidence": {
+    "RuntimeCoverageConfidence": {
       "type": "string",
       "enum": ["very_high", "high", "medium", "low", "none", "unknown"],
-      "description": "Confidence level for a production coverage finding."
+      "description": "Confidence level for a runtime coverage finding."
     },
 
-    "ProductionCoverageEvidence": {
+    "RuntimeCoverageEvidence": {
       "type": "object",
       "required": ["static_status", "test_coverage", "v8_tracking", "observation_days", "deployments_observed"],
-      "description": "Supporting evidence for a production coverage finding. Mirrors the rows of the decision table.",
+      "description": "Supporting evidence for a runtime coverage finding. Mirrors the rows of the decision table.",
       "properties": {
         "static_status": {
           "type": "string",
@@ -608,16 +608,16 @@
       }
     },
 
-    "ProductionCoverageWatermark": {
+    "RuntimeCoverageWatermark": {
       "type": "string",
       "enum": ["trial-expired", "license-expired-grace", "unknown"],
-      "description": "License or trial watermark applied to production coverage output."
+      "description": "License or trial watermark applied to runtime coverage output."
     },
 
-    "ProductionCoverageAction": {
+    "RuntimeCoverageAction": {
       "type": "object",
       "required": ["type", "description", "auto_fixable"],
-      "description": "Suggested follow-up action for a production coverage finding.",
+      "description": "Suggested follow-up action for a runtime coverage finding.",
       "properties": {
         "type": {
           "type": "string",
@@ -634,7 +634,7 @@
       }
     },
 
-    "ProductionCoverageMessage": {
+    "RuntimeCoverageMessage": {
       "type": "object",
       "required": ["code", "message"],
       "properties": {
@@ -649,7 +649,7 @@
       }
     },
 
-    "ProductionCoverageFinding": {
+    "RuntimeCoverageFinding": {
       "type": "object",
       "required": ["id", "path", "function", "line", "verdict", "confidence", "evidence"],
       "properties": {
@@ -672,7 +672,7 @@
           "description": "1-indexed line number the function starts on."
         },
         "verdict": {
-          "$ref": "#/definitions/ProductionCoverageVerdict"
+          "$ref": "#/definitions/RuntimeCoverageVerdict"
         },
         "invocations": {
           "type": "integer",
@@ -680,20 +680,20 @@
           "description": "Observed invocation count for the function. Omitted when the function is untracked (lazy-parsed, worker-thread isolate, dynamic code)."
         },
         "confidence": {
-          "$ref": "#/definitions/ProductionCoverageConfidence"
+          "$ref": "#/definitions/RuntimeCoverageConfidence"
         },
         "evidence": {
-          "$ref": "#/definitions/ProductionCoverageEvidence"
+          "$ref": "#/definitions/RuntimeCoverageEvidence"
         },
         "actions": {
           "type": "array",
           "description": "Suggested actions for this finding. Omitted when empty.",
-          "items": { "$ref": "#/definitions/ProductionCoverageAction" }
+          "items": { "$ref": "#/definitions/RuntimeCoverageAction" }
         }
       }
     },
 
-    "ProductionCoverageHotPath": {
+    "RuntimeCoverageHotPath": {
       "type": "object",
       "required": ["id", "path", "function", "line", "invocations", "percentile"],
       "properties": {
@@ -729,7 +729,7 @@
         "actions": {
           "type": "array",
           "description": "Suggested actions for this hot path (e.g., review-on-change). Omitted when empty.",
-          "items": { "$ref": "#/definitions/ProductionCoverageAction" }
+          "items": { "$ref": "#/definitions/RuntimeCoverageAction" }
         }
       }
     },
@@ -765,7 +765,7 @@
 
     "SchemaVersion": {
       "type": "integer",
-      "description": "Schema version for this output format (independent of tool version). Adding new fields does not bump the version. Consumers should check this field to detect structural changes. v4 was introduced alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence block, renamed summary fields); the production-coverage block is extended additively as the protocol evolves (currently 0.3, which adds an optional capture_quality summary field).",
+      "description": "Schema version for this output format (independent of tool version). Adding new fields does not bump the version. Consumers should check this field to detect structural changes. v4 was introduced alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence block, renamed summary fields); the runtime-coverage block is extended additively as the protocol evolves (currently 0.3, which adds an optional capture_quality summary field).",
       "examples": [4]
     },
     "ToolVersion": {

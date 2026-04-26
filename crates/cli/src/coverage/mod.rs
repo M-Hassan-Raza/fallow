@@ -1,10 +1,10 @@
-//! `fallow coverage` - paid Production Coverage onboarding and inventory
+//! `fallow coverage` - paid Runtime Coverage onboarding and inventory
 //! upload.
 //!
 //! Today the subtree holds two commands:
 //!
 //! - `setup`: resumable first-run state machine (license + sidecar + recipe
-//!   + auto-handoff to `fallow health --production-coverage`).
+//!   + auto-handoff to `fallow health --runtime-coverage`).
 //! - `upload-inventory`: push a static function inventory to fallow cloud,
 //!   unlocking the `untracked` filter on the dashboard by pairing runtime
 //!   coverage data with the AST view of "every function that exists".
@@ -17,14 +17,14 @@ use std::process::{Command, ExitCode};
 use fallow_config::PackageJson;
 use fallow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
 
-use crate::health::coverage as production_coverage;
+use crate::health::coverage as runtime_coverage;
 use crate::license;
 
 pub use upload_inventory::UploadInventoryArgs;
 
 mod upload_inventory;
 
-const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/production-coverage";
+const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-coverage";
 
 /// Subcommands for `fallow coverage`.
 #[derive(Debug, Clone)]
@@ -190,7 +190,7 @@ pub fn run(subcommand: CoverageSubcommand, root: &Path) -> ExitCode {
 fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
     println!("fallow coverage setup");
     println!();
-    println!("What \"production coverage\" means: fallow looks at which functions actually");
+    println!("What \"runtime coverage\" means: fallow looks at which functions actually");
     println!("ran in your deployed app, so it can say \"this code is never called\" with");
     println!("proof, not just \"this code has no static references.\"");
     println!();
@@ -228,7 +228,7 @@ fn run_setup(args: SetupArgs, root: &Path) -> ExitCode {
             display_relative(root, &coverage_path)
         );
         println!(
-            "Step 4/4: Running fallow health --production-coverage {} ...",
+            "Step 4/4: Running fallow health --runtime-coverage {} ...",
             display_relative(root, &coverage_path)
         );
         let exit = run_health_analysis(root, &coverage_path);
@@ -337,7 +337,7 @@ fn handle_sidecar_step(
     args: SetupArgs,
     package_manager: Option<PackageManager>,
 ) -> Option<ExitCode> {
-    match production_coverage::discover_sidecar(Some(root)) {
+    match runtime_coverage::discover_sidecar(Some(root)) {
         Ok(path) => {
             println!("Step 2/4: Sidecar check... ok ({})", path.to_string_lossy());
             None
@@ -368,7 +368,7 @@ fn handle_sidecar_step(
                 println!("  -> Run: {install_command}");
                 println!(
                     "  -> Manual fallback: install a signed binary and place it at {}",
-                    production_coverage::canonical_sidecar_path().display()
+                    runtime_coverage::canonical_sidecar_path().display()
                 );
                 return Some(ExitCode::SUCCESS);
             }
@@ -523,14 +523,14 @@ fn install_sidecar(
     if !status.success() {
         return Err(format!(
             "{display_command} failed. Install it manually or place the binary in {}",
-            production_coverage::canonical_sidecar_path().display()
+            runtime_coverage::canonical_sidecar_path().display()
         ));
     }
 
-    production_coverage::discover_sidecar(Some(root)).map_err(|_| {
+    runtime_coverage::discover_sidecar(Some(root)).map_err(|_| {
         format!(
             "sidecar install finished but fallow still could not find fallow-cov. Checked project-local node_modules/.bin, {}, and PATH",
-            production_coverage::canonical_sidecar_path().display()
+            runtime_coverage::canonical_sidecar_path().display()
         )
     })
 }
@@ -632,13 +632,13 @@ fn recipe_contents(context: &CoverageSetupContext) -> String {
         FrameworkKind::PlainNode => "Node service",
         FrameworkKind::Other => {
             return format!(
-                "# Collect production coverage\n\nThis project was not matched to a built-in recipe.\nSee {COVERAGE_DOCS_URL} for framework-specific instructions.\n"
+                "# Collect runtime coverage\n\nThis project was not matched to a built-in recipe.\nSee {COVERAGE_DOCS_URL} for framework-specific instructions.\n"
             );
         }
     };
 
     let mut lines = vec![
-        format!("# Collect production coverage for {title}"),
+        format!("# Collect runtime coverage for {title}"),
         String::new(),
     ];
     lines.push("1. Remove any old dump directory: `rm -rf ./coverage`".to_owned());
@@ -713,7 +713,7 @@ fn run_health_analysis(root: &Path, coverage_path: &Path) -> ExitCode {
         .arg("health")
         .arg("--root")
         .arg(root)
-        .arg("--production-coverage")
+        .arg("--runtime-coverage")
         .arg(coverage_path)
         .status()
     {

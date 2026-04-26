@@ -408,10 +408,10 @@ fn print_status(status: &LicenseStatus) {
             );
         }
     }
-    if status.permits(&Feature::ProductionCoverage) {
-        println!("  → production_coverage: ENABLED");
+    if status.permits(&Feature::RuntimeCoverage) {
+        println!("  → runtime_coverage: ENABLED");
     } else {
-        println!("  → production_coverage: disabled (upgrade or refresh)");
+        println!("  → runtime_coverage: disabled (upgrade or refresh)");
     }
 }
 

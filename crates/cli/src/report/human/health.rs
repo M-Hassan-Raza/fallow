@@ -25,7 +25,7 @@ pub(in crate::report) fn print_health_human(
         && report.coverage_gaps.is_none()
         && report.hotspots.is_empty()
         && report.targets.is_empty()
-        && report.production_coverage.is_none()
+        && report.runtime_coverage.is_none()
         && !has_score
     {
         if !quiet {
@@ -72,7 +72,7 @@ pub(in crate::report) fn print_health_human(
             };
             parts.push(format!("maintainability {avg:.1} ({label})"));
         }
-        if let Some(ref production) = report.production_coverage {
+        if let Some(ref production) = report.runtime_coverage {
             parts.push(format!(
                 "{} unhit in production",
                 production.summary.functions_unhit
@@ -106,7 +106,7 @@ pub(in crate::report) fn build_health_human_lines(
     let mut lines = Vec::new();
     render_health_score(&mut lines, report);
     render_health_trend(&mut lines, report);
-    render_production_coverage(&mut lines, report, root);
+    render_runtime_coverage(&mut lines, report, root);
     render_vital_signs(&mut lines, report);
     render_risk_profiles(&mut lines, report);
     render_large_functions(&mut lines, report, root);
@@ -118,32 +118,30 @@ pub(in crate::report) fn build_health_human_lines(
     lines
 }
 
-fn render_production_coverage(
+fn render_runtime_coverage(
     lines: &mut Vec<String>,
     report: &crate::health_types::HealthReport,
     root: &Path,
 ) {
-    let Some(ref production) = report.production_coverage else {
+    let Some(ref production) = report.runtime_coverage else {
         return;
     };
 
     let verdict = match production.verdict {
-        crate::health_types::ProductionCoverageReportVerdict::Clean => "clean",
-        crate::health_types::ProductionCoverageReportVerdict::HotPathChangesNeeded => {
+        crate::health_types::RuntimeCoverageReportVerdict::Clean => "clean",
+        crate::health_types::RuntimeCoverageReportVerdict::HotPathChangesNeeded => {
             "hot path changes needed"
         }
-        crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected => {
-            "cold code detected"
-        }
-        crate::health_types::ProductionCoverageReportVerdict::LicenseExpiredGrace => {
+        crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected => "cold code detected",
+        crate::health_types::RuntimeCoverageReportVerdict::LicenseExpiredGrace => {
             "license expired grace"
         }
-        crate::health_types::ProductionCoverageReportVerdict::Unknown => "unknown",
+        crate::health_types::RuntimeCoverageReportVerdict::Unknown => "unknown",
     };
     lines.push(format!(
         "{} {} {}",
         "\u{25cf}".cyan(),
-        "Production coverage:".cyan().bold(),
+        "Runtime coverage:".cyan().bold(),
         verdict
     ));
     lines.push(format!(
@@ -174,7 +172,7 @@ fn render_production_coverage(
     }
     if matches!(
         production.watermark,
-        Some(crate::health_types::ProductionCoverageWatermark::LicenseExpiredGrace)
+        Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace)
     ) {
         lines.push(
             "  license expired grace active; refresh with `fallow license refresh`".to_owned(),
@@ -251,7 +249,7 @@ pub(in crate::report) fn format_window(seconds: u64) -> String {
 /// inline caveats on summary numbers; fully yellow, no prefix glyph.
 fn render_capture_quality_warning(
     lines: &mut Vec<String>,
-    production: &crate::health_types::ProductionCoverageReport,
+    production: &crate::health_types::RuntimeCoverageReport,
 ) {
     let Some(ref quality) = production.summary.capture_quality else {
         return;
@@ -287,7 +285,7 @@ fn render_capture_quality_warning(
 /// capture warning so long, clean captures do not see CTA spam on every run.
 fn render_upgrade_prompt(
     lines: &mut Vec<String>,
-    production: &crate::health_types::ProductionCoverageReport,
+    production: &crate::health_types::RuntimeCoverageReport,
 ) {
     let Some(ref quality) = production.summary.capture_quality else {
         return;
@@ -1580,7 +1578,7 @@ pub(in crate::report) fn print_health_summary(
             },
         );
     }
-    if let Some(ref production) = report.production_coverage {
+    if let Some(ref production) = report.runtime_coverage {
         println!(
             "  {:>6}  Unhit in production",
             production.summary.functions_unhit,
@@ -1885,12 +1883,12 @@ mod tests {
     }
 
     #[test]
-    fn health_production_coverage_renders_section() {
+    fn health_runtime_coverage_renders_section() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.production_coverage = Some(crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageReportVerdict::ColdCodeDetected,
-            summary: crate::health_types::ProductionCoverageSummary {
+        report.runtime_coverage = Some(crate::health_types::RuntimeCoverageReport {
+            verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
+            summary: crate::health_types::RuntimeCoverageSummary {
                 functions_tracked: 4,
                 functions_hit: 2,
                 functions_unhit: 1,
@@ -1901,15 +1899,15 @@ mod tests {
                 deployments_seen: 14,
                 capture_quality: None,
             },
-            findings: vec![crate::health_types::ProductionCoverageFinding {
+            findings: vec![crate::health_types::RuntimeCoverageFinding {
                 id: "fallow:prod:deadbeef".to_owned(),
                 path: root.join("src/cold.ts"),
                 function: "coldPath".to_owned(),
                 line: 14,
-                verdict: crate::health_types::ProductionCoverageVerdict::ReviewRequired,
+                verdict: crate::health_types::RuntimeCoverageVerdict::ReviewRequired,
                 invocations: Some(0),
-                confidence: crate::health_types::ProductionCoverageConfidence::Medium,
-                evidence: crate::health_types::ProductionCoverageEvidence {
+                confidence: crate::health_types::RuntimeCoverageConfidence::Medium,
+                evidence: crate::health_types::RuntimeCoverageEvidence {
                     static_status: "used".to_owned(),
                     test_coverage: "not_covered".to_owned(),
                     v8_tracking: "tracked".to_owned(),
@@ -1919,7 +1917,7 @@ mod tests {
                 },
                 actions: vec![],
             }],
-            hot_paths: vec![crate::health_types::ProductionCoverageHotPath {
+            hot_paths: vec![crate::health_types::RuntimeCoverageHotPath {
                 id: "fallow:hot:cafebabe".to_owned(),
                 path: root.join("src/hot.ts"),
                 function: "hotPath".to_owned(),
@@ -1928,12 +1926,12 @@ mod tests {
                 percentile: 99,
                 actions: vec![],
             }],
-            watermark: Some(crate::health_types::ProductionCoverageWatermark::LicenseExpiredGrace),
+            watermark: Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace),
             warnings: vec![],
         });
 
         let text = plain(&build_health_human_lines(&report, &root));
-        assert!(text.contains("Production coverage: cold code detected"));
+        assert!(text.contains("Runtime coverage: cold code detected"));
         assert!(text.contains("src/cold.ts:14 coldPath [0 invocations, review required]"));
         assert!(text.contains("license expired grace active"));
         assert!(text.contains("hot paths:"));
@@ -1943,12 +1941,12 @@ mod tests {
         assert!(!text.contains("start a trial"));
     }
 
-    fn production_coverage_report_with_quality(
-        quality: Option<crate::health_types::ProductionCoverageCaptureQuality>,
-    ) -> crate::health_types::ProductionCoverageReport {
-        crate::health_types::ProductionCoverageReport {
-            verdict: crate::health_types::ProductionCoverageReportVerdict::Clean,
-            summary: crate::health_types::ProductionCoverageSummary {
+    fn runtime_coverage_report_with_quality(
+        quality: Option<crate::health_types::RuntimeCoverageCaptureQuality>,
+    ) -> crate::health_types::RuntimeCoverageReport {
+        crate::health_types::RuntimeCoverageReport {
+            verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
+            summary: crate::health_types::RuntimeCoverageSummary {
                 functions_tracked: 10,
                 functions_hit: 7,
                 functions_unhit: 0,
@@ -1967,11 +1965,11 @@ mod tests {
     }
 
     #[test]
-    fn health_production_coverage_short_capture_shows_warning_and_prompt() {
+    fn health_runtime_coverage_short_capture_shows_warning_and_prompt() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.production_coverage = Some(production_coverage_report_with_quality(Some(
-            crate::health_types::ProductionCoverageCaptureQuality {
+        report.runtime_coverage = Some(runtime_coverage_report_with_quality(Some(
+            crate::health_types::RuntimeCoverageCaptureQuality {
                 window_seconds: 720, // 12 min
                 instances_observed: 1,
                 lazy_parse_warning: true,
@@ -2004,11 +2002,11 @@ mod tests {
     }
 
     #[test]
-    fn health_production_coverage_long_capture_shows_neither_warning_nor_prompt() {
+    fn health_runtime_coverage_long_capture_shows_neither_warning_nor_prompt() {
         let root = PathBuf::from("/project");
         let mut report = empty_report();
-        report.production_coverage = Some(production_coverage_report_with_quality(Some(
-            crate::health_types::ProductionCoverageCaptureQuality {
+        report.runtime_coverage = Some(runtime_coverage_report_with_quality(Some(
+            crate::health_types::RuntimeCoverageCaptureQuality {
                 window_seconds: 7 * 24 * 3600, // 7 days
                 instances_observed: 4,
                 lazy_parse_warning: false,

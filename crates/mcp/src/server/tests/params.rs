@@ -60,13 +60,13 @@ fn check_changed_params_require_since() {
 }
 
 #[test]
-fn check_production_coverage_params_require_coverage() {
+fn check_runtime_coverage_params_require_coverage() {
     let json = "{}";
-    let result: Result<CheckProductionCoverageParams, _> = serde_json::from_str(json);
+    let result: Result<CheckRuntimeCoverageParams, _> = serde_json::from_str(json);
     assert!(result.is_err());
 
     let json = r#"{"coverage":"./coverage"}"#;
-    let params: CheckProductionCoverageParams = serde_json::from_str(json).unwrap();
+    let params: CheckRuntimeCoverageParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.coverage, "./coverage");
     assert!(params.min_invocations_hot.is_none());
     assert!(params.min_observation_volume.is_none());
@@ -75,7 +75,7 @@ fn check_production_coverage_params_require_coverage() {
 }
 
 #[test]
-fn check_production_coverage_params_all_fields_deserialize() {
+fn check_runtime_coverage_params_all_fields_deserialize() {
     let json = r#"{
         "coverage": "./coverage/coverage-final.json",
         "root": "/project",
@@ -90,7 +90,7 @@ fn check_production_coverage_params_all_fields_deserialize() {
         "max_crap": 35.0,
         "group_by": "owner"
     }"#;
-    let params: CheckProductionCoverageParams = serde_json::from_str(json).unwrap();
+    let params: CheckRuntimeCoverageParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.coverage, "./coverage/coverage-final.json");
     assert_eq!(params.root.as_deref(), Some("/project"));
     assert_eq!(params.config.as_deref(), Some("fallow.toml"));

@@ -127,9 +127,9 @@ echo "  summary-health.jq (no delta header without score):"
 OUT_NO_SCORE=$(jq 'del(.health_score) | del(.health_trend)' "$FIXTURES/health.json" | jq -r -f "$JQ_DIR/summary-health.jq" 2>&1)
 assert_not_contains "$OUT_NO_SCORE" "Health:" "no-score: no delta header"
 
-echo "  summary-health.jq (production coverage findings and hot paths):"
-OUT_PROD=$(jq '.production_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":4,"functions_hit":2,"functions_unhit":1,"functions_untracked":1,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium"},{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/summary-health.jq" 2>&1)
-assert_contains "$OUT_PROD" "Production Coverage" "prod: has production coverage section"
+echo "  summary-health.jq (runtime coverage findings and hot paths):"
+OUT_PROD=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":4,"functions_hit":2,"functions_unhit":1,"functions_untracked":1,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium"},{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/summary-health.jq" 2>&1)
+assert_contains "$OUT_PROD" "Runtime Coverage" "prod: has runtime coverage section"
 assert_contains "$OUT_PROD" "review_required" "prod: shows production verdict"
 assert_contains "$OUT_PROD" "Hot Paths" "prod: has hot paths section"
 assert_contains "$OUT_PROD" "hotPath" "prod: shows hot path function"
@@ -188,9 +188,9 @@ echo "  summary-combined.jq (delta header with increasing dead exports shows sup
 OUT_WORSE=$(jq '.health.health_trend.metrics[1].delta = 5.0 | .health.health_trend.metrics[1].current = 50.0' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_WORSE" "suppress?" "worsening: shows suppress link when dead exports increase"
 
-echo "  summary-combined.jq (production coverage details):"
-OUT_COMBINED_PROD=$(jq '.health.production_coverage = {"verdict":"hot-path-changes-needed","summary":{"functions_tracked":4,"functions_hit":3,"functions_unhit":0,"functions_untracked":1,"coverage_percent":75,"trace_count":2400,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/combined-clean.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
-assert_contains "$OUT_COMBINED_PROD" "Production coverage" "combined prod: has production coverage details"
+echo "  summary-combined.jq (runtime coverage details):"
+OUT_COMBINED_PROD=$(jq '.health.runtime_coverage = {"verdict":"hot-path-changes-needed","summary":{"functions_tracked":4,"functions_hit":3,"functions_unhit":0,"functions_untracked":1,"coverage_percent":75,"trace_count":2400,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/combined-clean.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_COMBINED_PROD" "Runtime coverage" "combined prod: has runtime coverage details"
 assert_contains "$OUT_COMBINED_PROD" "hotPath" "combined prod: shows hot path"
 
 # --- Annotation jq tests ---
@@ -220,8 +220,8 @@ assert_contains "$OUT" "(critical)" "critical severity in annotation title"
 assert_contains "$OUT" "(high)" "high severity in annotation title"
 assert_contains "$OUT" "parseContentBlocks" "includes function name"
 
-OUT_PROD_ANN=$(jq '.production_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]},{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"untracked","untracked_reason":"lazy_parsed"}}]}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
-assert_contains "$OUT_PROD_ANN" "Production coverage" "prod annotation: title present"
+OUT_PROD_ANN=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]},{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"untracked","untracked_reason":"lazy_parsed"}}]}' "$FIXTURES/health-clean.json" | jq -r -f "$JQ_DIR/annotations-health.jq" 2>&1)
+assert_contains "$OUT_PROD_ANN" "Runtime coverage" "prod annotation: title present"
 assert_contains "$OUT_PROD_ANN" "coldPath" "prod annotation: function name present"
 
 # --- Review comment jq tests ---
@@ -255,7 +255,7 @@ assert_valid_json "$OUT" "produces valid JSON"
 assert_contains "$OUT" "critical" "includes severity in review comment"
 assert_contains "$OUT" "parseContentBlocks" "includes function name"
 
-OUT_PROD_REVIEW=$(jq '.production_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]}]}' "$FIXTURES/health-clean.json" | jq -f "$JQ_DIR/review-comments-health.jq" 2>&1)
+OUT_PROD_REVIEW=$(jq '.runtime_coverage = {"verdict":"cold-code-detected","summary":{"functions_tracked":2,"functions_hit":1,"functions_unhit":1,"functions_untracked":0,"coverage_percent":50,"trace_count":1200,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/cold.ts","function":"coldPath","line":14,"verdict":"review_required","invocations":0,"confidence":"medium","evidence":{"static_status":"used","test_coverage":"not_covered","v8_tracking":"tracked"},"actions":[{"description":"Review before deleting."}]}]}' "$FIXTURES/health-clean.json" | jq -f "$JQ_DIR/review-comments-health.jq" 2>&1)
 assert_valid_json "$OUT_PROD_REVIEW" "prod review comments: valid JSON"
 assert_contains "$OUT_PROD_REVIEW" "coldPath" "prod review comments: function present"
 assert_contains "$OUT_PROD_REVIEW" "review_required" "prod review comments: verdict present"
@@ -267,8 +267,8 @@ assert_contains "$OUT" "Fallow Review" "has review title"
 assert_contains "$OUT" "fallow-review" "has marker comment"
 assert_contains "$OUT" "Maintainability" "shows metrics"
 
-OUT_REVIEW_PROD=$(jq '.health.production_coverage = {"verdict":"hot-path-changes-needed","summary":{"functions_tracked":4,"functions_hit":3,"functions_unhit":0,"functions_untracked":1,"coverage_percent":75,"trace_count":2400,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/combined-clean.json" | jq -r -f "$JQ_DIR/review-body.jq" 2>&1)
-assert_contains "$OUT_REVIEW_PROD" "Production coverage:" "review body prod: summary line present"
+OUT_REVIEW_PROD=$(jq '.health.runtime_coverage = {"verdict":"hot-path-changes-needed","summary":{"functions_tracked":4,"functions_hit":3,"functions_unhit":0,"functions_untracked":1,"coverage_percent":75,"trace_count":2400,"period_days":7,"deployments_seen":2},"findings":[{"path":"src/lazy.ts","function":"lateBound","line":8,"verdict":"coverage_unavailable","confidence":"none"}],"hot_paths":[{"path":"src/hot.ts","function":"hotPath","line":3,"invocations":250,"percentile":99}]}' "$FIXTURES/combined-clean.json" | jq -r -f "$JQ_DIR/review-body.jq" 2>&1)
+assert_contains "$OUT_REVIEW_PROD" "Runtime coverage:" "review body prod: summary line present"
 assert_contains "$OUT_REVIEW_PROD" "hot path" "review body prod: hot path mentioned"
 
 # --- Suggestion block tests ---

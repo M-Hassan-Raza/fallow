@@ -247,8 +247,8 @@ fallow health --targets --effort low      # Only quick-win refactoring targets
 fallow health --coverage-gaps             # Static test coverage gaps
 fallow health --coverage coverage/coverage-final.json
 fallow health --coverage artifacts/coverage.json --coverage-root /home/runner/work/myapp
-fallow health --production-coverage ./coverage
-fallow health --production-coverage ./coverage --min-invocations-hot 250
+fallow health --runtime-coverage ./coverage
+fallow health --runtime-coverage ./coverage --min-invocations-hot 250
 fallow health --trend                     # Compare against saved snapshot
 fallow health --changed-since main        # Only changed files
 ```
@@ -259,7 +259,7 @@ Static analysis answers: **what is connected to what?**
 
 Runtime intelligence answers: **what actually ran?**
 
-Fallow Runtime is the optional paid team layer. It uses production coverage as the collection engine (V8 dumps via `NODE_V8_COVERAGE=...` and Istanbul `coverage-final.json` files), then merges that evidence into `fallow health` so teams and coding agents can:
+Fallow Runtime is the optional paid team layer. It uses runtime coverage as the collection engine (V8 dumps via `NODE_V8_COVERAGE=...` and Istanbul `coverage-final.json` files), then merges that evidence into `fallow health` so teams and coding agents can:
 
 - review changes on hot production paths more carefully
 - delete cold code with stronger evidence
@@ -270,16 +270,16 @@ Fallow Runtime is the optional paid team layer. It uses production coverage as t
 ```bash
 fallow license activate --trial --email you@company.com
 fallow coverage setup
-fallow health --production-coverage ./coverage
+fallow health --runtime-coverage ./coverage
 ```
 
-Static `coverage_gaps` and runtime `production_coverage` are separate layers in the same `health` surface:
+Static `coverage_gaps` and runtime `runtime_coverage` are separate layers in the same `health` surface:
 
 | Surface | Flag | Input | Answers | License |
 |:--|:--|:--|:--|:--|
 | Static test reachability | `--coverage-gaps` | none | which runtime files/exports have no test dependency path | no |
 | Exact CRAP scoring | `--coverage` | Istanbul JSON file or `coverage-final.json` directory | how covered each function is for CRAP computation | no |
-| Runtime production coverage | `--production-coverage` | V8 directory, V8 JSON file, or Istanbul JSON file | which functions actually executed, which stayed cold, which are hot | yes |
+| Runtime runtime coverage | `--runtime-coverage` | V8 directory, V8 JSON file, or Istanbul JSON file | which functions actually executed, which stayed cold, which are hot | yes |
 
 Setup details:
 
@@ -288,15 +288,15 @@ Setup details:
 - `fallow coverage setup` detects your framework and package manager, installs the sidecar if needed, writes a collection recipe, and resumes from the current setup state on re-run
 - `fallow coverage upload-inventory` pushes a static function inventory to fallow cloud so the dashboard's `Untracked` filter (functions that exist but never run) lights up. Runs in CI, respects `.gitignore` + `--exclude-paths`, preserves same-named functions by their line-aware cloud identity, and warns when inventory paths do not overlap recent runtime paths. For containerized deployments, pass `--path-prefix /app` (or your Dockerfile `WORKDIR`) so inventory paths match what the runtime beacon reports
 - The sidecar can be installed globally or as a project devDependency; fallow resolves `FALLOW_COV_BIN`, project-local shims, package-manager bin lookups, `~/.fallow/bin/fallow-cov`, and `PATH`
-- `fallow health --production-coverage <path>` accepts a V8 directory, a single V8 JSON file, or a single Istanbul coverage map JSON file (commonly `coverage-final.json`)
+- `fallow health --runtime-coverage <path>` accepts a V8 directory, a single V8 JSON file, or a single Istanbul coverage map JSON file (commonly `coverage-final.json`)
 - `fallow health --coverage <path>` accepts a single Istanbul coverage map JSON file or a directory containing `coverage-final.json`
 - `--coverage-root <path>` rebases Istanbul file paths before CRAP matching. Use it when coverage was generated in CI or Docker with a different checkout root, for example `fallow health --coverage artifacts/coverage-final.json --coverage-root /home/runner/work/myapp`
 - V8 dumps that include Node's `source-map-cache` are remapped through supported source-map paths before analysis, including file paths, relative paths, `webpack://...`, and `vite://...`; unsupported virtual schemes safely fall back to raw V8 handling
-- `fallow health --changed-since <ref> --production-coverage <path>` promotes touched hot paths to a `hot-path-changes-needed` verdict during change review
+- `fallow health --changed-since <ref> --runtime-coverage <path>` promotes touched hot paths to a `hot-path-changes-needed` verdict during change review
 
-Production coverage is merged into the same human, JSON, SARIF, compact, markdown, and CodeClimate outputs as the rest of the health report.
+Runtime coverage is merged into the same human, JSON, SARIF, compact, markdown, and CodeClimate outputs as the rest of the health report.
 
-Read more: [Static vs runtime intelligence](https://docs.fallow.tools/explanations/static-vs-runtime) | [Production coverage](https://docs.fallow.tools/analysis/production-coverage)
+Read more: [Static vs runtime intelligence](https://docs.fallow.tools/explanations/static-vs-runtime) | [Runtime coverage](https://docs.fallow.tools/analysis/runtime-coverage)
 
 ## Audit
 

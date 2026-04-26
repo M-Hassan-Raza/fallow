@@ -664,33 +664,31 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
         ));
     }
 
-    if let Some(ref production) = report.production_coverage {
+    if let Some(ref production) = report.runtime_coverage {
         for finding in &production.findings {
             let path = cc_path(&finding.path, root);
             let check_name = match finding.verdict {
-                crate::health_types::ProductionCoverageVerdict::SafeToDelete => {
+                crate::health_types::RuntimeCoverageVerdict::SafeToDelete => {
                     "fallow/production-safe-to-delete"
                 }
-                crate::health_types::ProductionCoverageVerdict::ReviewRequired => {
+                crate::health_types::RuntimeCoverageVerdict::ReviewRequired => {
                     "fallow/production-review-required"
                 }
-                crate::health_types::ProductionCoverageVerdict::LowTraffic => {
+                crate::health_types::RuntimeCoverageVerdict::LowTraffic => {
                     "fallow/production-low-traffic"
                 }
-                crate::health_types::ProductionCoverageVerdict::CoverageUnavailable => {
-                    "fallow/production-coverage-unavailable"
+                crate::health_types::RuntimeCoverageVerdict::CoverageUnavailable => {
+                    "fallow/runtime-coverage-unavailable"
                 }
-                crate::health_types::ProductionCoverageVerdict::Active
-                | crate::health_types::ProductionCoverageVerdict::Unknown => {
-                    "fallow/production-coverage"
-                }
+                crate::health_types::RuntimeCoverageVerdict::Active
+                | crate::health_types::RuntimeCoverageVerdict::Unknown => "fallow/runtime-coverage",
             };
             let invocations_hint = finding.invocations.map_or_else(
                 || "untracked".to_owned(),
                 |hits| format!("{hits} invocations"),
             );
             let description = format!(
-                "'{}' production coverage verdict: {} ({})",
+                "'{}' runtime coverage verdict: {} ({})",
                 finding.function,
                 finding.verdict.human_label(),
                 invocations_hint,
@@ -700,8 +698,8 @@ pub fn build_health_codeclimate(report: &HealthReport, root: &Path) -> serde_jso
             // "minor" — "info" is schema-valid but silently dropped from MR
             // annotations.
             let severity = match finding.verdict {
-                crate::health_types::ProductionCoverageVerdict::SafeToDelete => "critical",
-                crate::health_types::ProductionCoverageVerdict::ReviewRequired => "major",
+                crate::health_types::RuntimeCoverageVerdict::SafeToDelete => "critical",
+                crate::health_types::RuntimeCoverageVerdict::ReviewRequired => "major",
                 _ => "minor",
             };
             let fp = fingerprint_hash(&[

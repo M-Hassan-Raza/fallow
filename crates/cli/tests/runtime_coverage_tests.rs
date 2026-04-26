@@ -1,11 +1,11 @@
-//! End-to-end integration tests for `fallow health --production-coverage`.
+//! End-to-end integration tests for `fallow health --runtime-coverage`.
 //!
 //! Exercises the full CLI → sidecar pipeline with a signed stub sidecar:
 //! discovery via `FALLOW_COV_BIN`, Ed25519 signature verification, Request
 //! marshalling over stdin, Response parsing, protocol-version check, and the
 //! 3 / 4 / 5 / 6 exit-code matrix. Pairs with the source-level
 //! network-prohibition assertion in
-//! `crates/cli/src/health/coverage.rs::tests::production_coverage_module_has_no_network_code`
+//! `crates/cli/src/health/coverage.rs::tests::runtime_coverage_module_has_no_network_code`
 //! to cover the Phase 2 step 4 roadmap gate:
 //!
 //! > integration test asserting zero network calls during analysis.
@@ -15,7 +15,7 @@
 //! deterministic test keypairs, and activates the `stub_sidecar` bin target.
 //! A `compile_error!` in `coverage.rs` blocks the feature from release builds.
 //!
-//! Run: `cargo test -p fallow-cli --features test-sidecar-key production_coverage`.
+//! Run: `cargo test -p fallow-cli --features test-sidecar-key runtime_coverage`.
 
 #[path = "common/mod.rs"]
 mod common;
@@ -106,7 +106,7 @@ mod gated {
                 "health".to_owned(),
                 "--root".to_owned(),
                 fixture.to_string_lossy().into_owned(),
-                "--production-coverage".to_owned(),
+                "--runtime-coverage".to_owned(),
                 self.coverage_file.to_string_lossy().into_owned(),
                 "--format".to_owned(),
                 format.to_owned(),
@@ -167,10 +167,7 @@ mod gated {
     fn license_expired_hard_fail_exits_3() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env(
-            "FALLOW_LICENSE",
-            sign::mint_expired_production_coverage_jwt(),
-        );
+        cmd.env("FALLOW_LICENSE", sign::mint_expired_runtime_coverage_jwt());
         for arg in harness.health_args() {
             cmd.arg(arg);
         }
@@ -182,10 +179,10 @@ mod gated {
     }
 
     #[test]
-    fn happy_path_exits_0_and_renders_production_coverage() {
+    fn happy_path_exits_0_and_renders_runtime_coverage() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", "ok");
         for arg in harness.health_args() {
             cmd.arg(arg);
@@ -204,8 +201,8 @@ mod gated {
             )
         });
         assert!(
-            json.get("production_coverage").is_some(),
-            "production_coverage key missing from JSON output; keys={:?}",
+            json.get("runtime_coverage").is_some(),
+            "runtime_coverage key missing from JSON output; keys={:?}",
             json.as_object().map(|o| o.keys().collect::<Vec<_>>())
         );
     }
@@ -214,7 +211,7 @@ mod gated {
     fn sidecar_missing_exits_4() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         // Deliberately point at a path that does not exist so discovery
         // hits the explicit-beats-implicit bailout in discover_sidecar.
         cmd.env("FALLOW_COV_BIN", harness.home.join("does-not-exist"));
@@ -252,7 +249,7 @@ mod gated {
     fn sidecar_protocol_mismatch_exits_4() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", "protocol-mismatch");
         for arg in harness.health_args() {
             cmd.arg(arg);
@@ -268,7 +265,7 @@ mod gated {
     fn malformed_sidecar_stdout_exits_4() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", "malformed-stdout");
         for arg in harness.health_args() {
             cmd.arg(arg);
@@ -290,7 +287,7 @@ mod gated {
         fs::write(&sig_path, [0u8; 64]).expect("overwrite signature");
 
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", "ok");
         for arg in harness.health_args() {
             cmd.arg(arg);
@@ -309,7 +306,7 @@ mod gated {
     fn happy_path_does_not_set_watermark() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", "ok");
         for arg in harness.health_args() {
             cmd.arg(arg);
@@ -322,8 +319,8 @@ mod gated {
             code,
         });
         let coverage = json
-            .get("production_coverage")
-            .expect("production_coverage present");
+            .get("runtime_coverage")
+            .expect("runtime_coverage present");
         let watermark = coverage.get("watermark");
         assert!(
             watermark.is_none_or(serde_json::Value::is_null),
@@ -338,7 +335,7 @@ mod gated {
     fn capture_quality_short_renders_warning_and_upgrade_prompt_in_human_output() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", "capture-quality-short");
         for arg in harness.health_args_with_format("human") {
             cmd.arg(arg);
@@ -376,7 +373,7 @@ mod gated {
     fn capture_quality_long_shows_neither_warning_nor_upgrade_prompt() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", "capture-quality-long");
         for arg in harness.health_args_with_format("human") {
             cmd.arg(arg);
@@ -404,7 +401,7 @@ mod gated {
     fn capture_quality_short_does_not_emit_upgrade_prompt_in_json() {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", "capture-quality-short");
         for arg in harness.health_args_with_format("json") {
             cmd.arg(arg);
@@ -421,7 +418,7 @@ mod gated {
         let json: serde_json::Value =
             serde_json::from_str(&stdout).expect("json output must parse");
         let quality = json
-            .pointer("/production_coverage/summary/capture_quality")
+            .pointer("/runtime_coverage/summary/capture_quality")
             .expect("capture_quality absent from json summary");
         assert_eq!(
             quality.get("lazy_parse_warning"),
@@ -437,7 +434,7 @@ mod gated {
     fn exit_code_case(mode: &str, expected: i32) {
         let harness = Harness::new();
         let mut cmd = harness.fallow();
-        cmd.env("FALLOW_LICENSE", sign::mint_production_coverage_jwt());
+        cmd.env("FALLOW_LICENSE", sign::mint_runtime_coverage_jwt());
         cmd.env("FALLOW_STUB_MODE", mode);
         for arg in harness.health_args() {
             cmd.arg(arg);
