@@ -840,6 +840,41 @@ allow = ["db"]
         assert_eq!(resolved.classify_zone("packages/utils/src/x.ts"), None);
     }
 
+    /// Case-sensitivity contract: `root` matching is case-sensitive,
+    /// matching the existing globset case-sensitivity for `patterns`. On
+    /// case-insensitive filesystems (HFS+, NTFS) two files differing only
+    /// in case still classify only when the configured `root` exactly
+    /// matches the path's case as fallow recorded it. Locking this down
+    /// prevents silent platform-divergent classification.
+    #[test]
+    fn zone_root_is_case_sensitive() {
+        let config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/**".to_string()],
+                root: Some("packages/app/".to_string()),
+            }],
+            rules: vec![],
+        };
+        let resolved = config.resolve();
+        assert_eq!(
+            resolved.classify_zone("packages/app/src/login.tsx"),
+            Some("ui"),
+            "exact-case path classifies"
+        );
+        assert_eq!(
+            resolved.classify_zone("packages/App/src/login.tsx"),
+            None,
+            "case-different path does not classify (root is case-sensitive)"
+        );
+        assert_eq!(
+            resolved.classify_zone("Packages/app/src/login.tsx"),
+            None,
+            "case-different prefix does not classify"
+        );
+    }
+
     #[test]
     fn zone_root_normalizes_trailing_slash_and_dot_prefix() {
         let config = BoundaryConfig {

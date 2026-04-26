@@ -558,10 +558,17 @@ pub(in crate::report) fn print_grouped_duplication_human(
             .red()
             .bold()
         );
-        eprintln!(
-            "  {}",
-            format!("Group attribution rule: largest owner (most instances; alphabetical tiebreak); see {DOCS_DUPLICATION}#grouping").dimmed()
-        );
+        // The largest-owner attribution rule only matters when grouping
+        // produces ambiguity. In `directory`, `package`, and `section` modes,
+        // every file lives in exactly one bucket so attribution is
+        // unambiguous and the preamble is noise. Only render it for owner
+        // grouping where a clone group can span multiple owners.
+        if grouping.mode == "owner" {
+            eprintln!(
+                "  {}",
+                format!("Group attribution rule: largest owner (most instances; alphabetical tiebreak); see {DOCS_DUPLICATION}#grouping").dimmed()
+            );
+        }
         // Per-bucket files-with-clones is local to that bucket; the project
         // total deduplicates files appearing in multiple buckets so per-bucket
         // counts can sum to more than the project headline.

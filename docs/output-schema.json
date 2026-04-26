@@ -835,7 +835,7 @@
 
     "SchemaVersion": {
       "type": "integer",
-      "description": "Schema version for this output format (independent of tool version). Adding new fields does not bump the version. Consumers should check this field to detect structural changes. v4 was introduced alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence block, renamed summary fields); the runtime-coverage block is extended additively as the protocol evolves (currently 0.3, which adds an optional capture_quality summary field).",
+      "description": "Schema version for this output format (independent of tool version). Bump policy: ADDITIVE changes (new optional top-level fields, new optional struct fields, new array entries, new MCP tools, new CLI flags that map to new optional fields) do NOT bump the version; consumers receive new fields without breaking. BREAKING changes (renamed fields, removed fields, type changes, enum-variant removals, semantic changes to existing fields) DO bump. To detect newly-added fields without a bump, check field presence via JSON-key existence rather than gating on the version. v4 was introduced alongside fallow-cov-protocol 0.2 (per-finding verdict, stable IDs, evidence block, renamed summary fields); the runtime-coverage block is extended additively as the protocol evolves (currently 0.3, which adds an optional capture_quality summary field). Other additive examples: dupes --group-by adds optional grouped_by, total_issues, groups fields without bumping.",
       "examples": [4]
     },
     "ToolVersion": {
