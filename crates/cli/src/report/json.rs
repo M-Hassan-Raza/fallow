@@ -545,23 +545,87 @@ pub fn build_baseline_deltas_json<'a>(
     })
 }
 
+/// Cyclomatic distance from `max_cyclomatic_threshold` at which a
+/// CRAP-only finding still warrants a secondary `refactor-function` action.
+///
+/// Reasoning: a function whose cyclomatic count is within this band of the
+/// configured threshold is "almost too complex" already, so refactoring is a
+/// useful complement to the primary coverage action. Keeping the boundary
+/// expressed as a band (threshold minus N) rather than a ratio links it
+/// to the existing `health.maxCyclomatic` knob: tightening the threshold
+/// automatically widens the population that gets the secondary suggestion.
+const SECONDARY_REFACTOR_BAND: u16 = 5;
+
+/// Options controlling how `inject_health_actions` populates JSON output.
+///
+/// `omit_suppress_line` skips the `suppress-line` action across every
+/// health finding. Set when:
+/// - A baseline is active (`opts.baseline.is_some()` or
+///   `opts.save_baseline.is_some()`): the baseline file already suppresses
+///   findings, and adding `// fallow-ignore-next-line` comments on top
+///   creates dead annotations once the baseline regenerates.
+/// - The team has opted out via `health.suggestInlineSuppression: false`.
+///
+/// When omitted, a top-level `actions_meta` object on the report records
+/// the omission and the reason so consumers can audit "where did
+/// health finding suppress-line go?" without having to grep the config
+/// or CLI history.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct HealthActionOptions {
+    /// Skip emission of `suppress-line` action entries.
+    pub omit_suppress_line: bool,
+    /// Human-readable reason surfaced in the `actions_meta` breadcrumb when
+    /// `omit_suppress_line` is true. Stable codes:
+    /// - `"baseline-active"`: `--baseline` or `--save-baseline` was passed
+    /// - `"config-disabled"`: `health.suggestInlineSuppression: false`
+    pub omit_reason: Option<&'static str>,
+}
+
 /// Inject `actions` arrays into complexity findings in a health JSON output.
 ///
 /// Walks `findings` and `targets` arrays, appending machine-actionable
-/// fix and suppress hints to each item.
+/// fix and suppress hints to each item. The `opts` argument controls
+/// whether `suppress-line` actions are emitted; when suppressed, an
+/// `actions_meta` breadcrumb at the report root records the omission.
 #[allow(
     clippy::redundant_pub_crate,
-    reason = "pub(crate) needed — used by audit.rs via re-export, but not part of public API"
+    reason = "pub(crate) needed, used by audit.rs via re-export, but not part of public API"
 )]
-pub(crate) fn inject_health_actions(output: &mut serde_json::Value) {
+pub(crate) fn inject_health_actions(output: &mut serde_json::Value, opts: HealthActionOptions) {
     let Some(map) = output.as_object_mut() else {
         return;
     };
 
+    // The complexity thresholds live on `summary.*_threshold`; read once so
+    // action selection for findings has access without re-walking the envelope.
+    let max_cyclomatic_threshold = map
+        .get("summary")
+        .and_then(|s| s.get("max_cyclomatic_threshold"))
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| u16::try_from(v).ok())
+        .unwrap_or(20);
+    let max_cognitive_threshold = map
+        .get("summary")
+        .and_then(|s| s.get("max_cognitive_threshold"))
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| u16::try_from(v).ok())
+        .unwrap_or(15);
+    let max_crap_threshold = map
+        .get("summary")
+        .and_then(|s| s.get("max_crap_threshold"))
+        .and_then(serde_json::Value::as_f64)
+        .unwrap_or(30.0);
+
     // Complexity findings: refactor the function to reduce complexity
     if let Some(findings) = map.get_mut("findings").and_then(|v| v.as_array_mut()) {
         for item in findings {
-            let actions = build_health_finding_actions(item);
+            let actions = build_health_finding_actions(
+                item,
+                opts,
+                max_cyclomatic_threshold,
+                max_cognitive_threshold,
+                max_crap_threshold,
+            );
             if let serde_json::Value::Object(obj) = item {
                 obj.insert("actions".to_string(), actions);
             }
@@ -612,15 +676,52 @@ pub(crate) fn inject_health_actions(output: &mut serde_json::Value) {
     // directly via serde (see `ProductionCoverageAction` in
     // `crates/cli/src/health_types/production_coverage.rs`), so no post-hoc
     // injection is needed here.
+
+    // Auditable breadcrumb: when the suppress-line hint was omitted, record
+    // it at the report root so consumers don't have to infer the absence.
+    if opts.omit_suppress_line {
+        let reason = opts.omit_reason.unwrap_or("unspecified");
+        map.insert(
+            "actions_meta".to_string(),
+            serde_json::json!({
+                "suppression_hints_omitted": true,
+                "reason": reason,
+                "scope": "health-findings",
+            }),
+        );
+    }
 }
 
 /// Build the `actions` array for a single complexity finding.
 ///
-/// When the finding was triggered by CRAP (alone or alongside complexity),
-/// the primary action switches to `add-tests` because coverage is the
-/// leverage point for lowering CRAP on a given complexity. When only
-/// cyclomatic/cognitive were exceeded, `refactor-function` remains primary.
-fn build_health_finding_actions(item: &serde_json::Value) -> serde_json::Value {
+/// The primary action depends on which thresholds were exceeded and the
+/// finding's bucketed coverage tier (`none`/`partial`/`high`):
+///
+/// - Exceeded cyclomatic/cognitive only (no CRAP): `refactor-function`.
+/// - Exceeded CRAP, tier `none` or absent: `add-tests` (no test path
+///   reaches this function; start from scratch).
+/// - Exceeded CRAP, tier `partial`: `increase-coverage` (file already has
+///   some test path; add targeted assertions for uncovered branches).
+/// - Exceeded CRAP, full coverage can clear CRAP: tier-specific coverage
+///   action (`add-tests` for `none`, `increase-coverage` for `partial`/
+///   `high`).
+/// - Exceeded CRAP, full coverage cannot clear CRAP: `refactor-function`
+///   because reducing cyclomatic complexity is the remaining lever.
+/// - Exceeded both CRAP and cyclomatic/cognitive: emit BOTH the
+///   tier-appropriate coverage action AND `refactor-function`.
+/// - CRAP-only with cyclomatic close to the threshold (within
+///   `SECONDARY_REFACTOR_BAND`): also append `refactor-function` as a
+///   secondary action; the function is "almost too complex" already.
+///
+/// `suppress-line` is appended last unless `opts.omit_suppress_line` is
+/// true (baseline active or `health.suggestInlineSuppression: false`).
+fn build_health_finding_actions(
+    item: &serde_json::Value,
+    opts: HealthActionOptions,
+    max_cyclomatic_threshold: u16,
+    max_cognitive_threshold: u16,
+    max_crap_threshold: f64,
+) -> serde_json::Value {
     let name = item
         .get("name")
         .and_then(serde_json::Value::as_str)
@@ -634,17 +735,53 @@ fn build_health_finding_actions(item: &serde_json::Value) -> serde_json::Value {
         "crap" | "cyclomatic_crap" | "cognitive_crap" | "all"
     );
     let crap_only = exceeded == "crap";
+    let tier = item
+        .get("coverage_tier")
+        .and_then(serde_json::Value::as_str);
+    let cyclomatic = item
+        .get("cyclomatic")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| u16::try_from(v).ok())
+        .unwrap_or(0);
+    let cognitive = item
+        .get("cognitive")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|v| u16::try_from(v).ok())
+        .unwrap_or(0);
+    let full_coverage_can_clear_crap = !includes_crap || f64::from(cyclomatic) < max_crap_threshold;
 
     let mut actions: Vec<serde_json::Value> = Vec::new();
+
+    // Coverage-leaning action: only emitted when CRAP contributed.
     if includes_crap {
-        actions.push(serde_json::json!({
-            "type": "add-tests",
-            "auto_fixable": false,
-            "description": format!("Add test coverage for `{name}` to lower its CRAP score (coverage reduces risk even without refactoring)"),
-            "note": "CRAP = CC^2 * (1 - cov/100)^3 + CC; higher coverage is the fastest way to bring CRAP under threshold",
-        }));
+        let coverage_action = build_crap_coverage_action(name, tier, full_coverage_can_clear_crap);
+        if let Some(action) = coverage_action {
+            actions.push(action);
+        }
     }
-    if !crap_only {
+
+    // Refactor action conditions:
+    //   1. Exceeded cyclomatic/cognitive (with or without CRAP), or
+    //   2. CRAP-only where even full coverage cannot bring CRAP below the
+    //      configured threshold, so reducing complexity is the remaining
+    //      lever), or
+    //   3. CRAP-only with cyclomatic within SECONDARY_REFACTOR_BAND of the
+    //      threshold AND cognitive complexity past the cognitive floor (the
+    //      function is almost too complex anyway and the cognitive signal
+    //      confirms that refactoring would actually help). Without the
+    //      cognitive floor, flat type-tag dispatchers and JSX render maps
+    //      (high CC, near-zero cog) get a misleading refactor suggestion.
+    //
+    // `build_crap_coverage_action` returns `None` for case 2 instead of
+    // pushing `refactor-function` itself, so this branch unconditionally
+    // pushes the refactor entry without needing to dedupe.
+    let crap_only_needs_complexity_reduction = crap_only && !full_coverage_can_clear_crap;
+    let cognitive_floor = max_cognitive_threshold / 2;
+    let near_cyclomatic_threshold = crap_only
+        && cyclomatic > 0
+        && cyclomatic >= max_cyclomatic_threshold.saturating_sub(SECONDARY_REFACTOR_BAND)
+        && cognitive >= cognitive_floor;
+    if !crap_only || crap_only_needs_complexity_reduction || near_cyclomatic_threshold {
         actions.push(serde_json::json!({
             "type": "refactor-function",
             "auto_fixable": false,
@@ -653,15 +790,52 @@ fn build_health_finding_actions(item: &serde_json::Value) -> serde_json::Value {
         }));
     }
 
-    actions.push(serde_json::json!({
-        "type": "suppress-line",
-        "auto_fixable": false,
-        "description": "Suppress with an inline comment above the function declaration",
-        "comment": "// fallow-ignore-next-line complexity",
-        "placement": "above-function-declaration",
-    }));
+    if !opts.omit_suppress_line {
+        actions.push(serde_json::json!({
+            "type": "suppress-line",
+            "auto_fixable": false,
+            "description": "Suppress with an inline comment above the function declaration",
+            "comment": "// fallow-ignore-next-line complexity",
+            "placement": "above-function-declaration",
+        }));
+    }
 
     serde_json::Value::Array(actions)
+}
+
+/// Build the coverage-leaning action for a CRAP-contributing finding.
+///
+/// Returns `None` when even 100% coverage could not bring the function below
+/// the configured CRAP threshold. In that case the primary action becomes
+/// `refactor-function`, which the caller emits separately.
+fn build_crap_coverage_action(
+    name: &str,
+    tier: Option<&str>,
+    full_coverage_can_clear_crap: bool,
+) -> Option<serde_json::Value> {
+    if !full_coverage_can_clear_crap {
+        return None;
+    }
+
+    match tier {
+        // Partial coverage: the file already has some test path. Pivot
+        // the action description from "add tests" to "increase coverage"
+        // so agents add targeted assertions for uncovered branches
+        // instead of scaffolding new tests from scratch.
+        Some("partial" | "high") => Some(serde_json::json!({
+            "type": "increase-coverage",
+            "auto_fixable": false,
+            "description": format!("Increase test coverage for `{name}` (file is reachable from existing tests; add targeted assertions for uncovered branches)"),
+            "note": "CRAP = CC^2 * (1 - cov/100)^3 + CC; targeted branch coverage is more efficient than scaffolding new test files when the file already has coverage",
+        })),
+        // None / unknown tier: keep the original "add-tests" message.
+        _ => Some(serde_json::json!({
+            "type": "add-tests",
+            "auto_fixable": false,
+            "description": format!("Add test coverage for `{name}` to lower its CRAP score (coverage reduces risk even without refactoring)"),
+            "note": "CRAP = CC^2 * (1 - cov/100)^3 + CC; higher coverage is the fastest way to bring CRAP under threshold",
+        })),
+    }
 }
 
 /// Build the `actions` array for a single hotspot entry.
@@ -1025,12 +1199,13 @@ pub fn build_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    action_opts: HealthActionOptions,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let report_value = serde_json::to_value(report)?;
     let mut output = build_json_envelope(report_value, elapsed);
     let root_prefix = format!("{}/", root.display());
     strip_root_prefix(&mut output, &root_prefix);
-    inject_health_actions(&mut output);
+    inject_health_actions(&mut output, action_opts);
     if explain {
         insert_meta(&mut output, explain::health_meta());
     }
@@ -1042,8 +1217,9 @@ pub(super) fn print_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    action_opts: HealthActionOptions,
 ) -> ExitCode {
-    match build_health_json(report, root, elapsed, explain) {
+    match build_health_json(report, root, elapsed, explain, action_opts) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize health report: {e}");
@@ -1077,24 +1253,32 @@ pub fn build_grouped_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    action_opts: HealthActionOptions,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let root_prefix = format!("{}/", root.display());
     let report_value = serde_json::to_value(report)?;
     let mut output = build_json_envelope(report_value, elapsed);
     strip_root_prefix(&mut output, &root_prefix);
-    inject_health_actions(&mut output);
+    inject_health_actions(&mut output, action_opts);
 
     if let serde_json::Value::Object(ref mut map) = output {
         map.insert("grouped_by".to_string(), serde_json::json!(grouping.mode));
     }
 
+    // Per-group sub-envelopes share the project-level suppression state:
+    // baseline-active and config-disabled apply uniformly, so each group's
+    // `actions` array honors the same opts AND each group emits its own
+    // `actions_meta` breadcrumb. The redundancy with the top-level breadcrumb
+    // is intentional: consumers that only walk the `groups` array (e.g.,
+    // per-team dashboards) still see the omission reason without needing to
+    // walk back up to the report root.
     let group_values: Vec<serde_json::Value> = grouping
         .groups
         .iter()
         .map(|g| {
             let mut value = serde_json::to_value(g)?;
             strip_root_prefix(&mut value, &root_prefix);
-            inject_health_actions(&mut value);
+            inject_health_actions(&mut value, action_opts);
             Ok(value)
         })
         .collect::<Result<_, serde_json::Error>>()?;
@@ -1116,8 +1300,9 @@ pub(super) fn print_grouped_health_json(
     root: &Path,
     elapsed: Duration,
     explain: bool,
+    action_opts: HealthActionOptions,
 ) -> ExitCode {
-    match build_grouped_health_json(report, grouping, root, elapsed, explain) {
+    match build_grouped_health_json(report, grouping, root, elapsed, explain, action_opts) {
         Ok(output) => emit_json(&output, "JSON"),
         Err(e) => {
             eprintln!("Error: failed to serialize grouped health report: {e}");
@@ -1302,7 +1487,7 @@ mod tests {
         let report_value = serde_json::to_value(&report).expect("should serialize health report");
         let mut output = build_json_envelope(report_value, Duration::from_millis(7));
         strip_root_prefix(&mut output, "/project/");
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         assert_eq!(
             output["production_coverage"]["verdict"],
@@ -2366,7 +2551,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let actions = output["findings"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
@@ -2400,7 +2585,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let actions = output["targets"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
@@ -2428,7 +2613,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let actions = output["targets"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 1);
@@ -2442,7 +2627,7 @@ mod tests {
             "targets": []
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         assert!(output["findings"].as_array().unwrap().is_empty());
         assert!(output["targets"].as_array().unwrap().is_empty());
@@ -2459,7 +2644,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         assert_eq!(actions.len(), 2);
@@ -2488,7 +2673,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         assert!(
@@ -2520,7 +2705,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         let unowned = actions
@@ -2548,7 +2733,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         assert!(
@@ -2573,7 +2758,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let actions = output["hotspots"][0]["actions"].as_array().unwrap();
         let drift = actions
@@ -2628,7 +2813,7 @@ mod tests {
             }]
         });
 
-        inject_health_actions(&mut output);
+        inject_health_actions(&mut output, HealthActionOptions::default());
 
         let suppress = &output["findings"][0]["actions"][1];
         assert_eq!(suppress["placement"], "above-function-declaration");
@@ -2724,5 +2909,385 @@ mod tests {
 
         assert!(output["clone_families"].as_array().unwrap().is_empty());
         assert!(output["clone_groups"].as_array().unwrap().is_empty());
+    }
+
+    // ── Tier-aware health action emission ──────────────────────────
+
+    /// Helper: build a health JSON envelope with a single CRAP-only finding.
+    /// Default cognitive complexity is 12 (above the cognitive floor at the
+    /// default `max_cognitive_threshold / 2 = 7.5`); use
+    /// `crap_only_finding_envelope_with_cognitive` to exercise low-cog cases
+    /// (flat dispatchers, JSX render maps) where the cognitive floor should
+    /// suppress the secondary refactor.
+    fn crap_only_finding_envelope(
+        coverage_tier: Option<&str>,
+        cyclomatic: u16,
+        max_cyclomatic_threshold: u16,
+    ) -> serde_json::Value {
+        crap_only_finding_envelope_with_max_crap(
+            coverage_tier,
+            cyclomatic,
+            12,
+            max_cyclomatic_threshold,
+            15,
+            30.0,
+        )
+    }
+
+    fn crap_only_finding_envelope_with_cognitive(
+        coverage_tier: Option<&str>,
+        cyclomatic: u16,
+        cognitive: u16,
+        max_cyclomatic_threshold: u16,
+    ) -> serde_json::Value {
+        crap_only_finding_envelope_with_max_crap(
+            coverage_tier,
+            cyclomatic,
+            cognitive,
+            max_cyclomatic_threshold,
+            15,
+            30.0,
+        )
+    }
+
+    fn crap_only_finding_envelope_with_max_crap(
+        coverage_tier: Option<&str>,
+        cyclomatic: u16,
+        cognitive: u16,
+        max_cyclomatic_threshold: u16,
+        max_cognitive_threshold: u16,
+        max_crap_threshold: f64,
+    ) -> serde_json::Value {
+        let mut finding = serde_json::json!({
+            "path": "src/risk.ts",
+            "name": "computeScore",
+            "line": 12,
+            "col": 0,
+            "cyclomatic": cyclomatic,
+            "cognitive": cognitive,
+            "line_count": 40,
+            "exceeded": "crap",
+            "crap": 35.5,
+        });
+        if let Some(tier) = coverage_tier {
+            finding["coverage_tier"] = serde_json::Value::String(tier.to_owned());
+        }
+        serde_json::json!({
+            "findings": [finding],
+            "summary": {
+                "max_cyclomatic_threshold": max_cyclomatic_threshold,
+                "max_cognitive_threshold": max_cognitive_threshold,
+                "max_crap_threshold": max_crap_threshold,
+            },
+        })
+    }
+
+    #[test]
+    fn crap_only_tier_none_emits_add_tests() {
+        let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "add-tests"),
+            "tier=none crap-only must emit add-tests, got {actions:?}"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "increase-coverage"),
+            "tier=none must not emit increase-coverage"
+        );
+    }
+
+    #[test]
+    fn crap_only_tier_partial_emits_increase_coverage() {
+        let mut output = crap_only_finding_envelope(Some("partial"), 6, 20);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "increase-coverage"),
+            "tier=partial crap-only must emit increase-coverage, got {actions:?}"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "add-tests"),
+            "tier=partial must not emit add-tests"
+        );
+    }
+
+    #[test]
+    fn crap_only_tier_high_emits_increase_coverage_when_full_coverage_can_clear_crap() {
+        // CC=20 at 70% coverage has CRAP 30.8, but at 100% coverage CRAP
+        // falls to 20.0, below the default max_crap_threshold=30. Coverage
+        // is therefore still a valid remediation even though tier=high.
+        let mut output = crap_only_finding_envelope(Some("high"), 20, 30);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "increase-coverage"),
+            "tier=high crap-only must still emit increase-coverage when full coverage can clear CRAP, got {actions:?}"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "refactor-function"),
+            "coverage-remediable crap-only findings should not get refactor-function unless near the cyclomatic threshold"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "add-tests"),
+            "tier=high must not emit add-tests"
+        );
+    }
+
+    #[test]
+    fn crap_only_emits_refactor_when_full_coverage_cannot_clear_crap() {
+        // At 100% coverage CRAP bottoms out at CC. With CC=35 and a CRAP
+        // threshold of 30, tests alone can reduce risk but cannot clear the
+        // finding; the primary action should be complexity reduction.
+        let mut output =
+            crap_only_finding_envelope_with_max_crap(Some("high"), 35, 12, 50, 15, 30.0);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "refactor-function"),
+            "full-coverage-impossible CRAP-only finding must emit refactor-function, got {actions:?}"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "increase-coverage"),
+            "must not emit increase-coverage when even 100% coverage cannot clear CRAP"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "add-tests"),
+            "must not emit add-tests when even 100% coverage cannot clear CRAP"
+        );
+    }
+
+    #[test]
+    fn crap_only_high_cc_appends_secondary_refactor() {
+        // CC=16 with threshold=20 => within SECONDARY_REFACTOR_BAND (5)
+        // of the threshold; refactor is a useful complement to coverage.
+        let mut output = crap_only_finding_envelope(Some("none"), 16, 20);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "add-tests"),
+            "near-threshold crap-only still emits the primary tier action"
+        );
+        assert!(
+            actions.iter().any(|a| a["type"] == "refactor-function"),
+            "near-threshold crap-only must also emit secondary refactor-function"
+        );
+    }
+
+    #[test]
+    fn crap_only_far_below_threshold_no_secondary_refactor() {
+        // CC=6 with threshold=20 => far outside the band; refactor not added.
+        let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            !actions.iter().any(|a| a["type"] == "refactor-function"),
+            "low-CC crap-only should not get a secondary refactor-function"
+        );
+    }
+
+    #[test]
+    fn crap_only_near_threshold_low_cognitive_no_secondary_refactor() {
+        // Cognitive floor regression. Real-world example from vrs-portals:
+        // a flat type-tag dispatcher with CC=17 (within SECONDARY_REFACTOR_BAND
+        // of the default cyclomatic threshold of 20) but cognitive=2 (a single
+        // switch, no nesting). Suggesting "extract helpers, simplify branching"
+        // is wrong-target advice for declarative dispatchers; the cognitive
+        // floor at `max_cognitive_threshold / 2` (default 7) suppresses the
+        // secondary refactor in this case while still firing it for genuinely
+        // tangled functions (CC>=15 + cog>=8) where refactor would help.
+        let mut output = crap_only_finding_envelope_with_cognitive(Some("none"), 17, 2, 20);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "add-tests"),
+            "primary tier action still emits"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "refactor-function"),
+            "near-threshold CC with cognitive below floor must NOT emit secondary refactor (got {actions:?})"
+        );
+    }
+
+    #[test]
+    fn crap_only_near_threshold_high_cognitive_emits_secondary_refactor() {
+        // Companion to the cognitive-floor regression: when cognitive is at or
+        // above the floor, the secondary refactor should still fire. CC=16
+        // and cognitive=10 (above default floor of 7) is the canonical
+        // "tangled but near-threshold" function that genuinely benefits from
+        // both coverage AND refactoring.
+        let mut output = crap_only_finding_envelope_with_cognitive(Some("none"), 16, 10, 20);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "add-tests"),
+            "primary tier action still emits"
+        );
+        assert!(
+            actions.iter().any(|a| a["type"] == "refactor-function"),
+            "near-threshold CC with cognitive above floor must emit secondary refactor (got {actions:?})"
+        );
+    }
+
+    #[test]
+    fn cyclomatic_only_emits_only_refactor_function() {
+        let mut output = serde_json::json!({
+            "findings": [{
+                "path": "src/cyclo.ts",
+                "name": "branchy",
+                "line": 5,
+                "col": 0,
+                "cyclomatic": 25,
+                "cognitive": 10,
+                "line_count": 80,
+                "exceeded": "cyclomatic",
+            }],
+            "summary": { "max_cyclomatic_threshold": 20 },
+        });
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "refactor-function"),
+            "non-CRAP findings emit refactor-function"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "add-tests"),
+            "non-CRAP findings must not emit add-tests"
+        );
+        assert!(
+            !actions.iter().any(|a| a["type"] == "increase-coverage"),
+            "non-CRAP findings must not emit increase-coverage"
+        );
+    }
+
+    // ── Suppress-line gating ──────────────────────────────────────
+
+    #[test]
+    fn suppress_line_omitted_when_baseline_active() {
+        let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
+        inject_health_actions(
+            &mut output,
+            HealthActionOptions {
+                omit_suppress_line: true,
+                omit_reason: Some("baseline-active"),
+            },
+        );
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            !actions.iter().any(|a| a["type"] == "suppress-line"),
+            "baseline-active must not emit suppress-line, got {actions:?}"
+        );
+        assert_eq!(
+            output["actions_meta"]["suppression_hints_omitted"],
+            serde_json::Value::Bool(true)
+        );
+        assert_eq!(output["actions_meta"]["reason"], "baseline-active");
+        assert_eq!(output["actions_meta"]["scope"], "health-findings");
+    }
+
+    #[test]
+    fn suppress_line_omitted_when_config_disabled() {
+        let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
+        inject_health_actions(
+            &mut output,
+            HealthActionOptions {
+                omit_suppress_line: true,
+                omit_reason: Some("config-disabled"),
+            },
+        );
+        assert_eq!(output["actions_meta"]["reason"], "config-disabled");
+    }
+
+    #[test]
+    fn suppress_line_emitted_by_default() {
+        let mut output = crap_only_finding_envelope(Some("none"), 6, 20);
+        inject_health_actions(&mut output, HealthActionOptions::default());
+        let actions = output["findings"][0]["actions"].as_array().unwrap();
+        assert!(
+            actions.iter().any(|a| a["type"] == "suppress-line"),
+            "default opts must emit suppress-line"
+        );
+        assert!(
+            output.get("actions_meta").is_none(),
+            "actions_meta must be absent when no omission occurred"
+        );
+    }
+
+    /// Drift guard: every action `type` value emitted by the action builder
+    /// must appear in `docs/output-schema.json`'s `HealthFindingAction.type`
+    /// enum. Previously the schema listed only `[refactor-function,
+    /// suppress-line]` while the code emitted `add-tests` for CRAP findings,
+    /// silently producing schema-invalid output for any consumer using the
+    /// schema for validation.
+    #[test]
+    fn every_emitted_health_action_type_is_in_schema_enum() {
+        // Exercise every distinct emission path. The list mirrors the match
+        // in `build_crap_coverage_action` and the surrounding refactor/
+        // suppress-line emissions in `build_health_finding_actions`.
+        let cases = [
+            // (exceeded, coverage_tier, cyclomatic, max_cyclomatic_threshold)
+            ("crap", Some("none"), 6_u16, 20_u16),
+            ("crap", Some("partial"), 6, 20),
+            ("crap", Some("high"), 12, 20),
+            ("crap", Some("none"), 16, 20), // near threshold => secondary refactor
+            ("cyclomatic", None, 25, 20),
+            ("cognitive_crap", Some("partial"), 6, 20),
+            ("all", Some("none"), 25, 20),
+        ];
+
+        let mut emitted: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for (exceeded, tier, cc, max) in cases {
+            let mut finding = serde_json::json!({
+                "path": "src/x.ts",
+                "name": "fn",
+                "line": 1,
+                "col": 0,
+                "cyclomatic": cc,
+                "cognitive": 5,
+                "line_count": 10,
+                "exceeded": exceeded,
+                "crap": 35.0,
+            });
+            if let Some(t) = tier {
+                finding["coverage_tier"] = serde_json::Value::String(t.to_owned());
+            }
+            let mut output = serde_json::json!({
+                "findings": [finding],
+                "summary": { "max_cyclomatic_threshold": max },
+            });
+            inject_health_actions(&mut output, HealthActionOptions::default());
+            for action in output["findings"][0]["actions"].as_array().unwrap() {
+                if let Some(ty) = action["type"].as_str() {
+                    emitted.insert(ty.to_owned());
+                }
+            }
+        }
+
+        // Load the schema enum once.
+        let schema_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("..")
+            .join("docs")
+            .join("output-schema.json");
+        let raw = std::fs::read_to_string(&schema_path)
+            .expect("docs/output-schema.json must be readable for the drift-guard test");
+        let schema: serde_json::Value = serde_json::from_str(&raw).expect("schema parses");
+        let enum_values: std::collections::BTreeSet<String> =
+            schema["definitions"]["HealthFindingAction"]["properties"]["type"]["enum"]
+                .as_array()
+                .expect("HealthFindingAction.type.enum is an array")
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_owned))
+                .collect();
+
+        for ty in &emitted {
+            assert!(
+                enum_values.contains(ty),
+                "build_health_finding_actions emitted action type `{ty}` but \
+                 docs/output-schema.json HealthFindingAction.type enum does \
+                 not list it. Add it to the schema (and any downstream \
+                 typed consumers) when introducing a new action type."
+            );
+        }
     }
 }

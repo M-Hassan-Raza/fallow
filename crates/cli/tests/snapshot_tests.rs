@@ -1773,6 +1773,7 @@ fn sample_health_report(root: &Path) -> HealthReport {
             severity: FindingSeverity::High,
             crap: None,
             coverage_pct: None,
+            coverage_tier: None,
         }],
         summary: HealthSummary {
             files_analyzed: 50,
@@ -2041,8 +2042,14 @@ fn codeclimate_health_with_production_coverage_snapshot() {
 fn json_health_with_production_coverage_snapshot() {
     let root = PathBuf::from("/project");
     let report = health_report_with_production_coverage(&root);
-    let value = build_health_json(&report, &root, Duration::ZERO, false)
-        .expect("health JSON build should succeed");
+    let value = build_health_json(
+        &report,
+        &root,
+        Duration::ZERO,
+        false,
+        fallow_cli::report::HealthActionOptions::default(),
+    )
+    .expect("health JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
     insta::assert_snapshot!(
         "json_health_with_production_coverage",

@@ -16,6 +16,13 @@ const fn default_max_crap() -> f64 {
     30.0
 }
 
+/// Default for `suggest_inline_suppression`: emit `suppress-line` actions
+/// alongside health findings unless a baseline is active or the team has
+/// opted out via config.
+const fn default_suggest_inline_suppression() -> bool {
+    true
+}
+
 /// Default bot/service-account author patterns filtered from ownership metrics.
 ///
 /// Matches common CI bot signatures and service-account naming conventions.
@@ -122,6 +129,17 @@ pub struct HealthConfig {
     /// privacy mode for `--ownership` output.
     #[serde(default)]
     pub ownership: OwnershipConfig,
+
+    /// Whether health JSON output emits `suppress-line` action hints
+    /// alongside complexity findings (default: `true`). Set to `false` to
+    /// opt out across the project: useful for teams that manage suppressions
+    /// exclusively through `// fallow-ignore-*` comments authored by hand or
+    /// through the `fallow.suppress` LSP code action, but who do not want
+    /// CI-driven `suppress-line` action hints in their JSON output.
+    /// `--baseline` activates auto-omission regardless of this setting,
+    /// since baseline files are a separate suppression mechanism.
+    #[serde(default = "default_suggest_inline_suppression")]
+    pub suggest_inline_suppression: bool,
 }
 
 impl Default for HealthConfig {
@@ -132,6 +150,7 @@ impl Default for HealthConfig {
             max_crap: default_max_crap(),
             ignore: vec![],
             ownership: OwnershipConfig::default(),
+            suggest_inline_suppression: default_suggest_inline_suppression(),
         }
     }
 }
@@ -233,6 +252,7 @@ ignore = ["generated/**", "vendor/**"]
             max_crap: 75.0,
             ignore: vec!["test/**".to_string()],
             ownership: OwnershipConfig::default(),
+            suggest_inline_suppression: false,
         };
         let json = serde_json::to_string(&config).unwrap();
         let restored: HealthConfig = serde_json::from_str(&json).unwrap();
@@ -240,6 +260,26 @@ ignore = ["generated/**", "vendor/**"]
         assert_eq!(restored.max_cognitive, 40);
         assert!((restored.max_crap - 75.0).abs() < f64::EPSILON);
         assert_eq!(restored.ignore, vec!["test/**"]);
+        assert!(!restored.suggest_inline_suppression);
+    }
+
+    #[test]
+    fn health_config_suggest_inline_suppression_default_true() {
+        let config = HealthConfig::default();
+        assert!(config.suggest_inline_suppression);
+    }
+
+    #[test]
+    fn health_config_suggest_inline_suppression_explicit_false() {
+        let json = r#"{"suggestInlineSuppression": false}"#;
+        let config: HealthConfig = serde_json::from_str(json).unwrap();
+        assert!(!config.suggest_inline_suppression);
+    }
+
+    #[test]
+    fn health_config_suggest_inline_suppression_omitted_uses_default() {
+        let config: HealthConfig = serde_json::from_str("{}").unwrap();
+        assert!(config.suggest_inline_suppression);
     }
 
     // ── Zero thresholds ─────────────────────────────────────────────

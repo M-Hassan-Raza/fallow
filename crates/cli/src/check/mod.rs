@@ -458,6 +458,7 @@ pub fn print_check_result(
         top,
         summary,
         baseline_matched: result.baseline_matched,
+        health_action_opts: report::HealthActionOptions::default(),
     };
     let report_code = report::print_results(
         &result.results,

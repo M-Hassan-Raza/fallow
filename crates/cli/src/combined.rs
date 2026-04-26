@@ -516,7 +516,7 @@ fn print_combined_json(
         match serde_json::to_value(&result.report) {
             Ok(mut json) => {
                 report::strip_root_prefix(&mut json, &root_prefix);
-                report::inject_health_actions(&mut json);
+                report::inject_health_actions(&mut json, crate::health::health_action_opts(result));
                 combined.insert("health".into(), json);
             }
             Err(e) => {

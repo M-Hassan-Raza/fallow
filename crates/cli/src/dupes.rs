@@ -323,6 +323,7 @@ pub fn print_dupes_result(
         top: None,
         summary,
         baseline_matched: None,
+        health_action_opts: report::HealthActionOptions::default(),
     };
     let report_code = report::print_duplication_report(&result.report, &ctx, result.config.output);
     if report_code != ExitCode::SUCCESS {
@@ -376,6 +377,7 @@ fn print_dupes_result_with_grouping(
         top: None,
         summary,
         baseline_matched: None,
+        health_action_opts: report::HealthActionOptions::default(),
     };
     report::print_duplication_report(&result.report, &ctx, result.config.output)
 }

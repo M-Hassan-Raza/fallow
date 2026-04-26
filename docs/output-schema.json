@@ -356,6 +356,26 @@
           "description": "Per-group health output, present only when --group-by is active. Each group recomputes its own vital_signs and health_score from the files in that group, mirroring how --workspace scopes a single subset.",
           "items": { "$ref": "#/definitions/HealthGroup" }
         },
+        "actions_meta": {
+          "type": "object",
+          "description": "Audit breadcrumb explaining systemic action-array adjustments. Present only when at least one adjustment was made (e.g., health finding suppression hints omitted because a baseline is active). When --group-by is active, each entry of `groups` may carry its own `actions_meta` describing the same omission so per-group consumers do not need to walk back to the report root.",
+          "required": ["suppression_hints_omitted", "reason", "scope"],
+          "properties": {
+            "suppression_hints_omitted": {
+              "type": "boolean",
+              "description": "True when `suppress-line` actions were not emitted on health findings."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why suppression hints were omitted. `baseline-active` = `--baseline` or `--save-baseline` was passed; `config-disabled` = `health.suggestInlineSuppression: false`; `unspecified` = caller omitted hints without setting a reason."
+            },
+            "scope": {
+              "type": "string",
+              "enum": ["health-findings"],
+              "description": "The report section affected by this metadata. Other health sections can still carry their own suppress actions."
+            }
+          }
+        },
         "_meta": { "$ref": "#/definitions/Meta" }
       }
     },
@@ -871,6 +891,11 @@
         "coverage_pct": {
           "type": "number",
           "description": "Per-function statement coverage percentage (0.0 to 100.0) used to derive `crap`. Present only when Istanbul coverage data matched the function; absent for the estimated model or unmatched functions."
+        },
+        "coverage_tier": {
+          "type": "string",
+          "enum": ["none", "partial", "high"],
+          "description": "Bucketed coverage tier used to drive action selection. Present whenever CRAP triggered the finding (Istanbul or estimated), absent otherwise. `none` = coverage is at most 0% (file not test-reachable, or Istanbul reports 0); `partial` = coverage is in `(0, 70)`; `high` = coverage is at or above the high watermark (default `>= 70`, or the estimated 85% band)."
         },
         "severity": {
           "type": "string",
@@ -1472,8 +1497,8 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["refactor-function", "suppress-line"],
-          "description": "Action type identifier."
+          "enum": ["refactor-function", "add-tests", "increase-coverage", "suppress-line"],
+          "description": "Action type identifier. A single finding's `actions` array can carry MULTIPLE entries of different types: e.g., a finding that exceeded both cyclomatic and CRAP at `coverage_tier`: partial will get BOTH `increase-coverage` AND `refactor-function`, plus `suppress-line`. Consumers that select a single action should treat the FIRST non-`suppress-line` action as primary. `add-tests` is emitted when CRAP triggered the finding, the function has no test coverage (`coverage_tier`: none), and full coverage can bring CRAP below `max_crap_threshold` (cyclomatic < threshold, since CRAP bottoms out at CC at 100% coverage). `increase-coverage` is emitted when CRAP triggered the finding, some coverage exists (`coverage_tier`: partial or high), and full coverage can bring CRAP below `max_crap_threshold`; the description steers toward targeted branch coverage rather than scaffolding new tests. `refactor-function` is emitted when cyclomatic/cognitive triggered the finding, when full coverage still cannot bring CRAP below `max_crap_threshold` (cyclomatic >= threshold), or as a secondary action when cyclomatic is within 5 of the cyclomatic threshold AND cognitive is at or above `max_cognitive_threshold / 2` (the cognitive floor suppresses false positives on flat type-tag dispatchers and JSX render maps where high cyclomatic comes from a single switch with near-zero cognitive load)."
         },
         "auto_fixable": {
           "type": "boolean",

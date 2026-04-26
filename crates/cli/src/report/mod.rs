@@ -43,6 +43,12 @@ pub struct ReportContext<'a> {
     pub summary: bool,
     /// When a baseline was loaded: (total entries in baseline, entries that matched).
     pub baseline_matched: Option<(usize, usize)>,
+    /// JSON-only: controls emission of `suppress-line` action entries on
+    /// health findings. Other formats ignore this field. Computed by the
+    /// caller from `HealthResult::baseline_active` and
+    /// `health.suggestInlineSuppression` config (see
+    /// `crate::health::health_action_opts`).
+    pub health_action_opts: HealthActionOptions,
 }
 
 /// Strip the project root prefix from a path for display, falling back to the full path.
@@ -345,8 +351,15 @@ pub fn print_health_report(
                 ctx.root,
                 ctx.elapsed,
                 ctx.explain,
+                ctx.health_action_opts,
             ),
-            None => json::print_health_json(report, ctx.root, ctx.elapsed, ctx.explain),
+            None => json::print_health_json(
+                report,
+                ctx.root,
+                ctx.elapsed,
+                ctx.explain,
+                ctx.health_action_opts,
+            ),
         },
         OutputFormat::CodeClimate => match group_resolver {
             Some(resolver) => {
@@ -466,6 +479,7 @@ pub use codeclimate::build_health_codeclimate;
     reason = "target-dependent: used in lib, unused in bin"
 )]
 pub use compact::build_compact_lines;
+pub use json::HealthActionOptions;
 pub use json::build_baseline_deltas_json;
 #[allow(
     unused_imports,
@@ -497,7 +511,7 @@ pub(crate) use json::inject_dupes_actions;
 )]
 #[allow(
     clippy::redundant_pub_crate,
-    reason = "pub(crate) deliberately limits visibility — report is pub but these are internal"
+    reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
 )]
 pub(crate) use json::inject_health_actions;
 #[allow(

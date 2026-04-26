@@ -1766,6 +1766,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
@@ -1803,6 +1804,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 100,
@@ -1836,6 +1838,7 @@ mod tests {
                     severity: crate::health_types::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
+                    coverage_tier: None,
                 },
                 crate::health_types::HealthFinding {
                     path: root.join("src/parser.ts"),
@@ -1850,6 +1853,7 @@ mod tests {
                     severity: crate::health_types::FindingSeverity::High,
                     crap: None,
                     coverage_pct: None,
+                    coverage_tier: None,
                 },
             ],
             summary: crate::health_types::HealthSummary {
@@ -3193,6 +3197,7 @@ mod tests {
             severity: crate::health_types::FindingSeverity::Moderate,
             crap: None,
             coverage_pct: None,
+            coverage_tier: None,
         }];
         report.health_score = Some(crate::health_types::HealthScore {
             score: 75.0,
@@ -3287,6 +3292,7 @@ mod tests {
             severity: crate::health_types::FindingSeverity::Moderate,
             crap: None,
             coverage_pct: None,
+            coverage_tier: None,
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3312,6 +3318,7 @@ mod tests {
             severity: crate::health_types::FindingSeverity::High,
             crap: None,
             coverage_pct: None,
+            coverage_tier: None,
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);
@@ -3338,6 +3345,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::Moderate,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             },
             crate::health_types::HealthFinding {
                 path: root.join("src/b.ts"),
@@ -3352,6 +3360,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::Moderate,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             },
         ];
         let lines = build_health_human_lines(&report, &root);
@@ -3379,6 +3388,7 @@ mod tests {
             severity: crate::health_types::FindingSeverity::Moderate,
             crap: None,
             coverage_pct: None,
+            coverage_tier: None,
         }];
         let lines = build_health_human_lines(&report, &root);
         let text = plain(&lines);

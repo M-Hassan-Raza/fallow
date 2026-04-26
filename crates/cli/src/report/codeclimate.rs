@@ -1327,6 +1327,7 @@ mod tests {
                 severity: FindingSeverity::High,
                 crap: Some(60.0),
                 coverage_pct: Some(25.0),
+                coverage_tier: None,
             }],
             summary: HealthSummary {
                 functions_analyzed: 10,

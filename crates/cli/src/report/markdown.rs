@@ -1387,6 +1387,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
@@ -1425,6 +1426,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::Critical,
                 crap: Some(182.0),
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 1,
@@ -1466,6 +1468,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
@@ -1778,6 +1781,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
@@ -1829,6 +1833,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,
@@ -1883,6 +1888,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 1,
@@ -1934,6 +1940,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 10,
@@ -2014,6 +2021,7 @@ mod tests {
                 severity: crate::health_types::FindingSeverity::High,
                 crap: None,
                 coverage_pct: None,
+                coverage_tier: None,
             }],
             summary: crate::health_types::HealthSummary {
                 files_analyzed: 5,

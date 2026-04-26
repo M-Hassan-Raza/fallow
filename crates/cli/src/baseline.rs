@@ -1311,6 +1311,7 @@ mod tests {
             severity,
             crap: None,
             coverage_pct: None,
+            coverage_tier: None,
         }
     }
 

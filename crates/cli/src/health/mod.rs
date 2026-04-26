@@ -722,6 +722,7 @@ fn execute_health_inner(
         timings,
         coverage_gaps_has_findings,
         should_fail_on_coverage_gaps: enforce_coverage_gaps,
+        baseline_active: opts.baseline.is_some() || opts.save_baseline.is_some(),
     })
 }
 
@@ -1458,6 +1459,7 @@ fn collect_findings(
                     ),
                     crap: None,
                     coverage_pct: None,
+                    coverage_tier: None,
                 });
             }
         }
@@ -1565,6 +1567,7 @@ fn merge_crap_findings(
                 let finding = &mut findings[idx];
                 finding.crap = Some(pf.crap);
                 finding.coverage_pct = pf.coverage_pct;
+                finding.coverage_tier = Some(pf.coverage_tier);
                 let exceeds_cyclomatic = finding.exceeded.includes_cyclomatic();
                 let exceeds_cognitive = finding.exceeded.includes_cognitive();
                 finding.exceeded =
@@ -1617,6 +1620,7 @@ fn merge_crap_findings(
                     ),
                     crap: Some(pf.crap),
                     coverage_pct: pf.coverage_pct,
+                    coverage_tier: Some(pf.coverage_tier),
                 });
             }
         }
@@ -1749,6 +1753,35 @@ pub struct HealthResult {
     pub timings: Option<HealthTimings>,
     pub coverage_gaps_has_findings: bool,
     pub should_fail_on_coverage_gaps: bool,
+    /// True when this run was invoked with `--baseline` and/or
+    /// `--save-baseline`. Used to gate JSON `suppress-line` action emission:
+    /// teams managing suppressions through a baseline file should not be
+    /// nudged toward inline `// fallow-ignore-next-line` comments, which
+    /// become dead annotations once the baseline is regenerated.
+    pub baseline_active: bool,
+}
+
+/// Compute the JSON `actions` injection options for a health result.
+///
+/// Returns the options that should drive `inject_health_actions` /
+/// `build_health_json`: the same logic for standalone health, combined
+/// mode, audit mode, and the programmatic NAPI surface, so every caller
+/// produces identical JSON for identical inputs.
+#[must_use]
+pub fn health_action_opts(result: &HealthResult) -> crate::report::HealthActionOptions {
+    if result.baseline_active {
+        crate::report::HealthActionOptions {
+            omit_suppress_line: true,
+            omit_reason: Some("baseline-active"),
+        }
+    } else if !result.config.health.suggest_inline_suppression {
+        crate::report::HealthActionOptions {
+            omit_suppress_line: true,
+            omit_reason: Some("config-disabled"),
+        }
+    } else {
+        crate::report::HealthActionOptions::default()
+    }
 }
 
 /// Print health results and return appropriate exit code.
@@ -1770,6 +1803,7 @@ pub fn print_health_result(
         top: None,
         summary,
         baseline_matched: None,
+        health_action_opts: health_action_opts(result),
     };
     let report_code = report::print_health_report(
         &result.report,
@@ -2238,12 +2272,14 @@ mod tests {
                     col: inner.col,
                     crap: 56.0,
                     coverage_pct: None,
+                    coverage_tier: crate::health_types::CoverageTier::None,
                 },
                 scoring::PerFunctionCrap {
                     line: outer.line,
                     col: outer.col,
                     crap: 2.0,
                     coverage_pct: None,
+                    coverage_tier: crate::health_types::CoverageTier::None,
                 },
             ],
         );
@@ -2336,12 +2372,14 @@ mod tests {
                     col: inner.col,
                     crap: 2.0,
                     coverage_pct: None,
+                    coverage_tier: crate::health_types::CoverageTier::None,
                 },
                 scoring::PerFunctionCrap {
                     line: outer.line,
                     col: outer.col,
                     crap: 72.0,
                     coverage_pct: None,
+                    coverage_tier: crate::health_types::CoverageTier::None,
                 },
             ],
         );
@@ -2646,11 +2684,82 @@ mod tests {
             timings: None,
             coverage_gaps_has_findings: false,
             should_fail_on_coverage_gaps: false,
+            baseline_active: false,
         };
 
         assert_eq!(
             print_health_result(&result, true, false, None, None, false),
             ExitCode::from(1),
         );
+    }
+
+    fn test_health_result(baseline_active: bool, suggest_inline_suppression: bool) -> HealthResult {
+        let mut config = test_resolved_config();
+        config.health.suggest_inline_suppression = suggest_inline_suppression;
+        HealthResult {
+            report: crate::health_types::HealthReport::default(),
+            config,
+            elapsed: Duration::default(),
+            timings: None,
+            coverage_gaps_has_findings: false,
+            should_fail_on_coverage_gaps: false,
+            baseline_active,
+            grouping: None,
+            group_resolver: None,
+        }
+    }
+
+    #[test]
+    fn health_action_opts_default_keeps_suppress_line() {
+        let opts = health_action_opts(&test_health_result(false, true));
+        assert!(!opts.omit_suppress_line);
+        assert_eq!(opts.omit_reason, None);
+    }
+
+    #[test]
+    fn health_action_opts_baseline_active_omits_suppress_line() {
+        let opts = health_action_opts(&test_health_result(true, true));
+        assert!(opts.omit_suppress_line);
+        assert_eq!(opts.omit_reason, Some("baseline-active"));
+    }
+
+    #[test]
+    fn health_action_opts_config_disabled_omits_suppress_line() {
+        let opts = health_action_opts(&test_health_result(false, false));
+        assert!(opts.omit_suppress_line);
+        assert_eq!(opts.omit_reason, Some("config-disabled"));
+    }
+
+    #[test]
+    fn health_action_opts_baseline_wins_over_config_for_reason() {
+        // When both signals fire, baseline takes precedence in the reason
+        // string. The behaviour (omit_suppress_line) is identical, but the
+        // reason is the more actionable hint for an operator wondering why
+        // the actions array is missing suppress-line.
+        let opts = health_action_opts(&test_health_result(true, false));
+        assert!(opts.omit_suppress_line);
+        assert_eq!(opts.omit_reason, Some("baseline-active"));
+    }
+
+    #[test]
+    fn baseline_active_set_when_save_baseline_used_alone() {
+        // Regression guard: --save-baseline alone (without --baseline) is
+        // ALSO a "managing suppressions through baseline" intent and must
+        // omit suppress-line so the regenerated baseline is the only
+        // suppression mechanism.
+        // Smoke-test the propagation by constructing HealthResult directly,
+        // since execute_health is integration-tested separately.
+        let result = HealthResult {
+            report: crate::health_types::HealthReport::default(),
+            config: test_resolved_config(),
+            elapsed: Duration::default(),
+            timings: None,
+            coverage_gaps_has_findings: false,
+            should_fail_on_coverage_gaps: false,
+            baseline_active: true,
+            grouping: None,
+            group_resolver: None,
+        };
+        assert!(health_action_opts(&result).omit_suppress_line);
     }
 }

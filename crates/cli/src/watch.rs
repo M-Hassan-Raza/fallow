@@ -111,6 +111,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
         top: None,
         summary: false,
         baseline_matched: None,
+        health_action_opts: report::HealthActionOptions::default(),
     };
     let report_code = report::print_results(&results, &ctx, config.output, None);
     if report_code != ExitCode::SUCCESS {

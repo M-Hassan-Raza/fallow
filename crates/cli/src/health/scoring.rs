@@ -255,6 +255,10 @@ pub(super) struct PerFunctionCrap {
     /// Coverage percentage used to compute `crap`, when Istanbul matched the
     /// function. `None` for estimated coverage or unmatched functions.
     pub coverage_pct: Option<f64>,
+    /// Bucketed coverage tier used to drive action selection in JSON output.
+    /// Populated for both Istanbul-matched and estimated CRAP rows so the
+    /// action builder does not need to recompute reachability state.
+    pub coverage_tier: crate::health_types::CoverageTier,
 }
 
 /// Istanbul CRAP result: CRAP scores plus match statistics.
@@ -304,13 +308,25 @@ fn compute_crap_scores_istanbul(
     for f in complexity {
         let cc = f64::from(f.cyclomatic);
         let lookup = file_coverage.and_then(|fc| fc.lookup(f.name.as_str(), f.line, f.col));
-        let (crap, coverage_pct) = if let Some(cov_pct) = lookup {
+        // Coverage tier is the source-of-truth for action selection: with an
+        // Istanbul match we bucket the observed pct; without a match we fall
+        // back to file reachability so the action signal stays meaningful
+        // even when only some functions matched.
+        let (crap, coverage_pct, tier) = if let Some(cov_pct) = lookup {
             matched += 1;
-            (crap_formula(cc, cov_pct), Some(cov_pct))
+            (
+                crap_formula(cc, cov_pct),
+                Some(cov_pct),
+                crate::health_types::CoverageTier::from_pct(cov_pct),
+            )
         } else if is_test_reachable {
-            (cc, None)
+            (
+                cc,
+                None,
+                crate::health_types::CoverageTier::from_pct(INDIRECT_TEST_COVERAGE_ESTIMATE),
+            )
         } else {
-            (cc * cc + cc, None)
+            (cc * cc + cc, None, crate::health_types::CoverageTier::None)
         };
         let crap_rounded = (crap * 10.0).round() / 10.0;
         max = max.max(crap);
@@ -322,6 +338,7 @@ fn compute_crap_scores_istanbul(
             col: f.col,
             crap: crap_rounded,
             coverage_pct,
+            coverage_tier: tier,
         });
     }
     IstanbulCrapResult {
@@ -390,12 +407,15 @@ fn compute_crap_scores_estimated(
         }
         // Estimated model never attaches a `coverage_pct` because the values
         // are heuristic (85%, 40%, 0%) rather than observed; reporting them
-        // as "the function's real coverage" would be misleading.
+        // as "the function's real coverage" would be misleading. The tier
+        // is bucketed though, since `none`/`partial`/`high` is a useful
+        // signal regardless of whether the underlying value is observed.
         per_function.push(PerFunctionCrap {
             line: f.line,
             col: f.col,
             crap: crap_rounded,
             coverage_pct: None,
+            coverage_tier: crate::health_types::CoverageTier::from_pct(estimated_coverage),
         });
     }
     EstimatedCrapResult {

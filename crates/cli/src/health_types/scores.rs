@@ -120,6 +120,53 @@ pub const fn letter_grade(score: f64) -> &'static str {
     }
 }
 
+/// Coverage tier classification for CRAP findings.
+///
+/// Bucketed coverage signal that lets action consumers (AI agents, IDE
+/// extensions, CI integrations) pick the right remediation without knowing
+/// the underlying coverage values:
+/// - `None`: file has no test reachability (estimated model 0% band) or
+///   Istanbul data shows 0% statement coverage. The right action is
+///   "add tests from scratch."
+/// - `Partial`: some coverage exists (estimated model 40% band, or
+///   Istanbul shows >0% but below the high watermark). The right
+///   action is "increase coverage on uncovered branches."
+/// - `High`: coverage is at or above the high watermark (estimated model
+///   85% band, or Istanbul shows >= 70%). Action selection still checks
+///   the CRAP formula before deciding whether coverage or refactoring is
+///   the better remediation.
+///
+/// The high watermark default is 70 (matches Istanbul `lines: 70`).
+/// Partial is anything in `(0, 70)`. None is `<= 0`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageTier {
+    /// 0% coverage: file is not test-reachable, or Istanbul reports 0%.
+    None,
+    /// Some coverage: estimated 40% band, or Istanbul reports `(0, 70)`.
+    Partial,
+    /// High coverage: estimated 85% band, or Istanbul reports `>= 70`.
+    High,
+}
+
+/// Coverage percentage at or above which a function is classified as `High`.
+/// Matches Istanbul's default `lines: 70` watermark.
+const HIGH_COVERAGE_WATERMARK: f64 = 70.0;
+
+impl CoverageTier {
+    /// Bucket a numeric coverage percentage `[0, 100]` into a tier.
+    #[must_use]
+    pub fn from_pct(pct: f64) -> Self {
+        if pct <= 0.0 {
+            Self::None
+        } else if pct >= HIGH_COVERAGE_WATERMARK {
+            Self::High
+        } else {
+            Self::Partial
+        }
+    }
+}
+
 /// A single function that exceeds a complexity threshold.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct HealthFinding {
@@ -152,6 +199,12 @@ pub struct HealthFinding {
     /// otherwise absent (estimated model or unmatched functions).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub coverage_pct: Option<f64>,
+    /// Bucketed coverage tier (`none`/`partial`/`high`) used to drive
+    /// action selection in JSON output. Present whenever CRAP triggered
+    /// the finding (Istanbul or estimated), absent for findings that only
+    /// exceeded cyclomatic/cognitive without CRAP context.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub coverage_tier: Option<CoverageTier>,
 }
 
 /// Which complexity threshold was exceeded.
@@ -634,6 +687,15 @@ mod tests {
         assert_eq!(letter_grade(40.0), "D");
         assert_eq!(letter_grade(39.9), "F");
         assert_eq!(letter_grade(0.0), "F");
+    }
+
+    #[test]
+    fn coverage_tier_boundaries() {
+        assert_eq!(CoverageTier::from_pct(0.0), CoverageTier::None);
+        assert_eq!(CoverageTier::from_pct(0.1), CoverageTier::Partial);
+        assert_eq!(CoverageTier::from_pct(69.9), CoverageTier::Partial);
+        assert_eq!(CoverageTier::from_pct(70.0), CoverageTier::High);
+        assert_eq!(CoverageTier::from_pct(100.0), CoverageTier::High);
     }
 
     #[test]

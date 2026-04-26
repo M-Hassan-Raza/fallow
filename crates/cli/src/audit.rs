@@ -733,7 +733,7 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
             Ok(mut json) => {
                 let root_prefix = format!("{}/", health.config.root.display());
                 report::strip_root_prefix(&mut json, &root_prefix);
-                report::inject_health_actions(&mut json);
+                report::inject_health_actions(&mut json, crate::health::health_action_opts(health));
                 obj.insert("complexity".into(), json);
             }
             Err(e) => {
