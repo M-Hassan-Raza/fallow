@@ -4,8 +4,9 @@ use std::time::Duration;
 use fallow_cli::health_types::*;
 use fallow_cli::report::{
     build_codeclimate, build_compact_lines, build_duplication_codeclimate,
-    build_duplication_markdown, build_health_codeclimate, build_health_json, build_health_markdown,
-    build_health_sarif, build_json, build_markdown, build_sarif,
+    build_duplication_markdown, build_grouped_duplication_json, build_health_codeclimate,
+    build_health_json, build_health_markdown, build_health_sarif, build_json, build_markdown,
+    build_sarif,
 };
 use fallow_config::RulesConfig;
 use fallow_core::duplicates::{CloneGroup, CloneInstance, DuplicationReport, DuplicationStats};
@@ -2286,4 +2287,139 @@ fn codeclimate_duplication_empty_snapshot() {
     let cc = build_duplication_codeclimate(&report, &root);
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
     insta::assert_snapshot!("codeclimate_duplication_empty", json_str);
+}
+
+// ── Grouped duplication snapshots ───────────────────────────────────
+
+/// Build a multi-group duplication report exercising the largest-owner rule.
+fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
+    DuplicationReport {
+        clone_groups: vec![
+            // Group 1: 2 src instances + 1 lib instance -> primary owner = src
+            CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: root.join("src/a.ts"),
+                        start_line: 10,
+                        end_line: 20,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "function a() { return 1; }".to_string(),
+                    },
+                    CloneInstance {
+                        file: root.join("src/b.ts"),
+                        start_line: 5,
+                        end_line: 15,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "function a() { return 1; }".to_string(),
+                    },
+                    CloneInstance {
+                        file: root.join("lib/c.ts"),
+                        start_line: 30,
+                        end_line: 40,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "function a() { return 1; }".to_string(),
+                    },
+                ],
+                token_count: 25,
+                line_count: 11,
+            },
+            // Group 2: 2 lib instances -> primary owner = lib
+            CloneGroup {
+                instances: vec![
+                    CloneInstance {
+                        file: root.join("lib/x.ts"),
+                        start_line: 1,
+                        end_line: 8,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "const x = 1;".to_string(),
+                    },
+                    CloneInstance {
+                        file: root.join("lib/y.ts"),
+                        start_line: 1,
+                        end_line: 8,
+                        start_col: 0,
+                        end_col: 1,
+                        fragment: "const x = 1;".to_string(),
+                    },
+                ],
+                token_count: 18,
+                line_count: 8,
+            },
+        ],
+        clone_families: vec![],
+        mirrored_directories: vec![],
+        stats: DuplicationStats {
+            total_files: 100,
+            files_with_clones: 5,
+            total_lines: 5000,
+            duplicated_lines: 35,
+            total_tokens: 25000,
+            duplicated_tokens: 86,
+            clone_groups: 2,
+            clone_instances: 5,
+            duplication_percentage: 0.7,
+        },
+    }
+}
+
+#[test]
+fn grouped_duplication_json_directory_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = sample_grouped_duplication_report(&root);
+    let resolver = fallow_cli::report::OwnershipResolver::Directory;
+    let grouping =
+        fallow_cli::report::dupes_grouping::build_duplication_grouping(&report, &root, &resolver);
+    let value =
+        build_grouped_duplication_json(&report, &grouping, &root, Duration::from_millis(0), false)
+            .expect("should serialize");
+    // Redact elapsed_ms which always 0 here, but keeps the assertion stable.
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("grouped_duplication_json_directory", json_str);
+}
+
+#[test]
+fn grouped_duplication_codeclimate_directory_snapshot() {
+    let root = PathBuf::from("/project");
+    let report = sample_grouped_duplication_report(&root);
+    let resolver = fallow_cli::report::OwnershipResolver::Directory;
+    // Build the codeclimate output, then post-process per-issue with the
+    // group key (replicates the runtime path inside print_grouped_duplication_codeclimate
+    // for snapshot stability without going through stdout).
+    let mut value = build_duplication_codeclimate(&report, &root);
+    let mut path_to_owner = rustc_hash::FxHashMap::<String, String>::default();
+    for group in &report.clone_groups {
+        let owner = fallow_cli::report::dupes_grouping::largest_owner(group, &root, &resolver);
+        for instance in &group.instances {
+            let rel = instance
+                .file
+                .strip_prefix(&root)
+                .unwrap_or(&instance.file)
+                .to_string_lossy()
+                .replace('\\', "/");
+            path_to_owner.insert(rel, owner.clone());
+        }
+    }
+    if let Some(arr) = value.as_array_mut() {
+        for issue in arr {
+            let path = issue
+                .pointer("/location/path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let group = path_to_owner
+                .get(&path)
+                .cloned()
+                .unwrap_or_else(|| "(unowned)".to_string());
+            issue
+                .as_object_mut()
+                .expect("issue object")
+                .insert("group".to_string(), serde_json::Value::String(group));
+        }
+    }
+    let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
+    insta::assert_snapshot!("grouped_duplication_codeclimate_directory", json_str);
 }

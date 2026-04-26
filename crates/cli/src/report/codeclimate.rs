@@ -872,6 +872,54 @@ pub(super) fn print_duplication_codeclimate(report: &DuplicationReport, root: &P
     emit_json(&value, "CodeClimate")
 }
 
+/// Print duplication CodeClimate output with a per-issue `group` field.
+///
+/// Mirrors [`print_grouped_health_codeclimate`]: each clone group is attributed
+/// to its largest owner ([`super::dupes_grouping::largest_owner`]) and every
+/// CodeClimate issue emitted for that clone group's instances carries the same
+/// top-level `group` key. Lets GitLab Code Quality and other CodeClimate
+/// consumers partition findings per team / package / directory without
+/// re-parsing the project structure.
+pub(super) fn print_grouped_duplication_codeclimate(
+    report: &DuplicationReport,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) -> ExitCode {
+    let mut value = build_duplication_codeclimate(report, root);
+
+    // Build a flat lookup from each instance path -> primary owner. Every
+    // instance of a clone group inherits the group's largest-owner key.
+    use rustc_hash::FxHashMap;
+    let mut path_to_owner: FxHashMap<String, String> = FxHashMap::default();
+    for group in &report.clone_groups {
+        let owner = super::dupes_grouping::largest_owner(group, root, resolver);
+        for instance in &group.instances {
+            let path = cc_path(&instance.file, root);
+            path_to_owner.insert(path, owner.clone());
+        }
+    }
+
+    if let Some(issues) = value.as_array_mut() {
+        for issue in issues {
+            let path = issue
+                .pointer("/location/path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            let group = path_to_owner
+                .get(&path)
+                .cloned()
+                .unwrap_or_else(|| crate::codeowners::UNOWNED_LABEL.to_string());
+            issue
+                .as_object_mut()
+                .expect("CodeClimate issue should be an object")
+                .insert("group".to_string(), serde_json::Value::String(group));
+        }
+    }
+
+    emit_json(&value, "CodeClimate")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

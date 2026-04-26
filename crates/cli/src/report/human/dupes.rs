@@ -5,6 +5,7 @@ use colored::Colorize;
 use fallow_core::duplicates::DuplicationReport;
 
 use super::{MAX_FLAT_ITEMS, format_path, plural, relative_path, split_dir_filename, thousands};
+use crate::report::dupes_grouping::DuplicationGrouping;
 
 /// Docs base URL for duplication explanations.
 const DOCS_DUPLICATION: &str = "https://docs.fallow.tools/explanations/duplication";
@@ -414,6 +415,141 @@ pub(in crate::report) fn print_duplication_summary(
             )
             .red()
             .bold()
+        );
+    }
+}
+
+/// Print a per-group duplication report alongside the project-level totals.
+///
+/// Renders one block per resolver bucket (sorted most clone groups first,
+/// `(unowned)` pinned last). Each block shows the bucket's clone group count
+/// and dedup-aware stats (duplicated LOC, percentage, files-with-clones).
+/// The project-level totals follow as a footer so consumers always see the
+/// project headline even when consuming grouped output.
+pub(in crate::report) fn print_grouped_duplication_human(
+    report: &DuplicationReport,
+    grouping: &DuplicationGrouping,
+    root: &Path,
+    elapsed: Duration,
+    quiet: bool,
+) {
+    if !quiet {
+        eprintln!();
+    }
+
+    if grouping.groups.is_empty() {
+        if !quiet {
+            eprintln!(
+                "{}",
+                format!(
+                    "\u{2713} No code duplication found ({:.2}s)",
+                    elapsed.as_secs_f64()
+                )
+                .green()
+                .bold()
+            );
+        }
+        return;
+    }
+
+    // Per-bucket render
+    for bucket in &grouping.groups {
+        let total_groups = bucket.clone_groups.len();
+        let dup_lines = bucket.stats.duplicated_lines;
+        let header = format!(
+            "## {}: {} ({} clone group{}, {} LOC duplicated)",
+            grouping.mode,
+            bucket.key,
+            total_groups,
+            plural(total_groups),
+            thousands(dup_lines),
+        );
+        println!("{}", header.cyan().bold());
+
+        let shown = total_groups.min(MAX_CLONE_GROUPS);
+        let mut sorted: Vec<_> = bucket.clone_groups.iter().collect();
+        sorted.sort_by_key(|cg| std::cmp::Reverse(cg.line_count));
+
+        for cg in &sorted[..shown] {
+            let lc = cg.line_count;
+            let lc_str = format!("{:>5}", thousands(lc));
+            let lc_colored = if lc > 1000 {
+                lc_str.red().bold().to_string()
+            } else if lc > 100 {
+                lc_str.yellow().to_string()
+            } else {
+                lc_str.dimmed().to_string()
+            };
+            println!(
+                "  {} lines  {} instance{}",
+                lc_colored,
+                cg.instances.len(),
+                plural(cg.instances.len()),
+            );
+            for inst in &cg.instances {
+                let relative = relative_path(&inst.instance.file, root);
+                let path_str = relative.display().to_string();
+                let (dir, filename) = split_dir_filename(&path_str);
+                let owner_tag = if inst.owner == bucket.key {
+                    String::new()
+                } else {
+                    format!("  [{}]", inst.owner).dimmed().to_string()
+                };
+                println!(
+                    "    {}{}:{}-{}{}",
+                    dir.dimmed(),
+                    format_path(filename),
+                    inst.instance.start_line,
+                    inst.instance.end_line,
+                    owner_tag,
+                );
+            }
+            println!();
+        }
+        if total_groups > MAX_CLONE_GROUPS {
+            println!(
+                "  {}",
+                format!(
+                    "... and {} more clone groups",
+                    total_groups - MAX_CLONE_GROUPS
+                )
+                .dimmed()
+            );
+        }
+        // Per-group stats footer
+        println!(
+            "  {}",
+            format!(
+                "{} duplicated lines ({:.1}%) across {} file{}",
+                thousands(dup_lines),
+                bucket.stats.duplication_percentage,
+                bucket.stats.files_with_clones,
+                plural(bucket.stats.files_with_clones),
+            )
+            .dimmed()
+        );
+        println!();
+    }
+
+    // Project-level totals footer
+    let stats = &report.stats;
+    if !quiet {
+        eprintln!(
+            "{}",
+            format!(
+                "\u{2717} {} lines ({:.1}%) duplicated across {} file{} ({:.2}s)",
+                thousands(stats.duplicated_lines),
+                stats.duplication_percentage,
+                stats.files_with_clones,
+                plural(stats.files_with_clones),
+                elapsed.as_secs_f64(),
+            )
+            .red()
+            .bold()
+        );
+        eprintln!(
+            "  {}",
+            format!("Group attribution rule: largest owner (most instances; alphabetical tiebreak); see {DOCS_DUPLICATION}#grouping").dimmed()
         );
     }
 }

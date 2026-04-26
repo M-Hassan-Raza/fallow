@@ -1370,6 +1370,81 @@ pub(super) fn print_duplication_json(
     }
 }
 
+/// Build a grouped duplication JSON envelope when `--group-by` is active.
+///
+/// The envelope keeps the project-level duplication payload (`stats`,
+/// `clone_groups`, `clone_families`) at the top level so consumers that ignore
+/// grouping still see project-wide aggregates, and adds:
+///
+/// - `grouped_by`: the resolver mode (`"owner"`, `"directory"`, `"package"`,
+///   `"section"`).
+/// - `groups`: one entry per resolver bucket. Each entry carries its own
+///   per-group `stats` (dedup-aware, computed over the FULL group before
+///   `--top` truncation), `clone_groups` (each tagged with `primary_owner`
+///   and per-instance `owner`), and `clone_families`.
+///
+/// Paths inside groups are relativised the same way as the project-level
+/// payload via `strip_root_prefix`.
+///
+/// # Errors
+///
+/// Returns an error if either the project report or any group cannot be
+/// serialised to JSON.
+pub fn build_grouped_duplication_json(
+    report: &DuplicationReport,
+    grouping: &super::dupes_grouping::DuplicationGrouping,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> Result<serde_json::Value, serde_json::Error> {
+    let report_value = serde_json::to_value(report)?;
+    let mut output = build_json_envelope(report_value, elapsed);
+    let root_prefix = format!("{}/", root.display());
+    strip_root_prefix(&mut output, &root_prefix);
+    inject_dupes_actions(&mut output);
+
+    if let serde_json::Value::Object(ref mut map) = output {
+        map.insert("grouped_by".to_string(), serde_json::json!(grouping.mode));
+    }
+
+    let group_values: Vec<serde_json::Value> = grouping
+        .groups
+        .iter()
+        .map(|g| {
+            let mut value = serde_json::to_value(g)?;
+            strip_root_prefix(&mut value, &root_prefix);
+            inject_dupes_actions(&mut value);
+            Ok(value)
+        })
+        .collect::<Result<_, serde_json::Error>>()?;
+
+    if let serde_json::Value::Object(ref mut map) = output {
+        map.insert("groups".to_string(), serde_json::Value::Array(group_values));
+    }
+
+    if explain {
+        insert_meta(&mut output, explain::dupes_meta());
+    }
+
+    Ok(output)
+}
+
+pub(super) fn print_grouped_duplication_json(
+    report: &DuplicationReport,
+    grouping: &super::dupes_grouping::DuplicationGrouping,
+    root: &Path,
+    elapsed: Duration,
+    explain: bool,
+) -> ExitCode {
+    match build_grouped_duplication_json(report, grouping, root, elapsed, explain) {
+        Ok(output) => emit_json(&output, "JSON"),
+        Err(e) => {
+            eprintln!("Error: failed to serialize grouped duplication report: {e}");
+            ExitCode::from(2)
+        }
+    }
+}
+
 pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
     match serde_json::to_string_pretty(value) {
         Ok(json) => println!("{json}"),

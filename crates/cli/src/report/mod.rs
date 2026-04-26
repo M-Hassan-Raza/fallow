@@ -1,6 +1,7 @@
 mod badge;
 mod codeclimate;
 mod compact;
+pub mod dupes_grouping;
 pub mod grouping;
 mod human;
 mod json;
@@ -263,6 +264,14 @@ pub fn print_duplication_report(
     ctx: &ReportContext<'_>,
     output: OutputFormat,
 ) -> ExitCode {
+    // Grouped output: build the grouping payload once and dispatch
+    // per-format. Compact, markdown, and badge fall back to ungrouped output
+    // with a stderr note (parity with the health grouped fallback).
+    if let Some(ref resolver) = ctx.group_by {
+        let grouping = dupes_grouping::build_duplication_grouping(report, ctx.root, resolver);
+        return print_grouped_duplication_report(report, &grouping, ctx, output, resolver);
+    }
+
     match output {
         OutputFormat::Human => {
             if ctx.summary {
@@ -290,6 +299,62 @@ pub fn print_duplication_report(
             ExitCode::from(2)
         }
     }
+}
+
+/// Render grouped duplication results across all output formats.
+#[must_use]
+fn print_grouped_duplication_report(
+    report: &DuplicationReport,
+    grouping: &dupes_grouping::DuplicationGrouping,
+    ctx: &ReportContext<'_>,
+    output: OutputFormat,
+    resolver: &OwnershipResolver,
+) -> ExitCode {
+    match output {
+        OutputFormat::Human => {
+            human::print_grouped_duplication_human(
+                report,
+                grouping,
+                ctx.root,
+                ctx.elapsed,
+                ctx.quiet,
+            );
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Json => json::print_grouped_duplication_json(
+            report,
+            grouping,
+            ctx.root,
+            ctx.elapsed,
+            ctx.explain,
+        ),
+        OutputFormat::Sarif => sarif::print_grouped_duplication_sarif(report, ctx.root, resolver),
+        OutputFormat::CodeClimate => {
+            codeclimate::print_grouped_duplication_codeclimate(report, ctx.root, resolver)
+        }
+        OutputFormat::Compact => {
+            compact::print_duplication_compact(report, ctx.root);
+            warn_dupes_grouping_unsupported(grouping, "compact");
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Markdown => {
+            markdown::print_duplication_markdown(report, ctx.root);
+            warn_dupes_grouping_unsupported(grouping, "markdown");
+            ExitCode::SUCCESS
+        }
+        OutputFormat::Badge => {
+            eprintln!("Error: badge format is only supported for the health command");
+            ExitCode::from(2)
+        }
+    }
+}
+
+fn warn_dupes_grouping_unsupported(grouping: &dupes_grouping::DuplicationGrouping, format: &str) {
+    eprintln!(
+        "note: --group-by {} is not supported for {format} duplication output, falling back to \
+         ungrouped output (use --format json for the full grouped envelope)",
+        grouping.mode
+    );
 }
 
 // ── Health / complexity report ─────────────────────────────────────
@@ -486,6 +551,11 @@ pub use json::build_baseline_deltas_json;
     reason = "target-dependent: used in lib, unused in bin"
 )]
 pub use json::build_duplication_json;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use json::build_grouped_duplication_json;
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"

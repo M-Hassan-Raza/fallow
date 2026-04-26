@@ -736,7 +736,7 @@
 
     "DupesOutput": {
       "title": "fallow dupes --format json",
-      "description": "Duplication analysis output. Contains clone groups (individual duplicates), clone families (groups sharing the same files), and aggregate statistics.",
+      "description": "Duplication analysis output. Contains clone groups (individual duplicates), clone families (groups sharing the same files), and aggregate statistics. With --group-by, the project-level fields stay populated and an additional `grouped_by` + `groups` envelope is appended.",
       "type": "object",
       "required": ["schema_version", "version", "elapsed_ms", "clone_groups", "clone_families", "stats"],
       "properties": {
@@ -759,7 +759,77 @@
           "description": "Directory pairs with high structural duplication. Only present when mirrored directories are detected.",
           "items": { "$ref": "#/definitions/MirroredDirectory" }
         },
+        "grouped_by": {
+          "type": "string",
+          "enum": ["owner", "directory", "package", "section"],
+          "description": "Resolver mode used for partitioning. Present only when `--group-by` is active."
+        },
+        "groups": {
+          "type": "array",
+          "description": "Per-group buckets when `--group-by` is active. Each clone group is attributed to its largest-owner key (most instances; alphabetical tiebreak). Sort: most clone groups first, then alphabetical, with `(unowned)` pinned last.",
+          "items": { "$ref": "#/definitions/DuplicationGroup" }
+        },
         "_meta": { "$ref": "#/definitions/Meta" }
+      }
+    },
+
+    "DuplicationGroup": {
+      "type": "object",
+      "description": "A single grouped duplication bucket. Per-group `stats` are dedup-aware and computed over the FULL group BEFORE any `--top` truncation.",
+      "required": ["key", "stats", "clone_groups", "clone_families"],
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Group label (owner / directory / package / section). `(unowned)` for files with no CODEOWNERS rule, `(no section)` for pre-section rules in section mode."
+        },
+        "stats": { "$ref": "#/definitions/DuplicationStats" },
+        "clone_groups": {
+          "type": "array",
+          "description": "Clone groups attributed to this owner. Each group's `primary_owner` is its largest-owner key; per-instance `owner` lets consumers see cross-bucket fan-out without re-resolving paths.",
+          "items": { "$ref": "#/definitions/AttributedCloneGroup" }
+        },
+        "clone_families": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/CloneFamily" }
+        }
+      }
+    },
+
+    "AttributedCloneGroup": {
+      "type": "object",
+      "description": "A clone group annotated with its largest-owner attribution and per-instance owner keys.",
+      "required": ["primary_owner", "token_count", "line_count", "instances"],
+      "properties": {
+        "primary_owner": {
+          "type": "string",
+          "description": "Largest-owner attribution: the resolver key with the most instances in this clone group. Ties broken alphabetically (smallest key wins)."
+        },
+        "token_count": { "type": "integer" },
+        "line_count": { "type": "integer" },
+        "instances": {
+          "type": "array",
+          "description": "Each instance carries its own `owner` field alongside the standard CloneInstance shape.",
+          "items": {
+            "type": "object",
+            "required": ["file", "start_line", "end_line", "start_col", "end_col", "fragment", "owner"],
+            "properties": {
+              "file": { "type": "string" },
+              "start_line": { "type": "integer" },
+              "end_line": { "type": "integer" },
+              "start_col": { "type": "integer" },
+              "end_col": { "type": "integer" },
+              "fragment": { "type": "string" },
+              "owner": {
+                "type": "string",
+                "description": "Resolver key for this specific instance (per-instance, not the group-level largest-owner)."
+              }
+            }
+          }
+        },
+        "actions": {
+          "type": "array",
+          "description": "Suggested actions for this clone group (extract-shared, suppress-line, etc.)."
+        }
       }
     },
 

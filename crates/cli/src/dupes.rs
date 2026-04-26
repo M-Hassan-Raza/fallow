@@ -345,9 +345,7 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
-    // Standalone dupes does not partition output yet, but it must still
-    // validate --group-by so global flag errors match check/health.
-    let _resolver = match crate::build_ownership_resolver(
+    let resolver = match crate::build_ownership_resolver(
         opts.group_by,
         opts.root,
         result.config.codeowners.as_deref(),
@@ -356,7 +354,7 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
-    print_dupes_result_with_grouping(&result, opts.quiet, opts.explain, None, opts.summary)
+    print_dupes_result_with_grouping(&result, opts.quiet, opts.explain, resolver, opts.summary)
 }
 
 fn print_dupes_result_with_grouping(

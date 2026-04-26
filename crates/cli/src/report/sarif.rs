@@ -685,6 +685,80 @@ pub(super) fn print_duplication_sarif(report: &DuplicationReport, root: &Path) -
     emit_json(&sarif, "SARIF")
 }
 
+/// Print SARIF duplication output with a `properties.group` tag on every
+/// result.
+///
+/// Each clone group is attributed to its largest owner (most instances; ties
+/// broken alphabetically) via [`super::dupes_grouping::largest_owner`], and
+/// every result emitted for that group's instances carries the same
+/// `properties.group` value. This mirrors the health SARIF convention
+/// (`print_grouped_health_sarif`) so consumers (GitHub Code Scanning, GitLab
+/// Code Quality) can partition findings per team / package / directory
+/// without re-resolving ownership.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "line/col numbers are bounded by source size"
+)]
+pub(super) fn print_grouped_duplication_sarif(
+    report: &DuplicationReport,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) -> ExitCode {
+    let mut sarif_results = Vec::new();
+
+    for (i, group) in report.clone_groups.iter().enumerate() {
+        // Compute the group's primary owner once. Every result emitted for
+        // this group carries the same `properties.group` value (the GROUP'S
+        // owner, not the per-instance owner).
+        let primary_owner = super::dupes_grouping::largest_owner(group, root, resolver);
+        for instance in &group.instances {
+            let mut result = sarif_result(
+                "fallow/code-duplication",
+                "warning",
+                &format!(
+                    "Code clone group {} ({} lines, {} instances)",
+                    i + 1,
+                    group.line_count,
+                    group.instances.len()
+                ),
+                &relative_uri(&instance.file, root),
+                Some((instance.start_line as u32, (instance.start_col + 1) as u32)),
+            );
+            let props = result
+                .as_object_mut()
+                .expect("SARIF result should be an object")
+                .entry("properties")
+                .or_insert_with(|| serde_json::json!({}));
+            props
+                .as_object_mut()
+                .expect("properties should be an object")
+                .insert(
+                    "group".to_string(),
+                    serde_json::Value::String(primary_owner.clone()),
+                );
+            sarif_results.push(result);
+        }
+    }
+
+    let sarif = serde_json::json!({
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {
+                "driver": {
+                    "name": "fallow",
+                    "version": env!("CARGO_PKG_VERSION"),
+                    "informationUri": "https://github.com/fallow-rs/fallow",
+                    "rules": [sarif_rule("fallow/code-duplication", "Duplicated code block", "warning")]
+                }
+            },
+            "results": sarif_results
+        }]
+    });
+
+    emit_json(&sarif, "SARIF")
+}
+
 // ── Health SARIF output ────────────────────────────────────────────
 // Note: file_scores are intentionally omitted from SARIF output.
 // SARIF is designed for diagnostic results (issues/findings), not metric tables.
