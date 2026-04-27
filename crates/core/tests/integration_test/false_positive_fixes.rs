@@ -1,5 +1,88 @@
 use super::common::{create_config, fixture_path};
 
+// ── ESLint relative extends chain (issue #198) ──────────────────
+
+#[test]
+fn eslint_relative_extends_config_is_not_reported_unused() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::create_dir_all(root.join("config")).expect("config dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "eslint-chain",
+            "private": true,
+            "devDependencies": {
+                "eslint": "8.57.0",
+                "@typescript-eslint/parser": "7.0.0",
+                "eslint-config-prettier": "9.1.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "compilerOptions": {
+                "target": "ES2022",
+                "module": "ES2022",
+                "moduleResolution": "bundler",
+                "strict": true,
+                "skipLibCheck": true
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join(".eslintrc.json"),
+        r#"{ "root": true, "extends": ["./config/eslintrc.base.js"] }"#,
+    )
+    .expect("eslint root config");
+    std::fs::write(
+        root.join("config/eslintrc.base.js"),
+        r#"module.exports = {
+            extends: ["prettier"],
+            overrides: [
+                { files: ["*.ts"], parser: "@typescript-eslint/parser", rules: {} }
+            ]
+        };"#,
+    )
+    .expect("eslint base config");
+    std::fs::write(root.join("src/index.ts"), "export const hello = 'world';")
+        .expect("source file");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "config/eslintrc.base.js"),
+        "ESLint base config reached through relative extends should be used, got: {unused_files:?}"
+    );
+
+    let unused_dev_dependencies: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dev_dependencies.contains(&"@typescript-eslint/parser"),
+        "override parser should be credited through the ESLint config chain: {unused_dev_dependencies:?}"
+    );
+    assert!(
+        !unused_dev_dependencies.contains(&"eslint-config-prettier"),
+        "extends package should be credited through the ESLint config chain: {unused_dev_dependencies:?}"
+    );
+}
+
 // ── Type-only circular dependency filtering ──────────────────
 
 #[test]

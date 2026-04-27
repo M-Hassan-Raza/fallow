@@ -10,7 +10,7 @@ paths:
 
 ## Rich config parsing (15 plugins)
 
-- **ESLint**: Legacy plugin/extends/parser short-name resolution, flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), settings["import/resolver"] (string/array/object formats)
+- **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
 - **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
 - **Jest**: preset, setupFiles, globalSetup/Teardown, testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
 - **Storybook**: addons, framework (string/object), stories, core.builder, typescript.reactDocgen
