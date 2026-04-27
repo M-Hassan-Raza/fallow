@@ -6,8 +6,8 @@ import {
   buildParamsFromCli,
   buildStatusBarPartsFromLsp,
   buildStatusBarTooltipMarkdown,
-  formatChangedSinceRefForStatusBar,
   getStatusBarSeverityKey,
+  renderStatusBarText,
 } from "./statusBar-utils.js";
 import type { FallowCheckResult, FallowDupesResult } from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
@@ -15,13 +15,18 @@ import type { AnalysisCompleteParams } from "./statusBar-utils.js";
 
 let statusBarItem: vscode.StatusBarItem | null = null;
 
+const liveChangedSince = (): string | null => getChangedSince() || null;
+
 export const createStatusBar = (): vscode.StatusBarItem => {
   statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Left,
     50
   );
   statusBarItem.command = "fallow.analyze";
-  statusBarItem.text = "$(search) Fallow";
+  statusBarItem.text = renderStatusBarText(
+    "$(search) Fallow",
+    liveChangedSince()
+  );
   statusBarItem.show();
   return statusBarItem;
 };
@@ -83,26 +88,28 @@ const applyStatusBarText = (parts: string[]): void => {
   if (!statusBarItem) {
     return;
   }
-  const changedSince = getChangedSince();
-  const suffix = changedSince
-    ? ` (since ${formatChangedSinceRefForStatusBar(changedSince)})`
-    : "";
-  if (parts.length > 0) {
-    statusBarItem.text = `$(search) Fallow: ${parts.join(" | ")}${suffix}`;
-  } else {
-    statusBarItem.text = `$(search) Fallow${suffix}`;
-  }
+  const base =
+    parts.length > 0
+      ? `$(search) Fallow: ${parts.join(" | ")}`
+      : "$(search) Fallow";
+  statusBarItem.text = renderStatusBarText(base, liveChangedSince());
 };
 
 export const setStatusBarAnalyzing = (): void => {
   if (statusBarItem) {
-    statusBarItem.text = "$(loading~spin) Fallow: Analyzing...";
+    statusBarItem.text = renderStatusBarText(
+      "$(loading~spin) Fallow: Analyzing...",
+      liveChangedSince()
+    );
   }
 };
 
 export const setStatusBarError = (): void => {
   if (statusBarItem) {
-    statusBarItem.text = "$(error) Fallow: Error";
+    statusBarItem.text = renderStatusBarText(
+      "$(error) Fallow: Error",
+      liveChangedSince()
+    );
   }
 };
 

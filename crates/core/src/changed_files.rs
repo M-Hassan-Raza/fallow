@@ -103,10 +103,20 @@ fn augment_git_failed(stderr: &str) -> String {
     }
 }
 
-fn collect_git_paths(root: &Path, args: &[&str]) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+/// Resolve the canonical git toplevel for `cwd`.
+///
+/// Runs `git rev-parse --show-toplevel`, which is git's own answer to "where
+/// does this repository live?". The returned path is canonicalized so it
+/// agrees with paths produced by `fs::canonicalize` elsewhere on macOS
+/// (`/tmp` -> `/private/tmp`) and Windows (8.3 short paths).
+///
+/// Used by `try_get_changed_files` to produce changed-file paths whose
+/// absolute form matches what the analysis pipeline emits, regardless of
+/// whether the caller's `cwd` is the repo root or a subdirectory of it.
+pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
     let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(root)
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(cwd)
         .output()
         .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
@@ -119,9 +129,47 @@ fn collect_git_paths(root: &Path, args: &[&str]) -> Result<FxHashSet<PathBuf>, C
         });
     }
 
+    let raw = String::from_utf8_lossy(&output.stdout);
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(ChangedFilesError::GitFailed(
+            "git rev-parse --show-toplevel returned empty output".to_owned(),
+        ));
+    }
+
+    let path = PathBuf::from(trimmed);
+    Ok(path.canonicalize().unwrap_or(path))
+}
+
+fn collect_git_paths(
+    cwd: &Path,
+    toplevel: &Path,
+    args: &[&str],
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(if stderr.contains("not a git repository") {
+            ChangedFilesError::NotARepository
+        } else {
+            ChangedFilesError::GitFailed(stderr.trim().to_owned())
+        });
+    }
+
+    // All callers use modes whose output is repository-root-relative
+    // (`git diff --name-only`, `git ls-files --full-name --others`). Joining
+    // against `toplevel` yields absolute paths that line up with what
+    // `analyze_project` emits when given a canonical workspace root, even if
+    // the LSP / CLI was invoked from a subdirectory.
     let files: FxHashSet<PathBuf> = String::from_utf8_lossy(&output.stdout)
         .lines()
-        .map(|line| root.join(line))
+        .filter(|line| !line.is_empty())
+        .map(|line| toplevel.join(line))
         .collect();
 
     Ok(files)
@@ -138,14 +186,43 @@ fn collect_git_paths(root: &Path, args: &[&str]) -> Result<FxHashSet<PathBuf>, C
 ///
 /// This keeps `--changed-since` useful for local validation instead of only
 /// reflecting the last committed `HEAD`.
+///
+/// All paths in the returned set are absolute and rooted at the canonical
+/// git toplevel, not at `root`. This matters when the LSP / CLI is invoked
+/// from a subdirectory of the repository (e.g., a Turborepo workspace at
+/// `apps/web`): `git diff` emits root-relative paths, and we need to join
+/// them against the actual repo root rather than the caller's cwd.
 pub fn try_get_changed_files(
     root: &Path,
+    git_ref: &str,
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    // Validate the ref BEFORE resolving the toplevel so the security-relevant
+    // boundary check (rejects refs starting with `-`, etc.) runs even when
+    // `cwd` happens to not be a git repo. Otherwise an attacker-controlled
+    // `--changed-since=--upload-pack=evil` would leak through to
+    // `git rev-parse` instead of being rejected at validation.
+    validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    let toplevel = resolve_git_toplevel(root)?;
+    try_get_changed_files_with_toplevel(root, &toplevel, git_ref)
+}
+
+/// Like [`try_get_changed_files`], but takes a pre-resolved canonical
+/// `toplevel` so callers (the LSP) can cache it across runs and avoid the
+/// extra `git rev-parse --show-toplevel` subprocess on every save.
+///
+/// `toplevel` MUST be the canonical git toplevel for `cwd`; passing anything
+/// else produces incorrect changed-file paths. The CLI does not call this
+/// directly: it uses [`try_get_changed_files`] which resolves on each call.
+pub fn try_get_changed_files_with_toplevel(
+    cwd: &Path,
+    toplevel: &Path,
     git_ref: &str,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
     validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
 
     let mut files = collect_git_paths(
-        root,
+        cwd,
+        toplevel,
         &[
             "diff",
             "--name-only",
@@ -153,10 +230,19 @@ pub fn try_get_changed_files(
             &format!("{git_ref}...HEAD"),
         ],
     )?;
-    files.extend(collect_git_paths(root, &["diff", "--name-only", "HEAD"])?);
     files.extend(collect_git_paths(
-        root,
-        &["ls-files", "--others", "--exclude-standard"],
+        cwd,
+        toplevel,
+        &["diff", "--name-only", "HEAD"],
+    )?);
+    // `--full-name` forces `ls-files` to emit repository-root-relative paths,
+    // matching `git diff`'s default. Without it, `ls-files` emits paths
+    // relative to cwd, which silently produces wrong joins when the caller
+    // invokes from a subdirectory.
+    files.extend(collect_git_paths(
+        cwd,
+        toplevel,
+        &["ls-files", "--full-name", "--others", "--exclude-standard"],
     )?);
     Ok(files)
 }
@@ -575,6 +661,194 @@ mod tests {
         // stats recomputed from surviving groups
         assert_eq!(report.stats.clone_groups, 1);
         assert_eq!(report.stats.clone_instances, 2);
+    }
+
+    // -----------------------------------------------------------------------
+    // Real git interactions (tempdir + git init). These exercise the
+    // path-resolution boundary between `git rev-parse --show-toplevel`,
+    // `git diff --name-only`, and `git ls-files --full-name --others` to
+    // catch regressions like issue #190 where the LSP workspace was a
+    // subdirectory of the git repo and changed-file paths were joined
+    // against the wrong base.
+    // -----------------------------------------------------------------------
+
+    /// Initialize a temp git repo with a single committed file plus a tag
+    /// at HEAD. Returns the canonical repo root.
+    fn init_repo(repo: &Path) -> PathBuf {
+        run_git(repo, &["init", "--quiet", "--initial-branch=main"]);
+        run_git(repo, &["config", "user.email", "test@example.com"]);
+        run_git(repo, &["config", "user.name", "test"]);
+        run_git(repo, &["config", "commit.gpgsign", "false"]);
+        std::fs::write(repo.join("seed.txt"), "seed\n").unwrap();
+        run_git(repo, &["add", "seed.txt"]);
+        run_git(repo, &["commit", "--quiet", "-m", "initial"]);
+        run_git(repo, &["tag", "fallow-baseline"]);
+        repo.canonicalize().unwrap()
+    }
+
+    fn run_git(cwd: &Path, args: &[&str]) {
+        let output = std::process::Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .expect("git available");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Workspace at git root, an untracked file is included in the
+    /// changed-files set with an absolute path joined from the repo root.
+    #[test]
+    fn try_get_changed_files_workspace_at_repo_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::write(repo.join("src/new.ts"), "export const x = 1;\n").unwrap();
+
+        let changed = try_get_changed_files(&repo, "fallow-baseline").unwrap();
+
+        let expected = repo.join("src/new.ts");
+        assert!(
+            changed.contains(&expected),
+            "changed set should contain {expected:?}; actual: {changed:?}"
+        );
+    }
+
+    /// Regression test for #190. When the workspace is a subdirectory of
+    /// the git repository, `git diff --name-only` emits paths relative to
+    /// the repo root (e.g., `frontend/src/new.ts`). Without the
+    /// rev-parse-based toplevel resolution the function joined those
+    /// against the workspace root, producing bogus paths like
+    /// `<repo>/frontend/frontend/src/new.ts` that never matched
+    /// `analyze_project` output and silently dropped the filter.
+    #[test]
+    fn try_get_changed_files_workspace_in_subdirectory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let frontend = repo.join("frontend");
+        std::fs::create_dir_all(frontend.join("src")).unwrap();
+        std::fs::write(frontend.join("src/new.ts"), "export const x = 1;\n").unwrap();
+
+        let changed = try_get_changed_files(&frontend, "fallow-baseline").unwrap();
+
+        let expected = repo.join("frontend/src/new.ts");
+        assert!(
+            changed.contains(&expected),
+            "changed set should contain canonical {expected:?}; actual: {changed:?}"
+        );
+        // Verify the bogus double-frontend path is NOT in the set
+        let bogus = frontend.join("frontend/src/new.ts");
+        assert!(
+            !changed.contains(&bogus),
+            "changed set must not contain double-frontend path {bogus:?}"
+        );
+    }
+
+    /// A *committed* change in a sibling subdirectory (outside the
+    /// workspace) appears in the changed-files set because `git diff`
+    /// is repo-wide regardless of cwd. The downstream
+    /// `filter_results_by_changed_files` retains it only if
+    /// `analyze_project` saw it; for a workspace scoped to one subdir,
+    /// the sibling file is not in the analysis paths and falls away at
+    /// the result-merge boundary, not here. This test pins the contract:
+    /// for committed changes, the set is repo-wide.
+    ///
+    /// Note: `git ls-files --others --exclude-standard` only lists
+    /// untracked files in cwd's subtree, so untracked siblings are NOT
+    /// in the set when invoked from a subdirectory. That's harmless for
+    /// the LSP because `analyze_project` only walks files under the
+    /// workspace root either way.
+    #[test]
+    fn try_get_changed_files_includes_committed_sibling_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let backend = repo.join("backend");
+        std::fs::create_dir_all(&backend).unwrap();
+        std::fs::write(backend.join("server.py"), "print('hi')\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "--quiet", "-m", "add backend"]);
+
+        let frontend = repo.join("frontend");
+        std::fs::create_dir_all(&frontend).unwrap();
+
+        let changed = try_get_changed_files(&frontend, "fallow-baseline").unwrap();
+
+        let expected = repo.join("backend/server.py");
+        assert!(
+            changed.contains(&expected),
+            "committed sibling backend/server.py should be in the set: {changed:?}"
+        );
+    }
+
+    /// Modifying a tracked file shows up via `git diff --name-only HEAD`,
+    /// not just via `ls-files --others`. Confirm the path-join fix
+    /// applies to that codepath too.
+    #[test]
+    fn try_get_changed_files_includes_modified_tracked_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let frontend = repo.join("frontend");
+        std::fs::create_dir_all(frontend.join("src")).unwrap();
+        std::fs::write(frontend.join("src/old.ts"), "export const x = 1;\n").unwrap();
+        run_git(&repo, &["add", "."]);
+        run_git(&repo, &["commit", "--quiet", "-m", "add old"]);
+        run_git(&repo, &["tag", "fallow-baseline-v2"]);
+        // Modify the tracked file (no commit, so diff-HEAD picks it up)
+        std::fs::write(frontend.join("src/old.ts"), "export const x = 2;\n").unwrap();
+
+        let changed = try_get_changed_files(&frontend, "fallow-baseline-v2").unwrap();
+
+        let expected = repo.join("frontend/src/old.ts");
+        assert!(
+            changed.contains(&expected),
+            "modified tracked file {expected:?} missing from set: {changed:?}"
+        );
+    }
+
+    /// `resolve_git_toplevel` returns the canonical repo path even when
+    /// invoked from inside a subdirectory and via a symlinked input path.
+    /// On macOS this guards against the `/tmp` -> `/private/tmp`
+    /// canonicalization gap that would otherwise make the LSP filter set
+    /// disagree with `analyze_project` paths.
+    #[test]
+    fn resolve_git_toplevel_returns_canonical_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let repo = init_repo(tmp.path());
+        let frontend = repo.join("frontend");
+        std::fs::create_dir_all(&frontend).unwrap();
+
+        let toplevel = resolve_git_toplevel(&frontend).unwrap();
+        assert_eq!(toplevel, repo, "toplevel should equal canonical repo root");
+        assert_eq!(
+            toplevel,
+            toplevel.canonicalize().unwrap(),
+            "resolved toplevel should already be canonical"
+        );
+    }
+
+    /// Outside any git repo, `resolve_git_toplevel` returns
+    /// `NotARepository` rather than panicking or returning a wrong path.
+    /// The LSP relies on this to fall back to the workspace root cleanly.
+    #[test]
+    fn resolve_git_toplevel_not_a_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = resolve_git_toplevel(tmp.path());
+        assert!(
+            matches!(result, Err(ChangedFilesError::NotARepository)),
+            "expected NotARepository, got {result:?}"
+        );
+    }
+
+    /// `try_get_changed_files` propagates the not-a-repo error so the
+    /// LSP can warn and fall back to full-scope results.
+    #[test]
+    fn try_get_changed_files_not_a_repository() {
+        let tmp = tempfile::tempdir().unwrap();
+        let result = try_get_changed_files(tmp.path(), "main");
+        assert!(matches!(result, Err(ChangedFilesError::NotARepository)));
     }
 
     #[test]

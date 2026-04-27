@@ -148,6 +148,31 @@ export const formatChangedSinceRefForStatusBar = (ref: string): string => {
     : normalized;
 };
 
+/**
+ * Resolve the visible status bar text for a given base label, appending
+ * the persistent `changedSince` suffix when that filter is active.
+ *
+ * Single source of truth across the four status bar states (idle,
+ * analyzing, error, post-analysis). Earlier the post-analysis path was
+ * the only state that showed `(since <ref>)`, which made the filter feel
+ * intermittent and forced users to hover the tooltip to verify it was
+ * still active. The panel review for issue #190 flagged this as the
+ * visible signal that should match the `changedSince` filter applied to
+ * LSP diagnostics.
+ *
+ * Pure: takes the resolved ref so it can be unit-tested without a vscode
+ * mock. Callers in `statusBar.ts` pass `getChangedSince()` or `null`.
+ */
+export const renderStatusBarText = (
+  base: string,
+  changedSince: string | null
+): string => {
+  if (!changedSince) {
+    return base;
+  }
+  return `${base} (since ${formatChangedSinceRefForStatusBar(changedSince)})`;
+};
+
 const escapeMarkdownText = (value: string): string =>
   normalizeInlineText(value).replace(/([\\`*_{}[\]()#+.!|>-])/g, "\\$1");
 

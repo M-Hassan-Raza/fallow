@@ -6,6 +6,7 @@ import {
   formatChangedSinceRefForStatusBar,
   getStatusBarSeverityKey,
   getDuplicationPercentage,
+  renderStatusBarText,
 } from "../src/statusBar-utils.js";
 import type { AnalysisCompleteParams } from "../src/statusBar-utils.js";
 import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
@@ -133,6 +134,51 @@ describe("formatChangedSinceRefForStatusBar", () => {
     );
     expect(formatted.length).toBeLessThanOrEqual(48);
     expect(formatted).toMatch(/\.\.\.$/);
+  });
+});
+
+describe("renderStatusBarText", () => {
+  it("returns the base label unchanged when no changedSince is set", () => {
+    expect(renderStatusBarText("$(search) Fallow", null)).toBe(
+      "$(search) Fallow"
+    );
+    expect(renderStatusBarText("$(search) Fallow: 5 issues", null)).toBe(
+      "$(search) Fallow: 5 issues"
+    );
+  });
+
+  it("treats empty-string ref as 'no filter' so the suffix never renders blank", () => {
+    // Defensive: callers should pre-coerce "" to null via getChangedSince()
+    // (or the liveChangedSince() wrapper in statusBar.ts). If the empty
+    // string ever leaks through directly, the helper must still fall
+    // back to the base label rather than rendering "Fallow (since )".
+    expect(renderStatusBarText("$(search) Fallow", "")).toBe(
+      "$(search) Fallow"
+    );
+  });
+
+  it("appends `(since <ref>)` to every state when changedSince is active", () => {
+    const ref = "fallow-baseline";
+    expect(renderStatusBarText("$(search) Fallow", ref)).toBe(
+      "$(search) Fallow (since fallow-baseline)"
+    );
+    expect(
+      renderStatusBarText("$(loading~spin) Fallow: Analyzing...", ref)
+    ).toBe("$(loading~spin) Fallow: Analyzing... (since fallow-baseline)");
+    expect(renderStatusBarText("$(error) Fallow: Error", ref)).toBe(
+      "$(error) Fallow: Error (since fallow-baseline)"
+    );
+    expect(renderStatusBarText("$(search) Fallow: 3 issues", ref)).toBe(
+      "$(search) Fallow: 3 issues (since fallow-baseline)"
+    );
+  });
+
+  it("delegates to formatChangedSinceRefForStatusBar for truncation", () => {
+    const longRef =
+      "feature/some-extremely-long-baseline-branch-name-that-would-crowd-the-status-bar";
+    const rendered = renderStatusBarText("$(search) Fallow", longRef);
+    expect(rendered.startsWith("$(search) Fallow (since ")).toBe(true);
+    expect(rendered.endsWith("...)")).toBe(true);
   });
 });
 
