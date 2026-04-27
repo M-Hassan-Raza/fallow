@@ -727,6 +727,21 @@ mod tests {
         assert!(usage.is_empty());
     }
 
+    #[test]
+    fn snippet_tuple_typed_param_does_not_stack_overflow() {
+        // Regression for #172: `{#snippet foo(x: [number, number])}` overflowed
+        // the stack because the param string `x: [number, number]` reached the
+        // comma-split branch with all commas inside the tuple type, which kept
+        // recursing on the unchanged input.
+        let usage = collect_template_usage(
+            "{#snippet foo(x: [number, number])}{/snippet}",
+            &imported(&["x"]),
+        );
+
+        // x is a snippet-local binding, so it shadows the import
+        assert!(usage.is_empty());
+    }
+
     // --- @html ---
 
     #[test]

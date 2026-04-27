@@ -193,7 +193,16 @@ fn collect_pattern_usage(
         return;
     }
 
-    // Strip trailing TypeScript type annotations (same as extract_pattern_binding_names).
+    if pattern.contains(',') {
+        let parts = split_top_level(pattern, ',');
+        if parts.len() > 1 {
+            for part in parts {
+                collect_pattern_usage(usage, part.trim(), imported_bindings, locals, bindings);
+            }
+            return;
+        }
+    }
+
     let pattern = strip_trailing_type_annotation(pattern);
 
     if let Some(inner) = strip_wrapping(pattern, '{', '}') {
@@ -223,13 +232,6 @@ fn collect_pattern_usage(
         return;
     }
 
-    if pattern.contains(',') {
-        for part in split_top_level(pattern, ',') {
-            collect_pattern_usage(usage, part.trim(), imported_bindings, locals, bindings);
-        }
-        return;
-    }
-
     if let Some((lhs, rhs)) = split_top_level_once(pattern, '=') {
         merge_expression_usage(usage, rhs, imported_bindings, locals);
         collect_pattern_usage(usage, lhs, imported_bindings, locals, bindings);
@@ -248,11 +250,16 @@ pub(super) fn extract_pattern_binding_names(pattern: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    // Strip trailing TypeScript type annotations from destructuring patterns.
-    // e.g. `{ href, content }: Props` → `{ href, content }`
-    //      `[a, b]: number[]`         → `[a, b]`
-    // Without this, the pattern falls through to the comma-split path which
-    // recurses infinitely because `split_top_level` returns the whole string.
+    if pattern.contains(',') {
+        let parts = split_top_level(pattern, ',');
+        if parts.len() > 1 {
+            return parts
+                .into_iter()
+                .flat_map(|part| extract_pattern_binding_names(part.trim()))
+                .collect();
+        }
+    }
+
     let pattern = strip_trailing_type_annotation(pattern);
 
     if let Some(inner) = strip_wrapping(pattern, '{', '}') {
@@ -276,13 +283,6 @@ pub(super) fn extract_pattern_binding_names(pattern: &str) -> Vec<String> {
 
     if let Some(inner) = strip_wrapping(pattern, '[', ']') {
         return split_top_level(inner, ',')
-            .into_iter()
-            .flat_map(|part| extract_pattern_binding_names(part.trim()))
-            .collect();
-    }
-
-    if pattern.contains(',') {
-        return split_top_level(pattern, ',')
             .into_iter()
             .flat_map(|part| extract_pattern_binding_names(part.trim()))
             .collect();
@@ -371,33 +371,40 @@ fn strip_wrapping(source: &str, open: char, close: char) -> Option<&str> {
         .and_then(|inner| inner.strip_suffix(close))
 }
 
-/// Strip a trailing TypeScript type annotation from a destructuring pattern.
+/// Strip a trailing TypeScript type annotation from a single binding pattern.
 ///
-/// Handles patterns like `{ a, b }: SomeType` → `{ a, b }` by finding the
-/// matching closing delimiter (`}` or `]`) and discarding everything after it.
-/// Returns the input unchanged when there is no trailing annotation.
+/// Handles `{ a, b }: Props` → `{ a, b }`, `[a, b]: number[]` → `[a, b]`,
+/// and plain `name: Type` → `name`. Returns the substring before the first
+/// top-level `:` (outside brackets and quoted strings), or the input unchanged
+/// when no such colon exists.
+///
+/// The caller must split multi-binding patterns on top-level commas first;
+/// otherwise a tuple type like `x: [number, number]` followed by `, y` would
+/// be misinterpreted, and even without a second binding the colon-before-comma
+/// rule could not be enforced.
 fn strip_trailing_type_annotation(pattern: &str) -> &str {
-    let first = match pattern.bytes().next() {
-        Some(b'{') => b'}',
-        Some(b'[') => b']',
-        _ => return pattern,
-    };
+    let mut depth = 0_i32;
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut in_backtick = false;
+    let mut escape = false;
 
-    let mut depth: u32 = 0;
-    for (i, byte) in pattern.bytes().enumerate() {
-        match byte {
-            b'{' | b'[' | b'(' => depth += 1,
-            b'}' | b']' | b')' => {
-                depth -= 1;
-                if byte == first && depth == 0 {
-                    // Found the matching close; if `: ...` follows, strip it.
-                    let rest = pattern[i + 1..].trim_start();
-                    if rest.starts_with(':') {
-                        return &pattern[..=i];
-                    }
-                    return pattern;
-                }
+    for (idx, ch) in pattern.char_indices() {
+        if escape {
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' if in_single || in_double || in_backtick => {
+                escape = true;
             }
+            '\'' if !in_double && !in_backtick => in_single = !in_single,
+            '"' if !in_single && !in_backtick => in_double = !in_double,
+            '`' if !in_single && !in_double => in_backtick = !in_backtick,
+            _ if in_single || in_double || in_backtick => {}
+            '(' | '[' | '{' => depth += 1,
+            ')' | ']' | '}' => depth -= 1,
+            ':' if depth == 0 => return &pattern[..idx],
             _ => {}
         }
     }
@@ -1043,6 +1050,36 @@ mod tests {
         assert_eq!(
             strip_trailing_type_annotation("{ a: { b, c } }: Type"),
             "{ a: { b, c } }"
+        );
+    }
+
+    #[test]
+    fn strip_type_from_simple_identifier() {
+        assert_eq!(strip_trailing_type_annotation("x: number"), "x");
+    }
+
+    #[test]
+    fn strip_type_from_identifier_with_tuple_type() {
+        assert_eq!(strip_trailing_type_annotation("x: [number, number]"), "x");
+    }
+
+    #[test]
+    fn extract_pattern_typed_tuple_param() {
+        // Regression: `{#snippet foo(x: [number, number])}` recursed forever
+        // because `x: [number, number]` contains a comma that `split_top_level`
+        // refused to split (depth=1 inside the tuple), yet the comma branch
+        // recursed with the same input.
+        assert_eq!(
+            extract_pattern_binding_names("x: [number, number]"),
+            vec!["x"]
+        );
+    }
+
+    #[test]
+    fn extract_pattern_multiple_typed_params() {
+        assert_eq!(
+            extract_pattern_binding_names("a: number, b: string"),
+            vec!["a", "b"]
         );
     }
 
