@@ -144,13 +144,14 @@ fn format_undeclared_workspace_warning(
 fn warn_undeclared_workspaces(
     root: &Path,
     workspaces_vec: &[fallow_config::WorkspaceInfo],
+    ignore_patterns: &globset::GlobSet,
     quiet: bool,
 ) {
     if quiet {
         return;
     }
 
-    let undeclared = find_undeclared_workspaces(root, workspaces_vec);
+    let undeclared = find_undeclared_workspaces(root, workspaces_vec, ignore_patterns);
     if let Some(message) = format_undeclared_workspace_warning(root, &undeclared) {
         tracing::warn!("{message}");
     }
@@ -248,7 +249,12 @@ pub fn analyze_with_parse_result(
     }
 
     // Warn about directories with package.json not declared as workspaces
-    warn_undeclared_workspaces(&config.root, &workspaces_vec, config.quiet);
+    warn_undeclared_workspaces(
+        &config.root,
+        &workspaces_vec,
+        &config.ignore_patterns,
+        config.quiet,
+    );
 
     // Stage 1: Discover files (cheap — needed for file registry and resolution)
     let t = Instant::now();
@@ -464,7 +470,12 @@ fn analyze_full(
     }
 
     // Warn about directories with package.json not declared as workspaces
-    warn_undeclared_workspaces(&config.root, &workspaces_vec, config.quiet);
+    warn_undeclared_workspaces(
+        &config.root,
+        &workspaces_vec,
+        &config.ignore_patterns,
+        config.quiet,
+    );
 
     // Stage 1: Discover all source files
     let t = Instant::now();

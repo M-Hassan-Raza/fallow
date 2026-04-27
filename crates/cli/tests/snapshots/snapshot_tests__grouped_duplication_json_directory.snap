@@ -1,10 +1,10 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-expression: json_str
+expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"CARGO_PKG_VERSION\")),\n\"\\\"version\\\": \\\"[VERSION]\\\"\")"
 ---
 {
   "schema_version": 4,
-  "version": "2.52.0",
+  "version": "[VERSION]",
   "elapsed_ms": 0,
   "clone_groups": [
     {

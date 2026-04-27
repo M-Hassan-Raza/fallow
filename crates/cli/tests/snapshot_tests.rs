@@ -2376,9 +2376,15 @@ fn grouped_duplication_json_directory_snapshot() {
     let value =
         build_grouped_duplication_json(&report, &grouping, &root, Duration::from_millis(0), false)
             .expect("should serialize");
-    // Redact elapsed_ms which always 0 here, but keeps the assertion stable.
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
-    insta::assert_snapshot!("grouped_duplication_json_directory", json_str);
+    // Redact dynamic values (version changes with releases; elapsed_ms is forced to 0 above).
+    insta::assert_snapshot!(
+        "grouped_duplication_json_directory",
+        json_str.replace(
+            &format!("\"version\": \"{}\"", env!("CARGO_PKG_VERSION")),
+            "\"version\": \"[VERSION]\"",
+        )
+    );
 }
 
 #[test]

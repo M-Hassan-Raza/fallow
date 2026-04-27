@@ -68,10 +68,15 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
 /// Only meaningful in monorepos that declare workspaces (via `package.json` `workspaces`
 /// field or `pnpm-workspace.yaml`). Scans up to two directory levels deep, skipping
 /// hidden directories, `node_modules`, and `build`.
+///
+/// Directories whose project-root-relative path matches `ignore_patterns` are skipped
+/// so users who already excluded a path via `ignorePatterns` don't see a redundant
+/// "not declared as workspace" warning. See issue #193.
 #[must_use]
 pub fn find_undeclared_workspaces(
     root: &Path,
     declared: &[WorkspaceInfo],
+    ignore_patterns: &globset::GlobSet,
 ) -> Vec<WorkspaceDiagnostic> {
     // Only run when workspaces are declared
     let patterns = collect_workspace_patterns(root);
@@ -111,6 +116,7 @@ pub fn find_undeclared_workspaces(
             root,
             &canonical_root,
             &declared_roots,
+            ignore_patterns,
             &mut undeclared,
         );
 
@@ -136,6 +142,7 @@ pub fn find_undeclared_workspaces(
                 root,
                 &canonical_root,
                 &declared_roots,
+                ignore_patterns,
                 &mut undeclared,
             );
         }
@@ -150,6 +157,7 @@ fn check_undeclared(
     root: &Path,
     canonical_root: &Path,
     declared_roots: &rustc_hash::FxHashSet<PathBuf>,
+    ignore_patterns: &globset::GlobSet,
     undeclared: &mut Vec<WorkspaceDiagnostic>,
 ) {
     if !dir.join("package.json").exists() {
@@ -164,6 +172,15 @@ fn check_undeclared(
         return;
     }
     let relative = dir.strip_prefix(root).unwrap_or(dir);
+    // Honor user-supplied ignorePatterns: directories explicitly excluded should not
+    // trigger an undeclared-workspace warning. Match using forward-slash normalized
+    // relative path so cross-platform globs (`references/*`) work on Windows.
+    let relative_str = relative.to_string_lossy().replace('\\', "/");
+    if ignore_patterns.is_match(relative_str.as_str())
+        || ignore_patterns.is_match(format!("{relative_str}/package.json").as_str())
+    {
+        return;
+    }
     undeclared.push(WorkspaceDiagnostic {
         path: dir.to_path_buf(),
         message: format!(
@@ -900,7 +917,8 @@ mod tests {
         let declared = discover_workspaces(dir.path());
         assert_eq!(declared.len(), 1);
 
-        let undeclared = find_undeclared_workspaces(dir.path(), &declared);
+        let undeclared =
+            find_undeclared_workspaces(dir.path(), &declared, &globset::GlobSet::empty());
         assert_eq!(undeclared.len(), 1);
         assert!(
             undeclared[0]
@@ -927,7 +945,8 @@ mod tests {
         std::fs::write(pkg_a.join("package.json"), r#"{"name": "a"}"#).unwrap();
 
         let declared = discover_workspaces(dir.path());
-        let undeclared = find_undeclared_workspaces(dir.path(), &declared);
+        let undeclared =
+            find_undeclared_workspaces(dir.path(), &declared, &globset::GlobSet::empty());
         assert!(undeclared.is_empty());
     }
 
@@ -937,11 +956,11 @@ mod tests {
         let sub = dir.path().join("lib");
         std::fs::create_dir_all(&sub).unwrap();
 
-        // No workspaces field at all — non-monorepo project
+        // No workspaces field at all, non-monorepo project
         std::fs::write(dir.path().join("package.json"), r#"{"name": "app"}"#).unwrap();
         std::fs::write(sub.join("package.json"), r#"{"name": "lib"}"#).unwrap();
 
-        let undeclared = find_undeclared_workspaces(dir.path(), &[]);
+        let undeclared = find_undeclared_workspaces(dir.path(), &[], &globset::GlobSet::empty());
         assert!(
             undeclared.is_empty(),
             "should skip check when no workspace patterns exist"
@@ -965,10 +984,142 @@ mod tests {
         std::fs::write(nm.join("package.json"), r#"{"name": "nm-pkg"}"#).unwrap();
         std::fs::write(hidden.join("package.json"), r#"{"name": "hidden"}"#).unwrap();
 
-        let undeclared = find_undeclared_workspaces(dir.path(), &[]);
+        let undeclared = find_undeclared_workspaces(dir.path(), &[], &globset::GlobSet::empty());
         assert!(
             undeclared.is_empty(),
             "should not flag node_modules or hidden directories"
+        );
+    }
+
+    fn build_globset(patterns: &[&str]) -> globset::GlobSet {
+        let mut builder = globset::GlobSetBuilder::new();
+        for pattern in patterns {
+            builder.add(globset::Glob::new(pattern).expect("valid glob"));
+        }
+        builder.build().expect("build globset")
+    }
+
+    #[test]
+    fn undeclared_skips_dirs_matching_ignore_patterns() {
+        // Reproduces issue #193: a `references/*` directory containing package.json
+        // should not be reported as undeclared workspace when listed in ignorePatterns.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = dir.path().join("packages").join("a");
+        let vitest_ref = dir.path().join("references").join("vitest");
+        let tanstack_ref = dir.path().join("references").join("tanstack-router");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+        std::fs::create_dir_all(&vitest_ref).unwrap();
+        std::fs::create_dir_all(&tanstack_ref).unwrap();
+
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_a.join("package.json"), r#"{"name": "a"}"#).unwrap();
+        std::fs::write(
+            vitest_ref.join("package.json"),
+            r#"{"name": "vitest-reference"}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            tanstack_ref.join("package.json"),
+            r#"{"name": "tanstack-reference"}"#,
+        )
+        .unwrap();
+
+        let declared = discover_workspaces(dir.path());
+        let ignore = build_globset(&["references/*"]);
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared, &ignore);
+        assert!(
+            undeclared.is_empty(),
+            "references/* should be ignored: {undeclared:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_still_reported_when_ignore_does_not_match() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_b = dir.path().join("packages").join("b");
+        std::fs::create_dir_all(&pkg_b).unwrap();
+
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/a"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_b.join("package.json"), r#"{"name": "b"}"#).unwrap();
+
+        let declared = discover_workspaces(dir.path());
+        // ignore pattern is unrelated to packages/b
+        let ignore = build_globset(&["references/*"]);
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared, &ignore);
+        assert_eq!(
+            undeclared.len(),
+            1,
+            "non-matching ignore patterns should not silence other undeclared dirs"
+        );
+    }
+
+    #[test]
+    fn undeclared_skips_dirs_matching_package_json_glob() {
+        // Some users write ignore patterns as `references/*/package.json`
+        // (matching the file rather than the directory). Both styles should silence
+        // the undeclared-workspace warning.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = dir.path().join("packages").join("a");
+        let vitest_ref = dir.path().join("references").join("vitest");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+        std::fs::create_dir_all(&vitest_ref).unwrap();
+
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_a.join("package.json"), r#"{"name": "a"}"#).unwrap();
+        std::fs::write(
+            vitest_ref.join("package.json"),
+            r#"{"name": "vitest-reference"}"#,
+        )
+        .unwrap();
+
+        let declared = discover_workspaces(dir.path());
+        let ignore = build_globset(&["references/*/package.json"]);
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared, &ignore);
+        assert!(
+            undeclared.is_empty(),
+            "package.json-suffixed glob should silence the warning: {undeclared:?}"
+        );
+    }
+
+    #[test]
+    fn undeclared_skips_dirs_matching_doublestar_ignore() {
+        // `references/**` should also cover `references/<name>` candidates.
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_a = dir.path().join("packages").join("a");
+        let nested_ref = dir.path().join("references").join("vitest");
+        std::fs::create_dir_all(&pkg_a).unwrap();
+        std::fs::create_dir_all(&nested_ref).unwrap();
+
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"workspaces": ["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(pkg_a.join("package.json"), r#"{"name": "a"}"#).unwrap();
+        std::fs::write(
+            nested_ref.join("package.json"),
+            r#"{"name": "vitest-reference"}"#,
+        )
+        .unwrap();
+
+        let declared = discover_workspaces(dir.path());
+        let ignore = build_globset(&["**/references/**"]);
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared, &ignore);
+        assert!(
+            undeclared.is_empty(),
+            "**/references/** should ignore nested package.json dirs: {undeclared:?}"
         );
     }
 }
