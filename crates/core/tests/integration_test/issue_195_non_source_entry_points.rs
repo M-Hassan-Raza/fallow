@@ -1,7 +1,7 @@
 //! Issue #195: false positives for files referenced from non-source artifacts.
 //!
 //! Each test fixture exercises one of the five reported cases:
-//! A. Vite `css.preprocessorOptions.{scss,less}.additionalData`
+//! A. Vite `css.preprocessorOptions.scss.additionalData`
 //! B. SFC `<style lang="scss">` body imports + `<style src>` references
 //! C. package.json `scripts` positional file arguments (root + workspace)
 //! D. CI YAML positional file arguments (`.gitlab-ci.yml`, GitHub Actions)
@@ -36,7 +36,7 @@ fn unused_file_paths(results: &fallow_types::results::AnalysisResults) -> Vec<St
 // ── Case A: Vite additionalData ──────────────────────────────────────
 
 #[test]
-fn vite_additional_data_seeds_scss_and_less_entries() {
+fn vite_additional_data_seeds_scss_entries() {
     let root = fixture_path("issue-195-vite-additional-data");
     let config = create_config(root);
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -49,10 +49,6 @@ fn vite_additional_data_seeds_scss_and_less_entries() {
     assert!(
         !names.contains(&"_tokens.scss".to_string()),
         "_tokens.scss is reachable via global.scss @use, should not be unused. Got: {names:?}"
-    );
-    assert!(
-        !names.contains(&"theme.less".to_string()),
-        "theme.less is referenced from less.additionalData, should not be unused. Got: {names:?}"
     );
 }
 

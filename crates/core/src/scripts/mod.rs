@@ -60,15 +60,13 @@ pub struct ScriptAnalysis {
 /// appeared in the script (e.g., `./scripts/deploy.ts`, `scripts/deploy.ts`).
 ///
 /// Returns `None` when:
-/// - The path resolves outside the workspace package (`../shared/...` collapsed
-///   above `ws_prefix`). These would point at sibling packages, which should
-///   import the entry through their own dependency graph instead of CI or
-///   script plumbing.
-/// - The path is absolute or escapes the project root.
+/// - The path is absolute or escapes the project root. Parent segments may
+///   resolve above the workspace package as long as they stay inside the
+///   project root (e.g., `apps/api/../../top.ts` becomes `top.ts`).
 ///
 /// Matches existing behaviour for `config_files` (workspace-prefix join) but
 /// additionally normalizes `..` segments via [`Path::components`] so paths like
-/// `apps/api/../shared/scripts/deploy.ts` collapse to `shared/scripts/deploy.ts`
+/// `apps/api/../shared/scripts/deploy.ts` collapse to `apps/shared/scripts/deploy.ts`
 /// instead of being passed verbatim to globset (which does not normalize).
 #[must_use]
 pub fn normalize_script_entry_pattern(ws_prefix: &str, raw: &str) -> Option<String> {

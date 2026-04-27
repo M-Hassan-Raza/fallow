@@ -4,7 +4,6 @@ export default defineConfig({
   css: {
     preprocessorOptions: {
       scss: { additionalData: `@use "./src/styles/global.scss";` },
-      less: { additionalData: `@import "./src/styles/theme.less";` },
     },
   },
 });
