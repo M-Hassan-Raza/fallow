@@ -68,12 +68,25 @@ pub fn discover_workspaces(root: &Path) -> Vec<WorkspaceInfo> {
 /// Only meaningful in monorepos that declare workspaces (via `package.json` `workspaces`
 /// field or `pnpm-workspace.yaml`). Scans up to two directory levels deep, skipping
 /// hidden directories, `node_modules`, and `build`.
+#[must_use]
+pub fn find_undeclared_workspaces(
+    root: &Path,
+    declared: &[WorkspaceInfo],
+) -> Vec<WorkspaceDiagnostic> {
+    find_undeclared_workspaces_with_ignores(root, declared, &globset::GlobSet::empty())
+}
+
+/// Find directories containing `package.json` that are not declared as workspaces,
+/// excluding candidates covered by the supplied ignore globset.
+///
+/// This is the ignore-aware variant used by the full analyzer after config
+/// resolution. See [`find_undeclared_workspaces`] for the compatibility wrapper.
 ///
 /// Directories whose project-root-relative path matches `ignore_patterns` are skipped
 /// so users who already excluded a path via `ignorePatterns` don't see a redundant
 /// "not declared as workspace" warning. See issue #193.
 #[must_use]
-pub fn find_undeclared_workspaces(
+pub fn find_undeclared_workspaces_with_ignores(
     root: &Path,
     declared: &[WorkspaceInfo],
     ignore_patterns: &globset::GlobSet,
@@ -917,8 +930,7 @@ mod tests {
         let declared = discover_workspaces(dir.path());
         assert_eq!(declared.len(), 1);
 
-        let undeclared =
-            find_undeclared_workspaces(dir.path(), &declared, &globset::GlobSet::empty());
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared);
         assert_eq!(undeclared.len(), 1);
         assert!(
             undeclared[0]
@@ -945,8 +957,7 @@ mod tests {
         std::fs::write(pkg_a.join("package.json"), r#"{"name": "a"}"#).unwrap();
 
         let declared = discover_workspaces(dir.path());
-        let undeclared =
-            find_undeclared_workspaces(dir.path(), &declared, &globset::GlobSet::empty());
+        let undeclared = find_undeclared_workspaces(dir.path(), &declared);
         assert!(undeclared.is_empty());
     }
 
@@ -960,7 +971,7 @@ mod tests {
         std::fs::write(dir.path().join("package.json"), r#"{"name": "app"}"#).unwrap();
         std::fs::write(sub.join("package.json"), r#"{"name": "lib"}"#).unwrap();
 
-        let undeclared = find_undeclared_workspaces(dir.path(), &[], &globset::GlobSet::empty());
+        let undeclared = find_undeclared_workspaces(dir.path(), &[]);
         assert!(
             undeclared.is_empty(),
             "should skip check when no workspace patterns exist"
@@ -984,7 +995,7 @@ mod tests {
         std::fs::write(nm.join("package.json"), r#"{"name": "nm-pkg"}"#).unwrap();
         std::fs::write(hidden.join("package.json"), r#"{"name": "hidden"}"#).unwrap();
 
-        let undeclared = find_undeclared_workspaces(dir.path(), &[], &globset::GlobSet::empty());
+        let undeclared = find_undeclared_workspaces(dir.path(), &[]);
         assert!(
             undeclared.is_empty(),
             "should not flag node_modules or hidden directories"
@@ -1030,7 +1041,7 @@ mod tests {
 
         let declared = discover_workspaces(dir.path());
         let ignore = build_globset(&["references/*"]);
-        let undeclared = find_undeclared_workspaces(dir.path(), &declared, &ignore);
+        let undeclared = find_undeclared_workspaces_with_ignores(dir.path(), &declared, &ignore);
         assert!(
             undeclared.is_empty(),
             "references/* should be ignored: {undeclared:?}"
@@ -1053,7 +1064,7 @@ mod tests {
         let declared = discover_workspaces(dir.path());
         // ignore pattern is unrelated to packages/b
         let ignore = build_globset(&["references/*"]);
-        let undeclared = find_undeclared_workspaces(dir.path(), &declared, &ignore);
+        let undeclared = find_undeclared_workspaces_with_ignores(dir.path(), &declared, &ignore);
         assert_eq!(
             undeclared.len(),
             1,
@@ -1086,7 +1097,7 @@ mod tests {
 
         let declared = discover_workspaces(dir.path());
         let ignore = build_globset(&["references/*/package.json"]);
-        let undeclared = find_undeclared_workspaces(dir.path(), &declared, &ignore);
+        let undeclared = find_undeclared_workspaces_with_ignores(dir.path(), &declared, &ignore);
         assert!(
             undeclared.is_empty(),
             "package.json-suffixed glob should silence the warning: {undeclared:?}"
@@ -1116,7 +1127,7 @@ mod tests {
 
         let declared = discover_workspaces(dir.path());
         let ignore = build_globset(&["**/references/**"]);
-        let undeclared = find_undeclared_workspaces(dir.path(), &declared, &ignore);
+        let undeclared = find_undeclared_workspaces_with_ignores(dir.path(), &declared, &ignore);
         assert!(
             undeclared.is_empty(),
             "**/references/** should ignore nested package.json dirs: {undeclared:?}"

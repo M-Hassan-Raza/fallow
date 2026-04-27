@@ -25,7 +25,8 @@ use std::time::Instant;
 
 use errors::FallowError;
 use fallow_config::{
-    EntryPointRole, PackageJson, ResolvedConfig, discover_workspaces, find_undeclared_workspaces,
+    EntryPointRole, PackageJson, ResolvedConfig, discover_workspaces,
+    find_undeclared_workspaces_with_ignores,
 };
 use rayon::prelude::*;
 use results::AnalysisResults;
@@ -151,7 +152,7 @@ fn warn_undeclared_workspaces(
         return;
     }
 
-    let undeclared = find_undeclared_workspaces(root, workspaces_vec, ignore_patterns);
+    let undeclared = find_undeclared_workspaces_with_ignores(root, workspaces_vec, ignore_patterns);
     if let Some(message) = format_undeclared_workspace_warning(root, &undeclared) {
         tracing::warn!("{message}");
     }
