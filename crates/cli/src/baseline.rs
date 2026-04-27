@@ -23,18 +23,38 @@ fn relative_path(path: &Path, root: &Path) -> String {
     }
 }
 
+fn package_json_dependency_key(package_name: &str, path: &Path, root: &Path) -> String {
+    format!("{}:{package_name}", relative_path(path, root))
+}
+
+fn baseline_contains_dependency(
+    baseline_keys: &FxHashSet<&str>,
+    package_name: &str,
+    path_key: &str,
+) -> bool {
+    baseline_keys.contains(path_key) || baseline_keys.contains(package_name)
+}
+
 /// Baseline data for comparison.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct BaselineData {
     pub unused_files: Vec<String>,
     pub unused_exports: Vec<String>,
     pub unused_types: Vec<String>,
+    /// Unused dependencies, keyed by `package.json:package_name`. Legacy
+    /// bare `package_name` keys are still matched for back-compat with
+    /// baselines saved by older fallow versions.
     pub unused_dependencies: Vec<String>,
+    /// Unused dev dependencies, keyed by `package.json:package_name`. Legacy
+    /// bare `package_name` keys are still matched for back-compat with
+    /// baselines saved by older fallow versions.
     pub unused_dev_dependencies: Vec<String>,
     /// Circular dependency chains, keyed by sorted file paths joined with `->`.
     #[serde(default)]
     pub circular_dependencies: Vec<String>,
-    /// Unused optional dependencies, keyed by package name.
+    /// Unused optional dependencies, keyed by `package.json:package_name`.
+    /// Legacy bare `package_name` keys are still matched for back-compat
+    /// with baselines saved by older fallow versions.
     #[serde(default)]
     pub unused_optional_dependencies: Vec<String>,
     /// Unused enum members, keyed by `file:parent.member`.
@@ -52,10 +72,14 @@ pub struct BaselineData {
     /// Duplicate exports, keyed by export name.
     #[serde(default)]
     pub duplicate_exports: Vec<String>,
-    /// Type-only dependencies, keyed by package name.
+    /// Type-only dependencies, keyed by `package.json:package_name`. Legacy
+    /// bare `package_name` keys are still matched for back-compat with
+    /// baselines saved by older fallow versions.
     #[serde(default)]
     pub type_only_dependencies: Vec<String>,
-    /// Test-only dependencies, keyed by package name.
+    /// Test-only dependencies, keyed by `package.json:package_name`. Legacy
+    /// bare `package_name` keys are still matched for back-compat with
+    /// baselines saved by older fallow versions.
     #[serde(default)]
     pub test_only_dependencies: Vec<String>,
     /// Boundary violations, keyed by `from_path->to_path`.
@@ -87,12 +111,12 @@ impl BaselineData {
             unused_dependencies: results
                 .unused_dependencies
                 .iter()
-                .map(|d| d.package_name.clone())
+                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
                 .collect(),
             unused_dev_dependencies: results
                 .unused_dev_dependencies
                 .iter()
-                .map(|d| d.package_name.clone())
+                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
                 .collect(),
             circular_dependencies: results
                 .circular_dependencies
@@ -102,7 +126,7 @@ impl BaselineData {
             unused_optional_dependencies: results
                 .unused_optional_dependencies
                 .iter()
-                .map(|d| d.package_name.clone())
+                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
                 .collect(),
             unused_enum_members: results
                 .unused_enum_members
@@ -146,12 +170,12 @@ impl BaselineData {
             type_only_dependencies: results
                 .type_only_dependencies
                 .iter()
-                .map(|d| d.package_name.clone())
+                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
                 .collect(),
             test_only_dependencies: results
                 .test_only_dependencies
                 .iter()
-                .map(|d| d.package_name.clone())
+                .map(|d| package_json_dependency_key(&d.package_name, &d.path, root))
                 .collect(),
             boundary_violations: results
                 .boundary_violations
@@ -248,12 +272,14 @@ pub fn filter_new_issues(
         let key = format!("{}:{}", relative_path(&e.path, root), e.export_name);
         !baseline_types.contains(key.as_str())
     });
-    results
-        .unused_dependencies
-        .retain(|d| !baseline_deps.contains(d.package_name.as_str()));
-    results
-        .unused_dev_dependencies
-        .retain(|d| !baseline_dev_deps.contains(d.package_name.as_str()));
+    results.unused_dependencies.retain(|d| {
+        let key = package_json_dependency_key(&d.package_name, &d.path, root);
+        !baseline_contains_dependency(&baseline_deps, &d.package_name, key.as_str())
+    });
+    results.unused_dev_dependencies.retain(|d| {
+        let key = package_json_dependency_key(&d.package_name, &d.path, root);
+        !baseline_contains_dependency(&baseline_dev_deps, &d.package_name, key.as_str())
+    });
 
     let baseline_circular: FxHashSet<&str> = baseline
         .circular_dependencies
@@ -270,9 +296,10 @@ pub fn filter_new_issues(
         .iter()
         .map(String::as_str)
         .collect();
-    results
-        .unused_optional_dependencies
-        .retain(|d| !baseline_optional_deps.contains(d.package_name.as_str()));
+    results.unused_optional_dependencies.retain(|d| {
+        let key = package_json_dependency_key(&d.package_name, &d.path, root);
+        !baseline_contains_dependency(&baseline_optional_deps, &d.package_name, key.as_str())
+    });
 
     let baseline_enum_members: FxHashSet<&str> = baseline
         .unused_enum_members
@@ -338,18 +365,20 @@ pub fn filter_new_issues(
         .iter()
         .map(String::as_str)
         .collect();
-    results
-        .type_only_dependencies
-        .retain(|d| !baseline_type_only.contains(d.package_name.as_str()));
+    results.type_only_dependencies.retain(|d| {
+        let key = package_json_dependency_key(&d.package_name, &d.path, root);
+        !baseline_contains_dependency(&baseline_type_only, &d.package_name, key.as_str())
+    });
 
     let baseline_test_only: FxHashSet<&str> = baseline
         .test_only_dependencies
         .iter()
         .map(String::as_str)
         .collect();
-    results
-        .test_only_dependencies
-        .retain(|d| !baseline_test_only.contains(d.package_name.as_str()));
+    results.test_only_dependencies.retain(|d| {
+        let key = package_json_dependency_key(&d.package_name, &d.path, root);
+        !baseline_contains_dependency(&baseline_test_only, &d.package_name, key.as_str())
+    });
 
     let baseline_boundary: FxHashSet<&str> = baseline
         .boundary_violations
@@ -944,8 +973,96 @@ mod tests {
         assert!(baseline.unused_files.contains(&"src/dead.ts".to_string()));
         assert_eq!(baseline.unused_exports, vec!["src/utils.ts:helperA"]);
         assert_eq!(baseline.unused_types, vec!["src/types.ts:OldType"]);
-        assert_eq!(baseline.unused_dependencies, vec!["lodash"]);
-        assert_eq!(baseline.unused_dev_dependencies, vec!["jest"]);
+        assert_eq!(baseline.unused_dependencies, vec!["package.json:lodash"]);
+        assert_eq!(baseline.unused_dev_dependencies, vec!["package.json:jest"]);
+    }
+
+    #[test]
+    fn dependency_baseline_keys_include_package_json_path() {
+        let root = Path::new("/repo");
+        let results = AnalysisResults {
+            unused_dependencies: vec![
+                UnusedDependency {
+                    package_name: "lodash-es".to_string(),
+                    location: DependencyLocation::Dependencies,
+                    path: PathBuf::from("/repo/packages/app-a/package.json"),
+                    line: 5,
+                },
+                UnusedDependency {
+                    package_name: "lodash-es".to_string(),
+                    location: DependencyLocation::Dependencies,
+                    path: PathBuf::from("/repo/packages/app-b/package.json"),
+                    line: 5,
+                },
+            ],
+            ..Default::default()
+        };
+
+        let baseline = BaselineData::from_results(&results, root);
+
+        assert_eq!(
+            baseline.unused_dependencies,
+            vec![
+                "packages/app-a/package.json:lodash-es",
+                "packages/app-b/package.json:lodash-es"
+            ]
+        );
+    }
+
+    #[test]
+    fn dependency_baseline_filter_matches_path_before_package_name() {
+        let root = Path::new("/repo");
+        let results = AnalysisResults {
+            unused_dependencies: vec![
+                UnusedDependency {
+                    package_name: "lodash-es".to_string(),
+                    location: DependencyLocation::Dependencies,
+                    path: PathBuf::from("/repo/packages/app-a/package.json"),
+                    line: 5,
+                },
+                UnusedDependency {
+                    package_name: "lodash-es".to_string(),
+                    location: DependencyLocation::Dependencies,
+                    path: PathBuf::from("/repo/packages/app-b/package.json"),
+                    line: 5,
+                },
+            ],
+            ..Default::default()
+        };
+        let baseline = BaselineData {
+            unused_dependencies: vec!["packages/app-a/package.json:lodash-es".to_string()],
+            ..BaselineData::from_results(&AnalysisResults::default(), root)
+        };
+
+        let filtered = filter_new_issues(results, &baseline, root);
+
+        assert_eq!(filtered.unused_dependencies.len(), 1);
+        assert_eq!(
+            filtered.unused_dependencies[0].path,
+            PathBuf::from("/repo/packages/app-b/package.json")
+        );
+    }
+
+    #[test]
+    fn dependency_baseline_filter_supports_legacy_package_only_keys() {
+        let root = Path::new("/repo");
+        let results = AnalysisResults {
+            unused_dependencies: vec![UnusedDependency {
+                package_name: "lodash-es".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: PathBuf::from("/repo/packages/app/package.json"),
+                line: 5,
+            }],
+            ..Default::default()
+        };
+        let baseline = BaselineData {
+            unused_dependencies: vec!["lodash-es".to_string()],
+            ..BaselineData::from_results(&AnalysisResults::default(), root)
+        };
+
+        let filtered = filter_new_issues(results, &baseline, root);
+
+        assert!(filtered.unused_dependencies.is_empty());
     }
 
     #[test]
@@ -1706,7 +1823,10 @@ mod tests {
         let results = make_full_results();
         let baseline = BaselineData::from_results(&results, Path::new(""));
         assert_eq!(baseline.circular_dependencies.len(), 1);
-        assert_eq!(baseline.unused_optional_dependencies, vec!["fsevents"]);
+        assert_eq!(
+            baseline.unused_optional_dependencies,
+            vec!["package.json:fsevents"]
+        );
         assert_eq!(baseline.unused_enum_members.len(), 1);
         assert!(baseline.unused_enum_members[0].contains("Status.Deprecated"));
         assert_eq!(baseline.unused_class_members.len(), 1);
@@ -1716,8 +1836,8 @@ mod tests {
         assert_eq!(baseline.unlisted_dependencies, vec!["chalk"]);
         assert_eq!(baseline.duplicate_exports.len(), 1);
         assert!(baseline.duplicate_exports[0].starts_with("Config|"));
-        assert_eq!(baseline.type_only_dependencies, vec!["zod"]);
-        assert_eq!(baseline.test_only_dependencies, vec!["vitest"]);
+        assert_eq!(baseline.type_only_dependencies, vec!["package.json:zod"]);
+        assert_eq!(baseline.test_only_dependencies, vec!["package.json:vitest"]);
         assert_eq!(baseline.boundary_violations.len(), 1);
         assert!(baseline.boundary_violations[0].contains("->"));
     }
@@ -1912,6 +2032,12 @@ mod tests {
                 span_start: 40,
                 is_re_export: false,
             }],
+            unused_dependencies: vec![UnusedDependency {
+                package_name: "lodash-es".to_string(),
+                location: DependencyLocation::Dependencies,
+                path: p("packages/app/package.json"),
+                line: 5,
+            }],
             circular_dependencies: vec![CircularDependency {
                 files: vec![p("src/a.ts"), p("src/b.ts")],
                 length: 2,
@@ -1982,6 +2108,10 @@ mod tests {
         assert_eq!(baseline.unused_files, vec!["src/old.ts"]);
         assert_eq!(baseline.unused_exports, vec!["src/utils.ts:helper"]);
         assert_eq!(
+            baseline.unused_dependencies,
+            vec!["packages/app/package.json:lodash-es"]
+        );
+        assert_eq!(
             baseline.boundary_violations,
             vec!["src/ui/btn.ts->src/db/query.ts"]
         );
@@ -2004,6 +2134,7 @@ mod tests {
         let filtered = filter_new_issues(ci_results, &baseline, ci_root);
         assert!(filtered.unused_files.is_empty(), "unused files");
         assert!(filtered.unused_exports.is_empty(), "unused exports");
+        assert!(filtered.unused_dependencies.is_empty(), "unused deps");
         assert!(
             filtered.boundary_violations.is_empty(),
             "boundary violations"

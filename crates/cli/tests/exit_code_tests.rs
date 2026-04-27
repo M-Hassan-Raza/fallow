@@ -1,7 +1,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow, run_fallow_combined, run_fallow_raw};
+use common::{parse_json, run_fallow, run_fallow_combined, run_fallow_in_root, run_fallow_raw};
 
 // ---------------------------------------------------------------------------
 // --fail-on-issues across commands
@@ -282,6 +282,97 @@ fn baseline_filters_known_issues() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn save_baseline_distinguishes_same_unused_dep_across_workspaces() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{
+  "name": "baseline-workspace-deps",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
+"#,
+    )
+    .expect("write root package.json");
+    std::fs::write(
+        dir.path().join("tsconfig.json"),
+        r#"{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ES2022",
+    "moduleResolution": "bundler",
+    "strict": true
+  }
+}
+"#,
+    )
+    .expect("write tsconfig");
+
+    for package in ["app-a", "app-b"] {
+        let package_dir = dir.path().join("packages").join(package);
+        let src_dir = package_dir.join("src");
+        std::fs::create_dir_all(&src_dir).expect("create package src");
+        std::fs::write(
+            package_dir.join("package.json"),
+            format!(
+                r#"{{
+  "name": "{package}",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "dependencies": {{ "lodash-es": "4.17.21" }}
+}}
+"#
+            ),
+        )
+        .expect("write workspace package.json");
+        std::fs::write(
+            src_dir.join("index.ts"),
+            format!("export const {package}_value = 1;\n").replace('-', "_"),
+        )
+        .expect("write source file");
+    }
+
+    let baseline_path = dir.path().join("baseline.json");
+    let output = run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &[
+            "--save-baseline",
+            baseline_path
+                .to_str()
+                .expect("baseline path should be utf-8"),
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "save-baseline should not crash, got {}: {}",
+        output.code,
+        output.stderr
+    );
+
+    let baseline: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&baseline_path).expect("read baseline"))
+            .expect("baseline should be valid JSON");
+    let deps: Vec<&str> = baseline["unused_dependencies"]
+        .as_array()
+        .expect("unused_dependencies should be an array")
+        .iter()
+        .map(|value| value.as_str().expect("dependency key should be a string"))
+        .collect();
+
+    assert_eq!(
+        deps,
+        vec![
+            "packages/app-a/package.json:lodash-es",
+            "packages/app-b/package.json:lodash-es"
+        ]
+    );
 }
 
 // ---------------------------------------------------------------------------
