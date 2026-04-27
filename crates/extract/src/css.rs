@@ -59,6 +59,15 @@ pub(crate) fn is_css_file(path: &Path) -> bool {
         .is_some_and(|ext| ext == "css" || ext == "scss")
 }
 
+/// A CSS import source with both the literal source and fallow's resolver-normalized form.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CssImportSource {
+    /// The import source exactly as it appeared in `@import` / `@use` / `@forward`.
+    pub raw: String,
+    /// The source normalized for fallow's resolver (`variables` -> `./variables` in SCSS).
+    pub normalized: String,
+}
+
 fn is_css_module_file(path: &Path) -> bool {
     is_css_file(path)
         && path
@@ -128,6 +137,62 @@ fn strip_css_comments(source: &str, is_scss: bool) -> String {
     }
 }
 
+/// Extract `@import` / `@use` / `@forward` source paths from a CSS/SCSS string.
+///
+/// Returns both the raw source and the normalized source. URL imports
+/// (`http://`, `https://`, `data:`) are skipped. Use [`extract_css_imports`]
+/// when only the normalized form is needed.
+#[must_use]
+pub fn extract_css_import_sources(source: &str, is_scss: bool) -> Vec<CssImportSource> {
+    let stripped = strip_css_comments(source, is_scss);
+    let mut out = Vec::new();
+
+    for cap in CSS_IMPORT_RE.captures_iter(&stripped) {
+        let raw = cap
+            .get(1)
+            .or_else(|| cap.get(2))
+            .or_else(|| cap.get(3))
+            .map(|m| m.as_str().trim().to_string());
+        if let Some(src) = raw
+            && !src.is_empty()
+            && !is_css_url_import(&src)
+        {
+            out.push(CssImportSource {
+                normalized: normalize_css_import_path(src.clone(), is_scss),
+                raw: src,
+            });
+        }
+    }
+
+    if is_scss {
+        for cap in SCSS_USE_RE.captures_iter(&stripped) {
+            if let Some(m) = cap.get(1) {
+                let raw = m.as_str().to_string();
+                out.push(CssImportSource {
+                    normalized: normalize_css_import_path(raw.clone(), true),
+                    raw,
+                });
+            }
+        }
+    }
+
+    out
+}
+
+/// Extract normalized `@import` / `@use` / `@forward` source paths from a CSS/SCSS string.
+///
+/// Returns specifiers normalized via [`normalize_css_import_path`] so callers can push
+/// them as `SideEffect` imports without further pre-processing. URL imports
+/// (`http://`, `https://`, `data:`) are skipped. Used by the SFC parser to scan
+/// `<style lang="scss">` block bodies and by plugins that only need entry paths.
+#[must_use]
+pub fn extract_css_imports(source: &str, is_scss: bool) -> Vec<String> {
+    extract_css_import_sources(source, is_scss)
+        .into_iter()
+        .map(|source| source.normalized)
+        .collect()
+}
+
 /// Extract class names from a CSS module file as named exports.
 pub fn extract_css_module_exports(source: &str) -> Vec<ExportInfo> {
     let cleaned = CSS_NON_SELECTOR_RE.replace_all(source, "");
@@ -189,6 +254,7 @@ pub(crate) fn parse_css_to_module(
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
+                from_style: false,
                 span: Span::default(),
                 source_span: Span::default(),
             });
@@ -204,6 +270,7 @@ pub(crate) fn parse_css_to_module(
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
+                    from_style: false,
                     span: Span::default(),
                     source_span: Span::default(),
                 });
@@ -221,6 +288,7 @@ pub(crate) fn parse_css_to_module(
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
+            from_style: false,
             span: Span::default(),
             source_span: Span::default(),
         });
@@ -737,5 +805,63 @@ mod tests {
     fn ignores_element_selectors() {
         let names = export_names("div { color: red; } span { }");
         assert!(names.is_empty());
+    }
+
+    // ── extract_css_imports (issue #195: vite additionalData / SFC styles) ──
+
+    #[test]
+    fn extract_css_imports_at_import_quoted() {
+        let imports = extract_css_imports(r#"@import "./reset.css";"#, false);
+        assert_eq!(imports, vec!["./reset.css"]);
+    }
+
+    #[test]
+    fn extract_css_imports_at_import_url() {
+        let imports = extract_css_imports(r#"@import url("./reset.css");"#, false);
+        assert_eq!(imports, vec!["./reset.css"]);
+    }
+
+    #[test]
+    fn extract_css_imports_skips_remote_urls() {
+        let imports =
+            extract_css_imports(r#"@import "https://fonts.example.com/font.css";"#, false);
+        assert!(imports.is_empty());
+    }
+
+    #[test]
+    fn extract_css_imports_scss_use_normalizes_partial() {
+        let imports = extract_css_imports(r#"@use "variables";"#, true);
+        assert_eq!(imports, vec!["./variables"]);
+    }
+
+    #[test]
+    fn extract_css_imports_scss_forward_normalizes_partial() {
+        let imports = extract_css_imports(r#"@forward "tokens";"#, true);
+        assert_eq!(imports, vec!["./tokens"]);
+    }
+
+    #[test]
+    fn extract_css_imports_skips_comments() {
+        let imports = extract_css_imports(
+            r#"/* @import "./hidden.scss"; */
+@use "real";"#,
+            true,
+        );
+        assert_eq!(imports, vec!["./real"]);
+    }
+
+    #[test]
+    fn extract_css_imports_scss_at_import_kept_relative() {
+        let imports = extract_css_imports(r"@import 'Foo';", true);
+        // Bare specifier in SCSS context is normalized to ./
+        assert_eq!(imports, vec!["./Foo"]);
+    }
+
+    #[test]
+    fn extract_css_imports_additional_data_string_body() {
+        // Mimics what Vite's css.preprocessorOptions.scss.additionalData ships
+        let body = r#"@use "./src/styles/global.scss";"#;
+        let imports = extract_css_imports(body, true);
+        assert_eq!(imports, vec!["./src/styles/global.scss"]);
     }
 }

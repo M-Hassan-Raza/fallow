@@ -9,9 +9,10 @@ use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
 use serde_json::Value;
 
 use super::fallbacks::{
-    extract_package_name_from_node_modules_path, try_path_alias_fallback,
-    try_pnpm_workspace_fallback, try_scss_include_path_fallback, try_scss_node_modules_fallback,
-    try_scss_partial_fallback, try_source_fallback, try_workspace_package_fallback,
+    extract_package_name_from_node_modules_path, try_css_extension_fallback,
+    try_path_alias_fallback, try_pnpm_workspace_fallback, try_scss_include_path_fallback,
+    try_scss_node_modules_fallback, try_scss_partial_fallback, try_source_fallback,
+    try_workspace_package_fallback,
 };
 use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
@@ -190,20 +191,34 @@ fn matches_nearest_tsconfig_path_alias(root: &Path, from_file: &Path, specifier:
 /// Try the SCSS-specific resolution fallbacks in order: local partial,
 /// framework-supplied include paths, and `node_modules/`.
 ///
-/// Only applies to `.scss` / `.sass` importers. Returns `None` when the
-/// importer is not an SCSS file or when none of the fallbacks produce a hit,
-/// so the outer error path continues to the generic alias / bare / workspace
-/// fallbacks.
+/// Applies when the importer is a `.scss` / `.sass` file OR the import
+/// originated from an SFC `<style lang="scss">` block (`from_style = true`).
+/// SFC importers carry the `.vue` / `.svelte` extension at the file system
+/// level but still emit SCSS-shape specifiers from style blocks; the
+/// `from_style` flag is the authoritative signal that the import is a
+/// CSS-context reference rather than a JS-context import from the same file.
+/// Returns `None` when none of the fallbacks produce a hit, so the outer error
+/// path continues to the generic alias / bare / workspace fallbacks.
 fn try_scss_fallbacks(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
+    from_style: bool,
 ) -> Option<ResolveResult> {
-    if !from_file
+    let is_scss_importer = from_file
         .extension()
-        .is_some_and(|e| e == "scss" || e == "sass")
-    {
+        .is_some_and(|e| e == "scss" || e == "sass");
+    if !is_scss_importer && !from_style {
         return None;
+    }
+    // 0. CSS-extension probe: `./Foo` -> `./Foo.scss` / `.sass` / `.css`. The
+    //    standard resolver's extension list contains both `.vue` / `.svelte` /
+    //    `.astro` AND CSS extensions; for SFC importers (`from_style = true`)
+    //    `./Foo` would otherwise resolve to the SFC itself instead of the
+    //    sibling `Foo.scss`. SCSS importers also benefit (defensive against
+    //    future extension list changes).
+    if let Some(result) = try_css_extension_fallback(ctx, from_file, specifier) {
+        return Some(result);
     }
     // 1. Local partial convention: `@use 'variables'` → `_variables.scss`.
     if let Some(result) = try_scss_partial_fallback(ctx, from_file, specifier) {
@@ -211,7 +226,7 @@ fn try_scss_fallbacks(
     }
     // 2. Framework-supplied SCSS include paths (Angular's
     //    `stylePreprocessorOptions.includePaths`, Nx equivalent). See #103.
-    if let Some(result) = try_scss_include_path_fallback(ctx, from_file, specifier) {
+    if let Some(result) = try_scss_include_path_fallback(ctx, from_file, specifier, from_style) {
         return Some(result);
     }
     // 3. `node_modules/` search (Sass's own resolution algorithm):
@@ -219,7 +234,7 @@ fn try_scss_fallbacks(
     //    `node_modules/bootstrap/scss/_functions.scss`. Returns
     //    `ResolveResult::NpmPackage` so unused-/unlisted-dependency detection
     //    stays accurate. See #125.
-    try_scss_node_modules_fallback(ctx, from_file, specifier)
+    try_scss_node_modules_fallback(ctx, from_file, specifier, from_style)
 }
 
 fn is_style_file(path: &Path) -> bool {
@@ -254,6 +269,11 @@ fn should_preserve_node_modules_style_file(
 }
 
 /// Resolve a single import specifier to a target.
+///
+/// `from_style` is `true` for imports extracted from CSS contexts (currently
+/// SFC `<style lang="scss">` blocks and `<style src>` references). It enables
+/// SCSS partial / include-path / node_modules fallbacks for SFC importers
+/// without applying them to JS-context imports from the same file.
 #[expect(
     clippy::too_many_lines,
     reason = "central import resolver keeps fallback order visible; style-preservation logic is \
@@ -263,6 +283,7 @@ pub(super) fn resolve_specifier(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
+    from_style: bool,
 ) -> ResolveResult {
     // URL imports (https://, http://, data:) are valid but can't be resolved locally
     if specifier.contains("://") || specifier.starts_with("data:") {
@@ -333,6 +354,18 @@ pub(super) fn resolve_specifier(
             }
         }
         return ResolveResult::Unresolvable(specifier.to_string());
+    }
+
+    // CSS-context imports (SFC `<style>` blocks) bypass the standard resolver
+    // entirely and route through SCSS-aware fallbacks first. The standard
+    // resolver's extension list mixes JS / SFC / CSS extensions, so a bare
+    // `./Foo` from a `Foo.vue` `<style lang="scss">` block would resolve to
+    // `Foo.vue` itself instead of the sibling `Foo.scss`. The SCSS fallback
+    // chain restricts probing to `.css` / `.scss` / `.sass` (plus partial /
+    // include-path / node_modules conventions), which matches Sass's actual
+    // resolution algorithm. See issue #195 (Case B).
+    if from_style && let Some(result) = try_scss_fallbacks(ctx, from_file, specifier, true) {
+        return result;
     }
 
     // Bare specifier classification (used for fallback logic below).
@@ -464,7 +497,7 @@ pub(super) fn resolve_specifier(
         ResolveFileAttempt::Failed {
             used_tsconfig_fallback,
         } => {
-            if let Some(result) = try_scss_fallbacks(ctx, from_file, specifier) {
+            if let Some(result) = try_scss_fallbacks(ctx, from_file, specifier, from_style) {
                 return result;
             }
 

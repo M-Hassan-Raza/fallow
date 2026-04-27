@@ -68,6 +68,7 @@ fn make_import(source: &str, imported: ImportedName, local: &str) -> ImportInfo 
         imported_name: imported,
         local_name: local.to_string(),
         is_type_only: false,
+        from_style: false,
         span: dummy_span(),
         source_span: Span::default(),
     }
@@ -254,6 +255,7 @@ fn static_imports_preserves_type_only() {
             imported_name: ImportedName::Named("FC".into()),
             local_name: "FC".into(),
             is_type_only: true,
+            from_style: false,
             span: dummy_span(),
             source_span: Span::default(),
         }];
@@ -1276,7 +1278,8 @@ fn dynamic_import_preserves_source_span() {
 fn specifier_https_url_returns_external_file() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "https://cdn.example.com/lib.js");
+        let result =
+            specifier::resolve_specifier(ctx, file, "https://cdn.example.com/lib.js", false);
 
         assert!(
             matches!(result, ResolveResult::ExternalFile(ref p) if p.to_str().unwrap() == "https://cdn.example.com/lib.js")
@@ -1288,7 +1291,7 @@ fn specifier_https_url_returns_external_file() {
 fn specifier_http_url_returns_external_file() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "http://example.com/module.js");
+        let result = specifier::resolve_specifier(ctx, file, "http://example.com/module.js", false);
 
         assert!(
             matches!(result, ResolveResult::ExternalFile(ref p) if p.to_str().unwrap() == "http://example.com/module.js")
@@ -1300,8 +1303,12 @@ fn specifier_http_url_returns_external_file() {
 fn specifier_data_url_returns_external_file() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result =
-            specifier::resolve_specifier(ctx, file, "data:text/javascript,export default 42");
+        let result = specifier::resolve_specifier(
+            ctx,
+            file,
+            "data:text/javascript,export default 42",
+            false,
+        );
 
         assert!(
             matches!(result, ResolveResult::ExternalFile(ref p) if p.to_str().unwrap() == "data:text/javascript,export default 42")
@@ -1313,7 +1320,7 @@ fn specifier_data_url_returns_external_file() {
 fn specifier_custom_protocol_returns_external_file() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "vscode://extension/my-ext");
+        let result = specifier::resolve_specifier(ctx, file, "vscode://extension/my-ext", false);
 
         assert!(matches!(result, ResolveResult::ExternalFile(_)));
     });
@@ -1328,7 +1335,7 @@ fn specifier_html_root_relative_unresolvable() {
     // Root-relative paths in HTML files that fail resolution return Unresolvable
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/public/index.html");
-        let result = specifier::resolve_specifier(ctx, file, "/src/main.tsx");
+        let result = specifier::resolve_specifier(ctx, file, "/src/main.tsx", false);
 
         assert!(
             matches!(result, ResolveResult::Unresolvable(ref s) if s == "/src/main.tsx"),
@@ -1342,7 +1349,7 @@ fn specifier_html_root_relative_deep_path_unresolvable() {
     // Even deep root-relative paths in HTML should return Unresolvable when not found
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/nested/deep/page.html");
-        let result = specifier::resolve_specifier(ctx, file, "/assets/styles/main.css");
+        let result = specifier::resolve_specifier(ctx, file, "/assets/styles/main.css", false);
 
         assert!(
             matches!(result, ResolveResult::Unresolvable(ref s) if s == "/assets/styles/main.css")
@@ -1359,7 +1366,7 @@ fn specifier_root_relative_in_ts_file_unresolvable_when_missing() {
     // spurious npm package or external file.
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "/usr/local/lib/something");
+        let result = specifier::resolve_specifier(ctx, file, "/usr/local/lib/something", false);
 
         assert!(matches!(
             result,
@@ -1377,7 +1384,7 @@ fn specifier_path_alias_hash_returns_unresolvable() {
     // Path aliases (#import) that fail resolution should return Unresolvable, not NpmPackage
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "#internal/utils");
+        let result = specifier::resolve_specifier(ctx, file, "#internal/utils", false);
 
         assert!(
             matches!(result, ResolveResult::Unresolvable(ref s) if s == "#internal/utils"),
@@ -1390,7 +1397,7 @@ fn specifier_path_alias_hash_returns_unresolvable() {
 fn specifier_path_alias_tilde_returns_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "~/components/Button");
+        let result = specifier::resolve_specifier(ctx, file, "~/components/Button", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(ref s) if s == "~/components/Button"));
     });
@@ -1400,7 +1407,7 @@ fn specifier_path_alias_tilde_returns_unresolvable() {
 fn specifier_path_alias_double_tilde_returns_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "~~/utils/helpers");
+        let result = specifier::resolve_specifier(ctx, file, "~~/utils/helpers", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(ref s) if s == "~~/utils/helpers"));
     });
@@ -1410,7 +1417,7 @@ fn specifier_path_alias_double_tilde_returns_unresolvable() {
 fn specifier_path_alias_at_slash_returns_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "@/components/Foo");
+        let result = specifier::resolve_specifier(ctx, file, "@/components/Foo", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(ref s) if s == "@/components/Foo"));
     });
@@ -1421,7 +1428,7 @@ fn specifier_pascal_scope_alias_returns_unresolvable() {
     // PascalCase @Scope is treated as a path alias, not npm package
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "@Components/Button");
+        let result = specifier::resolve_specifier(ctx, file, "@Components/Button", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(ref s) if s == "@Components/Button"));
     });
@@ -1451,7 +1458,7 @@ fn specifier_plugin_alias_match_returns_unresolvable() {
     };
 
     let file = Path::new("/project/src/app.ts");
-    let result = specifier::resolve_specifier(&ctx, file, "$lib/utils");
+    let result = specifier::resolve_specifier(&ctx, file, "$lib/utils", false);
 
     assert!(
         matches!(result, ResolveResult::Unresolvable(ref s) if s == "$lib/utils"),
@@ -1464,7 +1471,7 @@ fn specifier_bare_scoped_package_returns_npm_package() {
     // Scoped bare specifiers that fail resolution -> NpmPackage with extracted name
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "@babel/core/transform");
+        let result = specifier::resolve_specifier(ctx, file, "@babel/core/transform", false);
 
         assert!(
             matches!(result, ResolveResult::NpmPackage(ref pkg) if pkg == "@babel/core"),
@@ -1478,7 +1485,7 @@ fn specifier_bare_unscoped_package_returns_npm_package() {
     // Unscoped bare specifiers that fail resolution -> NpmPackage
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "lodash/merge");
+        let result = specifier::resolve_specifier(ctx, file, "lodash/merge", false);
 
         assert!(matches!(result, ResolveResult::NpmPackage(ref pkg) if pkg == "lodash"));
     });
@@ -1490,7 +1497,7 @@ fn specifier_invalid_package_name_returns_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
         // Shell variable is not a valid package name
-        let result = specifier::resolve_specifier(ctx, file, "$DIR");
+        let result = specifier::resolve_specifier(ctx, file, "$DIR", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(ref s) if s == "$DIR"));
     });
@@ -1502,7 +1509,7 @@ fn specifier_bundler_internal_returns_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
         let result =
-            specifier::resolve_specifier(ctx, file, "raw-loader?esModule=false!./data.csv");
+            specifier::resolve_specifier(ctx, file, "raw-loader?esModule=false!./data.csv", false);
 
         // Contains "://"-like pattern is not present, but "!" makes it not a bare specifier
         // Actually let's check: it doesn't start with . or /, doesn't contain ://, doesn't start with data:
@@ -1516,7 +1523,7 @@ fn specifier_double_underscore_returns_unresolvable() {
     // Turbopack barrel optimization prefixes
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "__barrel_optimize__");
+        let result = specifier::resolve_specifier(ctx, file, "__barrel_optimize__", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(_)));
     });
@@ -1527,7 +1534,7 @@ fn specifier_pure_numeric_returns_unresolvable() {
     // Pure numeric strings are not valid package names
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "123");
+        let result = specifier::resolve_specifier(ctx, file, "123", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(_)));
     });
@@ -1541,7 +1548,7 @@ fn specifier_pure_numeric_returns_unresolvable() {
 fn specifier_relative_path_missing_is_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "./nonexistent/module");
+        let result = specifier::resolve_specifier(ctx, file, "./nonexistent/module", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(_)));
     });
@@ -1551,7 +1558,7 @@ fn specifier_relative_path_missing_is_unresolvable() {
 fn specifier_parent_relative_path_missing_is_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/deep/nested/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "../../missing");
+        let result = specifier::resolve_specifier(ctx, file, "../../missing", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(_)));
     });
@@ -1565,7 +1572,7 @@ fn specifier_parent_relative_path_missing_is_unresolvable() {
 fn specifier_at_at_slash_returns_unresolvable() {
     with_empty_ctx(|ctx| {
         let file = Path::new("/project/src/app.ts");
-        let result = specifier::resolve_specifier(ctx, file, "@@/shared/utils");
+        let result = specifier::resolve_specifier(ctx, file, "@@/shared/utils", false);
 
         assert!(matches!(result, ResolveResult::Unresolvable(ref s) if s == "@@/shared/utils"));
     });

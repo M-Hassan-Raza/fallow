@@ -123,6 +123,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                             imported_name: ImportedName::Named(s.imported.name().to_string()),
                             local_name: s.local.name.to_string(),
                             is_type_only: is_type_only || s.import_kind.is_type(),
+                            from_style: false,
                             span: s.span,
                             source_span,
                         });
@@ -133,6 +134,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                             imported_name: ImportedName::Default,
                             local_name: s.local.name.to_string(),
                             is_type_only,
+                            from_style: false,
                             span: s.span,
                             source_span,
                         });
@@ -145,6 +147,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                             imported_name: ImportedName::Namespace,
                             local_name: local,
                             is_type_only,
+                            from_style: false,
                             span: s.span,
                             source_span,
                         });
@@ -158,6 +161,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
+                from_style: false,
                 span: decl.span,
                 source_span,
             });
@@ -851,6 +855,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
+                    from_style: false,
                     span: oxc_span::Span::default(),
                     source_span: oxc_span::Span::default(),
                 });
@@ -861,6 +866,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     imported_name: ImportedName::SideEffect,
                     local_name: String::new(),
                     is_type_only: false,
+                    from_style: false,
                     span: oxc_span::Span::default(),
                     source_span: oxc_span::Span::default(),
                 });
@@ -1022,6 +1028,7 @@ impl ModuleInfoExtractor {
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
+            from_style: false,
             span: oxc_span::Span::default(),
             source_span: oxc_span::Span::default(),
         });

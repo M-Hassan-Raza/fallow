@@ -11,18 +11,36 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{parse_script, resolve_binary_to_package};
 
-/// Analyze CI config files for package binary invocations.
+/// Result of scanning CI config files: package names used by CI tooling AND
+/// project-relative file paths referenced as command-line arguments.
+#[derive(Debug, Default)]
+pub struct CiAnalysis {
+    /// npm package names used as binaries in CI shell commands.
+    pub used_packages: FxHashSet<String>,
+    /// File paths extracted as positional arguments or `--config` values
+    /// (e.g., `node scripts/deploy.ts` in a GitHub Actions `run:` block).
+    /// Paths are project-root-relative; CI files always live at the root.
+    pub entry_files: Vec<String>,
+}
+
+/// Analyze CI config files for package binary invocations and file references.
 ///
 /// Scans GitLab CI and GitHub Actions workflow files for shell commands,
-/// extracts binary names, and returns the set of npm package names used.
-pub fn analyze_ci_files(root: &Path, bin_map: &FxHashMap<String, String>) -> FxHashSet<String> {
+/// extracts binary names AND positional file path arguments, and returns both
+/// the set of npm package names used and the file paths referenced as command
+/// arguments. The file paths are seeded as entry points so scripts invoked from
+/// CI (`node scripts/deploy.ts`) do not get reported as `unused-files`.
+///
+/// CI files always live at `.gitlab-ci.yml` or `.github/workflows/*.yml`
+/// relative to the project root, so no workspace-prefix transformation applies.
+pub fn analyze_ci_files(root: &Path, bin_map: &FxHashMap<String, String>) -> CiAnalysis {
     let _span = tracing::info_span!("analyze_ci_files").entered();
-    let mut used_packages = FxHashSet::default();
+    let mut analysis = CiAnalysis::default();
 
     // GitLab CI
     let gitlab_ci = root.join(".gitlab-ci.yml");
     if let Ok(content) = std::fs::read_to_string(&gitlab_ci) {
-        extract_ci_packages(&content, root, bin_map, &mut used_packages);
+        extract_ci_signals(&content, root, bin_map, &mut analysis);
     }
 
     // GitHub Actions workflows
@@ -34,34 +52,42 @@ pub fn analyze_ci_files(root: &Path, bin_map: &FxHashMap<String, String>) -> FxH
             if (name_str.ends_with(".yml") || name_str.ends_with(".yaml"))
                 && let Ok(content) = std::fs::read_to_string(entry.path())
             {
-                extract_ci_packages(&content, root, bin_map, &mut used_packages);
+                extract_ci_signals(&content, root, bin_map, &mut analysis);
             }
         }
     }
 
-    used_packages
+    // File path entries can be repeated across workflow files (`build.yml` and
+    // `deploy.yml` both invoking `node scripts/deploy.ts`). Dedup so the
+    // entry-pattern globset is not seeded with duplicates.
+    analysis.entry_files.sort();
+    analysis.entry_files.dedup();
+    analysis
 }
 
-/// Extract package names from shell commands found in a CI config file.
+/// Extract package names AND file path references from shell commands found in
+/// a CI config file.
 ///
 /// Uses line-based heuristics to find shell command lines in YAML CI configs.
 /// This intentionally avoids a full YAML parser to keep dependencies minimal.
-/// Since results only mark packages as "used" (never as "unused"), false
-/// positives from non-command YAML lines are safe — they only reduce
-/// false positive unused dependency reports.
-fn extract_ci_packages(
+/// Known limitations (line-based parsing): variable interpolation
+/// (`${{ matrix.env }}/deploy.ts`), `\` line-continuations, YAML anchors
+/// (`<<: *defaults`) are silently skipped.
+fn extract_ci_signals(
     content: &str,
     root: &Path,
     bin_map: &FxHashMap<String, String>,
-    packages: &mut FxHashSet<String>,
+    analysis: &mut CiAnalysis,
 ) {
     for command in extract_ci_commands(content) {
         let parsed = parse_script(&command);
         for cmd in parsed {
             if !cmd.binary.is_empty() && !super::is_builtin_command(&cmd.binary) {
                 let pkg = resolve_binary_to_package(&cmd.binary, root, bin_map);
-                packages.insert(pkg);
+                analysis.used_packages.insert(pkg);
             }
+            analysis.entry_files.extend(cmd.config_args);
+            analysis.entry_files.extend(cmd.file_args);
         }
     }
 }
@@ -261,13 +287,14 @@ build:
   script:
     - npx @cyclonedx/cyclonedx-npm --output-file sbom.json
 ";
-        let mut packages = FxHashSet::default();
-        extract_ci_packages(
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
             content,
             Path::new("/nonexistent"),
             &FxHashMap::default(),
-            &mut packages,
+            &mut analysis,
         );
+        let packages = &analysis.used_packages;
         assert!(
             packages.contains("@cyclonedx/cyclonedx-npm"),
             "packages: {packages:?}"
@@ -283,13 +310,14 @@ build:
     - npx prettier --check .
     - tsc --noEmit
 ";
-        let mut packages = FxHashSet::default();
-        extract_ci_packages(
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
             content,
             Path::new("/nonexistent"),
             &FxHashMap::default(),
-            &mut packages,
+            &mut analysis,
         );
+        let packages = &analysis.used_packages;
         assert!(packages.contains("eslint"));
         assert!(packages.contains("prettier"));
         assert!(packages.contains("typescript")); // tsc → typescript via resolve
@@ -304,13 +332,14 @@ build:
     - mkdir -p dist
     - cp -r build/* dist/
 ";
-        let mut packages = FxHashSet::default();
-        extract_ci_packages(
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
             content,
             Path::new("/nonexistent"),
             &FxHashMap::default(),
-            &mut packages,
+            &mut analysis,
         );
+        let packages = &analysis.used_packages;
         assert!(
             packages.is_empty(),
             "should not extract built-in commands: {packages:?}"
@@ -325,13 +354,14 @@ jobs:
     steps:
       - run: npx @cyclonedx/cyclonedx-npm --output-file sbom.json
 ";
-        let mut packages = FxHashSet::default();
-        extract_ci_packages(
+        let mut analysis = CiAnalysis::default();
+        extract_ci_signals(
             content,
             Path::new("/nonexistent"),
             &FxHashMap::default(),
-            &mut packages,
+            &mut analysis,
         );
+        let packages = &analysis.used_packages;
         assert!(packages.contains("@cyclonedx/cyclonedx-npm"));
     }
 

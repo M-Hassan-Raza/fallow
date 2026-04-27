@@ -261,6 +261,7 @@ mod tests {
                         imported_name: ImportedName::Named("foo".to_string()),
                         local_name: "foo".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -325,6 +326,11 @@ mod tests {
     }
 
     #[test]
+    #[expect(
+        clippy::too_many_lines,
+        reason = "this test fixture exercises four reachability roles end-to-end; splitting it \
+                  would obscure the cross-role assertions"
+    )]
     fn graph_distinguishes_runtime_test_and_support_reachability() {
         let files = vec![
             DiscoveredFile {
@@ -389,6 +395,7 @@ mod tests {
                         imported_name: ImportedName::Named("runtimeOnly".to_string()),
                         local_name: "runtimeOnly".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -419,6 +426,7 @@ mod tests {
                         imported_name: ImportedName::Named("covered".to_string()),
                         local_name: "covered".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -435,6 +443,7 @@ mod tests {
                         imported_name: ImportedName::Named("runtimeOnly".to_string()),
                         local_name: "runtimeOnly".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -548,6 +557,7 @@ mod tests {
                         imported_name: ImportedName::Namespace,
                         local_name: "utils".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -620,6 +630,7 @@ mod tests {
                         imported_name: ImportedName::Named("foo".to_string()),
                         local_name: "foo".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -692,6 +703,7 @@ mod tests {
                         imported_name: ImportedName::Default,
                         local_name: "React".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -703,6 +715,7 @@ mod tests {
                         imported_name: ImportedName::Named("merge".to_string()),
                         local_name: "merge".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(15, 30),
                         source_span: oxc_span::Span::default(),
                     },
@@ -832,6 +845,7 @@ mod tests {
                         imported_name: ImportedName::Named("FC".to_string()),
                         local_name: "FC".to_string(),
                         is_type_only: true,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -843,6 +857,7 @@ mod tests {
                         imported_name: ImportedName::Named("useState".to_string()),
                         local_name: "useState".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(15, 30),
                         source_span: oxc_span::Span::default(),
                     },
@@ -885,6 +900,7 @@ mod tests {
                         imported_name: ImportedName::Default,
                         local_name: "Utils".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -950,6 +966,7 @@ mod tests {
                         imported_name: ImportedName::SideEffect,
                         local_name: String::new(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },
@@ -1024,6 +1041,7 @@ mod tests {
                         imported_name: ImportedName::Named("helper".to_string()),
                         local_name: "helper".to_string(),
                         is_type_only: false,
+                        from_style: false,
                         span: oxc_span::Span::new(0, 10),
                         source_span: oxc_span::Span::default(),
                     },

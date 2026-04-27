@@ -417,6 +417,11 @@ pub struct ImportInfo {
     pub local_name: String,
     /// Whether this is a type-only import (`import type`).
     pub is_type_only: bool,
+    /// Whether this import originated from a CSS-context (an SFC `<style lang="scss">` block,
+    /// `<style src="...">` reference, or other style-section parser). The resolver uses this
+    /// to enable SCSS partial / include-path / node_modules fallbacks for SFC importers
+    /// without applying them to JS-context imports from the same file.
+    pub from_style: bool,
     /// Source span of the import declaration.
     pub span: Span,
     /// Span of the source string literal (e.g., the `'./utils'` in `import { foo } from './utils'`).

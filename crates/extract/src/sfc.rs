@@ -1,7 +1,10 @@
-//! Vue/Svelte Single File Component (SFC) script extraction.
+//! Vue/Svelte Single File Component (SFC) script and style extraction.
 //!
 //! Extracts `<script>` block content from `.vue` and `.svelte` files using regex,
 //! handling `lang`, `src`, and `generic` attributes, and filtering HTML comments.
+//! Also extracts `<style>` block sources (`@import` / `@use` / `@forward` and
+//! `<style src="...">`) so referenced CSS / SCSS files become reachable from the
+//! component, preventing false `unused-files` reports on co-located styles.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -51,6 +54,16 @@ static CONTEXT_MODULE_ATTR_RE: LazyLock<regex::Regex> =
 /// Regex to match HTML comments for filtering script blocks inside comments.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
+
+/// Regex to extract `<style>` block content from Vue/Svelte SFCs.
+/// Mirrors `SCRIPT_BLOCK_RE`: handles `>` inside quoted attribute values and
+/// captures the body so `@import` / `@use` / `@forward` directives can be parsed.
+static STYLE_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(
+        r#"(?is)<style\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>(?P<body>[\s\S]*?)</style>"#,
+    )
+    .expect("valid regex")
+});
 
 /// An extracted `<script>` block from a Vue or Svelte SFC.
 pub struct SfcScript {
@@ -118,6 +131,53 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
         .collect()
 }
 
+/// An extracted `<style>` block from a Vue or Svelte SFC.
+pub struct SfcStyle {
+    /// The style body text (CSS / SCSS / Sass / Less / Stylus / PostCSS source).
+    pub body: String,
+    /// The `lang` attribute value (`scss`, `sass`, `less`, `stylus`, `postcss`, ...).
+    /// `None` for plain `<style>` (CSS).
+    pub lang: Option<String>,
+    /// External style source path from the `src` attribute (`<style src="./theme.scss">`).
+    pub src: Option<String>,
+}
+
+/// Extract all `<style>` blocks from a Vue/Svelte SFC source string.
+///
+/// Mirrors [`extract_sfc_scripts`]: filters blocks inside HTML comments and
+/// captures the `lang` and `src` attributes so the caller can route the body to
+/// the right preprocessor's import scanner (currently only CSS / SCSS / Sass) or
+/// seed the `src` reference as a side-effect import.
+pub fn extract_sfc_styles(source: &str) -> Vec<SfcStyle> {
+    let comment_ranges: Vec<(usize, usize)> = HTML_COMMENT_RE
+        .find_iter(source)
+        .map(|m| (m.start(), m.end()))
+        .collect();
+
+    STYLE_BLOCK_RE
+        .captures_iter(source)
+        .filter(|cap| {
+            let start = cap.get(0).map_or(0, |m| m.start());
+            !comment_ranges
+                .iter()
+                .any(|&(cs, ce)| start >= cs && start < ce)
+        })
+        .map(|cap| {
+            let attrs = cap.name("attrs").map_or("", |m| m.as_str());
+            let body = cap.name("body").map_or("", |m| m.as_str()).to_string();
+            let lang = LANG_ATTR_RE
+                .captures(attrs)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+            let src = SRC_ATTR_RE
+                .captures(attrs)
+                .and_then(|c| c.get(1))
+                .map(|m| m.as_str().to_string());
+            SfcStyle { body, lang, src }
+        })
+        .collect()
+}
+
 /// Check if a file path is a Vue or Svelte SFC (`.vue` or `.svelte`).
 #[must_use]
 pub fn is_sfc_file(path: &Path) -> bool {
@@ -126,7 +186,7 @@ pub fn is_sfc_file(path: &Path) -> bool {
         .is_some_and(|ext| ext == "vue" || ext == "svelte")
 }
 
-/// Parse an SFC file by extracting and combining all `<script>` blocks.
+/// Parse an SFC file by extracting and combining all `<script>` and `<style>` blocks.
 pub(crate) fn parse_sfc_to_module(
     file_id: FileId,
     path: &Path,
@@ -135,6 +195,7 @@ pub(crate) fn parse_sfc_to_module(
     need_complexity: bool,
 ) -> ModuleInfo {
     let scripts = extract_sfc_scripts(source);
+    let styles = extract_sfc_styles(source);
     let kind = sfc_kind(path);
     let mut combined = empty_sfc_module(file_id, source, content_hash);
     let mut template_visible_imports: FxHashSet<String> = FxHashSet::default();
@@ -147,6 +208,10 @@ pub(crate) fn parse_sfc_to_module(
             &mut template_visible_imports,
             need_complexity,
         );
+    }
+
+    for style in &styles {
+        merge_style_into_module(style, &mut combined);
     }
 
     apply_template_usage(kind, source, &template_visible_imports, &mut combined);
@@ -272,9 +337,60 @@ fn add_script_src_import(module: &mut ModuleInfo, source: &str) {
         imported_name: ImportedName::SideEffect,
         local_name: String::new(),
         is_type_only: false,
+        from_style: false,
         span: Span::default(),
         source_span: Span::default(),
     });
+}
+
+/// `lang` attribute values whose body we know how to scan for `@import` /
+/// `@use` / `@forward` directives. Plain `<style>` (no `lang`) is treated as
+/// CSS. `less`, `stylus`, and `postcss` bodies are NOT scanned because their
+/// import syntax differs (`@import (reference)` modifiers, etc.); their
+/// `<style src="...">` references are still seeded.
+fn style_lang_is_scss(lang: Option<&str>) -> bool {
+    matches!(lang, Some("scss" | "sass"))
+}
+
+fn style_lang_is_css_like(lang: Option<&str>) -> bool {
+    lang.is_none() || matches!(lang, Some("css"))
+}
+
+fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
+    // <style src="./theme.scss"> is symmetric to <script src="...">: seed the
+    // referenced file as a side-effect import. The resolver still applies SCSS
+    // partial / include-path / node_modules fallbacks because `from_style` is
+    // set on the import.
+    if let Some(src) = &style.src {
+        combined.imports.push(ImportInfo {
+            source: normalize_asset_url(src),
+            imported_name: ImportedName::SideEffect,
+            local_name: String::new(),
+            is_type_only: false,
+            from_style: true,
+            span: Span::default(),
+            source_span: Span::default(),
+        });
+    }
+
+    let lang = style.lang.as_deref();
+    let is_scss = style_lang_is_scss(lang);
+    let is_css_like = style_lang_is_css_like(lang);
+    if !is_scss && !is_css_like {
+        return;
+    }
+
+    for spec in crate::css::extract_css_imports(&style.body, is_scss) {
+        combined.imports.push(ImportInfo {
+            source: spec,
+            imported_name: ImportedName::SideEffect,
+            local_name: String::new(),
+            is_type_only: false,
+            from_style: true,
+            span: Span::default(),
+            source_span: Span::default(),
+        });
+    }
 }
 
 fn source_type_for_script(script: &SfcScript) -> SourceType {
@@ -727,5 +843,113 @@ export const foo = 1;
         assert_eq!(scripts[0].src.as_deref(), Some("./logic.ts"));
         assert!(scripts[0].is_typescript);
         assert!(scripts[0].is_jsx);
+    }
+
+    // ── extract_sfc_styles (issue #195 Case B) ──
+
+    #[test]
+    fn extract_style_block_lang_scss() {
+        let source = r#"<template/><style lang="scss">@import 'Foo';</style>"#;
+        let styles = extract_sfc_styles(source);
+        assert_eq!(styles.len(), 1);
+        assert_eq!(styles[0].lang.as_deref(), Some("scss"));
+        assert!(styles[0].body.contains("@import"));
+        assert!(styles[0].src.is_none());
+    }
+
+    #[test]
+    fn extract_style_block_with_src() {
+        let source = r#"<style src="./theme.scss" lang="scss"></style>"#;
+        let styles = extract_sfc_styles(source);
+        assert_eq!(styles.len(), 1);
+        assert_eq!(styles[0].src.as_deref(), Some("./theme.scss"));
+        assert_eq!(styles[0].lang.as_deref(), Some("scss"));
+    }
+
+    #[test]
+    fn extract_style_block_plain_no_lang() {
+        let source = r"<style>.foo { color: red; }</style>";
+        let styles = extract_sfc_styles(source);
+        assert_eq!(styles.len(), 1);
+        assert!(styles[0].lang.is_none());
+    }
+
+    #[test]
+    fn extract_multiple_style_blocks() {
+        let source = r#"<style lang="scss">@import 'a';</style>
+<style scoped lang="scss">@import 'b';</style>"#;
+        let styles = extract_sfc_styles(source);
+        assert_eq!(styles.len(), 2);
+    }
+
+    #[test]
+    fn style_block_inside_html_comment_filtered() {
+        let source = r#"<!-- <style lang="scss">@import 'bad';</style> -->
+<style lang="scss">@import 'good';</style>"#;
+        let styles = extract_sfc_styles(source);
+        assert_eq!(styles.len(), 1);
+        assert!(styles[0].body.contains("good"));
+    }
+
+    #[test]
+    fn parse_sfc_extracts_style_imports_with_from_style_flag() {
+        let info = parse_sfc_to_module(
+            FileId(0),
+            Path::new("Foo.vue"),
+            r#"<template/><style lang="scss">@import 'Foo';</style>"#,
+            0,
+            false,
+        );
+        let style_import = info
+            .imports
+            .iter()
+            .find(|i| i.source == "./Foo")
+            .expect("scss @import 'Foo' should be normalized to ./Foo");
+        assert!(
+            style_import.from_style,
+            "imports from <style> blocks must carry from_style=true so the resolver \
+             enables SCSS partial fallback for the SFC importer"
+        );
+        assert!(matches!(
+            style_import.imported_name,
+            ImportedName::SideEffect
+        ));
+    }
+
+    #[test]
+    fn parse_sfc_extracts_style_src_with_from_style_flag() {
+        let info = parse_sfc_to_module(
+            FileId(0),
+            Path::new("Bar.vue"),
+            r#"<style src="./Bar.scss" lang="scss"></style>"#,
+            0,
+            false,
+        );
+        let style_src = info
+            .imports
+            .iter()
+            .find(|i| i.source == "./Bar.scss")
+            .expect("<style src=\"./Bar.scss\"> should produce a side-effect import");
+        assert!(style_src.from_style);
+    }
+
+    #[test]
+    fn parse_sfc_skips_unsupported_style_lang_body_but_keeps_src() {
+        // <style lang="postcss"> body is NOT scanned (custom directives); src is still seeded.
+        let info = parse_sfc_to_module(
+            FileId(0),
+            Path::new("Baz.vue"),
+            r#"<style lang="postcss" src="./Baz.pcss">@custom-rule "skipped";</style>"#,
+            0,
+            false,
+        );
+        assert!(
+            info.imports.iter().any(|i| i.source == "./Baz.pcss"),
+            "src reference should still be seeded for unsupported lang"
+        );
+        assert!(
+            !info.imports.iter().any(|i| i.source.contains("skipped")),
+            "postcss body should not be scanned for @import directives"
+        );
     }
 }

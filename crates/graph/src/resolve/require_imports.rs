@@ -37,7 +37,7 @@ pub(super) fn resolve_single_require(
     file_path: &Path,
     req: &RequireCallInfo,
 ) -> Vec<ResolvedImport> {
-    let target = resolve_specifier(ctx, file_path, &req.source);
+    let target = resolve_specifier(ctx, file_path, &req.source, false);
 
     if req.destructured_names.is_empty() {
         return vec![ResolvedImport {
@@ -46,6 +46,7 @@ pub(super) fn resolve_single_require(
                 imported_name: ImportedName::Namespace,
                 local_name: req.local_name.clone().unwrap_or_default(),
                 is_type_only: false,
+                from_style: false,
                 span: req.span,
                 source_span: Span::default(),
             },
@@ -61,6 +62,7 @@ pub(super) fn resolve_single_require(
                 imported_name: ImportedName::Named(name.clone()),
                 local_name: name.clone(),
                 is_type_only: false,
+                from_style: false,
                 span: req.span,
                 source_span: Span::default(),
             },

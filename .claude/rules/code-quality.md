@@ -15,7 +15,7 @@ paths:
 - All suppressions use `#[expect(clippy::..., reason = "...")]` — warns when unnecessary, preventing dead annotations. Every `#[allow]` and `#[expect]` must include a `reason` attribute. Use `#[allow]` only for pedantic-only or target-dependent lints where `#[expect]` would be unfulfilled.
 
 ## Size assertions
-`ModuleNode` (96 bytes), `ModuleInfo` (256 bytes), `ExportInfo`/`ImportInfo` (88 bytes), `Edge` (32 bytes) — prevents accidental struct bloat.
+`ModuleNode` (96 bytes), `ModuleInfo` (400 bytes), `ExportInfo` (112 bytes), `ImportInfo` (96 bytes), `Edge` (32 bytes), `MemberAccess` (48 bytes), `ImportedName` / `ExportName` (24 bytes each), prevents accidental struct bloat. Source of truth is `const _: () = assert!(...)` in `crates/types/src/extract.rs`; this doc is informational and may lag the code.
 
 ## Formatting
 `.rustfmt.toml` with `style_edition = "2024"`.

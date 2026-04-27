@@ -127,6 +127,7 @@ pub(crate) fn parse_html_to_module_with_complexity(
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
+            from_style: false,
             span: Span::default(),
             source_span: Span::default(),
         })

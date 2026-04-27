@@ -760,6 +760,13 @@ fn analyze_all_scripts(
                 .discovered_always_used
                 .push((config_file.clone(), "scripts".to_string()));
         }
+        for entry in &script_analysis.entry_files {
+            if let Some(pat) = scripts::normalize_script_entry_pattern("", entry) {
+                plugin_result
+                    .entry_patterns
+                    .push((plugins::PathRule::new(pat), "scripts".to_string()));
+            }
+        }
     }
     for (ws, ws_pkg) in workspace_pkgs {
         if let Some(ref ws_scripts) = ws_pkg.scripts {
@@ -783,12 +790,33 @@ fn analyze_all_scripts(
                     .discovered_always_used
                     .push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
             }
+            for entry in &ws_analysis.entry_files {
+                if let Some(pat) = scripts::normalize_script_entry_pattern(&ws_prefix, entry) {
+                    plugin_result
+                        .entry_patterns
+                        .push((plugins::PathRule::new(pat), "scripts".to_string()));
+                }
+            }
         }
     }
 
-    // Scan CI config files for binary invocations
-    let ci_packages = scripts::ci::analyze_ci_files(&config.root, &bin_map);
-    plugin_result.script_used_packages.extend(ci_packages);
+    // Scan CI config files for binary invocations and positional file references.
+    // Returns both packages used by CI tooling AND project-relative file paths
+    // referenced as command-line arguments (e.g., `node scripts/deploy.ts` in a
+    // GitHub Actions `run:` block) so the referenced files become reachable
+    // entry points. CI files always live at the project root, so file paths
+    // need no workspace-prefix transformation. See issue #195 (Case D).
+    let ci_analysis = scripts::ci::analyze_ci_files(&config.root, &bin_map);
+    plugin_result
+        .script_used_packages
+        .extend(ci_analysis.used_packages);
+    for entry in &ci_analysis.entry_files {
+        if let Some(pat) = scripts::normalize_script_entry_pattern("", entry) {
+            plugin_result
+                .entry_patterns
+                .push((plugins::PathRule::new(pat), "scripts".to_string()));
+        }
+    }
     plugin_result
         .entry_point_roles
         .entry("scripts".to_string())

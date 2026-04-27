@@ -131,6 +131,7 @@ mod tests {
                 imported_name: ImportedName::Default,
                 local_name: "x".to_string(),
                 is_type_only: false,
+                from_style: false,
                 span: Span::new(0, 0),
                 source_span: Span::new(0, 0),
             },

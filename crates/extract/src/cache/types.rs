@@ -7,7 +7,7 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version — bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 50;
+pub(super) const CACHE_VERSION: u32 = 51;
 
 /// Maximum cache file size to deserialize (256 MB).
 pub(super) const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
@@ -110,6 +110,8 @@ pub struct CachedImport {
     pub local_name: String,
     /// Whether this is a type-only import.
     pub is_type_only: bool,
+    /// Whether this import originated from an SFC `<style>` block / `<style src>` (CSS context).
+    pub from_style: bool,
     /// Import kind: 0=Named, 1=Default, 2=Namespace, 3=SideEffect.
     pub kind: u8,
     /// Byte offset of the import span start.

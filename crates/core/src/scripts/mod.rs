@@ -53,6 +53,55 @@ pub struct ScriptAnalysis {
     pub entry_files: Vec<String>,
 }
 
+/// Normalize a script-extracted file path into a project-relative entry pattern.
+///
+/// `ws_prefix` is the workspace package's path relative to the project root
+/// (empty string for root-level package.json scripts). `raw` is the path as it
+/// appeared in the script (e.g., `./scripts/deploy.ts`, `scripts/deploy.ts`).
+///
+/// Returns `None` when:
+/// - The path resolves outside the workspace package (`../shared/...` collapsed
+///   above `ws_prefix`). These would point at sibling packages, which should
+///   import the entry through their own dependency graph instead of CI or
+///   script plumbing.
+/// - The path is absolute or escapes the project root.
+///
+/// Matches existing behaviour for `config_files` (workspace-prefix join) but
+/// additionally normalizes `..` segments via [`Path::components`] so paths like
+/// `apps/api/../shared/scripts/deploy.ts` collapse to `shared/scripts/deploy.ts`
+/// instead of being passed verbatim to globset (which does not normalize).
+#[must_use]
+pub fn normalize_script_entry_pattern(ws_prefix: &str, raw: &str) -> Option<String> {
+    let trimmed = raw.trim_start_matches("./");
+    if trimmed.is_empty() || trimmed.starts_with('/') {
+        return None;
+    }
+    let combined = if ws_prefix.is_empty() {
+        trimmed.to_string()
+    } else {
+        format!("{}/{}", ws_prefix.trim_end_matches('/'), trimmed)
+    };
+
+    let mut stack: Vec<&str> = Vec::new();
+    for segment in combined.split('/') {
+        match segment {
+            "" | "." => {}
+            ".." => {
+                // Path escapes the project root would not match anything in
+                // the file index. Skip rather than seed an unmatchable pattern.
+                stack.pop()?;
+            }
+            other => stack.push(other),
+        }
+    }
+
+    if stack.is_empty() {
+        None
+    } else {
+        Some(stack.join("/"))
+    }
+}
+
 /// A parsed command segment from a script value.
 #[derive(Debug, PartialEq, Eq)]
 pub struct ScriptCommand {
@@ -359,6 +408,81 @@ fn is_builtin_command(cmd: &str) -> bool {
 )]
 mod tests {
     use super::*;
+
+    // --- normalize_script_entry_pattern tests ---
+
+    #[test]
+    fn normalize_root_level_strips_dot_slash() {
+        assert_eq!(
+            normalize_script_entry_pattern("", "./scripts/deploy.ts").as_deref(),
+            Some("scripts/deploy.ts")
+        );
+    }
+
+    #[test]
+    fn normalize_root_level_keeps_already_relative() {
+        assert_eq!(
+            normalize_script_entry_pattern("", "scripts/deploy.ts").as_deref(),
+            Some("scripts/deploy.ts")
+        );
+    }
+
+    #[test]
+    fn normalize_workspace_prefix_joins_path() {
+        assert_eq!(
+            normalize_script_entry_pattern("apps/api", "./scripts/deploy.ts").as_deref(),
+            Some("apps/api/scripts/deploy.ts")
+        );
+    }
+
+    #[test]
+    fn normalize_workspace_prefix_collapses_parent_segment() {
+        // `apps/api/../shared/scripts/deploy.ts` collapses one level up from
+        // `apps/api` to `apps`, producing `apps/shared/scripts/deploy.ts`.
+        assert_eq!(
+            normalize_script_entry_pattern("apps/api", "../shared/scripts/deploy.ts").as_deref(),
+            Some("apps/shared/scripts/deploy.ts")
+        );
+    }
+
+    #[test]
+    fn normalize_workspace_prefix_collapses_two_parent_segments_to_root() {
+        // `apps/api/../../top.ts` collapses fully to root: `top.ts`.
+        assert_eq!(
+            normalize_script_entry_pattern("apps/api", "../../top.ts").as_deref(),
+            Some("top.ts")
+        );
+    }
+
+    #[test]
+    fn normalize_path_escaping_project_root_skipped() {
+        // Cannot collapse beyond root; skip rather than seed unmatchable pattern.
+        assert_eq!(normalize_script_entry_pattern("", "../outside.ts"), None);
+        assert_eq!(
+            normalize_script_entry_pattern("apps/api", "../../../outside.ts"),
+            None
+        );
+    }
+
+    #[test]
+    fn normalize_absolute_path_skipped() {
+        assert_eq!(normalize_script_entry_pattern("", "/etc/passwd"), None);
+    }
+
+    #[test]
+    fn normalize_empty_path_skipped() {
+        assert_eq!(normalize_script_entry_pattern("", ""), None);
+        assert_eq!(normalize_script_entry_pattern("apps/api", "./"), None);
+    }
+
+    #[test]
+    fn normalize_workspace_prefix_with_trailing_slash() {
+        // Defensive: workspace prefixes from path display can end with `/`.
+        assert_eq!(
+            normalize_script_entry_pattern("apps/api/", "./scripts/deploy.ts").as_deref(),
+            Some("apps/api/scripts/deploy.ts")
+        );
+    }
 
     // --- parse_script tests ---
 

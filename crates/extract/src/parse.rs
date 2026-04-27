@@ -436,6 +436,7 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
                 imported_name: fallow_types::extract::ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: true,
+                from_style: false,
                 span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
             });
@@ -457,6 +458,7 @@ fn scan_jsdoc_imports_in(body: &str, imports: &mut Vec<ImportInfo>) {
             imported_name: fallow_types::extract::ImportedName::Named(member.to_string()),
             local_name: String::new(),
             is_type_only: true,
+            from_style: false,
             span: oxc_span::Span::default(),
             source_span: oxc_span::Span::default(),
         });
@@ -834,6 +836,7 @@ mod tests {
             imported_name: ImportedName::Default,
             local_name: "existing".to_string(),
             is_type_only: false,
+            from_style: false,
             span: oxc_span::Span::default(),
             source_span: oxc_span::Span::default(),
         }];

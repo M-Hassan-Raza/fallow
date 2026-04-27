@@ -42,7 +42,7 @@ pub(super) fn resolve_single_dynamic_import(
     file_path: &Path,
     imp: &DynamicImportInfo,
 ) -> Vec<ResolvedImport> {
-    let target = resolve_specifier(ctx, file_path, &imp.source);
+    let target = resolve_specifier(ctx, file_path, &imp.source, false);
 
     if !imp.destructured_names.is_empty() {
         // `const { a, b } = await import('./x')` -> Named imports
@@ -61,6 +61,7 @@ pub(super) fn resolve_single_dynamic_import(
                         imported_name,
                         local_name: name.clone(),
                         is_type_only: false,
+                        from_style: false,
                         span: imp.span,
                         source_span: Span::default(),
                     },
@@ -78,6 +79,7 @@ pub(super) fn resolve_single_dynamic_import(
                 imported_name: ImportedName::Namespace,
                 local_name: imp.local_name.clone().unwrap_or_default(),
                 is_type_only: false,
+                from_style: false,
                 span: imp.span,
                 source_span: Span::default(),
             },
@@ -92,6 +94,7 @@ pub(super) fn resolve_single_dynamic_import(
             imported_name: ImportedName::SideEffect,
             local_name: String::new(),
             is_type_only: false,
+            from_style: false,
             span: imp.span,
             source_span: Span::default(),
         },

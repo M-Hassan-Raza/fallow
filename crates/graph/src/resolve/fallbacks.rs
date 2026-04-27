@@ -118,6 +118,47 @@ pub(super) fn try_scss_partial_fallback(
     try_resolve_scss(ctx, from_file, &index_plain)
 }
 
+/// Try non-partial CSS-extension resolution: `<spec>.scss`, `<spec>.sass`,
+/// `<spec>.css` from the importing file's parent.
+///
+/// This is needed when the standard resolver's extension list contains both
+/// `.vue` / `.svelte` / `.astro` AND CSS extensions. For an SFC `<style>` block
+/// importing `./Foo`, the standard resolver picks `Foo.vue` (the SFC itself!)
+/// before `Foo.scss` because `.vue` comes earlier in the extension list. SCSS
+/// imports must restrict resolution to CSS-family extensions to avoid this
+/// self-import collision. Only invoked when `from_style = true`. See issue #195.
+pub(super) fn try_css_extension_fallback(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if specifier.contains(':') {
+        return None;
+    }
+    // If the specifier already has a CSS extension, the standard resolver path
+    // would have found it by name; a fallback re-entry with the same suffix is
+    // a no-op.
+    let spec_path = Path::new(specifier);
+    let already_css_ext = spec_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| {
+            e.eq_ignore_ascii_case("css")
+                || e.eq_ignore_ascii_case("scss")
+                || e.eq_ignore_ascii_case("sass")
+        });
+    if already_css_ext {
+        return try_resolve_scss(ctx, from_file, specifier);
+    }
+    for ext in ["scss", "sass", "css"] {
+        let candidate = format!("{specifier}.{ext}");
+        if let Some(result) = try_resolve_scss(ctx, from_file, &candidate) {
+            return Some(result);
+        }
+    }
+    None
+}
+
 /// Attempt to resolve a single SCSS specifier and map to an internal module.
 fn try_resolve_scss(
     ctx: &ResolveContext<'_>,
@@ -148,6 +189,8 @@ fn try_resolve_scss(
 /// resolution, so when the importing file is `.scss`/`.sass` and the spec
 /// originated from such a bare specifier, we retry against each include path,
 /// applying the SCSS partial (`_variables`) and directory-index conventions.
+/// SFC `<style lang="scss">` imports pass `from_style = true` because their
+/// filesystem importer is `.vue` / `.svelte`, not `.scss` / `.sass`.
 ///
 /// The specifier arrives with a `./` prefix because `normalize_css_import_path`
 /// rewrites bare extensionless SCSS specifiers to relative ones. We strip that
@@ -159,14 +202,15 @@ pub(super) fn try_scss_include_path_fallback(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
+    from_style: bool,
 ) -> Option<ResolveResult> {
     if ctx.scss_include_paths.is_empty() {
         return None;
     }
-    if !from_file
+    let is_scss_importer = from_file
         .extension()
-        .is_some_and(|e| e == "scss" || e == "sass")
-    {
+        .is_some_and(|e| e == "scss" || e == "sass");
+    if !is_scss_importer && !from_style {
         return None;
     }
     // SCSS built-in modules (`sass:math`) should not be retried
@@ -302,15 +346,16 @@ pub(super) fn try_scss_node_modules_fallback(
     _ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
+    from_style: bool,
 ) -> Option<ResolveResult> {
     // SCSS built-in modules (`sass:math`) should not be retried
     if specifier.contains(':') {
         return None;
     }
-    if !from_file
+    let is_scss_importer = from_file
         .extension()
-        .is_some_and(|e| e == "scss" || e == "sass")
-    {
+        .is_some_and(|e| e == "scss" || e == "sass");
+    if !is_scss_importer && !from_style {
         return None;
     }
     // Only bare (normalized) specifiers should search node_modules. Explicit

@@ -26,7 +26,7 @@ pub(super) fn resolve_re_exports(
         .iter()
         .map(|re| ResolvedReExport {
             info: re.clone(),
-            target: resolve_specifier(ctx, file_path, &re.source),
+            target: resolve_specifier(ctx, file_path, &re.source, false),
         })
         .collect()
 }

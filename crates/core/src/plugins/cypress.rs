@@ -1,8 +1,14 @@
 //! Cypress test runner plugin.
 //!
 //! Detects Cypress projects and marks test files and support files as entry points.
-//! Parses cypress.config to extract referenced dependencies.
+//! Parses `cypress.config.{ts,js}` to extract referenced dependencies and to seed
+//! `e2e.specPattern`, `component.specPattern`, `e2e.supportFile`, and
+//! `component.supportFile` as entry points so tests living outside the default
+//! `cypress/**` location are not reported as `unused-files`.
+//!
+//! See issue #195 (Case E).
 
+use super::config_parser;
 use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["cypress"];
@@ -18,12 +24,43 @@ const ALWAYS_USED: &[&str] = &["cypress.config.{ts,js,mjs,cjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["cypress", "@cypress/react", "@cypress/vue"];
 
-define_plugin! {
+define_plugin!(
     struct CypressPlugin => "cypress",
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
-    resolve_config: imports_only,
-}
+    resolve_config(config_path, source, _root) {
+        let mut result = PluginResult::default();
+
+        let imports = config_parser::extract_imports(source, config_path);
+        for imp in &imports {
+            let dep = crate::resolve::extract_package_name(imp);
+            result.referenced_dependencies.push(dep);
+        }
+
+        // Cypress 10+ split config: `e2e.*` and `component.*` sections each
+        // accept `specPattern` (string or array of glob patterns) and
+        // `supportFile` (string path or `false`). Seed both as entry patterns
+        // so spec files outside the default `cypress/**` location and custom
+        // support files are reachable.
+        for section in ["e2e", "component"] {
+            let spec_patterns = config_parser::extract_config_string_or_array(
+                source,
+                config_path,
+                &[section, "specPattern"],
+            );
+            result.extend_entry_patterns(spec_patterns);
+
+            let support_file = config_parser::extract_config_string_or_array(
+                source,
+                config_path,
+                &[section, "supportFile"],
+            );
+            result.extend_entry_patterns(support_file);
+        }
+
+        result
+    },
+);
