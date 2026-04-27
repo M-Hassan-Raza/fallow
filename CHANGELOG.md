@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.52.2] - 2026-04-28
+
+### Fixed
+
+- **Workspace-aware unused-dependency baselines.** When the same package appeared as unused in multiple workspace `package.json` files, `fallow dead-code --save-baseline` collapsed them into a single bare-package-name key. Suppressing the entry in one workspace then silenced every other workspace's report of the same package, hiding genuinely unused deps in the rest of the monorepo. Baseline keys for `unused_dependencies`, `unused_dev_dependencies`, `unused_optional_dependencies`, `type_only_dependencies`, and `test_only_dependencies` are now `package.json:package_name` so per-workspace instances stay distinct. Existing baselines saved with bare-package-name keys still match on load, so upgrading does not require regenerating baselines.
+
 ## [2.52.1] - 2026-04-27
 
 ### Fixed
@@ -1720,7 +1726,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.52.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.52.2...HEAD
+[2.52.2]: https://github.com/fallow-rs/fallow/compare/v2.52.1...v2.52.2
 [2.52.1]: https://github.com/fallow-rs/fallow/compare/v2.52.0...v2.52.1
 [2.52.0]: https://github.com/fallow-rs/fallow/compare/v2.51.0...v2.52.0
 [2.51.0]: https://github.com/fallow-rs/fallow/compare/v2.50.0...v2.51.0
