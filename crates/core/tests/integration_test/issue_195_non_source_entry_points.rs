@@ -101,6 +101,51 @@ export default defineConfig({
     );
 }
 
+#[test]
+fn vite_additional_data_marks_bare_scss_package_imports_used() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "issue-195-vite-additional-data-bare-package",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "bootstrap": "5.0.0",
+    "vite": "5.0.0"
+  }
+}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(root.join("src/main.ts"), "export const main = 1;").expect("write main");
+    std::fs::write(
+        root.join("vite.config.ts"),
+        r#"import { defineConfig } from "vite";
+
+export default defineConfig({
+  css: {
+    preprocessorOptions: {
+      scss: { additionalData: `@use "bootstrap";` },
+    },
+  },
+});"#,
+    )
+    .expect("write vite config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        !results
+            .unused_dependencies
+            .iter()
+            .any(|dep| dep.package_name == "bootstrap"),
+        "bare bootstrap import from vite additionalData should be marked used"
+    );
+}
+
 // ── Case B: SFC <style> blocks ───────────────────────────────────────
 
 #[test]
@@ -288,5 +333,73 @@ fn cypress_support_file_string_seeds_entry() {
         !support_unused,
         "tests/support/index.ts is referenced from cypress.config.ts e2e.supportFile. \
          Got unused: {paths:?}"
+    );
+}
+
+#[test]
+fn cypress_default_component_spec_pattern_seeds_entry() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src/components")).expect("create component dir");
+    std::fs::create_dir_all(root.join("tests")).expect("create tests dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "issue-195-cypress-default-component-spec",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "vue": "3.0.0"
+  },
+  "devDependencies": {
+    "cypress": "13.0.0",
+    "vite": "5.0.0"
+  }
+}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(root.join("src/main.ts"), "export const main = 1;").expect("write main");
+    std::fs::write(
+        root.join("cypress.config.ts"),
+        r#"import { defineConfig } from "cypress";
+
+export default defineConfig({
+  component: {
+    devServer: { framework: "vue", bundler: "vite" },
+  },
+});"#,
+    )
+    .expect("write cypress config");
+    std::fs::write(
+        root.join("src/components/Foo.vue"),
+        r#"<template><div>Foo</div></template>
+<script setup lang="ts">
+export const foo = true;
+</script>"#,
+    )
+    .expect("write component");
+    std::fs::write(
+        root.join("tests/Foo.cy.ts"),
+        r#"import Foo from "../src/components/Foo.vue";
+
+describe("Foo", () => {
+  it("mounts", () => {
+    cy.mount(Foo);
+  });
+});"#,
+    )
+    .expect("write cypress spec");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let paths = unused_file_paths(&results);
+
+    assert!(
+        !paths.iter().any(|p| p.ends_with("tests/Foo.cy.ts")),
+        "Cypress's default component specPattern should seed tests/Foo.cy.ts. Got unused: {paths:?}"
+    );
+    assert!(
+        !paths.iter().any(|p| p.ends_with("src/components/Foo.vue")),
+        "component imported by the default Cypress spec should be reachable. Got unused: {paths:?}"
     );
 }

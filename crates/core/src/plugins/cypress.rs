@@ -3,8 +3,10 @@
 //! Detects Cypress projects and marks test files and support files as entry points.
 //! Parses `cypress.config.{ts,js}` to extract referenced dependencies and to seed
 //! `e2e.specPattern`, `component.specPattern`, `e2e.supportFile`, and
-//! `component.supportFile` as entry points so tests living outside the default
-//! `cypress/**` location are not reported as `unused-files`.
+//! `component.supportFile` as entry points. Cypress's default component spec
+//! pattern is also seeded so `*.cy.*` files outside the default `cypress/**`
+//! location are not reported as `unused-files` when the config omits
+//! `component.specPattern`.
 //!
 //! See issue #195 (Case E).
 
@@ -14,6 +16,7 @@ use super::{Plugin, PluginResult};
 const ENABLERS: &[&str] = &["cypress"];
 
 const ENTRY_PATTERNS: &[&str] = &[
+    "**/*.cy.{ts,tsx,js,jsx}",
     "cypress/**/*.{ts,tsx,js,jsx}",
     "cypress/support/**/*.{ts,js}",
 ];

@@ -41,7 +41,9 @@ fn is_additional_data_package_import(
     if local_style_candidate_exists(root, normalized) {
         return false;
     }
-    raw.starts_with('@') || raw.contains('/')
+    // Non-relative stylesheet specifiers with no local candidate are package
+    // references, including bare packages like `bootstrap`.
+    true
 }
 
 fn local_style_candidate_exists(root: &std::path::Path, normalized: &str) -> bool {
@@ -286,7 +288,7 @@ mod tests {
             export default defineConfig({
                 css: {
                     preprocessorOptions: {
-                        scss: { additionalData: `@use "bootstrap/scss/functions";` },
+                        scss: { additionalData: `@use "bootstrap/scss/functions"; @use "bulma";` },
                     },
                 },
             });
@@ -301,11 +303,24 @@ mod tests {
             "additionalData package imports should credit the package dependency"
         );
         assert!(
+            result
+                .referenced_dependencies
+                .contains(&"bulma".to_string()),
+            "bare additionalData package imports should credit the package dependency"
+        );
+        assert!(
             !result
                 .entry_patterns
                 .iter()
                 .any(|rule| rule.pattern == "bootstrap/scss/functions"),
             "package imports should not be seeded as project entry globs"
+        );
+        assert!(
+            !result
+                .entry_patterns
+                .iter()
+                .any(|rule| rule.pattern == "bulma"),
+            "bare package imports should not be seeded as project entry globs"
         );
     }
 
