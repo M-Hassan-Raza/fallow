@@ -160,10 +160,11 @@ fn parse_complexity_sort(value: Option<String>) -> napi::Result<programmatic::Co
         "cyclomatic" => Ok(programmatic::ComplexitySort::Cyclomatic),
         "cognitive" => Ok(programmatic::ComplexitySort::Cognitive),
         "lines" => Ok(programmatic::ComplexitySort::Lines),
+        "severity" => Ok(programmatic::ComplexitySort::Severity),
         _ => Err(invalid_enum_value(
             "sort",
             &value,
-            &["cyclomatic", "cognitive", "lines"],
+            &["cyclomatic", "cognitive", "lines", "severity"],
         )),
     }
 }

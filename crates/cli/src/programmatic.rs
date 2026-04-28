@@ -164,11 +164,13 @@ pub enum ComplexitySort {
     Cyclomatic,
     Cognitive,
     Lines,
+    Severity,
 }
 
 impl ComplexitySort {
     const fn to_cli(self) -> SortBy {
         match self {
+            Self::Severity => SortBy::Severity,
             Self::Cyclomatic => SortBy::Cyclomatic,
             Self::Cognitive => SortBy::Cognitive,
             Self::Lines => SortBy::Lines,

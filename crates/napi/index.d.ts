@@ -40,7 +40,7 @@ export interface DuplicationOptions extends AnalysisOptions {
   top?: number;
 }
 
-export type ComplexitySort = 'cyclomatic' | 'cognitive' | 'lines';
+export type ComplexitySort = 'cyclomatic' | 'cognitive' | 'lines' | 'severity';
 export type OwnershipEmailMode = 'raw' | 'handle' | 'hash';
 export type TargetEffort = 'low' | 'medium' | 'high';
 

@@ -467,7 +467,7 @@ enum Command {
         #[arg(long)]
         top: Option<usize>,
 
-        /// Sort by: cyclomatic, cognitive, or lines
+        /// Sort by: cyclomatic (default), cognitive, lines, or severity
         #[arg(long, default_value = "cyclomatic")]
         sort: SortBy,
 

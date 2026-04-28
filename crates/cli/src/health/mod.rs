@@ -54,6 +54,7 @@ pub struct RuntimeCoverageOptions {
 /// Sort criteria for complexity output.
 #[derive(Clone, clap::ValueEnum)]
 pub enum SortBy {
+    Severity,
     Cyclomatic,
     Cognitive,
     Lines,
@@ -832,9 +833,37 @@ fn apply_duplication_metrics(
 /// Sort findings by the specified criteria.
 fn sort_findings(findings: &mut [HealthFinding], sort: &SortBy) {
     match sort {
+        SortBy::Severity => findings.sort_by_key(|f| {
+            std::cmp::Reverse((
+                exceeded_priority(f.exceeded),
+                severity_priority(f.severity),
+                f.crap.is_some(),
+                f.cyclomatic,
+                f.cognitive,
+                f.line_count,
+            ))
+        }),
         SortBy::Cyclomatic => findings.sort_by_key(|f| std::cmp::Reverse(f.cyclomatic)),
         SortBy::Cognitive => findings.sort_by_key(|f| std::cmp::Reverse(f.cognitive)),
         SortBy::Lines => findings.sort_by_key(|f| std::cmp::Reverse(f.line_count)),
+    }
+}
+
+const fn exceeded_priority(exceeded: ExceededThreshold) -> u8 {
+    match exceeded {
+        ExceededThreshold::All => 5,
+        ExceededThreshold::CyclomaticCrap | ExceededThreshold::CognitiveCrap => 4,
+        ExceededThreshold::Crap => 3,
+        ExceededThreshold::Both => 2,
+        ExceededThreshold::Cyclomatic | ExceededThreshold::Cognitive => 1,
+    }
+}
+
+const fn severity_priority(severity: FindingSeverity) -> u8 {
+    match severity {
+        FindingSeverity::Critical => 3,
+        FindingSeverity::High => 2,
+        FindingSeverity::Moderate => 1,
     }
 }
 
@@ -1941,6 +1970,66 @@ mod tests {
         let set = build_ignore_set(&patterns);
         // The valid pattern should still work
         assert!(set.is_match(Path::new("foo.js")));
+    }
+
+    fn make_finding(name: &str, exceeded: ExceededThreshold) -> HealthFinding {
+        HealthFinding {
+            path: PathBuf::from("/project/src/a.ts"),
+            name: name.to_string(),
+            line: 1,
+            col: 0,
+            cyclomatic: match exceeded {
+                ExceededThreshold::Cyclomatic
+                | ExceededThreshold::Both
+                | ExceededThreshold::CyclomaticCrap
+                | ExceededThreshold::All => 25,
+                _ => 8,
+            },
+            cognitive: match exceeded {
+                ExceededThreshold::Cognitive
+                | ExceededThreshold::Both
+                | ExceededThreshold::CognitiveCrap
+                | ExceededThreshold::All => 20,
+                _ => 5,
+            },
+            line_count: 10,
+            param_count: 0,
+            exceeded,
+            severity: FindingSeverity::Moderate,
+            crap: exceeded.includes_crap().then_some(30.0),
+            coverage_pct: None,
+            coverage_tier: None,
+        }
+    }
+
+    #[test]
+    fn sort_findings_by_severity_surfaces_crap_before_single_metric_findings() {
+        let mut findings = vec![
+            make_finding("cyclomatic", ExceededThreshold::Cyclomatic),
+            make_finding("cognitive", ExceededThreshold::Cognitive),
+            make_finding("both", ExceededThreshold::Both),
+            make_finding("crap", ExceededThreshold::Crap),
+            make_finding("cyclomatic_crap", ExceededThreshold::CyclomaticCrap),
+            make_finding("all", ExceededThreshold::All),
+        ];
+
+        sort_findings(&mut findings, &SortBy::Severity);
+
+        let names = findings
+            .iter()
+            .map(|finding| finding.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            [
+                "all",
+                "cyclomatic_crap",
+                "crap",
+                "both",
+                "cyclomatic",
+                "cognitive",
+            ]
+        );
     }
 
     // ── collect_findings ────────────────────────────────────────

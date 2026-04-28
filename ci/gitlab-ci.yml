@@ -123,7 +123,7 @@ variables:
   FALLOW_MIN_OBSERVATION_VOLUME: "" # Minimum observation volume required for high-confidence runtime coverage verdicts
   FALLOW_LOW_TRAFFIC_THRESHOLD: "" # Fraction of total trace volume below which an invoked function is classified as low_traffic
   FALLOW_TOP: ""
-  FALLOW_SORT: ""               # cyclomatic, cognitive, or lines
+  FALLOW_SORT: ""               # cyclomatic (default), cognitive, lines, or severity
   FALLOW_SCORE: "false"          # health score (0-100 with letter grade), enables delta header in MR comments
   FALLOW_FILE_SCORES: "false"
   FALLOW_HOTSPOTS: "false"

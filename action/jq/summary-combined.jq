@@ -9,6 +9,21 @@ def dupes_docs: "https://docs.fallow.tools/explanations/duplication";
 def suppression_docs: "https://docs.fallow.tools/configuration/suppression";
 def metric_delta(name):
   (.health.health_trend.metrics // []) | map(select(.name == name)) | first // null;
+def exceeded_priority:
+  (.exceeded // "") as $e |
+  if $e == "all" then 5
+  elif $e == "cyclomatic_crap" or $e == "cognitive_crap" then 4
+  elif $e == "crap" then 3
+  elif $e == "both" then 2
+  elif $e == "cyclomatic" or $e == "cognitive" then 1
+  else 0 end;
+def severity_priority:
+  (.severity // "") as $s |
+  if $s == "critical" then 3 elif $s == "high" then 2 elif $s == "moderate" then 1 else 0 end;
+def ranked_health_findings:
+  (.health.findings // [])
+  | sort_by([exceeded_priority, severity_priority, (.crap != null), (.cyclomatic // 0), (.cognitive // 0), (.line_count // 0)])
+  | reverse;
 def prod_failing_findings:
   (.health.runtime_coverage.findings // [])
   | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic"));
@@ -120,12 +135,17 @@ else
 
   # Complexity breakdown
   (if $complex > 0 then
+    (ranked_health_findings) as $findings |
+    (($summary.max_crap_threshold != null) or ($findings | map(.crap) | any(. != null))) as $show_crap |
+    ($summary.max_cyclomatic_threshold // "default") as $cyc_t |
+    ($summary.max_cognitive_threshold // "default") as $cog_t |
+    ($summary.max_crap_threshold // "default") as $crap_t |
     "<details>\n<summary><strong><a href=\"\(health_docs)#complexity-metrics\">Complexity</a> (\($complex) functions above threshold)</strong></summary>\n\n" +
-    "| File | Function | [Cyclomatic](\(health_docs)#cyclomatic-complexity) | [Cognitive](\(health_docs)#cognitive-complexity) |\n|:-----|:---------|----------:|---------:|\n" +
-    ([.health.findings[:5][] |
-      "| `\(.path | rel_path):\(.line)` | `\(.name)` | \(.cyclomatic) | \(.cognitive) |"
+    "| File | Function | Severity | [Cyclomatic](\(health_docs)#cyclomatic-complexity) | [Cognitive](\(health_docs)#cognitive-complexity)\(if $show_crap then " | [CRAP](\(health_docs)#crap-score)" else "" end) | Lines |\n|:-----|:---------|:---------|----------:|---------:\(if $show_crap then "|-----:" else "" end)|------:|\n" +
+    ([$findings[:5][] |
+      "| `\(.path | rel_path):\(.line)` | `\(.name)` | \(.severity // "moderate") | \(.cyclomatic)\(if (.exceeded // "") | test("cyclomatic|both|all") then " **!**" else "" end) | \(.cognitive)\(if (.exceeded // "") | test("cognitive|both|all") then " **!**" else "" end)\(if $show_crap then " | \(if .crap == null then "-" else (.crap | tostring) + (if (.exceeded // "") | test("crap|all") then " **!**" else "" end) end)" else "" end) | \(.line_count) |"
     ] | join("\n")) +
-    "\n\n</details>\n\n"
+    "\n\n**\($summary.files_analyzed // "unknown")** files, **\($summary.functions_analyzed // "unknown")** functions analyzed (thresholds: cyclomatic > \($cyc_t), cognitive > \($cog_t)\(if $show_crap then ", CRAP >= \($crap_t)" else "" end))\n\n</details>\n\n"
   else "" end) +
 
   (if $prod_failing > 0 or $prod_advisory > 0 or $hot_paths > 0 then

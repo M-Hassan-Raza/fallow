@@ -414,10 +414,10 @@ pub struct HealthParams {
     /// fallow estimates coverage from the module graph.
     pub max_crap: Option<f64>,
 
-    /// Number of top results to return, sorted by complexity.
+    /// Number of top results to return.
     pub top: Option<usize>,
 
-    /// Sort order for results (e.g., "cyclomatic", "cognitive").
+    /// Sort order for results (e.g., "cyclomatic", "cognitive", "lines", "severity").
     pub sort: Option<String>,
 
     /// Git ref to compare against. Only files changed since this ref are analyzed.

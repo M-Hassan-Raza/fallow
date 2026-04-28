@@ -74,6 +74,63 @@ assert_json_value() {
   fi
 }
 
+# --- Install script tests ---
+
+echo ""
+echo "=== Install script ==="
+
+INSTALL_TMP=$(mktemp -d)
+trap 'rm -rf "$INSTALL_TMP"' EXIT
+mkdir -p "$INSTALL_TMP/pinned" "$INSTALL_TMP/range" "$INSTALL_TMP/unsafe" "$INSTALL_TMP/empty"
+
+cat > "$INSTALL_TMP/pinned/package.json" <<'JSON'
+{"devDependencies":{"fallow":"2.7.3"}}
+JSON
+cat > "$INSTALL_TMP/range/package.json" <<'JSON'
+{"dependencies":{"fallow":"^2.52.0"}}
+JSON
+cat > "$INSTALL_TMP/unsafe/package.json" <<'JSON'
+{"devDependencies":{"fallow":"workspace:*"}}
+JSON
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/pinned" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Using fallow version from" "install: reads package.json pin"
+assert_contains "$OUT" "DRY RUN: npm install -g fallow@2.7.3" "install: installs project pin"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/range" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g fallow@^2.52.0" "install: supports package.json semver range"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="2.52.0 - 2.53.0" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g fallow@2.52.0 - 2.53.0" "install: supports npm hyphen ranges"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/pinned" FALLOW_VERSION="latest" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Using fallow version from action input: latest" "install: explicit version wins"
+assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: explicit latest installs latest"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/unsafe" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Ignoring unsupported fallow package.json spec" "install: warns on unsupported package spec"
+assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: unsupported package spec falls back to latest"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g fallow" "install: no package spec falls back to latest"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="file:../fallow" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -ne 0 ]; then
+  pass "install: invalid explicit spec fails"
+else
+  fail "install: invalid explicit spec fails" "expected non-zero exit"
+fi
+assert_contains "$OUT" "Invalid version specifier" "install: invalid explicit spec explains failure"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="2.0.0 -g malicious" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -ne 0 ]; then
+  pass "install: rejects dash-prefixed extra args in spec"
+else
+  fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
+fi
+
 # --- Summary jq tests ---
 
 echo ""
@@ -144,7 +201,27 @@ assert_contains "$OUT" "code issues" "mentions code issues"
 assert_contains "$OUT" "Maintainability" "shows vital signs"
 
 assert_contains "$OUT" "Codebase health" "has codebase health header"
+assert_contains "$OUT" "CRAP" "combined: shows CRAP column"
+assert_contains "$OUT" "thresholds: cyclomatic" "combined: shows complexity threshold line"
 assert_not_contains "$OUT" "Dead exports" "no dead_export_pct in PR comment"
+
+OUT_CRAP_ONLY=$(jq '.health.summary.functions_above_threshold = 1 | .health.findings = [{"path":"src/ui/pagination.tsx","name":"buildPageItems","line":42,"col":0,"cyclomatic":17,"cognitive":8,"crap":30,"line_count":13,"severity":"moderate","exceeded":"crap"}]' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_CRAP_ONLY" "buildPageItems" "combined: renders CRAP-only finding"
+assert_contains "$OUT_CRAP_ONLY" "CRAP >= 30" "combined: explains CRAP threshold"
+
+OUT_CRAP_SORT=$(jq '.health.summary.functions_above_threshold = 6 | .health.findings = [
+  {"path":"src/a.ts","name":"cyclo1","line":1,"col":0,"cyclomatic":80,"cognitive":4,"line_count":10,"severity":"critical","exceeded":"cyclomatic"},
+  {"path":"src/a.ts","name":"cyclo2","line":2,"col":0,"cyclomatic":70,"cognitive":4,"line_count":10,"severity":"critical","exceeded":"cyclomatic"},
+  {"path":"src/a.ts","name":"cyclo3","line":3,"col":0,"cyclomatic":60,"cognitive":4,"line_count":10,"severity":"critical","exceeded":"cyclomatic"},
+  {"path":"src/a.ts","name":"cyclo4","line":4,"col":0,"cyclomatic":50,"cognitive":4,"line_count":10,"severity":"critical","exceeded":"cyclomatic"},
+  {"path":"src/a.ts","name":"cyclo5","line":5,"col":0,"cyclomatic":40,"cognitive":4,"line_count":10,"severity":"high","exceeded":"cyclomatic"},
+  {"path":"src/a.ts","name":"crapOnly","line":6,"col":0,"cyclomatic":8,"cognitive":4,"crap":30,"line_count":10,"severity":"moderate","exceeded":"crap"}
+]' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_CRAP_SORT" "crapOnly" "combined: severity sort surfaces CRAP-only finding in visible rows"
+
+OUT_OLD_HEALTH=$(jq 'del(.health.summary.max_cyclomatic_threshold) | del(.health.summary.max_cognitive_threshold) | del(.health.summary.max_crap_threshold) | .health.findings = [{"path":"src/a.ts","name":"legacyComplex","line":1,"col":0,"cyclomatic":25,"cognitive":20,"line_count":10,"severity":"moderate","exceeded":"both"}]' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_OLD_HEALTH" "thresholds: cyclomatic > default, cognitive > default" "combined: old JSON threshold fallback is explicit"
+assert_not_contains "$OUT_OLD_HEALTH" "CRAP" "combined: old JSON without CRAP metadata hides CRAP column"
 
 echo "  summary-combined.jq (scoped maintainability):"
 # Simulate --changed-since filtering: keep only 1 file_score (76.2) vs codebase avg (86.8)

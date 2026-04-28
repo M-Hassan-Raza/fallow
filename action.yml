@@ -56,9 +56,9 @@ inputs:
     description: 'Save current results as a baseline file'
     required: false
   version:
-    description: 'Fallow version to use (default: latest)'
+    description: 'Fallow version override. When omitted, the action uses the project package.json fallow dependency spec if present, otherwise latest.'
     required: false
-    default: 'latest'
+    default: ''
   args:
     description: 'Additional arguments to pass to fallow (space-separated)'
     required: false
@@ -145,7 +145,7 @@ inputs:
     description: 'Show only the N worst offenders (health and dupes commands)'
     required: false
   sort:
-    description: 'Sort order for health results: cyclomatic, cognitive, or lines (health command)'
+    description: 'Sort order for health results: cyclomatic (default), cognitive, lines, or severity (health command)'
     required: false
   file-scores:
     description: 'Compute per-file maintainability index (health command)'
@@ -244,6 +244,7 @@ runs:
       shell: bash
       env:
         FALLOW_VERSION: ${{ inputs.version }}
+        INPUT_ROOT: ${{ inputs.root }}
       run: bash ${{ github.action_path }}/action/scripts/install.sh
 
     - name: Cache analysis results
