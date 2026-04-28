@@ -2,6 +2,12 @@
 # Differences from GitHub: no > [!NOTE] / > [!WARNING] / > [!TIP] callouts
 
 def docs(anchor): "https://docs.fallow.tools/explanations/dead-code#" + anchor;
+def workspace_context:
+  if ((.used_in_workspaces // []) | length) > 0 then
+    (.used_in_workspaces | map("`\(.)`") | join(", "))
+  else
+    ""
+  end;
 
 def table_row(name; key; anchor):
   (.[key] | length) as $n |
@@ -54,14 +60,14 @@ else
     "Type exports with no known consumers.\n\n| File | Line | Type |\n|------|-----:|------|\n";
     "| `\(.path)` | \(.line) | `\(.export_name)` |") +
   section("Unused dependencies"; "unused_dependencies";
-    "Listed in `dependencies` but never imported.\n\n| Package |\n|---------|\n";
-    "| `\(.package_name)` |") +
+    "Listed in `dependencies` but never imported by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n";
+    "| `\(.package_name)` | \(workspace_context) |") +
   section("Unused devDependencies"; "unused_dev_dependencies";
-    "Listed in `devDependencies` but never imported or referenced.\n\n| Package |\n|---------|\n";
-    "| `\(.package_name)` |") +
+    "Listed in `devDependencies` but never imported or referenced by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n";
+    "| `\(.package_name)` | \(workspace_context) |") +
   section("Unused optionalDependencies"; "unused_optional_dependencies";
-    "Listed in `optionalDependencies` but never imported.\n\n| Package |\n|---------|\n";
-    "| `\(.package_name)` |") +
+    "Listed in `optionalDependencies` but never imported by the declaring workspace.\n\n| Package | Imported elsewhere |\n|---------|--------------------|\n";
+    "| `\(.package_name)` | \(workspace_context) |") +
   section("Unused enum members"; "unused_enum_members";
     "Enum members never referenced outside their declaration.\n\n| File | Line | Enum | Member |\n|------|-----:|------|--------|\n";
     "| `\(.path)` | \(.line) | `\(.parent_name)` | `\(.member_name)` |") +

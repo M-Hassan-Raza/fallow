@@ -1145,18 +1145,21 @@ mod tests {
             location: fallow_core::results::DependencyLocation::Dependencies,
             path: "/pkg.json".into(),
             line: 3,
+            used_in_workspaces: Vec::new(),
         });
         source.unused_dev_dependencies.push(UnusedDependency {
             package_name: "dev-dep".to_string(),
             location: fallow_core::results::DependencyLocation::DevDependencies,
             path: "/pkg.json".into(),
             line: 4,
+            used_in_workspaces: Vec::new(),
         });
         source.unused_optional_dependencies.push(UnusedDependency {
             package_name: "opt-dep".to_string(),
             location: fallow_core::results::DependencyLocation::OptionalDependencies,
             path: "/pkg.json".into(),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         source.unused_enum_members.push(UnusedMember {
             path: "/f.ts".into(),
@@ -1539,6 +1542,7 @@ mod tests {
                 location: fallow_core::results::DependencyLocation::Dependencies,
                 path: "/repo/package.json".into(),
                 line: 5,
+                used_in_workspaces: Vec::new(),
             });
         }
         // Genuinely distinct: different package.json (sub-package).
@@ -1547,6 +1551,7 @@ mod tests {
             location: fallow_core::results::DependencyLocation::Dependencies,
             path: "/repo/packages/web/package.json".into(),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         dedup_results(&mut results);

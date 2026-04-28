@@ -23,6 +23,7 @@ fn collect_unused_empty_deps_returns_empty() {
         &category,
         &shared,
         |_| false,
+        |_| Vec::new(),
         Path::new("/pkg.json"),
         None,
     );
@@ -51,6 +52,7 @@ fn collect_unused_all_used_returns_empty() {
         &category,
         &shared,
         |_| true, // all used
+        |_| Vec::new(),
         Path::new("/pkg.json"),
         None,
     );
@@ -83,6 +85,7 @@ fn collect_unused_some_unused_are_flagged() {
         &category,
         &shared,
         |dep| dep == "react", // only react is used
+        |_| Vec::new(),
         Path::new("/project/package.json"),
         None,
     );
@@ -119,6 +122,7 @@ fn collect_unused_implicit_filter_skips_react_dom() {
         &category,
         &shared,
         |_| false,
+        |_| Vec::new(),
         Path::new("/pkg.json"),
         None,
     );
@@ -149,6 +153,7 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
         &category,
         &shared,
         |_| false,
+        |_| Vec::new(),
         Path::new("/pkg.json"),
         None,
     );
@@ -178,6 +183,7 @@ fn collect_unused_known_tooling_filter_skips_jest() {
         &category,
         &shared,
         |_| false,
+        |_| Vec::new(),
         Path::new("/pkg.json"),
         None,
     );
@@ -215,6 +221,7 @@ fn collect_unused_plugin_tooling_filter() {
         &category,
         &shared,
         |_| false,
+        |_| Vec::new(),
         Path::new("/pkg.json"),
         None,
     );
@@ -252,6 +259,7 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
         &category,
         &shared,
         |_| false,
+        |_| Vec::new(),
         Path::new("/pkg.json"),
         None,
     );

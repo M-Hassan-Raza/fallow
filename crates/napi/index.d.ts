@@ -117,6 +117,7 @@ export interface UnusedDependencyFinding {
   package_name: string;
   line: number;
   col: number;
+  used_in_workspaces?: string[];
   actions?: AnalysisAction[];
   [key: string]: unknown;
 }

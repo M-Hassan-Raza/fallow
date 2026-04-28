@@ -527,6 +527,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         let lines = build_compact_lines(&results, &root);
@@ -542,6 +543,7 @@ mod tests {
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         let lines = build_compact_lines(&results, &root);
@@ -732,6 +734,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
+            used_in_workspaces: Vec::new(),
         });
 
         let lines = build_compact_lines(&results, &root);
@@ -831,12 +834,14 @@ mod tests {
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_optional_dependencies.push(UnusedDependency {
             package_name: "fsevents".to_string(),
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_enum_members.push(UnusedMember {
             path: root.join("src/enums.ts"),

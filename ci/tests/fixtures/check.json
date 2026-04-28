@@ -75,7 +75,8 @@
       "package_name": "react",
       "location": "dependencies",
       "path": "package.json",
-      "line": 24
+      "line": 24,
+      "used_in_workspaces": ["packages/client"]
     },
     {
       "package_name": "jotai",

@@ -461,6 +461,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         let duplication = empty_duplication();
@@ -485,6 +486,7 @@ mod tests {
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         let duplication = empty_duplication();
@@ -599,6 +601,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
+            used_in_workspaces: Vec::new(),
         });
 
         let duplication = empty_duplication();

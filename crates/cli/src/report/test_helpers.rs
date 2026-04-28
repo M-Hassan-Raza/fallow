@@ -35,18 +35,21 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     r.unused_dev_dependencies.push(UnusedDependency {
         package_name: "jest".to_string(),
         location: DependencyLocation::DevDependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     r.unused_optional_dependencies.push(UnusedDependency {
         package_name: "fsevents".to_string(),
         location: DependencyLocation::OptionalDependencies,
         path: root.join("package.json"),
         line: 15,
+        used_in_workspaces: Vec::new(),
     });
     r.unused_enum_members.push(UnusedMember {
         path: root.join("src/enums.ts"),

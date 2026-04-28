@@ -82,6 +82,30 @@ fn unused_optional_dependency_detected() {
     );
 }
 
+#[test]
+fn unused_workspace_dependency_reports_other_workspace_usage() {
+    let root = fixture_path("cross-workspace-dependency-context");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let dep = results
+        .unused_dependencies
+        .iter()
+        .find(|dep| dep.package_name == "lodash-es")
+        .expect("lodash-es should be unused in the shared workspace");
+
+    assert!(
+        dep.path.ends_with("packages/shared/package.json"),
+        "finding should point at the workspace that declares lodash-es, got {}",
+        dep.path.display()
+    );
+    assert_eq!(
+        dep.used_in_workspaces,
+        vec![root.join("packages/consumer")],
+        "unused dependency should identify the sibling workspace importing it"
+    );
+}
+
 // ── Package.json `imports` field (#subpath imports) ─────────
 
 #[test]

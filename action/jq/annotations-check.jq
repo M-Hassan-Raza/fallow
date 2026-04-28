@@ -3,6 +3,18 @@ def nl: "%0A";
 def pm: $ENV.PKG_MANAGER // "npm";
 def remove_cmd(pkg): if pm == "pnpm" then "pnpm remove \(pkg)" elif pm == "yarn" then "yarn remove \(pkg)" else "npm uninstall \(pkg)" end;
 def add_cmd(pkg): if pm == "pnpm" then "pnpm add \(pkg)" elif pm == "yarn" then "yarn add \(pkg)" else "npm install \(pkg)" end;
+def workspace_context:
+  if ((.used_in_workspaces // []) | length) > 0 then
+    "\(nl)\(nl)Imported in other workspaces: " + (.used_in_workspaces | join(", "))
+  else
+    ""
+  end;
+def dependency_action(pkg):
+  if ((.used_in_workspaces // []) | length) > 0 then
+    "Move this dependency to the consuming workspace package.json."
+  else
+    "Run: \(remove_cmd(pkg))"
+  end;
 [
   (.unused_files[]? |
     "::warning file=\(.path | san),title=Unused file::This file is not imported by any other module and unreachable from entry points.\(nl)Consider removing it or importing it where needed."),
@@ -11,11 +23,11 @@ def add_cmd(pkg): if pm == "pnpm" then "pnpm add \(pkg)" elif pm == "yarn" then 
   (.unused_types[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused type::\(if .is_re_export then "Re-exported" else "Exported" end) type '\(.export_name | san)' is never imported by other modules.\(nl)\(nl)If only used internally, remove the export keyword."),
   (.unused_dependencies[]? |
-    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused dependency::Package '\(.package_name | san)' is listed in dependencies but never imported anywhere in the project.\(nl)\(nl)Run: \(remove_cmd(.package_name | san))"),
+    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused dependency::Package '\(.package_name | san)' is listed in dependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))"),
   (.unused_dev_dependencies[]? |
-    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused devDependency::Package '\(.package_name | san)' is listed in devDependencies but never imported.\(nl)\(nl)Run: \(remove_cmd(.package_name | san))"),
+    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused devDependency::Package '\(.package_name | san)' is listed in devDependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))"),
   (.unused_optional_dependencies[]? |
-    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused optionalDependency::Package '\(.package_name | san)' is listed in optionalDependencies but never imported.\(nl)\(nl)Run: \(remove_cmd(.package_name | san))"),
+    "::warning file=\(.path | san)\(if .line > 0 then ",line=\(.line)" else "" end),title=Unused optionalDependency::Package '\(.package_name | san)' is listed in optionalDependencies but never imported by this package.\(workspace_context)\(nl)\(nl)\(dependency_action(.package_name | san))"),
   (.unused_enum_members[]? |
     "::warning file=\(.path | san),line=\(.line),col=\(.col + 1),title=Unused enum member::Enum member '\(.parent_name | san).\(.member_name | san)' is never referenced in the codebase.\(nl)\(nl)Consider removing it to keep the enum minimal."),
   (.unused_class_members[]? |

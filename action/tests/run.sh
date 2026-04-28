@@ -85,6 +85,8 @@ assert_valid_markdown "$OUT" "produces output"
 assert_contains "$OUT" "Fallow Analysis" "has title"
 assert_contains "$OUT" "issues" "mentions issues"
 assert_contains "$OUT" "Unused" "lists unused categories"
+assert_contains "$OUT" "Imported elsewhere" "shows dependency workspace context column"
+assert_contains "$OUT" 'packages/client' "shows dependency workspace context value"
 
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
@@ -203,6 +205,8 @@ OUT=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check.json" 2>&1)
 assert_contains "$OUT" "::warning" "emits warning commands"
 assert_contains "$OUT" "file=" "has file references"
 assert_contains "$OUT" "title=" "has titles"
+assert_contains "$OUT" "Imported in other workspaces" "dependency annotation includes workspace context"
+assert_contains "$OUT" "Move this dependency to the consuming workspace package.json" "dependency annotation avoids unsafe remove hint"
 
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 [ -z "$OUT_CLEAN" ] && pass "clean: no annotations" || fail "clean: no annotations" "got output"
@@ -238,6 +242,8 @@ assert_contains "$OUT" "Unused" "contains unused findings"
 assert_contains "$OUT" "@public" "mentions @public JSDoc tag"
 assert_contains "$OUT" "docs.fallow.tools" "has docs links"
 assert_contains "$OUT" "Configure or suppress" "has suppress link"
+assert_contains "$OUT" "imported in another workspace" "dependency comment includes workspace context"
+assert_contains "$OUT" "Move this dependency to the workspace that imports it" "dependency comment avoids unsafe remove hint"
 
 OUT_CLEAN=$(jq -f "$JQ_DIR/review-comments-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_json_length "$OUT_CLEAN" "0" "clean: no comments"

@@ -138,12 +138,23 @@ fn sarif_dep_fields(
     level: &'static str,
     section: &str,
 ) -> SarifFields {
+    let workspace_context = if dep.used_in_workspaces.is_empty() {
+        String::new()
+    } else {
+        let workspaces = dep
+            .used_in_workspaces
+            .iter()
+            .map(|path| relative_uri(path, root))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("; imported in other workspaces: {workspaces}")
+    };
     SarifFields {
         rule_id,
         level,
         message: format!(
-            "Package '{}' is in {} but never imported",
-            dep.package_name, section
+            "Package '{}' is in {} but never imported{}",
+            dep.package_name, section, workspace_context
         ),
         uri: relative_uri(&dep.path, root),
         region: if dep.line > 0 {
@@ -1262,12 +1273,14 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
@@ -1708,6 +1721,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 0,
+            used_in_workspaces: Vec::new(),
         });
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
@@ -1725,6 +1739,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 7,
+            used_in_workspaces: Vec::new(),
         });
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());
@@ -1802,6 +1817,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
+            used_in_workspaces: Vec::new(),
         });
 
         let sarif = build_sarif(&results, &root, &RulesConfig::default());

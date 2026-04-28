@@ -68,7 +68,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_dependencies,
         "Unused dependencies",
-        |dep| format_dependency(&dep.package_name, &dep.path, root),
+        |dep| format_dependency(&dep.package_name, &dep.path, &dep.used_in_workspaces, root),
     );
 
     // ── Unused devDependencies ──
@@ -76,7 +76,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_dev_dependencies,
         "Unused devDependencies",
-        |dep| format_dependency(&dep.package_name, &dep.path, root),
+        |dep| format_dependency(&dep.package_name, &dep.path, &dep.used_in_workspaces, root),
     );
 
     // ── Unused optionalDependencies ──
@@ -84,7 +84,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.unused_optional_dependencies,
         "Unused optionalDependencies",
-        |dep| format_dependency(&dep.package_name, &dep.path, root),
+        |dep| format_dependency(&dep.package_name, &dep.path, &dep.used_in_workspaces, root),
     );
 
     // ── Unused enum members ──
@@ -149,7 +149,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.type_only_dependencies,
         "Type-only dependencies (consider moving to devDependencies)",
-        |dep| format_dependency(&dep.package_name, &dep.path, root),
+        |dep| format_dependency(&dep.package_name, &dep.path, &[], root),
     );
 
     // ── Test-only dependencies ──
@@ -157,7 +157,7 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
         &mut out,
         &results.test_only_dependencies,
         "Test-only production dependencies (consider moving to devDependencies)",
-        |dep| format_dependency(&dep.package_name, &dep.path, root),
+        |dep| format_dependency(&dep.package_name, &dep.path, &[], root),
     );
 
     // ── Circular dependencies ──
@@ -288,13 +288,32 @@ fn format_member(m: &UnusedMember) -> String {
     )
 }
 
-fn format_dependency(dep_name: &str, pkg_path: &Path, root: &Path) -> Vec<String> {
+fn format_dependency(
+    dep_name: &str,
+    pkg_path: &Path,
+    used_in_workspaces: &[std::path::PathBuf],
+    root: &Path,
+) -> Vec<String> {
     let name = escape_backticks(dep_name);
     let pkg_label = relative_path(pkg_path, root).display().to_string();
-    if pkg_label == "package.json" {
+    let workspace_context = if used_in_workspaces.is_empty() {
+        String::new()
+    } else {
+        let workspaces = used_in_workspaces
+            .iter()
+            .map(|path| escape_backticks(&relative_path(path, root).display().to_string()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("; imported in {workspaces}")
+    };
+    if pkg_label == "package.json" && workspace_context.is_empty() {
         vec![format!("- `{name}`")]
     } else {
-        let label = escape_backticks(&pkg_label);
+        let label = if pkg_label == "package.json" {
+            workspace_context.trim_start_matches("; ").to_string()
+        } else {
+            format!("{}{workspace_context}", escape_backticks(&pkg_label))
+        };
         vec![format!("- `{name}` ({label})")]
     }
 }
@@ -1162,6 +1181,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         let md = build_markdown(&results, &root);
         assert!(md.contains("- `lodash`"));
@@ -1248,6 +1268,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         let md = build_markdown(&results, &root);
         assert!(md.contains("pkg\\`name"));
@@ -1597,6 +1618,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("packages/core/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         let md = build_markdown(&results, &root);
         // Non-root package.json should show the label
@@ -1612,10 +1634,27 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         let md = build_markdown(&results, &root);
         assert!(md.contains("- `lodash`"));
         assert!(!md.contains("(package.json)"));
+    }
+
+    #[test]
+    fn markdown_root_dep_with_cross_workspace_context_uses_context_label() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash-es".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 5,
+            used_in_workspaces: vec![root.join("packages/consumer")],
+        });
+        let md = build_markdown(&results, &root);
+        assert!(md.contains("- `lodash-es` (imported in packages/consumer)"));
+        assert!(!md.contains("(package.json; imported in packages/consumer)"));
     }
 
     // ── Multiple exports same file grouped ──
@@ -1996,6 +2035,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
+            used_in_workspaces: Vec::new(),
         });
         let md = build_markdown(&results, &root);
         assert!(md.contains("### Unused optionalDependencies (1)"));

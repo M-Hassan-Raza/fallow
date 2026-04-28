@@ -427,13 +427,27 @@ fn build_actions(
     spec: &ActionSpec,
 ) -> serde_json::Value {
     let mut actions = Vec::with_capacity(2);
+    let cross_workspace_dependency = is_dependency_issue(issue_key)
+        && item
+            .get("used_in_workspaces")
+            .and_then(serde_json::Value::as_array)
+            .is_some_and(|workspaces| !workspaces.is_empty());
 
     // Primary fix action
-    let mut fix_action = serde_json::json!({
-        "type": spec.fix_type,
-        "auto_fixable": spec.auto_fixable,
-        "description": spec.description,
-    });
+    let mut fix_action = if cross_workspace_dependency {
+        serde_json::json!({
+            "type": "move-dependency",
+            "auto_fixable": false,
+            "description": "Move this dependency to the workspace package.json that imports it",
+            "note": "fallow fix will not remove dependencies that are imported by another workspace",
+        })
+    } else {
+        serde_json::json!({
+            "type": spec.fix_type,
+            "auto_fixable": spec.auto_fixable,
+            "description": spec.description,
+        })
+    };
     if let Some(note) = spec.note {
         fix_action["note"] = serde_json::json!(note);
     }
@@ -490,6 +504,13 @@ fn build_actions(
     }
 
     serde_json::Value::Array(actions)
+}
+
+fn is_dependency_issue(issue_key: &str) -> bool {
+    matches!(
+        issue_key,
+        "unused_dependencies" | "unused_dev_dependencies" | "unused_optional_dependencies"
+    )
 }
 
 /// Inject `actions` arrays into every issue item in the JSON output.
@@ -1904,6 +1925,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 10,
+            used_in_workspaces: Vec::new(),
         });
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
@@ -1911,6 +1933,28 @@ mod tests {
         let dep = &output["unused_dependencies"][0];
         assert_eq!(dep["package_name"], "axios");
         assert_eq!(dep["line"], 10);
+        assert!(dep.get("used_in_workspaces").is_none());
+    }
+
+    #[test]
+    fn json_unused_dependency_includes_cross_workspace_context() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash-es".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/shared/package.json"),
+            line: 6,
+            used_in_workspaces: vec![root.join("packages/consumer")],
+        });
+        let elapsed = Duration::from_millis(0);
+        let output = build_json(&results, &root, elapsed).expect("should serialize");
+
+        let dep = &output["unused_dependencies"][0];
+        assert_eq!(
+            dep["used_in_workspaces"],
+            serde_json::json!(["packages/consumer"])
+        );
     }
 
     #[test]
@@ -1922,6 +1966,7 @@ mod tests {
             location: DependencyLocation::DevDependencies,
             path: root.join("package.json"),
             line: 15,
+            used_in_workspaces: Vec::new(),
         });
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
@@ -1939,6 +1984,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: root.join("package.json"),
             line: 12,
+            used_in_workspaces: Vec::new(),
         });
         let elapsed = Duration::from_millis(0);
         let output = build_json(&results, &root, elapsed).expect("should serialize");
@@ -2599,6 +2645,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         let output = build_json(&results, &root, Duration::ZERO).unwrap();
 
@@ -2612,6 +2659,33 @@ mod tests {
         assert_eq!(actions[1]["type"], "add-to-config");
         assert_eq!(actions[1]["config_key"], "ignoreDependencies");
         assert_eq!(actions[1]["value"], "lodash");
+    }
+
+    #[test]
+    fn json_cross_workspace_dependency_is_not_auto_fixable() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash-es".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/shared/package.json"),
+            line: 5,
+            used_in_workspaces: vec![root.join("packages/consumer")],
+        });
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+
+        let actions = output["unused_dependencies"][0]["actions"]
+            .as_array()
+            .unwrap();
+        assert_eq!(actions[0]["type"], "move-dependency");
+        assert_eq!(actions[0]["auto_fixable"], false);
+        assert!(
+            actions[0]["note"]
+                .as_str()
+                .unwrap()
+                .contains("will not remove")
+        );
+        assert_eq!(actions[1]["type"], "add-to-config");
     }
 
     #[test]

@@ -322,6 +322,12 @@ pub struct UnusedDependency {
     pub path: PathBuf,
     /// 1-based line number of the dependency entry in package.json.
     pub line: u32,
+    /// Workspace roots that import this package even though the declaring workspace does not.
+    #[serde(
+        serialize_with = "serde_path::serialize_vec",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub used_in_workspaces: Vec<PathBuf>,
 }
 
 /// Where in package.json a dependency is listed.
@@ -752,12 +758,14 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "dev".to_string(),
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_enum_members.push(UnusedMember {
             path: PathBuf::from("d.ts"),
@@ -810,6 +818,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.type_only_dependencies.push(TypeOnlyDependency {
             package_name: "type-only".to_string(),
@@ -1020,6 +1029,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: PathBuf::from(path),
             line,
+            used_in_workspaces: Vec::new(),
         };
         r.unused_dependencies.push(mk("b/package.json", 3, "zlib"));
         r.unused_dependencies.push(mk("a/package.json", 5, "react"));
@@ -1043,12 +1053,14 @@ mod tests {
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("package.json"),
             line: 10,
+            used_in_workspaces: Vec::new(),
         });
         r.unused_dev_dependencies.push(UnusedDependency {
             package_name: "jest".to_string(),
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         r.sort();
         assert_eq!(r.unused_dev_dependencies[0].package_name, "jest");
@@ -1065,12 +1077,14 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("package.json"),
             line: 3,
+            used_in_workspaces: Vec::new(),
         });
         r.unused_optional_dependencies.push(UnusedDependency {
             package_name: "ajv".to_string(),
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("package.json"),
             line: 2,
+            used_in_workspaces: Vec::new(),
         });
         r.sort();
         assert_eq!(r.unused_optional_dependencies[0].package_name, "ajv");
@@ -1427,6 +1441,7 @@ mod tests {
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         };
         let json = serde_json::to_value(&dep).unwrap();
         assert_eq!(json["location"], "devDependencies");
@@ -1436,6 +1451,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("package.json"),
             line: 3,
+            used_in_workspaces: Vec::new(),
         };
         let json2 = serde_json::to_value(&dep2).unwrap();
         assert_eq!(json2["location"], "dependencies");
@@ -1445,6 +1461,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("package.json"),
             line: 7,
+            used_in_workspaces: Vec::new(),
         };
         let json3 = serde_json::to_value(&dep3).unwrap();
         assert_eq!(json3["location"], "optionalDependencies");

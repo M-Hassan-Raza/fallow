@@ -43,12 +43,14 @@ fn sample_results(root: &Path) -> AnalysisResults {
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     r.unused_dev_dependencies.push(UnusedDependency {
         package_name: "jest".to_string(),
         location: DependencyLocation::DevDependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     r.unused_enum_members.push(UnusedMember {
         path: root.join("src/enums.ts"),
@@ -101,6 +103,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
         location: DependencyLocation::OptionalDependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     r.type_only_dependencies.push(TypeOnlyDependency {
         package_name: "zod".to_string(),
@@ -274,12 +277,14 @@ fn compact_unused_deps_only_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     results.unused_dependencies.push(UnusedDependency {
         package_name: "moment".to_string(),
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_deps_only", lines.join("\n"));
@@ -294,6 +299,7 @@ fn compact_unused_dev_deps_only_snapshot() {
         location: DependencyLocation::DevDependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_dev_deps_only", lines.join("\n"));
@@ -308,6 +314,7 @@ fn compact_unused_optional_deps_only_snapshot() {
         location: DependencyLocation::OptionalDependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_unused_optional_deps_only", lines.join("\n"));
@@ -603,6 +610,7 @@ fn json_unused_deps_only_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
@@ -771,6 +779,7 @@ fn sarif_unused_deps_only_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -986,12 +995,14 @@ fn json_workspace_dep_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("packages/ui/package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     results.unused_dev_dependencies.push(UnusedDependency {
         package_name: "jest".to_string(),
         location: DependencyLocation::DevDependencies,
         path: root.join("packages/ui/package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
@@ -1007,6 +1018,7 @@ fn sarif_workspace_dep_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("packages/ui/package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let rules = RulesConfig::default();
     let sarif = build_sarif(&results, &root, &rules);
@@ -1095,6 +1107,7 @@ fn codeclimate_unused_deps_only_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let cc = build_codeclimate(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1262,6 +1275,7 @@ fn codeclimate_unused_dev_deps_only_snapshot() {
         location: DependencyLocation::DevDependencies,
         path: root.join("package.json"),
         line: 12,
+        used_in_workspaces: Vec::new(),
     });
     let cc = build_codeclimate(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1277,6 +1291,7 @@ fn codeclimate_unused_optional_deps_only_snapshot() {
         location: DependencyLocation::OptionalDependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let cc = build_codeclimate(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1344,6 +1359,7 @@ fn codeclimate_workspace_dep_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("packages/ui/package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let cc = build_codeclimate(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");
@@ -1439,6 +1455,7 @@ fn json_unused_dev_deps_only_snapshot() {
         location: DependencyLocation::DevDependencies,
         path: root.join("package.json"),
         line: 12,
+        used_in_workspaces: Vec::new(),
     });
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
@@ -1454,6 +1471,7 @@ fn sarif_unused_dev_deps_only_snapshot() {
         location: DependencyLocation::DevDependencies,
         path: root.join("package.json"),
         line: 12,
+        used_in_workspaces: Vec::new(),
     });
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1472,6 +1490,7 @@ fn json_unused_optional_deps_only_snapshot() {
         location: DependencyLocation::OptionalDependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let value = build_json(&results, &root, Duration::ZERO).expect("JSON build should succeed");
     let json_str = serde_json::to_string_pretty(&value).expect("should serialize");
@@ -1487,6 +1506,7 @@ fn sarif_unused_optional_deps_only_snapshot() {
         location: DependencyLocation::OptionalDependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let sarif = build_sarif(&results, &root, &RulesConfig::default());
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1507,6 +1527,7 @@ fn compact_workspace_dep_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("packages/ui/package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let lines = build_compact_lines(&results, &root);
     insta::assert_snapshot!("compact_workspace_deps", lines.join("\n"));
@@ -1606,6 +1627,7 @@ fn markdown_unused_deps_only_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_unused_deps_only", output);
@@ -1751,6 +1773,7 @@ fn markdown_workspace_dep_snapshot() {
         location: DependencyLocation::Dependencies,
         path: root.join("packages/ui/package.json"),
         line: 5,
+        used_in_workspaces: Vec::new(),
     });
     let output = build_markdown(&results, &root);
     insta::assert_snapshot!("markdown_workspace_deps", output);

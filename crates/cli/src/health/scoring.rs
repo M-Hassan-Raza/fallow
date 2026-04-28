@@ -2525,6 +2525,7 @@ mod tests {
                 location: fallow_types::results::DependencyLocation::Dependencies,
                 path: std::path::PathBuf::from("/package.json"),
                 line: 1,
+                used_in_workspaces: Vec::new(),
             });
 
         let output = fallow_core::AnalysisOutput {

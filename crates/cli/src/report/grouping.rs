@@ -972,6 +972,7 @@ mod tests {
             location: fallow_core::results::DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/root/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         let groups = group_analysis_results(&results, &root(), &OwnershipResolver::Directory);

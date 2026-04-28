@@ -68,6 +68,7 @@ pub fn collect_unused_for_category(
     category: &DepCategoryConfig,
     shared: &SharedDepSets<'_>,
     is_used: impl Fn(&str) -> bool,
+    used_in_workspaces: impl Fn(&str) -> Vec<PathBuf>,
     pkg_path: &Path,
     pkg_content: Option<&str>,
 ) -> Vec<UnusedDependency> {
@@ -87,14 +88,65 @@ pub fn collect_unused_for_category(
         .filter(|dep| !shared.workspace_names.contains(dep.as_str()))
         .map(|dep| {
             let line = pkg_content.map_or(1, |c| find_dep_line_in_json(c, &dep));
+            let used_in_workspaces = used_in_workspaces(&dep);
             UnusedDependency {
                 package_name: dep,
                 location: category.location.clone(),
                 path: pkg_path.to_path_buf(),
                 line,
+                used_in_workspaces,
             }
         })
         .collect()
+}
+
+/// Build a reverse index from package name to workspace roots that import it.
+fn collect_package_workspace_usage(
+    graph: &ModuleGraph,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> FxHashMap<String, Vec<PathBuf>> {
+    let mut usage: FxHashMap<String, Vec<PathBuf>> = FxHashMap::default();
+
+    for (package_name, file_ids) in &graph.package_usage {
+        for id in file_ids {
+            let Some(module) = graph.modules.get(id.0 as usize) else {
+                continue;
+            };
+            let Some(ws) = workspaces
+                .iter()
+                .find(|workspace| module.path.starts_with(&workspace.root))
+            else {
+                continue;
+            };
+            usage
+                .entry(package_name.clone())
+                .or_default()
+                .push(ws.root.clone());
+        }
+    }
+
+    for roots in usage.values_mut() {
+        roots.sort();
+        roots.dedup();
+    }
+
+    usage
+}
+
+fn used_in_other_workspaces(
+    package_workspace_usage: &FxHashMap<String, Vec<PathBuf>>,
+    dep: &str,
+    declaring_workspace_root: &Path,
+) -> Vec<PathBuf> {
+    package_workspace_usage
+        .get(dep)
+        .map_or_else(Vec::new, |roots| {
+            roots
+                .iter()
+                .filter(|root| root.as_path() != declaring_workspace_root)
+                .cloned()
+                .collect()
+        })
 }
 
 /// Category configs for the three dependency types.
@@ -173,6 +225,7 @@ pub fn find_unused_dependencies(
 
     // Build per-package set of files that use it (globally)
     let used_packages: FxHashSet<&str> = graph.package_usage.keys().map(String::as_str).collect();
+    let package_workspace_usage = collect_package_workspace_usage(graph, workspaces);
 
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
@@ -186,6 +239,7 @@ pub fn find_unused_dependencies(
     };
 
     let is_used_globally = |dep: &str| used_packages.contains(dep);
+    let no_workspace_context = |_dep: &str| Vec::new();
 
     // --- Root package.json check (existing behavior: any file can satisfy usage) ---
     let mut unused_deps = collect_unused_for_category(
@@ -193,6 +247,7 @@ pub fn find_unused_dependencies(
         &prod_category(),
         &shared,
         is_used_globally,
+        no_workspace_context,
         &root_pkg_path,
         root_pkg_content.as_deref(),
     );
@@ -202,6 +257,7 @@ pub fn find_unused_dependencies(
         &dev_category(),
         &shared,
         is_used_globally,
+        no_workspace_context,
         &root_pkg_path,
         root_pkg_content.as_deref(),
     );
@@ -211,6 +267,7 @@ pub fn find_unused_dependencies(
         &optional_category(),
         &shared,
         is_used_globally,
+        no_workspace_context,
         &root_pkg_path,
         root_pkg_content.as_deref(),
     );
@@ -240,21 +297,19 @@ pub fn find_unused_dependencies(
         let ws_root = &ws.root;
         let is_used_in_workspace = |dep: &str| -> bool {
             root_flagged.contains(dep)
-                || graph.package_usage.get(dep).is_some_and(|file_ids| {
-                    file_ids.iter().any(|id| {
-                        graph
-                            .modules
-                            .get(id.0 as usize)
-                            .is_some_and(|module| module.path.starts_with(ws_root))
-                    })
-                })
+                || package_workspace_usage
+                    .get(dep)
+                    .is_some_and(|roots| roots.iter().any(|root| root == ws_root))
         };
+        let used_in_workspaces =
+            |dep: &str| used_in_other_workspaces(&package_workspace_usage, dep, ws_root);
 
         unused_deps.extend(collect_unused_for_category(
             ws_pkg.production_dependency_names(),
             &prod_category(),
             &shared,
             is_used_in_workspace,
+            used_in_workspaces,
             &ws_pkg_path,
             ws_pkg_content.as_deref(),
         ));
@@ -264,6 +319,7 @@ pub fn find_unused_dependencies(
             &dev_category(),
             &shared,
             is_used_in_workspace,
+            used_in_workspaces,
             &ws_pkg_path,
             ws_pkg_content.as_deref(),
         ));
@@ -273,6 +329,7 @@ pub fn find_unused_dependencies(
             &optional_category(),
             &shared,
             is_used_in_workspace,
+            used_in_workspaces,
             &ws_pkg_path,
             ws_pkg_content.as_deref(),
         ));

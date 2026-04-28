@@ -409,18 +409,21 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_dependencies.push(UnusedDependency {
             package_name: "react".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "vitest".into(),
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         let ws_root = PathBuf::from("/project/packages/ui");
@@ -632,12 +635,14 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "jest".into(),
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 10,
+            used_in_workspaces: Vec::new(),
         });
 
         let changed = rustc_hash::FxHashSet::default(); // empty set
@@ -802,12 +807,14 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 3,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_optional_dependencies.push(UnusedDependency {
             package_name: "esbuild".into(),
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 7,
+            used_in_workspaces: Vec::new(),
         });
 
         let ws_root = PathBuf::from("/project/packages/ui");
@@ -1028,6 +1035,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 3,
+            used_in_workspaces: Vec::new(),
         });
         results.type_only_dependencies.push(TypeOnlyDependency {
             package_name: "zod".into(),
@@ -1345,18 +1353,21 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/packages/ui/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_dependencies.push(UnusedDependency {
             package_name: "react".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/packages/api/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_dependencies.push(UnusedDependency {
             package_name: "axios".into(),
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/packages/legacy/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
 
         let roots = [

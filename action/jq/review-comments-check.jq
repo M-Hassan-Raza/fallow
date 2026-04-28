@@ -4,6 +4,18 @@ def remove(pkg): if pm == "pnpm" then "pnpm remove \(pkg)" elif pm == "yarn" the
 def add(pkg): if pm == "pnpm" then "pnpm add \(pkg)" elif pm == "yarn" then "yarn add \(pkg)" else "npm install \(pkg)" end;
 def add_dev(pkg): if pm == "pnpm" then "pnpm add -D \(pkg)" elif pm == "yarn" then "yarn add -D \(pkg)" else "npm install --save-dev \(pkg)" end;
 def footer(rule): "\n\n---\n<sub><a href=\"https://docs.fallow.tools/explanations/dead-code#" + rule + "\">Docs</a> \u00b7 Disagree? <a href=\"https://docs.fallow.tools/configuration/suppression\">Configure or suppress</a></sub>";
+def workspace_context:
+  if ((.used_in_workspaces // []) | length) > 0 then
+    "\n\nThis package is imported in another workspace: " + (.used_in_workspaces | map("`\(.)`") | join(", ")) + ". Consider moving the dependency to the consuming workspace's `package.json`."
+  else
+    ""
+  end;
+def dependency_action(pkg):
+  if ((.used_in_workspaces // []) | length) > 0 then
+    "\n\n**Action:** Move this dependency to the workspace that imports it."
+  else
+    "\n\n**Action:** If nothing in your code imports this package, remove it:\n\n```sh\n\(remove(pkg))\n```"
+  end;
 [
   (.unused_files[]? | {
     type: "unused-file",
@@ -28,19 +40,19 @@ def footer(rule): "\n\n---\n<sub><a href=\"https://docs.fallow.tools/explanation
     type: "other",
     path: (prefix + .path),
     line: (if .line > 0 then .line else 1 end),
-    body: ":warning: **Unused dependency**\n\n`\(.package_name)` is listed in `\(.location)` but no file imports it directly.\n\n**Action:** If nothing in your code imports this package, remove it:\n\n```sh\n\(remove(.package_name))\n```\n\n<details>\n<summary>Why this matters</summary>\n\nUnused dependencies slow down installs, inflate `node_modules`, and add noise to security audits.\n</details>\n\n> Some packages are used indirectly (peer dependencies, framework internals, or plugin systems). If that\u2019s the case, add it to [`ignoreDependencies`](https://docs.fallow.tools/configuration/overview) in `.fallowrc.json`.\(footer("unused-dependencies"))"
+    body: ":warning: **Unused dependency**\n\n`\(.package_name)` is listed in `\(.location)` but no file imports it directly.\(workspace_context)\(dependency_action(.package_name))\n\n<details>\n<summary>Why this matters</summary>\n\nUnused dependencies slow down installs, inflate `node_modules`, and add noise to security audits.\n</details>\n\n> Some packages are used indirectly (peer dependencies, framework internals, or plugin systems). If that\u2019s the case, add it to [`ignoreDependencies`](https://docs.fallow.tools/configuration/overview) in `.fallowrc.json`.\(footer("unused-dependencies"))"
   }),
   (.unused_dev_dependencies[]? | {
     type: "other",
     path: (prefix + .path),
     line: (if .line > 0 then .line else 1 end),
-    body: ":warning: **Unused devDependency**\n\n`\(.package_name)` is listed in `devDependencies` but no file imports it.\n\n```sh\n\(remove(.package_name))\n```\n\n> Used by a tool that doesn\u2019t import directly (e.g., a CLI, plugin, or preset)? Add it to [`ignoreDependencies`](https://docs.fallow.tools/configuration/overview) in `.fallowrc.json`.\(footer("unused-dependencies"))"
+    body: ":warning: **Unused devDependency**\n\n`\(.package_name)` is listed in `devDependencies` but no file imports it in this workspace.\(workspace_context)\(dependency_action(.package_name))\n\n> Used by a tool that doesn\u2019t import directly (e.g., a CLI, plugin, or preset)? Add it to [`ignoreDependencies`](https://docs.fallow.tools/configuration/overview) in `.fallowrc.json`.\(footer("unused-dependencies"))"
   }),
   (.unused_optional_dependencies[]? | {
     type: "other",
     path: (prefix + .path),
     line: (if .line > 0 then .line else 1 end),
-    body: ":warning: **Unused optionalDependency**\n\n`\(.package_name)` is listed in `optionalDependencies` but no file imports it.\n\n```sh\n\(remove(.package_name))\n```\(footer("unused-dependencies"))"
+    body: ":warning: **Unused optionalDependency**\n\n`\(.package_name)` is listed in `optionalDependencies` but no file imports it in this workspace.\(workspace_context)\(dependency_action(.package_name))\(footer("unused-dependencies"))"
   }),
   (.unused_enum_members[]? | {
     type: "other",

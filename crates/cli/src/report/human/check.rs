@@ -1,5 +1,5 @@
 use std::fmt::Write as _;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use colored::Colorize;
@@ -248,12 +248,32 @@ fn format_unused_member(m: &UnusedMember) -> String {
     )
 }
 
-fn format_dep_with_pkg(name: &str, pkg_path: &Path, root: &Path) -> String {
+fn format_dep_with_pkg(
+    name: &str,
+    pkg_path: &Path,
+    used_in_workspaces: &[PathBuf],
+    root: &Path,
+) -> String {
     let pkg_label = relative_path(pkg_path, root).display().to_string();
-    if pkg_label == "package.json" {
+    let workspace_context = if used_in_workspaces.is_empty() {
+        String::new()
+    } else {
+        let workspaces = used_in_workspaces
+            .iter()
+            .map(|path| relative_path(path, root).display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("; imported in {workspaces}")
+    };
+    if pkg_label == "package.json" && workspace_context.is_empty() {
         format!("{}", name.bold())
     } else {
-        format!("{} ({})", name.bold(), pkg_label.dimmed())
+        let label = if pkg_label == "package.json" {
+            workspace_context.trim_start_matches("; ").to_string()
+        } else {
+            format!("{pkg_label}{workspace_context}")
+        };
+        format!("{} ({})", name.bold(), label.dimmed())
     }
 }
 
@@ -263,6 +283,9 @@ fn format_dep_with_pkg(name: &str, pkg_path: &Path, root: &Path) -> String {
 trait NamedPkgDep {
     fn pkg_name(&self) -> &str;
     fn pkg_path(&self) -> &Path;
+    fn used_in_workspaces(&self) -> &[PathBuf] {
+        &[]
+    }
 }
 
 impl NamedPkgDep for UnusedDependency {
@@ -271,6 +294,9 @@ impl NamedPkgDep for UnusedDependency {
     }
     fn pkg_path(&self) -> &Path {
         &self.path
+    }
+    fn used_in_workspaces(&self) -> &[PathBuf] {
+        &self.used_in_workspaces
     }
 }
 
@@ -311,7 +337,12 @@ fn push_human_pkg_dep_section<T: NamedPkgDep>(
         |dep| {
             vec![format!(
                 "  {}",
-                format_dep_with_pkg(dep.pkg_name(), dep.pkg_path(), root)
+                format_dep_with_pkg(
+                    dep.pkg_name(),
+                    dep.pkg_path(),
+                    dep.used_in_workspaces(),
+                    root
+                )
             )]
         },
     );
@@ -1676,6 +1707,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
@@ -1694,12 +1726,50 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("packages/web/package.json"),
             line: 8,
+            used_in_workspaces: Vec::new(),
         });
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);
         let text = plain(&lines);
         assert!(text.contains("axios"));
         assert!(text.contains("(packages/web/package.json)"));
+    }
+
+    #[test]
+    fn unused_deps_show_cross_workspace_context() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash-es".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/shared/package.json"),
+            line: 8,
+            used_in_workspaces: vec![root.join("packages/consumer")],
+        });
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules, None);
+        let text = plain(&lines);
+        assert!(text.contains("lodash-es"));
+        assert!(text.contains("packages/shared/package.json; imported in packages/consumer"));
+    }
+
+    #[test]
+    fn unused_root_dep_with_cross_workspace_context_uses_context_label() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(UnusedDependency {
+            package_name: "lodash-es".to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("package.json"),
+            line: 8,
+            used_in_workspaces: vec![root.join("packages/consumer")],
+        });
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules, None);
+        let text = plain(&lines);
+        assert!(text.contains("lodash-es"));
+        assert!(text.contains("(imported in packages/consumer)"));
+        assert!(!text.contains("(package.json; imported in packages/consumer)"));
     }
 
     // ── Unresolved imports show specifier ──
@@ -1960,6 +2030,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 1,
+            used_in_workspaces: Vec::new(),
         });
         let rules = RulesConfig::default();
         let lines = build_human_lines(&results, &root, &rules, None);

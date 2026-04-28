@@ -1774,7 +1774,7 @@
         },
         "location": {
           "type": "string",
-          "enum": ["dependencies", "devDependencies"],
+          "enum": ["dependencies", "devDependencies", "optionalDependencies"],
           "description": "Which section of package.json the dependency is listed in."
         },
         "path": {
@@ -1784,6 +1784,11 @@
         "line": {
           "type": "integer",
           "description": "1-based line number of the dependency entry in package.json."
+        },
+        "used_in_workspaces": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Workspace roots that import this package even though the declaring workspace does not."
         },
         "actions": {
           "type": "array",

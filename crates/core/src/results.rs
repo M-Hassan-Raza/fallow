@@ -75,12 +75,14 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_dev_dependencies.push(UnusedDependency {
             package_name: "dev".to_string(),
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         results.unused_enum_members.push(UnusedMember {
             path: PathBuf::from("d.ts"),

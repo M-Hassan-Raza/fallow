@@ -86,10 +86,21 @@ fn push_dep_cc_issues(
         let path = cc_path(&dep.path, root);
         let line = if dep.line > 0 { Some(dep.line) } else { None };
         let fp = fingerprint_hash(&[rule_id, &dep.package_name]);
+        let workspace_context = if dep.used_in_workspaces.is_empty() {
+            String::new()
+        } else {
+            let workspaces = dep
+                .used_in_workspaces
+                .iter()
+                .map(|path| cc_path(path, root))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("; imported in other workspaces: {workspaces}")
+        };
         issues.push(cc_issue(
             rule_id,
             &format!(
-                "Package '{}' is in {location_label} but never imported",
+                "Package '{}' is in {location_label} but never imported{workspace_context}",
                 dep.package_name
             ),
             level,
@@ -1219,6 +1230,7 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: root.join("package.json"),
             line: 0,
+            used_in_workspaces: Vec::new(),
         });
         let rules = RulesConfig::default();
         let output = build_codeclimate(&results, &root, &rules);

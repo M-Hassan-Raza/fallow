@@ -254,12 +254,14 @@ mod tests {
             location: DependencyLocation::Dependencies,
             path: PathBuf::from("/project/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         r.unused_dev_dependencies.push(UnusedDependency {
             package_name: "jest".into(),
             location: DependencyLocation::DevDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         r.unused_enum_members.push(UnusedMember {
             path: PathBuf::from("/project/src/d.ts"),
@@ -850,6 +852,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         let rules = RulesConfig::default();
         // unused_optional_dependencies defaults to Warn, so no error
@@ -864,6 +867,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("/project/package.json"),
             line: 5,
+            used_in_workspaces: Vec::new(),
         });
         let rules = RulesConfig {
             unused_optional_dependencies: Severity::Error,

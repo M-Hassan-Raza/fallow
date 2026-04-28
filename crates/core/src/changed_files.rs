@@ -549,6 +549,7 @@ mod tests {
                 location: crate::results::DependencyLocation::Dependencies,
                 path: "/pkg.json".into(),
                 line: 3,
+                used_in_workspaces: Vec::new(),
             });
 
         let changed: FxHashSet<PathBuf> = FxHashSet::default();

@@ -951,12 +951,14 @@ mod tests {
                 location: DependencyLocation::Dependencies,
                 path: PathBuf::from("package.json"),
                 line: 5,
+                used_in_workspaces: Vec::new(),
             }],
             unused_dev_dependencies: vec![UnusedDependency {
                 package_name: "jest".to_string(),
                 location: DependencyLocation::DevDependencies,
                 path: PathBuf::from("package.json"),
                 line: 5,
+                used_in_workspaces: Vec::new(),
             }],
             ..Default::default()
         }
@@ -987,12 +989,14 @@ mod tests {
                     location: DependencyLocation::Dependencies,
                     path: PathBuf::from("/repo/packages/app-a/package.json"),
                     line: 5,
+                    used_in_workspaces: Vec::new(),
                 },
                 UnusedDependency {
                     package_name: "lodash-es".to_string(),
                     location: DependencyLocation::Dependencies,
                     path: PathBuf::from("/repo/packages/app-b/package.json"),
                     line: 5,
+                    used_in_workspaces: Vec::new(),
                 },
             ],
             ..Default::default()
@@ -1019,12 +1023,14 @@ mod tests {
                     location: DependencyLocation::Dependencies,
                     path: PathBuf::from("/repo/packages/app-a/package.json"),
                     line: 5,
+                    used_in_workspaces: Vec::new(),
                 },
                 UnusedDependency {
                     package_name: "lodash-es".to_string(),
                     location: DependencyLocation::Dependencies,
                     path: PathBuf::from("/repo/packages/app-b/package.json"),
                     line: 5,
+                    used_in_workspaces: Vec::new(),
                 },
             ],
             ..Default::default()
@@ -1052,6 +1058,7 @@ mod tests {
                 location: DependencyLocation::Dependencies,
                 path: PathBuf::from("/repo/packages/app/package.json"),
                 line: 5,
+                used_in_workspaces: Vec::new(),
             }],
             ..Default::default()
         };
@@ -1747,6 +1754,7 @@ mod tests {
             location: DependencyLocation::OptionalDependencies,
             path: PathBuf::from("package.json"),
             line: 15,
+            used_in_workspaces: Vec::new(),
         });
         r.unused_enum_members.push(UnusedMember {
             path: PathBuf::from("src/enums.ts"),
@@ -2037,6 +2045,7 @@ mod tests {
                 location: DependencyLocation::Dependencies,
                 path: p("packages/app/package.json"),
                 line: 5,
+                used_in_workspaces: Vec::new(),
             }],
             circular_dependencies: vec![CircularDependency {
                 files: vec![p("src/a.ts"), p("src/b.ts")],

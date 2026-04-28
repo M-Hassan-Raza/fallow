@@ -146,12 +146,7 @@ fn is_file_level_only(rule: &str) -> bool {
 fn is_auto_fixable(title: &str) -> bool {
     matches!(
         title,
-        "Unused exports"
-            | "Unused type exports"
-            | "Unused dependencies"
-            | "Unused devDependencies"
-            | "Unused optionalDependencies"
-            | "Unused enum members"
+        "Unused exports" | "Unused type exports" | "Unused enum members"
     )
 }
 
