@@ -1461,7 +1461,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["remove-export", "delete-file", "remove-dependency", "remove-enum-member", "remove-class-member", "resolve-import", "install-dependency", "remove-duplicate", "move-to-dev", "refactor-cycle"],
+          "enum": ["remove-export", "delete-file", "remove-dependency", "move-dependency", "remove-enum-member", "remove-class-member", "resolve-import", "install-dependency", "remove-duplicate", "move-to-dev", "refactor-cycle"],
           "description": "Kebab-case identifier for the fix action."
         },
         "auto_fixable": {
