@@ -8,7 +8,13 @@ struct VendoredFile {
     executable: bool,
 }
 
-const GITLAB_TEMPLATE: &str = include_str!("../../../ci/gitlab-ci.yml");
+// `include_str!` paths must resolve inside the crates.io tarball, which only
+// contains `crates/cli/`. The workspace `ci/` and `action/` directories live
+// above the package root and are unreachable from the published crate, so we
+// keep file copies under `crates/cli/templates/`. A unit test below asserts
+// the bundled copies stay byte-identical to the workspace-root sources; CI
+// running against the workspace catches any drift before a release.
+const GITLAB_TEMPLATE: &str = include_str!("../templates/ci/gitlab-ci.yml");
 
 const GITLAB_FILES: &[VendoredFile] = &[
     VendoredFile {
@@ -18,67 +24,67 @@ const GITLAB_FILES: &[VendoredFile] = &[
     },
     VendoredFile {
         path: "ci/jq/summary-check.jq",
-        content: include_str!("../../../ci/jq/summary-check.jq"),
+        content: include_str!("../templates/ci/jq/summary-check.jq"),
         executable: false,
     },
     VendoredFile {
         path: "ci/jq/summary-health.jq",
-        content: include_str!("../../../ci/jq/summary-health.jq"),
+        content: include_str!("../templates/ci/jq/summary-health.jq"),
         executable: false,
     },
     VendoredFile {
         path: "ci/jq/summary-combined.jq",
-        content: include_str!("../../../ci/jq/summary-combined.jq"),
+        content: include_str!("../templates/ci/jq/summary-combined.jq"),
         executable: false,
     },
     VendoredFile {
         path: "ci/jq/review-comments-dupes.jq",
-        content: include_str!("../../../ci/jq/review-comments-dupes.jq"),
+        content: include_str!("../templates/ci/jq/review-comments-dupes.jq"),
         executable: false,
     },
     VendoredFile {
         path: "ci/scripts/comment.sh",
-        content: include_str!("../../../ci/scripts/comment.sh"),
+        content: include_str!("../templates/ci/scripts/comment.sh"),
         executable: true,
     },
     VendoredFile {
         path: "ci/scripts/review.sh",
-        content: include_str!("../../../ci/scripts/review.sh"),
+        content: include_str!("../templates/ci/scripts/review.sh"),
         executable: true,
     },
     VendoredFile {
         path: "action/jq/summary-dupes.jq",
-        content: include_str!("../../../action/jq/summary-dupes.jq"),
+        content: include_str!("../templates/action/jq/summary-dupes.jq"),
         executable: false,
     },
     VendoredFile {
         path: "action/jq/summary-fix.jq",
-        content: include_str!("../../../action/jq/summary-fix.jq"),
+        content: include_str!("../templates/action/jq/summary-fix.jq"),
         executable: false,
     },
     VendoredFile {
         path: "action/jq/review-comments-check.jq",
-        content: include_str!("../../../action/jq/review-comments-check.jq"),
+        content: include_str!("../templates/action/jq/review-comments-check.jq"),
         executable: false,
     },
     VendoredFile {
         path: "action/jq/review-comments-health.jq",
-        content: include_str!("../../../action/jq/review-comments-health.jq"),
+        content: include_str!("../templates/action/jq/review-comments-health.jq"),
         executable: false,
     },
     VendoredFile {
         path: "action/jq/review-body.jq",
-        content: include_str!("../../../action/jq/review-body.jq"),
+        content: include_str!("../templates/action/jq/review-body.jq"),
         executable: false,
     },
     VendoredFile {
         path: "action/jq/merge-comments.jq",
-        content: include_str!("../../../action/jq/merge-comments.jq"),
+        content: include_str!("../templates/action/jq/merge-comments.jq"),
         executable: false,
     },
     VendoredFile {
         path: "action/jq/filter-changed.jq",
-        content: include_str!("../../../action/jq/filter-changed.jq"),
+        content: include_str!("../templates/action/jq/filter-changed.jq"),
         executable: false,
     },
 ];
@@ -189,6 +195,35 @@ mod tests {
 
         assert_eq!(code, ExitCode::from(2));
         assert_eq!(std::fs::read_to_string(path).expect("read"), "custom");
+    }
+
+    // The bundled copies under `crates/cli/templates/` must stay byte-identical
+    // to the canonical workspace sources at `<root>/ci/` and `<root>/action/`.
+    // The published crates.io tarball only contains `crates/cli/`, so the
+    // workspace files would not be reachable from the published crate's
+    // `include_str!` paths; we ship copies. This test runs against the
+    // workspace and fails if either side drifts. CI runs the workspace test
+    // suite so drift is caught before tagging.
+    #[test]
+    fn bundled_templates_match_workspace_sources() {
+        let manifest_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+        let workspace_root = manifest_dir.join("../..");
+        for file in GITLAB_FILES {
+            let source = workspace_root.join(file.path);
+            let actual = std::fs::read_to_string(&source).unwrap_or_else(|e| {
+                panic!("could not read workspace source {}: {e}", source.display())
+            });
+            assert_eq!(
+                file.content,
+                actual,
+                "drift detected: bundled `crates/cli/templates/{}` does not match workspace `{}`. \
+                 Re-sync with: cp {} crates/cli/templates/{}",
+                file.path,
+                file.path,
+                source.display(),
+                file.path,
+            );
+        }
     }
 
     // gitlab-ci.yml hardcodes the same filenames in `for f in ...` cp loops

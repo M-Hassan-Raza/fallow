@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.54.1] - 2026-04-28
+
+### Fixed
+
+- **`fallow-cli` now publishes to crates.io.** v2.54.0 introduced `crates/cli/src/ci_template.rs` with `include_str!` paths (`"../../../ci/gitlab-ci.yml"` and 13 others) that resolved during workspace builds but failed during `cargo package` because the published tarball only contains `crates/cli/`, not the workspace's `ci/` and `action/` directories. The publish step's verification compile failed silently behind a `|| echo "Already published, skipping"` mask, so v2.54.0 of `fallow-cli` never reached crates.io while the eight upstream crates published cleanly. The 14 bundled files now live under `crates/cli/templates/` so `include_str!` resolves inside the crate, and a new `bundled_templates_match_workspace_sources` unit test asserts byte-equivalence between the bundled copies and the canonical workspace sources at `<root>/ci/` and `<root>/action/`. Drift between the two is caught by `cargo test` against the workspace before the next tag.
+
 ## [2.54.0] - 2026-04-28
 
 ### Added
@@ -1759,7 +1765,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.54.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.54.1...HEAD
+[2.54.1]: https://github.com/fallow-rs/fallow/compare/v2.54.0...v2.54.1
 [2.54.0]: https://github.com/fallow-rs/fallow/compare/v2.53.0...v2.54.0
 [2.53.0]: https://github.com/fallow-rs/fallow/compare/v2.52.2...v2.53.0
 [2.52.2]: https://github.com/fallow-rs/fallow/compare/v2.52.1...v2.52.2
