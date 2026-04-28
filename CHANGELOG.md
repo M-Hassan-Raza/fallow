@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.54.2] - 2026-04-28
+
+### Fixed
+
+- **Svelte template scanner now credits identifiers used in ternary branches and inline spread objects.** A double-increment bug in `scan_curly_section` caused the brace-section reader to skip the closing quote of an empty quoted string (`''` / `""`), leaving the in-quote flag stuck on, returning `None`, and aborting the rest of the template via the outer loop's `break`. Any expression inside or after `{cond ? expr : ''}` was therefore invisible to the scanner. The first byte of the brace was already incremented by the loop's terminal `index += 1`, so removing the in-arm increment fixes empty-string handling without changing any other path. Additionally, markup-tag braces now process `{...spread}` rest-attributes (and any non-`@attach` brace) instead of dropping them, so `<button {...{ "data-x": inSpread() }}>` correctly marks `inSpread` as used. Cache version bumped 53 → 54 so warm caches re-extract the new template-usage shape.
+
+### Internal
+
+- Bash test helpers (`ci/tests/run.sh`, `action/tests/run.sh`) replaced their `echo "$output" | grep -q ...` `assert_contains` / `assert_not_contains` implementations with bash native `[[ "$output" == *"$expected"* ]]` matching. The pipeline form was prone to `SIGPIPE` under `set -o pipefail` when grep matched early and closed the pipe before echo finished, intermittently failing CI with a misleading "expected to contain: ..." message on whichever assertion happened to ride the race.
+- VS Code extension `engines.vscode` bumped to `^1.116.0` to align with `@types/vscode@1.116.0`; vsce had been rejecting the package with "@types/vscode greater than engines.vscode".
+- Dependency bumps: `clap` 4.6.0 → 4.6.1, `rmcp` 1.4.0 → 1.5.0, `srcmap-sourcemap` 0.3.5 → 0.3.6, the `oxc` group (8 crates), plus VS Code dev-dependency refreshes (`@types/vscode`, `@vscode/vsce`, `rolldown`, `typescript`, `vitest`) and CI action bumps (`actions/setup-node`, `dependabot/fetch-metadata`).
+
 ## [2.54.1] - 2026-04-28
 
 ### Fixed
@@ -1765,7 +1777,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.54.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.54.2...HEAD
+[2.54.2]: https://github.com/fallow-rs/fallow/compare/v2.54.1...v2.54.2
 [2.54.1]: https://github.com/fallow-rs/fallow/compare/v2.54.0...v2.54.1
 [2.54.0]: https://github.com/fallow-rs/fallow/compare/v2.53.0...v2.54.0
 [2.53.0]: https://github.com/fallow-rs/fallow/compare/v2.52.2...v2.53.0
