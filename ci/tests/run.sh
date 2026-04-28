@@ -19,7 +19,7 @@ fail() { FAILED=$((FAILED + 1)); ERRORS+=("$1: $2"); echo "  ✗ $1 — $2"; }
 
 assert_contains() {
   local output="$1" expected="$2" name="$3"
-  if echo "$output" | /usr/bin/grep -q "$expected" 2>/dev/null; then
+  if [[ "$output" == *"$expected"* ]]; then
     pass "$name"
   else
     fail "$name" "expected to contain: $expected"
@@ -28,7 +28,7 @@ assert_contains() {
 
 assert_not_contains() {
   local output="$1" unexpected="$2" name="$3"
-  if echo "$output" | /usr/bin/grep -q "$unexpected" 2>/dev/null; then
+  if [[ "$output" == *"$unexpected"* ]]; then
     fail "$name" "should NOT contain: $unexpected"
   else
     pass "$name"
@@ -541,7 +541,7 @@ OUT=$(echo "$SAME_LINE" | jq --argjson max 50 -f "$SHARED_JQ_DIR/merge-comments.
 assert_json_length "$OUT" "1" "merges same-line comments"
 assert_contains "$OUT" "complexity warning" "merged comment has first body"
 assert_contains "$OUT" "unused export warning" "merged comment has second body"
-assert_contains "$OUT" "\\\\n---\\\\n" "merged comment has separator"
+assert_contains "$OUT" "\\n---\\n" "merged comment has separator"
 
 # Test empty input
 OUT=$(echo '[]' | jq --argjson max 50 -f "$SHARED_JQ_DIR/merge-comments.jq" 2>&1)
