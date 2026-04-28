@@ -7,9 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.54.0] - 2026-04-28
+
+### Added
+
+- **`fallow ci-template gitlab` subcommand for offline-runner pipelines.** `fallow ci-template gitlab` prints the bundled `ci/gitlab-ci.yml` to stdout. `fallow ci-template gitlab --vendor [DIR]` writes the template plus 13 jq/bash helper files (4 `ci/jq/`, 2 `ci/scripts/`, 7 `action/jq/`) under DIR (default `.`), letting GitLab pipelines run the full MR-comments + Code Quality + review integration without reaching `raw.githubusercontent.com` at pipeline runtime. `--force` is required to overwrite files that diverge from the bundled template; refusing to overwrite is the default to protect user edits.
+- **`--format gitlab-codequality` and `--format gitlab-code-quality` aliases for `codeclimate`.** The CodeClimate JSON array format is unchanged; the new aliases just make the GitLab Code Quality use case discoverable via the name GitLab consumers actually reach for. Aliases work via `--format`, `FALLOW_FORMAT`, and `fallow schema`.
+- **`fallow health --sort severity`** orders complexity findings by exceeded-priority + severity rather than by cyclomatic complexity. Opt-in: the CLI default stays `cyclomatic` to avoid breaking JSON consumers that assume cyclomatic ordering. The PR/MR jq scripts use the same composite-key sort independently, so the default does not affect comment rendering. Available across the CLI, the NAPI bindings, and the MCP server.
+
+### Changed
+
+- **GitHub Action and GitLab CI PR/MR complexity tables widened from 4 to 7 columns.** The complexity table in PR/MR comments now shows Severity, Cyclomatic, Cognitive, CRAP, Lines, plus per-cell `**!**` markers identifying which thresholds each function exceeded. The footnote spells out the active thresholds with explicit `default` fallbacks so older fallow JSON renders cleanly. CRAP-only findings (functions flagged purely by CRAP=30 with no runtime coverage) now stay visible even when several cyclomatic flags exist; previously they were buried below the cyclomatic-sorted top-5 cut. The CRAP column auto-hides when the JSON lacks CRAP metadata, preserving back-compat with older fallow versions.
+- **GitLab CI template: `GIT_STRATEGY: "fetch"` and `GIT_DEPTH: "0"` set as defaults** so shared organisation templates that set `GIT_STRATEGY=none` or a shallow clone do not strand fallow without a working tree or without enough history to diff against the MR base SHA.
+
 ### Fixed
 
+- **GitHub Action now respects package.json fallow pins.** The action's default `version: latest` previously installed whatever npm tagged latest, ignoring the project's `package.json` `fallow` pin. Local `pnpm exec fallow` could run 2.7.3 while CI ran 2.52.2, producing wildly divergent reports. The `version` input default is now empty; when omitted, `install.sh` reads the project package.json `fallow` dependency and installs that, falling back to `latest` only when no pin is found. The new spec whitelist accepts semver versions and ranges (`^2.52.0`, `>=2.0.0 <3.0.0`) and rejects `file:`, `link:`, `workspace:`, git URLs, paths, and `2.0.0 -g malicious` style flag injection. A drift warning fires when an exact pin diverges from the installed version (suppressed when `version:` was set explicitly). `INPUT_ROOT` is plumbed so monorepos with non-root `package.json` work.
 - **GitLab CI now respects package.json fallow pins to match GitHub Action behavior.** When `FALLOW_VERSION` is empty, the GitLab template reads the project's `package.json` `fallow` dependency, validates the spec with the same injection-safe whitelist as the GitHub Action, supports semver ranges, falls back to `latest` for unsupported package specs, and warns when an exact package pin drifts from the installed CLI version. The default value of `FALLOW_VERSION` changed from `"latest"` to `""`; pipelines that omit `FALLOW_VERSION` and have a `fallow` entry in `package.json` will now install that pinned version on the next run instead of `latest`. Set `FALLOW_VERSION: "latest"` explicitly to keep the previous behaviour.
+- **GitLab CI: `comment.sh` and `review.sh` hard-require `GITLAB_TOKEN`.** GitLab's documented `CI_JOB_TOKEN` permissions allow reading MR notes, but not creating, updating, or deleting them; the previous fallback was non-functional in practice and produced confusing 401/403 errors at API call time. The scripts now exit `0` with a clear stdout warning when `GITLAB_TOKEN` is unset rather than blocking the pipeline. `CI_JOB_TOKEN` is still useful for GitLab package registry authentication.
 
 ## [2.53.0] - 2026-04-28
 
@@ -1744,7 +1759,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.53.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.54.0...HEAD
+[2.54.0]: https://github.com/fallow-rs/fallow/compare/v2.53.0...v2.54.0
 [2.53.0]: https://github.com/fallow-rs/fallow/compare/v2.52.2...v2.53.0
 [2.52.2]: https://github.com/fallow-rs/fallow/compare/v2.52.1...v2.52.2
 [2.52.1]: https://github.com/fallow-rs/fallow/compare/v2.52.0...v2.52.1

@@ -1,6 +1,6 @@
 # Fallow Roadmap
 
-> Last updated: 2026-04-28 (v2.53.0: cross-workspace dependency leak detection, Svelte/Vue script-instance member tracking, GLIBC 2.31 floor; CRAP coverage story for templates still queued in #186)
+> Last updated: 2026-04-28 (v2.54.0: GitLab CI template hardening + `fallow ci-template gitlab --vendor` for offline runners; CRAP coverage story for templates still queued in #186)
 
 This roadmap tracks planned work on Fallow. For shipped capabilities, see the [documentation](https://docs.fallow.tools) and [GitHub releases](https://github.com/fallow-rs/fallow/releases).
 
@@ -32,7 +32,7 @@ Follow-ups to the `fallow.changedSince` setting shipped for issue #185. The sett
 
 - **"Fallow: Set Baseline at HEAD" command** -- a palette command that runs `git tag fallow-baseline` and writes `fallow.changedSince` into `.vscode/settings.json` in one step, so users do not need to leave the editor or know the git tag command.
 - **Filter-dropped status surfacing** -- when the LSP cannot resolve the configured ref (typo, shallow clone, missing tag), it currently falls back to full scope and logs a `WARNING` to the Fallow output channel. Surface that state in the status bar (e.g. `Fallow: 118 issues (since fallow-baseline: scope dropped)`) so users notice immediately rather than after the next "wait, why am I seeing all these issues again?" question.
-- **Shallow-clone hint in CI templates** -- the runtime hint already explains the `fetch-depth: 0` fix; the GitHub Action and GitLab CI templates should default to checkout depths that work with long-lived baseline tags, or document the requirement in the inline comments.
+- **Shallow-clone hint in CI templates** -- the runtime hint already explains the `fetch-depth: 0` fix; the GitHub Action template should default to a checkout depth that works with long-lived baseline tags, or document the requirement in the inline comments. The GitLab template ships `GIT_DEPTH: "0"` as a default since v2.54.0.
 
 ### Per-package `changedSince` overrides
 
