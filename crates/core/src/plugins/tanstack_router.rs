@@ -11,7 +11,7 @@ use super::{PathRule, Plugin, PluginResult, UsedExportRule, config_parser};
 use oxc_allocator::Allocator;
 use oxc_ast::ast::{
     Argument, BindingPattern, CallExpression, Expression, ImportDeclaration, ObjectExpression,
-    Program, Statement,
+    Program, Statement, VariableDeclaration,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
@@ -615,6 +615,41 @@ impl<'a> Visit<'a> for RouterPluginCallCollector<'a> {
 
         walk::walk_call_expression(self, call);
     }
+
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        for declarator in &decl.declarations {
+            let Some(init) = &declarator.init else {
+                continue;
+            };
+            let Some(source) = require_source(init) else {
+                continue;
+            };
+            if !ROUTER_PLUGIN_IMPORTS.iter().any(|import| source == *import) {
+                continue;
+            }
+
+            match &declarator.id {
+                BindingPattern::BindingIdentifier(identifier) => {
+                    push_unique(&mut self.namespaces, identifier.name.to_string());
+                }
+                BindingPattern::ObjectPattern(object) => {
+                    for prop in &object.properties {
+                        if prop
+                            .key
+                            .static_name()
+                            .is_some_and(|name| name == "tanstackRouter")
+                            && let BindingPattern::BindingIdentifier(identifier) = &prop.value
+                        {
+                            push_unique(&mut self.local_names, identifier.name.to_string());
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        walk::walk_variable_declaration(self, decl);
+    }
 }
 
 impl RouterPluginCallCollector<'_> {
@@ -710,6 +745,45 @@ impl<'a> Visit<'a> for VirtualRouteCallCollector {
 
         walk::walk_call_expression(self, call);
     }
+
+    fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
+        for declarator in &decl.declarations {
+            let Some(init) = &declarator.init else {
+                continue;
+            };
+            let Some(source) = require_source(init) else {
+                continue;
+            };
+            if source != "@tanstack/virtual-file-routes" {
+                continue;
+            }
+
+            match &declarator.id {
+                BindingPattern::BindingIdentifier(identifier) => {
+                    push_unique(&mut self.namespaces, identifier.name.to_string());
+                }
+                BindingPattern::ObjectPattern(object) => {
+                    for prop in &object.properties {
+                        let Some(helper) = prop.key.static_name() else {
+                            continue;
+                        };
+                        if is_virtual_route_helper(&helper)
+                            && let BindingPattern::BindingIdentifier(identifier) = &prop.value
+                        {
+                            push_unique_pair(
+                                &mut self.helper_bindings,
+                                identifier.name.to_string(),
+                                helper.to_string(),
+                            );
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        walk::walk_variable_declaration(self, decl);
+    }
 }
 
 impl VirtualRouteCallCollector {
@@ -754,6 +828,16 @@ fn string_arg(call: &CallExpression<'_>, index: usize) -> Option<String> {
                 .map(|quasi| quasi.value.raw.to_string()),
             _ => None,
         })
+}
+
+fn require_source(expr: &Expression<'_>) -> Option<String> {
+    let Expression::CallExpression(call) = expr else {
+        return None;
+    };
+    if !matches!(&call.callee, Expression::Identifier(identifier) if identifier.name == "require") {
+        return None;
+    }
+    string_arg(call, 0)
 }
 
 fn normalize_project_relative(base_dir: &str, raw: &str) -> Option<String> {

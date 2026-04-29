@@ -553,6 +553,107 @@ export const routes = rootRoute("root.tsx", [
 }
 
 #[test]
+fn tanstack_router_plain_vite_config_does_not_shadow_tsr_config() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "dependencies": {
+    "@tanstack/react-router": "1.0.0",
+    "vite": "1.0.0"
+  }
+}"#,
+    );
+    write_project_file(
+        root,
+        "vite.config.ts",
+        r#"import { defineConfig } from "vite";
+
+export default defineConfig({});
+"#,
+    );
+    write_project_file(
+        root,
+        "tsr.config.json",
+        r#"{
+  "routesDirectory": "./app/pages"
+}"#,
+    );
+    write_project_file(root, "app/pages/index.tsx", "export const Route = {};\n");
+    write_project_file(root, "src/routes/legacy.tsx", "export const Route = {};\n");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files = collect_unused_files(root, &results);
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "app/pages/index.tsx"),
+        "tsr.config.json should keep custom route directory live even when a plain vite config is present, unused files: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path == "src/routes/legacy.tsx"),
+        "default src/routes should not stay alive after tsr.config.json moves routesDirectory, unused files: {unused_files:?}"
+    );
+}
+
+#[test]
+fn tanstack_router_webpack_cjs_config_is_covered() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "dependencies": {
+    "@tanstack/react-router": "1.0.0",
+    "@tanstack/router-plugin": "1.0.0",
+    "webpack": "1.0.0"
+  }
+}"#,
+    );
+    write_project_file(
+        root,
+        "webpack.config.cjs",
+        r#"const { tanstackRouter } = require("@tanstack/router-plugin/webpack");
+
+module.exports = {
+  plugins: [
+    tanstackRouter({
+      target: "react",
+      routesDirectory: "./app/pages"
+    })
+  ]
+};
+"#,
+    );
+    write_project_file(root, "app/pages/index.tsx", "export const Route = {};\n");
+    write_project_file(root, "src/routes/legacy.tsx", "export const Route = {};\n");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files = collect_unused_files(root, &results);
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "app/pages/index.tsx"),
+        "CommonJS webpack tanstackRouter config should keep custom route directory live, unused files: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path == "src/routes/legacy.tsx"),
+        "default src/routes should not stay alive after webpack config moves routesDirectory, unused files: {unused_files:?}"
+    );
+}
+
+#[test]
 fn tanstack_router_custom_route_dir_replaces_default_used_export_rules() {
     let temp = tempdir().expect("create temp dir");
     let root = temp.path();
