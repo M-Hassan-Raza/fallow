@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 
 use super::{PathRule, Plugin, PluginResult, UsedExportRule, config_parser};
 use oxc_allocator::Allocator;
-use oxc_ast::ast::{Argument, CallExpression, Expression, ImportDeclaration};
+use oxc_ast::ast::{
+    Argument, BindingPattern, CallExpression, Expression, ImportDeclaration, ObjectExpression,
+    Program, Statement,
+};
 use oxc_ast_visit::{Visit, walk};
 use oxc_parser::Parser;
 use oxc_span::SourceType;
@@ -41,7 +44,18 @@ const ENTRY_PATTERNS: &[&str] = &[
     "src/routeTree.gen.js",
 ];
 
-const CONFIG_PATTERNS: &[&str] = &["tsr.config.json"];
+const CONFIG_PATTERNS: &[&str] = &[
+    "tsr.config.json",
+    "vite.config.{ts,js,mts,mjs}",
+    "rsbuild.config.{ts,js,mts,mjs}",
+    "rspack.config.{ts,js,mts,mjs}",
+    "webpack.config.{ts,js,mts,mjs,cjs}",
+];
+const ROUTER_PLUGIN_IMPORTS: &[&str] = &[
+    "@tanstack/router-plugin/vite",
+    "@tanstack/router-plugin/rspack",
+    "@tanstack/router-plugin/webpack",
+];
 
 const ALWAYS_USED: &[&str] = &["tsr.config.json", "app.config.{ts,js}"];
 
@@ -166,59 +180,109 @@ impl Plugin for TanstackRouterPlugin {
     }
 
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
-        let mut result = PluginResult {
-            replace_entry_patterns: true,
-            replace_used_export_rules: true,
-            ..PluginResult::default()
-        };
-
-        let route_dir =
-            config_parser::extract_config_string(source, config_path, &["routesDirectory"])
-                .as_deref()
-                .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root))
-                .unwrap_or_else(|| "src/routes".to_string());
-        let route_file_prefix =
-            config_parser::extract_config_string(source, config_path, &["routeFilePrefix"])
-                .unwrap_or_default();
-        let route_file_ignore_prefix =
-            config_parser::extract_config_string(source, config_path, &["routeFileIgnorePrefix"])
-                .unwrap_or_else(|| DEFAULT_ROUTE_FILE_IGNORE_PREFIX.to_string());
-        let route_file_ignore_pattern =
-            config_parser::extract_config_string(source, config_path, &["routeFileIgnorePattern"]);
-
-        let virtual_route_config =
-            resolve_virtual_route_config(config_path, source, root, &route_dir);
-        if virtual_route_config.is_empty() {
-            add_route_dir_patterns(
-                &mut result,
-                &route_dir,
-                &route_file_prefix,
-                &route_file_ignore_prefix,
-                route_file_ignore_pattern.as_deref(),
-            );
-        } else {
-            apply_virtual_route_config(
-                &mut result,
-                virtual_route_config,
-                &route_file_prefix,
-                &route_file_ignore_prefix,
-                route_file_ignore_pattern.as_deref(),
-            );
+        if !is_tsr_config(config_path) {
+            return resolve_bundler_config(config_path, source, root).unwrap_or_default();
         }
 
-        let generated_route_tree =
-            config_parser::extract_config_string(source, config_path, &["generatedRouteTree"])
-                .as_deref()
-                .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root));
-        if let Some(route_tree) = generated_route_tree {
-            result.push_entry_pattern(route_tree);
-        } else {
-            result.extend_entry_patterns(DEFAULT_GENERATED_ROUTE_TREE_PATTERNS.iter().copied());
-        }
-        result.extend_entry_patterns(SUPPORTING_ENTRY_PATTERNS.iter().copied());
-
-        result
+        resolve_tsr_config(config_path, source, root)
     }
+}
+
+fn resolve_tsr_config(config_path: &Path, source: &str, root: &Path) -> PluginResult {
+    let route_dir = config_parser::extract_config_string(source, config_path, &["routesDirectory"])
+        .as_deref()
+        .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root))
+        .unwrap_or_else(|| "src/routes".to_string());
+
+    resolve_route_options(RouteOptions {
+        route_dir: route_dir.clone(),
+        route_file_prefix: config_parser::extract_config_string(
+            source,
+            config_path,
+            &["routeFilePrefix"],
+        )
+        .unwrap_or_default(),
+        route_file_ignore_prefix: config_parser::extract_config_string(
+            source,
+            config_path,
+            &["routeFileIgnorePrefix"],
+        )
+        .unwrap_or_else(|| DEFAULT_ROUTE_FILE_IGNORE_PREFIX.to_string()),
+        route_file_ignore_pattern: config_parser::extract_config_string(
+            source,
+            config_path,
+            &["routeFileIgnorePattern"],
+        ),
+        generated_route_tree: config_parser::extract_config_string(
+            source,
+            config_path,
+            &["generatedRouteTree"],
+        )
+        .as_deref()
+        .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root)),
+        virtual_route_config: resolve_virtual_route_config(config_path, source, root, &route_dir),
+    })
+}
+
+fn resolve_bundler_config(config_path: &Path, source: &str, root: &Path) -> Option<PluginResult> {
+    let source_type = SourceType::from_path(config_path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, source, source_type).parse();
+    let options = collect_router_plugin_route_options(&parsed.program, config_path, root)
+        .into_iter()
+        .next()?;
+
+    Some(resolve_route_options(options))
+}
+
+#[derive(Debug, Default)]
+struct RouteOptions {
+    route_dir: String,
+    route_file_prefix: String,
+    route_file_ignore_prefix: String,
+    route_file_ignore_pattern: Option<String>,
+    generated_route_tree: Option<String>,
+    virtual_route_config: VirtualRouteConfig,
+}
+
+fn resolve_route_options(options: RouteOptions) -> PluginResult {
+    let mut result = PluginResult {
+        replace_entry_patterns: true,
+        replace_used_export_rules: true,
+        ..PluginResult::default()
+    };
+
+    if options.virtual_route_config.is_empty() {
+        add_route_dir_patterns(
+            &mut result,
+            &options.route_dir,
+            &options.route_file_prefix,
+            &options.route_file_ignore_prefix,
+            options.route_file_ignore_pattern.as_deref(),
+        );
+    } else {
+        apply_virtual_route_config(
+            &mut result,
+            options.virtual_route_config,
+            &options.route_file_prefix,
+            &options.route_file_ignore_prefix,
+            options.route_file_ignore_pattern.as_deref(),
+        );
+    }
+
+    if let Some(route_tree) = options.generated_route_tree {
+        result.push_entry_pattern(route_tree);
+    } else {
+        result.extend_entry_patterns(DEFAULT_GENERATED_ROUTE_TREE_PATTERNS.iter().copied());
+    }
+    result.extend_entry_patterns(SUPPORTING_ENTRY_PATTERNS.iter().copied());
+
+    result
+}
+
+fn is_tsr_config(path: &Path) -> bool {
+    path.file_name()
+        .is_some_and(|file_name| file_name == "tsr.config.json")
 }
 
 #[derive(Debug, Default)]
@@ -247,27 +311,7 @@ fn resolve_virtual_route_config(
             .as_deref()
             .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root))
     {
-        push_unique(&mut config.config_files, config_file.clone());
-
-        let file_path = root.join(&config_file);
-        if let Ok(source) = fs::read_to_string(&file_path) {
-            let base_dir = Path::new(&config_file)
-                .parent()
-                .map_or_else(String::new, |parent| {
-                    parent.to_string_lossy().replace('\\', "/")
-                });
-            let refs = collect_virtual_route_call_refs(&source, &file_path);
-            for file in refs.route_files {
-                if let Some(path) = normalize_project_relative(&base_dir, &file) {
-                    push_unique(&mut config.route_files, path);
-                }
-            }
-            for dir in refs.physical_dirs {
-                if let Some(path) = normalize_project_relative(&base_dir, &dir) {
-                    push_unique(&mut config.physical_dirs, path);
-                }
-            }
-        }
+        add_virtual_route_config_file(&mut config, root, &config_file);
     }
 
     for file in collect_inline_virtual_route_files(source) {
@@ -277,6 +321,96 @@ fn resolve_virtual_route_config(
     }
 
     config
+}
+
+fn resolve_bundler_route_options(
+    program: &Program,
+    options: &ObjectExpression,
+    config_path: &Path,
+    root: &Path,
+) -> RouteOptions {
+    let route_dir = extract_option_string(options, "routesDirectory")
+        .as_deref()
+        .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root))
+        .unwrap_or_else(|| "src/routes".to_string());
+
+    RouteOptions {
+        route_dir: route_dir.clone(),
+        route_file_prefix: extract_option_string(options, "routeFilePrefix").unwrap_or_default(),
+        route_file_ignore_prefix: extract_option_string(options, "routeFileIgnorePrefix")
+            .unwrap_or_else(|| DEFAULT_ROUTE_FILE_IGNORE_PREFIX.to_string()),
+        route_file_ignore_pattern: extract_option_string(options, "routeFileIgnorePattern"),
+        generated_route_tree: extract_option_string(options, "generatedRouteTree")
+            .as_deref()
+            .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root)),
+        virtual_route_config: resolve_bundler_virtual_route_config(
+            program,
+            options,
+            &route_dir,
+            config_path,
+            root,
+        ),
+    }
+}
+
+fn resolve_bundler_virtual_route_config(
+    program: &Program,
+    options: &ObjectExpression,
+    route_dir: &str,
+    config_path: &Path,
+    root: &Path,
+) -> VirtualRouteConfig {
+    let mut config = VirtualRouteConfig::default();
+    let Some(prop) = config_parser::find_property(options, "virtualRouteConfig") else {
+        return config;
+    };
+
+    if let Some(config_file) = config_parser::expression_to_string(&prop.value)
+        .as_deref()
+        .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root))
+    {
+        add_virtual_route_config_file(&mut config, root, &config_file);
+        return config;
+    }
+
+    let refs = if let Expression::Identifier(identifier) = &prop.value {
+        find_variable_init_expression(program, identifier.name.as_str())
+            .map(|expr| collect_virtual_route_expression_refs(program, expr))
+            .unwrap_or_default()
+    } else {
+        collect_virtual_route_expression_refs(program, &prop.value)
+    };
+    add_virtual_route_refs(&mut config, refs, route_dir);
+    config
+}
+
+fn add_virtual_route_config_file(config: &mut VirtualRouteConfig, root: &Path, config_file: &str) {
+    push_unique(&mut config.config_files, config_file.to_string());
+
+    let file_path = root.join(config_file);
+    let Ok(source) = fs::read_to_string(&file_path) else {
+        return;
+    };
+    let base_dir = Path::new(config_file)
+        .parent()
+        .map_or_else(String::new, |parent| {
+            parent.to_string_lossy().replace('\\', "/")
+        });
+    let refs = collect_virtual_route_call_refs(&source, &file_path);
+    add_virtual_route_refs(config, refs, &base_dir);
+}
+
+fn add_virtual_route_refs(config: &mut VirtualRouteConfig, refs: VirtualRouteRefs, base_dir: &str) {
+    for file in refs.route_files {
+        if let Some(path) = normalize_project_relative(base_dir, &file) {
+            push_unique(&mut config.route_files, path);
+        }
+    }
+    for dir in refs.physical_dirs {
+        if let Some(path) = normalize_project_relative(base_dir, &dir) {
+            push_unique(&mut config.physical_dirs, path);
+        }
+    }
 }
 
 fn apply_virtual_route_config(
@@ -381,11 +515,140 @@ fn collect_virtual_route_call_refs(source: &str, path: &Path) -> VirtualRouteRef
     collector.refs
 }
 
+fn collect_virtual_route_expression_refs(program: &Program, expr: &Expression) -> VirtualRouteRefs {
+    let mut collector = VirtualRouteCallCollector::from_imports(program);
+    collector.visit_expression(expr);
+    collector.refs
+}
+
+fn collect_router_plugin_route_options(
+    program: &Program,
+    config_path: &Path,
+    root: &Path,
+) -> Vec<RouteOptions> {
+    let mut collector = RouterPluginCallCollector {
+        route_options: Vec::new(),
+        local_names: Vec::new(),
+        namespaces: Vec::new(),
+        program,
+        config_path,
+        root,
+    };
+    collector.visit_program(program);
+    collector.route_options
+}
+
+fn extract_option_string(options: &ObjectExpression, key: &str) -> Option<String> {
+    config_parser::find_property(options, key)
+        .and_then(|prop| config_parser::expression_to_string(&prop.value))
+}
+
+fn find_variable_init_expression<'a>(
+    program: &'a Program<'a>,
+    name: &str,
+) -> Option<&'a Expression<'a>> {
+    for stmt in &program.body {
+        let Statement::VariableDeclaration(decl) = stmt else {
+            continue;
+        };
+        for declarator in &decl.declarations {
+            if let BindingPattern::BindingIdentifier(identifier) = &declarator.id
+                && identifier.name == name
+                && let Some(init) = &declarator.init
+            {
+                return Some(init);
+            }
+        }
+    }
+    None
+}
+
+struct RouterPluginCallCollector<'a> {
+    route_options: Vec<RouteOptions>,
+    local_names: Vec<String>,
+    namespaces: Vec<String>,
+    program: &'a Program<'a>,
+    config_path: &'a Path,
+    root: &'a Path,
+}
+
+impl<'a> Visit<'a> for RouterPluginCallCollector<'a> {
+    fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
+        if !ROUTER_PLUGIN_IMPORTS
+            .iter()
+            .any(|source| decl.source.value == *source)
+        {
+            return;
+        }
+
+        if let Some(specifiers) = &decl.specifiers {
+            for specifier in specifiers {
+                match specifier {
+                    oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(specifier)
+                        if specifier.imported.name() == "tanstackRouter" =>
+                    {
+                        push_unique(&mut self.local_names, specifier.local.name.to_string());
+                    }
+                    oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                        specifier,
+                    ) => {
+                        push_unique(&mut self.namespaces, specifier.local.name.to_string());
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if self.is_router_plugin_call(call)
+            && let Some(Expression::ObjectExpression(options)) =
+                call.arguments.first().and_then(Argument::as_expression)
+        {
+            self.route_options.push(resolve_bundler_route_options(
+                self.program,
+                options,
+                self.config_path,
+                self.root,
+            ));
+        }
+
+        walk::walk_call_expression(self, call);
+    }
+}
+
+impl RouterPluginCallCollector<'_> {
+    fn is_router_plugin_call(&self, call: &CallExpression<'_>) -> bool {
+        match &call.callee {
+            Expression::Identifier(identifier) => self
+                .local_names
+                .iter()
+                .any(|name| name == identifier.name.as_str()),
+            Expression::StaticMemberExpression(member) if matches!(&member.object, Expression::Identifier(object) if self.namespaces.iter().any(|name| name == object.name.as_str())) => {
+                member.property.name == "tanstackRouter"
+            }
+            _ => false,
+        }
+    }
+}
+
 #[derive(Default)]
 struct VirtualRouteCallCollector {
     refs: VirtualRouteRefs,
     helper_bindings: Vec<(String, String)>,
     namespaces: Vec<String>,
+}
+
+impl VirtualRouteCallCollector {
+    fn from_imports(program: &Program) -> Self {
+        let mut collector = Self::default();
+        for stmt in &program.body {
+            if let Statement::ImportDeclaration(decl) = stmt {
+                collector.visit_import_declaration(decl);
+            }
+        }
+        collector
+    }
 }
 
 impl<'a> Visit<'a> for VirtualRouteCallCollector {
