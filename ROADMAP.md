@@ -1,6 +1,6 @@
 # Fallow Roadmap
 
-> Last updated: 2026-04-28 (v2.54.0: GitLab CI template hardening + `fallow ci-template gitlab --vendor` for offline runners; CRAP coverage story for templates still queued in #186)
+> Last updated: 2026-04-29
 
 This roadmap tracks planned work on Fallow. For shipped capabilities, see the [documentation](https://docs.fallow.tools) and [GitHub releases](https://github.com/fallow-rs/fallow/releases).
 

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.54.3] - 2026-04-29
+
+### Fixed
+
+- **Class members are credited through cross-file exported instances.** When an instance is created in one file (`export const box = new Box()`) and consumed in another (`box.bump()`), the visitor now records a synthetic `MemberAccess` entry tying each instance export to its source class. The analysis layer reads those entries to build an instance-export to class-export-key map, walks through re-export chains, and propagates accumulated `accessed_members` from each instance key onto its target class key. Previously `Box.bump` (and getters/setters) were reported as unused with `auto_fixable: true`, which would let `fallow fix` silently delete methods in active use. Sentinel-prefixed accesses are filtered out of the main accessed-members loop and the heritage chain extractor so they do not leak into unrelated detection paths. (Closes [#222](https://github.com/fallow-rs/fallow/issues/222))
+- **Class members accessed via nested injected-dependency object types are credited.** Members reached through typed nested object bindings such as `constructor(private deps: { foo: FooClass }) { ... } this.deps.foo.foo()` were previously reported as unused. The visitor now walks `TSTypeLiteral` nodes to register dotted-path bindings (`this.deps.foo -> FooClass`), records full-chain object names in `visit_static_member_expression`, and propagates nested bindings through explicit `this.x = y` assignments for the no-accessibility-modifier form.
+
+### Internal
+
+- Cache version bumped 54 → 55 so warm caches re-extract the new instance-binding shape.
+
 ## [2.54.2] - 2026-04-28
 
 ### Fixed
@@ -1777,7 +1788,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.54.2...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.54.3...HEAD
+[2.54.3]: https://github.com/fallow-rs/fallow/compare/v2.54.2...v2.54.3
 [2.54.2]: https://github.com/fallow-rs/fallow/compare/v2.54.1...v2.54.2
 [2.54.1]: https://github.com/fallow-rs/fallow/compare/v2.54.0...v2.54.1
 [2.54.0]: https://github.com/fallow-rs/fallow/compare/v2.53.0...v2.54.0
