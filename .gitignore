@@ -78,3 +78,6 @@ editors/vscode/LICENSE
 # Codex
 .codex/
 AGENTS.md
+
+# Crash-handover markers from sdk-cli automation
+/HANDOVER-CRASH-*.md
