@@ -1,12 +1,18 @@
 //! `TanStack` Router plugin.
 //!
 //! Detects `TanStack` Router projects and marks route files as entry points.
-//! Parses `tsr.config.json` to support custom route directories and generated
-//! route-tree locations.
+//! Parses `tsr.config.json` to support custom route directories, generated
+//! route-tree locations, and virtual route config.
 
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use super::{PathRule, Plugin, PluginResult, UsedExportRule, config_parser};
+use oxc_allocator::Allocator;
+use oxc_ast::ast::{Argument, CallExpression, Expression, ImportDeclaration};
+use oxc_ast_visit::{Visit, walk};
+use oxc_parser::Parser;
+use oxc_span::SourceType;
 
 const ENABLERS: &[&str] = &[
     "@tanstack/react-router",
@@ -14,6 +20,7 @@ const ENABLERS: &[&str] = &[
     "@tanstack/start",
     "@tanstack/react-start",
     "@tanstack/solid-start",
+    "@tanstack/virtual-file-routes",
 ];
 
 const DEFAULT_ROUTE_DIRS: &[&str] = &["src/routes", "app/routes"];
@@ -47,7 +54,9 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@tanstack/react-start",
     "@tanstack/solid-start",
     "@tanstack/router-cli",
+    "@tanstack/router-plugin",
     "@tanstack/router-vite-plugin",
+    "@tanstack/virtual-file-routes",
 ];
 
 const ROUTE_EXPORTS: &[&str] = &[
@@ -60,6 +69,7 @@ const ROUTE_EXPORTS: &[&str] = &[
     "pendingComponent",
     "notFoundComponent",
     "beforeLoad",
+    "ServerRoute",
 ];
 const LAZY_ROUTE_EXPORTS: &[&str] = &[
     "Route",
@@ -176,13 +186,25 @@ impl Plugin for TanstackRouterPlugin {
         let route_file_ignore_pattern =
             config_parser::extract_config_string(source, config_path, &["routeFileIgnorePattern"]);
 
-        add_route_dir_patterns(
-            &mut result,
-            &route_dir,
-            &route_file_prefix,
-            &route_file_ignore_prefix,
-            route_file_ignore_pattern.as_deref(),
-        );
+        let virtual_route_config =
+            resolve_virtual_route_config(config_path, source, root, &route_dir);
+        if virtual_route_config.is_empty() {
+            add_route_dir_patterns(
+                &mut result,
+                &route_dir,
+                &route_file_prefix,
+                &route_file_ignore_prefix,
+                route_file_ignore_pattern.as_deref(),
+            );
+        } else {
+            apply_virtual_route_config(
+                &mut result,
+                virtual_route_config,
+                &route_file_prefix,
+                &route_file_ignore_prefix,
+                route_file_ignore_pattern.as_deref(),
+            );
+        }
 
         let generated_route_tree =
             config_parser::extract_config_string(source, config_path, &["generatedRouteTree"])
@@ -196,6 +218,319 @@ impl Plugin for TanstackRouterPlugin {
         result.extend_entry_patterns(SUPPORTING_ENTRY_PATTERNS.iter().copied());
 
         result
+    }
+}
+
+#[derive(Debug, Default)]
+struct VirtualRouteConfig {
+    config_files: Vec<String>,
+    route_files: Vec<String>,
+    physical_dirs: Vec<String>,
+}
+
+impl VirtualRouteConfig {
+    fn is_empty(&self) -> bool {
+        self.config_files.is_empty() && self.route_files.is_empty() && self.physical_dirs.is_empty()
+    }
+}
+
+fn resolve_virtual_route_config(
+    config_path: &Path,
+    source: &str,
+    root: &Path,
+    route_dir: &str,
+) -> VirtualRouteConfig {
+    let mut config = VirtualRouteConfig::default();
+
+    if let Some(config_file) =
+        config_parser::extract_config_string(source, config_path, &["virtualRouteConfig"])
+            .as_deref()
+            .and_then(|raw| config_parser::normalize_config_path(raw, config_path, root))
+    {
+        push_unique(&mut config.config_files, config_file.clone());
+
+        let file_path = root.join(&config_file);
+        if let Ok(source) = fs::read_to_string(&file_path) {
+            let base_dir = Path::new(&config_file)
+                .parent()
+                .map_or_else(String::new, |parent| {
+                    parent.to_string_lossy().replace('\\', "/")
+                });
+            let refs = collect_virtual_route_call_refs(&source, &file_path);
+            for file in refs.route_files {
+                if let Some(path) = normalize_project_relative(&base_dir, &file) {
+                    push_unique(&mut config.route_files, path);
+                }
+            }
+            for dir in refs.physical_dirs {
+                if let Some(path) = normalize_project_relative(&base_dir, &dir) {
+                    push_unique(&mut config.physical_dirs, path);
+                }
+            }
+        }
+    }
+
+    for file in collect_inline_virtual_route_files(source) {
+        if let Some(path) = normalize_project_relative(route_dir, &file) {
+            push_unique(&mut config.route_files, path);
+        }
+    }
+
+    config
+}
+
+fn apply_virtual_route_config(
+    result: &mut PluginResult,
+    config: VirtualRouteConfig,
+    route_file_prefix: &str,
+    route_file_ignore_prefix: &str,
+    route_file_ignore_pattern: Option<&str>,
+) {
+    for config_file in config.config_files {
+        result.push_entry_pattern(config_file);
+    }
+    for route_file in config.route_files {
+        result.push_entry_pattern(route_file.clone());
+        result
+            .used_exports
+            .push(virtual_route_used_export_rule(&route_file));
+    }
+    for dir in config.physical_dirs {
+        result.entry_patterns.push(route_dir_rule(
+            &dir,
+            route_file_prefix,
+            route_file_ignore_prefix,
+            route_file_ignore_pattern,
+            RouteFileKind::Standard,
+        ));
+        result.entry_patterns.push(route_dir_rule(
+            &dir,
+            route_file_prefix,
+            route_file_ignore_prefix,
+            route_file_ignore_pattern,
+            RouteFileKind::Lazy,
+        ));
+        result.used_exports.push(route_dir_used_export_rule(
+            &dir,
+            route_file_prefix,
+            route_file_ignore_prefix,
+            route_file_ignore_pattern,
+        ));
+        result.used_exports.push(lazy_route_rule(
+            &dir,
+            route_file_prefix,
+            route_file_ignore_prefix,
+            route_file_ignore_pattern,
+        ));
+    }
+}
+
+fn virtual_route_used_export_rule(path: &str) -> UsedExportRule {
+    let exports = if path.contains(".lazy.") {
+        LAZY_ROUTE_EXPORTS
+    } else {
+        ROUTE_EXPORTS
+    };
+    UsedExportRule::new(path.to_string(), exports.iter().copied())
+}
+
+fn collect_inline_virtual_route_files(source: &str) -> Vec<String> {
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(source) else {
+        return Vec::new();
+    };
+    let Some(virtual_config) = json.get("virtualRouteConfig") else {
+        return Vec::new();
+    };
+
+    let mut files = Vec::new();
+    collect_json_file_properties(virtual_config, &mut files);
+    files
+}
+
+fn collect_json_file_properties(value: &serde_json::Value, files: &mut Vec<String>) {
+    match value {
+        serde_json::Value::Object(object) => {
+            if let Some(serde_json::Value::String(file)) = object.get("file") {
+                push_unique(files, file.clone());
+            }
+            for child in object.values() {
+                collect_json_file_properties(child, files);
+            }
+        }
+        serde_json::Value::Array(array) => {
+            for child in array {
+                collect_json_file_properties(child, files);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[derive(Debug, Default)]
+struct VirtualRouteRefs {
+    route_files: Vec<String>,
+    physical_dirs: Vec<String>,
+}
+
+fn collect_virtual_route_call_refs(source: &str, path: &Path) -> VirtualRouteRefs {
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let allocator = Allocator::default();
+    let parsed = Parser::new(&allocator, source, source_type).parse();
+    let mut collector = VirtualRouteCallCollector::default();
+    collector.visit_program(&parsed.program);
+    collector.refs
+}
+
+#[derive(Default)]
+struct VirtualRouteCallCollector {
+    refs: VirtualRouteRefs,
+    helper_bindings: Vec<(String, String)>,
+    namespaces: Vec<String>,
+}
+
+impl<'a> Visit<'a> for VirtualRouteCallCollector {
+    fn visit_import_declaration(&mut self, decl: &ImportDeclaration<'a>) {
+        if decl.source.value != "@tanstack/virtual-file-routes" {
+            return;
+        }
+
+        if let Some(specifiers) = &decl.specifiers {
+            for specifier in specifiers {
+                match specifier {
+                    oxc_ast::ast::ImportDeclarationSpecifier::ImportSpecifier(specifier) => {
+                        let helper = specifier.imported.name().to_string();
+                        if is_virtual_route_helper(&helper) {
+                            push_unique_pair(
+                                &mut self.helper_bindings,
+                                specifier.local.name.to_string(),
+                                helper,
+                            );
+                        }
+                    }
+                    oxc_ast::ast::ImportDeclarationSpecifier::ImportNamespaceSpecifier(
+                        specifier,
+                    ) => {
+                        push_unique(&mut self.namespaces, specifier.local.name.to_string());
+                    }
+                    oxc_ast::ast::ImportDeclarationSpecifier::ImportDefaultSpecifier(_) => {}
+                }
+            }
+        }
+    }
+
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Some(callee) = self.virtual_route_helper(call) {
+            match callee {
+                "rootRoute" | "index" => {
+                    if let Some(file) = string_arg(call, 0) {
+                        push_unique(&mut self.refs.route_files, file);
+                    }
+                }
+                "route" => {
+                    if let Some(file) = string_arg(call, 1) {
+                        push_unique(&mut self.refs.route_files, file);
+                    }
+                }
+                "layout" => {
+                    if let Some(file) = string_arg(call, 1).or_else(|| string_arg(call, 0)) {
+                        push_unique(&mut self.refs.route_files, file);
+                    }
+                }
+                "physical" => {
+                    if let Some(dir) = string_arg(call, 1).or_else(|| string_arg(call, 0)) {
+                        push_unique(&mut self.refs.physical_dirs, dir);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        walk::walk_call_expression(self, call);
+    }
+}
+
+impl VirtualRouteCallCollector {
+    fn virtual_route_helper<'a>(&'a self, call: &'a CallExpression<'a>) -> Option<&'a str> {
+        match &call.callee {
+            Expression::Identifier(identifier) => {
+                self.helper_bindings.iter().find_map(|(local, helper)| {
+                    (local == identifier.name.as_str()).then_some(helper.as_str())
+                })
+            }
+            Expression::StaticMemberExpression(member) if matches!(&member.object, Expression::Identifier(object) if self.namespaces.iter().any(|name| name == object.name.as_str())) =>
+            {
+                let helper = member.property.name.as_str();
+                is_virtual_route_helper(helper).then_some(helper)
+            }
+            _ => None,
+        }
+    }
+}
+
+fn is_virtual_route_helper(name: &str) -> bool {
+    matches!(
+        name,
+        "rootRoute" | "index" | "route" | "layout" | "physical"
+    )
+}
+
+fn push_unique_pair(values: &mut Vec<(String, String)>, local: String, helper: String) {
+    if !values.iter().any(|(existing, _)| existing == &local) {
+        values.push((local, helper));
+    }
+}
+
+fn string_arg(call: &CallExpression<'_>, index: usize) -> Option<String> {
+    call.arguments
+        .get(index)
+        .and_then(|argument| match argument {
+            Argument::StringLiteral(value) => Some(value.value.to_string()),
+            Argument::TemplateLiteral(value) if value.expressions.is_empty() => value
+                .quasis
+                .first()
+                .map(|quasi| quasi.value.raw.to_string()),
+            _ => None,
+        })
+}
+
+fn normalize_project_relative(base_dir: &str, raw: &str) -> Option<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.starts_with('/') || raw.contains("://") {
+        return None;
+    }
+
+    let path = Path::new(raw);
+    let joined = if path.is_absolute() {
+        PathBuf::from(path)
+    } else if base_dir.is_empty() {
+        path.to_path_buf()
+    } else {
+        Path::new(base_dir).join(path)
+    };
+
+    let normalized = lexical_normalize(&joined)
+        .to_string_lossy()
+        .replace('\\', "/");
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+fn lexical_normalize(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn push_unique(values: &mut Vec<String>, value: String) {
+    if !values.contains(&value) {
+        values.push(value);
     }
 }
 

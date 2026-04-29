@@ -169,6 +169,152 @@ fn tanstack_router_prefix_and_ignore_patterns_stay_strict() {
 }
 
 #[test]
+fn tanstack_router_inline_virtual_route_config_is_covered() {
+    let root = fixture_path("tanstack-router-virtual-routes");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = collect_unused_files(&root, &results);
+    for path in [
+        "src/routeTree.gen.ts",
+        "src/virtual-routes/root.tsx",
+        "src/virtual-routes/home.tsx",
+        "src/virtual-routes/admin/dashboard.tsx",
+        "src/virtual-routes/layouts/shell.tsx",
+        "src/virtual-routes/settings.tsx",
+    ] {
+        assert!(
+            !unused_files.iter().any(|unused| unused == path),
+            "{path} should be reachable through inline virtualRouteConfig, unused files: {unused_files:?}"
+        );
+    }
+    assert!(
+        unused_files
+            .iter()
+            .any(|unused| unused == "src/virtual-routes/orphan.tsx"),
+        "virtualRouteConfig should not keep unlisted route files alive, unused files: {unused_files:?}"
+    );
+
+    let unused_exports = collect_unused_exports(&root, &results);
+    for (path, export) in [
+        ("src/virtual-routes/root.tsx", "Route"),
+        ("src/virtual-routes/home.tsx", "Route"),
+        ("src/virtual-routes/home.tsx", "loader"),
+        ("src/virtual-routes/admin/dashboard.tsx", "ServerRoute"),
+        ("src/virtual-routes/layouts/shell.tsx", "beforeLoad"),
+    ] {
+        assert!(
+            !has_unused_export(&unused_exports, path, export),
+            "{path}:{export} should be framework-used through virtualRouteConfig, found: {unused_exports:?}"
+        );
+    }
+    assert!(
+        has_unused_export(
+            &unused_exports,
+            "src/virtual-routes/home.tsx",
+            "unusedHomeHelper"
+        ),
+        "ordinary helpers in virtual route files should still be reported, found: {unused_exports:?}"
+    );
+}
+
+#[test]
+fn tanstack_router_virtual_route_config_file_is_covered() {
+    let temp = tempdir().expect("create temp dir");
+    let root = temp.path();
+
+    write_project_file(
+        root,
+        "package.json",
+        r#"{
+  "dependencies": {
+    "@tanstack/react-start": "1.0.0",
+    "@tanstack/virtual-file-routes": "1.0.0"
+  }
+}"#,
+    );
+    write_project_file(
+        root,
+        "tsr.config.json",
+        r#"{
+  "virtualRouteConfig": "./routes.ts",
+  "generatedRouteTree": "./routeTree.gen.ts"
+}"#,
+    );
+    write_project_file(
+        root,
+        "routes.ts",
+        r#"import { index, layout, physical, rootRoute, route } from "@tanstack/virtual-file-routes";
+
+export const routes = rootRoute("root.tsx", [
+  index("home.tsx"),
+  route("/admin", "admin/dashboard.tsx"),
+  layout("shell", "layouts/shell.tsx", [
+    route("/settings", "settings.tsx")
+  ]),
+  physical("physical")
+]);
+"#,
+    );
+    write_project_file(root, "routeTree.gen.ts", "export const routeTree = {};\n");
+    write_project_file(root, "root.tsx", "export const Route = {};\n");
+    write_project_file(root, "home.tsx", "export const Route = {};\n");
+    write_project_file(
+        root,
+        "admin/dashboard.tsx",
+        "export const ServerRoute = {};\nexport const unusedDashboardHelper = 1;\n",
+    );
+    write_project_file(
+        root,
+        "layouts/shell.tsx",
+        "export function beforeLoad() {}\n",
+    );
+    write_project_file(root, "settings.tsx", "export const Route = {};\n");
+    write_project_file(root, "physical/index.tsx", "export const Route = {};\n");
+    write_project_file(root, "physical/-helper.tsx", "export const Route = {};\n");
+    write_project_file(root, "src/routes/orphan.tsx", "export const Route = {};\n");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files = collect_unused_files(root, &results);
+    for path in [
+        "routes.ts",
+        "routeTree.gen.ts",
+        "root.tsx",
+        "home.tsx",
+        "admin/dashboard.tsx",
+        "layouts/shell.tsx",
+        "settings.tsx",
+        "physical/index.tsx",
+    ] {
+        assert!(
+            !unused_files.iter().any(|unused| unused == path),
+            "{path} should be reachable through virtual route config file, unused files: {unused_files:?}"
+        );
+    }
+    for path in ["physical/-helper.tsx", "src/routes/orphan.tsx"] {
+        assert!(
+            unused_files.iter().any(|unused| unused == path),
+            "{path} should not be treated as a configured virtual route, unused files: {unused_files:?}"
+        );
+    }
+
+    let unused_exports = collect_unused_exports(root, &results);
+    assert!(
+        !has_unused_export(&unused_exports, "admin/dashboard.tsx", "ServerRoute"),
+        "Start ServerRoute export should be framework-used, found: {unused_exports:?}"
+    );
+    assert!(
+        has_unused_export(
+            &unused_exports,
+            "admin/dashboard.tsx",
+            "unusedDashboardHelper"
+        ),
+        "non-framework exports should still be reported, found: {unused_exports:?}"
+    );
+}
+
+#[test]
 fn tanstack_router_custom_route_dir_replaces_default_used_export_rules() {
     let temp = tempdir().expect("create temp dir");
     let root = temp.path();
