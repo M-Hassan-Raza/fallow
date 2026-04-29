@@ -7,12 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.55.0] - 2026-04-29
+
+### Added
+
+- **`private-type-leak` issue type for exported function and method signatures.** Detects when an exported `function`, class method, or class field references a type that is not also exported from the same module, producing a finding the consumer cannot name when they need to type a wrapper, mock, or destructured argument. Opt-in via `rules.private-type-leak: "error"` (or `"warn"`); default severity is `"off"` so existing projects don't see new findings without explicit consent. Framework routing convention files (Next.js `app/` route handlers, Nuxt `pages/`, SvelteKit `+page.ts`/`+layout.ts`, Remix routes, TanStack route configs, Astro pages, Solid/Qwik routes) are skipped because their exports are framework contracts rather than public API surface.
+- **`ignoreExportsUsedInFile` config option (knip parity).** When set to `true`, exports that are referenced inside the same file as their declaration are not reported as unused, matching knip's behavior for projects that re-export internal utilities purely for convenience or testing. Default `false` keeps the stricter fallow behavior.
+- **TanStack virtual route configs supported.** The TanStack Router plugin now recognises virtual route files declared via `route(...)` / `index(...)` / `layout(...)` in a config, so route components consumed only by `routeTree.gen.ts` are no longer reported as unused. Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza). (#223)
+
 ### Changed
 
 - **`fallow health --score` no longer auto-runs churn-backed hotspot analysis.** Plain `--score` now computes the score using duplication, dead-code, complexity, maintainability, unused-deps, circular-deps, unit-size, and coupling penalties. The `hotspots` penalty is only included when hotspot analysis runs (via `--hotspots`, or `--targets` with `--score`). The previous behavior forced every `--score` invocation to run a `git log` shell-out, which dominated health timing on large repos. Snapshot (`--save-snapshot`) and trend (`--trend`) flows still trigger hotspot vital signs so saved snapshots remain complete. Score numbers can rise on projects that previously took a non-zero hotspot penalty; CI `--min-score` gates may need re-baselining. The human output now hints `N/A: hotspots (enable the corresponding analysis flags)` and the JSON `health_score.penalties.hotspots` field is omitted when the penalty was not computed.
 
+### Fixed
+
+- **LSP server now serves document diagnostic pulls.** Editors that follow the `textDocument/diagnostic` pull model (modern Helix, Zed, recent Neovim configs) previously got no diagnostics from the fallow LSP because the server only published via the push channel. The pull handler now returns a `RelatedFullDocumentDiagnosticReport` keyed by the requested document's URI, so pull-mode and push-mode editors see the same findings.
+
 ### Performance
 
+- **Audit shares dead-code parse and analysis with health and dupes.** `fallow audit` previously ran the dead-code pipeline (parse, semantic, graph build, plugin pass) once for `check`, again for `health`, and again for `dupes`. The orchestrator now computes the shared result once and threads the file list and analysis output through to both downstream steps, cutting redundant parsing work in the dominant local-developer flow.
 - **Workspace plugin runs see only their own files.** `run_plugins` now buckets discovered files by workspace root before parallel plugin execution and passes each workspace its own pre-computed relative paths, instead of feeding every workspace the full project file list. Cuts the per-workspace plugin matcher work from `O(workspaces × all_files × matchers)` to `O(workspace_files × matchers)` on monorepos. End-to-end plugin detection is unchanged because the filesystem-fallback Phase 3b still scans workspace and project roots for unmatched config files.
 - **Duplicate-export importer overlap is single-pass.** `find_duplicate_exports` pre-builds an `FxHashMap<&Path, FileId>` index instead of scanning every module per location, and `has_common_importer` walks each duplicate file's `reverse_deps` once into an `importer_owner` map instead of comparing every pair of importer sets. Same output, lower complexity on projects with many duplicate-export groups.
 
@@ -20,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New regression test asserts `expand_recursive_workspace_pattern` preserves nested workspace roots (e.g., `apps/app/packages/nested/`) when both parent and child have a `package.json`.
 - New end-to-end test asserts `run_workspace_fast` invokes `plugin.resolve_config()` for workspace-local config files and surfaces the parsed entry pattern.
+- Pre-push hook now unsets `GIT_DIR` and `GIT_WORK_TREE` so integration tests run from the worktree path even when the user's shell environment exports those variables (fixes flaky push from worktrees with bare-repo-style configs).
+- `.gitignore` updated to exclude crash handover marker files.
+- Dependency bump: `tokio` 1.51.1 → 1.52.1 (#218).
+- Docs touch-ups: MCP `analyze` tool description, agent context note for the new opt-in default of `private-type-leak`, and `crap_max` description refined across coverage_model variants.
 
 ## [2.54.3] - 2026-04-29
 
@@ -1802,7 +1819,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.54.3...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.55.0...HEAD
+[2.55.0]: https://github.com/fallow-rs/fallow/compare/v2.54.3...v2.55.0
 [2.54.3]: https://github.com/fallow-rs/fallow/compare/v2.54.2...v2.54.3
 [2.54.2]: https://github.com/fallow-rs/fallow/compare/v2.54.1...v2.54.2
 [2.54.1]: https://github.com/fallow-rs/fallow/compare/v2.54.0...v2.54.1
