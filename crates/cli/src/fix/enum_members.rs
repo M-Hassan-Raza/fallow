@@ -153,10 +153,17 @@ pub(super) fn apply_enum_member_fixes(
             continue;
         }
 
-        // Sort by line index descending so we can work backwards
-        member_fixes.sort_by_key(|f| std::cmp::Reverse(f.line_idx));
-        // Deduplicate by line_idx
-        member_fixes.dedup_by_key(|f| f.line_idx);
+        member_fixes.sort_by(|a, b| {
+            b.line_idx
+                .cmp(&a.line_idx)
+                .then_with(|| a.parent_name.cmp(&b.parent_name))
+                .then_with(|| a.member_name.cmp(&b.member_name))
+        });
+        member_fixes.dedup_by(|a, b| {
+            a.line_idx == b.line_idx
+                && a.parent_name == b.parent_name
+                && a.member_name == b.member_name
+        });
 
         let relative = path.strip_prefix(root).unwrap_or(path);
 
@@ -700,14 +707,11 @@ mod tests {
             &mut fixes,
         );
 
-        // Dedup by line_idx means only one fix is applied; the first member alphabetically
-        // in descending sort wins. Both are on line 1, so dedup keeps one.
-        // The fix still removes whichever member name matched.
         let content = std::fs::read_to_string(&file).unwrap();
-        // After dedup, only one fix is applied to line 1
-        assert_eq!(fixes.len(), 1);
-        // The line was modified (at least one member removed)
-        assert!(!content.contains("enum Status { A, B, C, D }"));
+        assert_eq!(content, "enum Status { A, C }\n");
+        assert_eq!(fixes.len(), 2);
+        assert!(fixes.iter().any(|fix| fix["name"] == "B"));
+        assert!(fixes.iter().any(|fix| fix["name"] == "D"));
     }
 
     #[test]
