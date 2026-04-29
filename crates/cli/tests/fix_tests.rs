@@ -1,7 +1,7 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow};
+use common::{parse_json, run_fallow, run_fallow_in_root};
 
 // ---------------------------------------------------------------------------
 // fix --dry-run
@@ -71,6 +71,40 @@ fn fix_dry_run_does_not_have_applied_key() {
             "dry-run fixes should not have 'applied' key"
         );
     }
+}
+
+#[test]
+fn fix_removes_unused_exported_enum_declaration() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"enum-fix","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src/index.ts"), "import './enum';\n").unwrap();
+    std::fs::write(
+        root.join("src/enum.ts"),
+        "export enum MyEnum {\n  A,\n  B,\n}\n",
+    )
+    .unwrap();
+
+    let output = run_fallow_in_root("fix", root, &["--yes", "--quiet"]);
+
+    assert_eq!(
+        output.code, 0,
+        "fix should exit 0, stdout: {}, stderr: {}",
+        output.stdout, output.stderr
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/enum.ts")).unwrap(),
+        "\n"
+    );
+
+    let output = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    let json = parse_json(&output);
+    assert!(json["fixes"].as_array().unwrap().is_empty());
 }
 
 // ---------------------------------------------------------------------------

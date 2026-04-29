@@ -8,6 +8,13 @@ use super::io::{read_source, write_fixed_content};
 pub(super) struct ExportFix {
     line_idx: usize,
     export_name: String,
+    enum_declaration: Option<EnumDeclarationRange>,
+}
+
+#[derive(Clone, Copy)]
+struct EnumDeclarationRange {
+    start_line: usize,
+    end_line: usize,
 }
 
 /// Check if a line (after stripping `export `) is a named export list like `{ A, B } ...`
@@ -76,6 +83,148 @@ fn remove_specifiers_from_export_list(line: &str, names_to_remove: &[&str]) -> O
     }
 }
 
+fn strip_enum_modifier<'a>(s: &'a str, modifier: &str) -> Option<&'a str> {
+    let rest = s.strip_prefix(modifier)?;
+    rest.chars()
+        .next()
+        .is_some_and(char::is_whitespace)
+        .then(|| rest.trim_start())
+}
+
+fn declares_exported_enum(line: &str, enum_name: &str) -> bool {
+    let trimmed = line.trim_start();
+    let Some(mut rest) = trimmed.strip_prefix("export").map(str::trim_start) else {
+        return false;
+    };
+
+    for _ in 0..2 {
+        if let Some(next) = strip_enum_modifier(rest, "declare") {
+            rest = next;
+        } else if let Some(next) = strip_enum_modifier(rest, "const") {
+            rest = next;
+        }
+    }
+
+    let Some(after_enum) = rest.strip_prefix("enum").map(str::trim_start) else {
+        return false;
+    };
+    let Some(after_name) = after_enum.strip_prefix(enum_name) else {
+        return false;
+    };
+    after_name
+        .chars()
+        .next()
+        .is_some_and(|ch| ch.is_whitespace() || ch == '{')
+}
+
+fn find_enum_declaration_range(lines: &[&str], line_idx: usize) -> Option<EnumDeclarationRange> {
+    let start_line = lines.get(line_idx)?;
+    let export_col = start_line.find("export")?;
+    if !start_line[..export_col].trim().is_empty() {
+        return None;
+    }
+
+    let mut brace_depth = 0i32;
+    let mut saw_open_brace = false;
+
+    for (idx, line) in lines.iter().enumerate().skip(line_idx) {
+        let chars: Vec<char> = line.chars().collect();
+        for (char_idx, ch) in chars.iter().enumerate() {
+            match ch {
+                '{' => {
+                    saw_open_brace = true;
+                    brace_depth += 1;
+                }
+                '}' if saw_open_brace => {
+                    brace_depth -= 1;
+                    if brace_depth == 0 {
+                        let suffix: String = chars[char_idx + 1..].iter().collect();
+                        if suffix.trim().trim_end_matches(';').trim().is_empty() {
+                            return Some(EnumDeclarationRange {
+                                start_line: line_idx,
+                                end_line: idx,
+                            });
+                        }
+                        return None;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    None
+}
+
+fn is_ident_char(ch: char) -> bool {
+    ch == '_' || ch == '$' || ch.is_ascii_alphanumeric()
+}
+
+fn contains_identifier(text: &str, name: &str) -> bool {
+    text.match_indices(name).any(|(idx, _)| {
+        let before = text[..idx].chars().next_back();
+        let after = text[idx + name.len()..].chars().next();
+        !before.is_some_and(is_ident_char) && !after.is_some_and(is_ident_char)
+    })
+}
+
+fn has_identifier_outside_range(lines: &[&str], name: &str, range: EnumDeclarationRange) -> bool {
+    lines
+        .iter()
+        .enumerate()
+        .filter(|(idx, _)| *idx < range.start_line || *idx > range.end_line)
+        .any(|(_, line)| contains_identifier(line, name))
+}
+
+fn removable_exported_enum_range(
+    lines: &[&str],
+    line_idx: usize,
+    enum_name: &str,
+) -> Option<EnumDeclarationRange> {
+    let line = *lines.get(line_idx)?;
+    if !declares_exported_enum(line, enum_name) {
+        return None;
+    }
+    let range = find_enum_declaration_range(lines, line_idx)?;
+    (!has_identifier_outside_range(lines, enum_name, range)).then_some(range)
+}
+
+fn emit_dry_run_export_fix(relative: &Path, fix: &ExportFix) {
+    if fix.enum_declaration.is_some() {
+        eprintln!(
+            "Would remove enum declaration from {}:{} `{}`",
+            relative.display(),
+            fix.line_idx + 1,
+            fix.export_name,
+        );
+    } else {
+        eprintln!(
+            "Would remove export from {}:{} `{}`",
+            relative.display(),
+            fix.line_idx + 1,
+            fix.export_name,
+        );
+    }
+}
+
+fn push_export_fix_json(
+    fixes: &mut Vec<serde_json::Value>,
+    relative: &Path,
+    fix: &ExportFix,
+    applied: Option<bool>,
+) {
+    let mut value = serde_json::json!({
+        "type": "remove_export",
+        "path": relative.display().to_string(),
+        "line": fix.line_idx + 1,
+        "name": fix.export_name,
+    });
+    if let Some(applied) = applied {
+        value["applied"] = serde_json::json!(applied);
+    }
+    fixes.push(value);
+}
+
 /// Apply export fixes to source files, returning JSON fix entries.
 pub(super) fn apply_export_fixes(
     root: &Path,
@@ -135,6 +284,11 @@ pub(super) fn apply_export_fixes(
             line_fixes.push(ExportFix {
                 line_idx,
                 export_name: export.export_name.clone(),
+                enum_declaration: removable_exported_enum_range(
+                    &lines,
+                    line_idx,
+                    &export.export_name,
+                ),
             });
         }
 
@@ -163,26 +317,26 @@ pub(super) fn apply_export_fixes(
         if dry_run {
             for fix in &line_fixes {
                 if !matches!(output, OutputFormat::Json) {
-                    eprintln!(
-                        "Would remove export from {}:{} `{}`",
-                        relative.display(),
-                        fix.line_idx + 1,
-                        fix.export_name,
-                    );
+                    emit_dry_run_export_fix(relative, fix);
                 }
-                fixes.push(serde_json::json!({
-                    "type": "remove_export",
-                    "path": relative.display().to_string(),
-                    "line": fix.line_idx + 1,
-                    "name": fix.export_name,
-                }));
+                push_export_fix_json(fixes, relative, fix, None);
             }
         } else {
             // Apply all fixes to a single in-memory copy
             let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
             let mut lines_to_delete: Vec<usize> = Vec::new();
+            let mut ranges_to_delete: Vec<EnumDeclarationRange> = Vec::new();
 
             for (line_idx, names) in &grouped {
+                if let Some(range) = line_fixes
+                    .iter()
+                    .find(|fix| fix.line_idx == *line_idx && fix.enum_declaration.is_some())
+                    .and_then(|fix| fix.enum_declaration)
+                {
+                    ranges_to_delete.push(range);
+                    continue;
+                }
+
                 let line = &new_lines[*line_idx];
                 let trimmed = line.trim_start();
                 let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
@@ -219,9 +373,15 @@ pub(super) fn apply_export_fixes(
                 }
             }
 
-            // Delete lines marked for removal (reverse order to preserve indices)
-            lines_to_delete.sort_unstable();
-            for &idx in lines_to_delete.iter().rev() {
+            // Delete all marked lines in descending order so earlier removals do
+            // not shift later source indices.
+            let mut delete_indices = lines_to_delete;
+            for range in ranges_to_delete {
+                delete_indices.extend(range.start_line..=range.end_line);
+            }
+            delete_indices.sort_unstable();
+            delete_indices.dedup();
+            for &idx in delete_indices.iter().rev() {
                 new_lines.remove(idx);
             }
 
@@ -235,13 +395,7 @@ pub(super) fn apply_export_fixes(
             };
 
             for fix in &line_fixes {
-                fixes.push(serde_json::json!({
-                    "type": "remove_export",
-                    "path": relative.display().to_string(),
-                    "line": fix.line_idx + 1,
-                    "name": fix.export_name,
-                    "applied": success,
-                }));
+                push_export_fix_json(fixes, relative, fix, Some(success));
             }
         }
     }
@@ -572,7 +726,90 @@ mod tests {
         let (_, _) = fix_single(root, &file, "Status", 1, false);
 
         let content = std::fs::read_to_string(&file).unwrap();
-        assert_eq!(content, "enum Status { Active, Inactive }\n");
+        assert_eq!(content, "\n");
+    }
+
+    #[test]
+    fn export_fix_removes_multiline_exported_enum_when_unused_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("enums.ts");
+        std::fs::write(
+            &file,
+            "const before = 1;\nexport enum Status {\n  Active,\n  Inactive,\n}\nconst after = 2;\n",
+        )
+        .unwrap();
+
+        let (_, fixes) = fix_single(root, &file, "Status", 2, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "const before = 1;\nconst after = 2;\n");
+        assert_eq!(fixes.len(), 1);
+        assert_eq!(fixes[0]["type"], "remove_export");
+        assert_eq!(fixes[0]["name"], "Status");
+        assert_eq!(fixes[0]["applied"], true);
+    }
+
+    #[test]
+    fn export_fix_only_removes_export_from_enum_when_used_locally() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("enums.ts");
+        std::fs::write(
+            &file,
+            "export enum Status {\n  Active,\n  Inactive,\n}\nconsole.log(Status.Active);\n",
+        )
+        .unwrap();
+
+        let (_, _) = fix_single(root, &file, "Status", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(
+            content,
+            "enum Status {\n  Active,\n  Inactive,\n}\nconsole.log(Status.Active);\n"
+        );
+    }
+
+    #[test]
+    fn export_fix_removes_const_enum_declaration() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("enums.ts");
+        std::fs::write(&file, "export const enum Status { Active }\n").unwrap();
+
+        let (_, _) = fix_single(root, &file, "Status", 1, false);
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "\n");
+    }
+
+    #[test]
+    fn export_fix_deletes_export_list_before_enum_without_shift() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let file = root.join("index.ts");
+        std::fs::write(
+            &file,
+            "export { unused } from './unused';\nexport enum Status {\n  Active,\n}\nexport const kept = 1;\n",
+        )
+        .unwrap();
+
+        let e1 = make_export(&file, "unused", 1);
+        let e2 = make_export(&file, "Status", 2);
+        let mut exports_by_file: FxHashMap<PathBuf, Vec<&UnusedExport>> = FxHashMap::default();
+        exports_by_file.insert(file.clone(), vec![&e1, &e2]);
+
+        let mut fixes = Vec::new();
+        apply_export_fixes(
+            root,
+            &exports_by_file,
+            OutputFormat::Human,
+            false,
+            &mut fixes,
+        );
+
+        let content = std::fs::read_to_string(&file).unwrap();
+        assert_eq!(content, "export const kept = 1;\n");
     }
 
     #[test]

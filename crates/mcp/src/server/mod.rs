@@ -117,7 +117,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Apply auto-fixes to the project. Removes unused export keywords from source files and deletes unused dependencies from package.json. This modifies files on disk. Use fix_preview first to review planned changes. Supports workspace scoping and performance tuning (no_cache, threads).",
+        description = "Apply auto-fixes to the project. Removes unused exports from the public API, may delete dead exported enum declarations, and deletes unused dependencies from package.json. This modifies files on disk. Use fix_preview first to review planned changes. Supports workspace scoping and performance tuning (no_cache, threads).",
         annotations(destructive_hint = true, read_only_hint = false)
     )]
     async fn fix_apply(&self, params: Parameters<FixParams>) -> Result<CallToolResult, McpError> {

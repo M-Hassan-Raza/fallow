@@ -299,7 +299,7 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
         "unused_exports" => Some(ActionSpec {
             fix_type: "remove-export",
             auto_fixable: true,
-            description: "Remove the `export` keyword from the declaration",
+            description: "Remove the unused export from the public API",
             note: None,
             suppress: SuppressKind::InlineComment,
             issue_kind: "unused-export",

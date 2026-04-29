@@ -39,7 +39,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
         {
           "type": "remove-export",
           "auto_fixable": true,
-          "description": "Remove the `export` keyword from the declaration",
+          "description": "Remove the unused export from the public API",
           "note": "This finding originates from a re-export; verify it is not part of your public API before removing"
         },
         {
