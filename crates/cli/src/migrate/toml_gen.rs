@@ -26,6 +26,33 @@ pub(super) fn generate_toml(result: &MigrationResult) -> String {
         }
     }
 
+    if let Some(value) = obj.get("ignoreExportsUsedInFile") {
+        match value {
+            serde_json::Value::Bool(enabled) => {
+                let _ = writeln!(output, "ignoreExportsUsedInFile = {enabled}");
+            }
+            serde_json::Value::Object(kinds) => {
+                let entries: Vec<String> = ["type", "interface"]
+                    .into_iter()
+                    .filter_map(|key| {
+                        kinds
+                            .get(key)
+                            .and_then(serde_json::Value::as_bool)
+                            .map(|enabled| format!("{key} = {enabled}"))
+                    })
+                    .collect();
+                if !entries.is_empty() {
+                    let _ = writeln!(
+                        output,
+                        "ignoreExportsUsedInFile = {{ {} }}",
+                        entries.join(", ")
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     // [rules] table
     if let Some(rules) = obj.get("rules")
         && let Some(rules_obj) = rules.as_object()

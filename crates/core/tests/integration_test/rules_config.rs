@@ -85,6 +85,7 @@ fn ignore_exports_wildcard() {
             file: "src/utils.ts".to_string(),
             exports: vec!["*".to_string()],
         }],
+        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
@@ -137,6 +138,7 @@ fn ignore_exports_specific() {
             file: "src/utils.ts".to_string(),
             exports: vec!["ignored".to_string()],
         }],
+        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),
@@ -174,6 +176,128 @@ fn ignore_exports_specific() {
     );
 }
 
+#[test]
+fn exports_used_only_in_file_are_reported_by_default() {
+    let root = fixture_path("ignore-exports-used-in-file");
+    let config = create_config(root);
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results
+            .unused_exports
+            .iter()
+            .any(|e| e.export_name == "usedOnlyHere"),
+        "same-file references should not suppress unused exports by default"
+    );
+    assert!(
+        results
+            .unused_types
+            .iter()
+            .any(|e| e.export_name == "LocallyUsedType"),
+        "same-file references should not suppress unused types by default"
+    );
+}
+
+#[test]
+fn ignore_exports_used_in_file_boolean_suppresses_local_references() {
+    let root = fixture_path("ignore-exports-used-in-file");
+    let mut config = create_config(root);
+    config.ignore_exports_used_in_file = true.into();
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+    assert!(
+        !unused_export_names.contains(&"usedOnlyHere"),
+        "usedOnlyHere is referenced by publicApi and should be suppressed"
+    );
+    assert!(
+        unused_export_names.contains(&"completelyUnused"),
+        "completelyUnused has no references and should still be reported"
+    );
+
+    let unused_type_names: Vec<&str> = results
+        .unused_types
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+    assert!(
+        !unused_type_names.contains(&"LocallyUsedType"),
+        "LocallyUsedType is referenced by LocalConsumer and should be suppressed"
+    );
+    assert!(
+        unused_type_names.contains(&"DeadType"),
+        "DeadType has no references and should still be reported"
+    );
+}
+
+#[test]
+fn ignore_exports_used_in_file_kind_form_can_target_types_only() {
+    let root = fixture_path("ignore-exports-used-in-file");
+    let mut config = create_config(root);
+    config.ignore_exports_used_in_file = fallow_config::IgnoreExportsUsedInFileByKind {
+        type_: true,
+        interface: false,
+    }
+    .into();
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results
+            .unused_exports
+            .iter()
+            .any(|e| e.export_name == "usedOnlyHere"),
+        "kind form should not suppress value exports"
+    );
+    assert!(
+        !results
+            .unused_types
+            .iter()
+            .any(|e| e.export_name == "LocallyUsedType"),
+        "kind form should suppress type exports referenced in the same file"
+    );
+}
+
+#[test]
+fn ignore_exports_used_in_file_does_not_suppress_export_specifier_self_references() {
+    // Regression: `function foo() {}; export { foo };` and
+    // `export default foo;` reference the binding only at the export site.
+    // The export specifier identifier is not a same-file *use*, so these
+    // exports must still be reported when ignoreExportsUsedInFile is on.
+    let root = fixture_path("ignore-exports-used-in-file");
+    let mut config = create_config(root);
+    config.ignore_exports_used_in_file = true.into();
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    assert!(
+        unused_export_names.contains(&"specifierOnlyExport"),
+        "export {{ specifierOnlyExport }} must still be flagged \
+         when no real same-file use exists, found: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"aliasedSpecifierExportAlias"),
+        "export {{ x as y }} must still be flagged when no real same-file \
+         use exists, found: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"default"),
+        "export default <identifier> must still be flagged when no real \
+         same-file use exists, found: {unused_export_names:?}"
+    );
+}
+
 // ── Ignore dependencies ────────────────────────────────────────
 
 #[test]
@@ -188,6 +312,7 @@ fn ignore_dependencies_config() {
         workspaces: None,
         ignore_dependencies: vec!["unused-dep".to_string()],
         ignore_exports: vec![],
+        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
         used_class_members: vec![],
         duplicates: fallow_config::DuplicatesConfig::default(),
         health: fallow_config::HealthConfig::default(),

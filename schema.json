@@ -72,6 +72,11 @@
       },
       "default": []
     },
+    "ignoreExportsUsedInFile": {
+      "description": "Suppress unused-export findings when the exported symbol is referenced\ninside the file that declares it. This mirrors Knip's\n`ignoreExportsUsedInFile` option while still reporting exports that have\nno references at all.",
+      "$ref": "#/$defs/IgnoreExportsUsedInFileConfig",
+      "default": false
+    },
     "usedClassMembers": {
       "description": "Class member method/property rules that should never be flagged as\nunused. Supports plain member names for global suppression and scoped\nobjects with `extends` / `implements` constraints for framework-invoked\nmethods that should only be suppressed on matching classes.",
       "type": "array",
@@ -514,6 +519,35 @@
         "file",
         "exports"
       ]
+    },
+    "IgnoreExportsUsedInFileConfig": {
+      "description": "Controls whether exports referenced only inside their defining file are\nreported as unused exports.",
+      "anyOf": [
+        {
+          "description": "`true` suppresses both value and type exports that are referenced in\ntheir defining file. `false` preserves the default cross-file behavior.",
+          "type": "boolean"
+        },
+        {
+          "description": "Knip-compatible fine-grained form. Fallow groups type aliases and\ninterfaces under `unused_types`, so either field enables type-export\nsuppression for same-file references.",
+          "$ref": "#/$defs/IgnoreExportsUsedInFileByKind"
+        }
+      ]
+    },
+    "IgnoreExportsUsedInFileByKind": {
+      "description": "Knip-compatible `ignoreExportsUsedInFile` object form.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Suppress same-file references for exported type aliases.",
+          "type": "boolean",
+          "default": false
+        },
+        "interface": {
+          "description": "Suppress same-file references for exported interfaces.",
+          "type": "boolean",
+          "default": false
+        }
+      }
     },
     "DuplicatesConfig": {
       "description": "Configuration for code duplication detection.",

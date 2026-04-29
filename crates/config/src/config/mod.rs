@@ -31,6 +31,70 @@ use std::ops::Not;
 use crate::external_plugin::ExternalPluginDef;
 use crate::workspace::WorkspaceConfig;
 
+/// Controls whether exports referenced only inside their defining file are
+/// reported as unused exports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(untagged, rename_all = "camelCase")]
+pub enum IgnoreExportsUsedInFileConfig {
+    /// `true` suppresses both value and type exports that are referenced in
+    /// their defining file. `false` preserves the default cross-file behavior.
+    Bool(bool),
+    /// Knip-compatible fine-grained form. Fallow groups type aliases and
+    /// interfaces under `unused_types`, so either field enables type-export
+    /// suppression for same-file references.
+    ByKind(IgnoreExportsUsedInFileByKind),
+}
+
+impl Default for IgnoreExportsUsedInFileConfig {
+    fn default() -> Self {
+        Self::Bool(false)
+    }
+}
+
+impl From<bool> for IgnoreExportsUsedInFileConfig {
+    fn from(value: bool) -> Self {
+        Self::Bool(value)
+    }
+}
+
+impl From<IgnoreExportsUsedInFileByKind> for IgnoreExportsUsedInFileConfig {
+    fn from(value: IgnoreExportsUsedInFileByKind) -> Self {
+        Self::ByKind(value)
+    }
+}
+
+impl IgnoreExportsUsedInFileConfig {
+    /// Whether this option can suppress at least one kind of export.
+    #[must_use]
+    pub const fn is_enabled(self) -> bool {
+        match self {
+            Self::Bool(value) => value,
+            Self::ByKind(kind) => kind.type_ || kind.interface,
+        }
+    }
+
+    /// Whether same-file references should suppress this export kind.
+    #[must_use]
+    pub const fn suppresses(self, is_type_only: bool) -> bool {
+        match self {
+            Self::Bool(value) => value,
+            Self::ByKind(kind) => is_type_only && (kind.type_ || kind.interface),
+        }
+    }
+}
+
+/// Knip-compatible `ignoreExportsUsedInFile` object form.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct IgnoreExportsUsedInFileByKind {
+    /// Suppress same-file references for exported type aliases.
+    #[serde(default, rename = "type")]
+    pub type_: bool,
+    /// Suppress same-file references for exported interfaces.
+    #[serde(default)]
+    pub interface: bool,
+}
+
 /// User-facing configuration loaded from `.fallowrc.json` or `fallow.toml`.
 ///
 /// # Examples
@@ -108,6 +172,13 @@ pub struct FallowConfig {
     /// Export ignore rules.
     #[serde(default)]
     pub ignore_exports: Vec<IgnoreExportRule>,
+
+    /// Suppress unused-export findings when the exported symbol is referenced
+    /// inside the file that declares it. This mirrors Knip's
+    /// `ignoreExportsUsedInFile` option while still reporting exports that have
+    /// no references at all.
+    #[serde(default)]
+    pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
 
     /// Class member method/property rules that should never be flagged as
     /// unused. Supports plain member names for global suppression and scoped
@@ -696,6 +767,24 @@ usedClassMembers = [
             result.is_err(),
             "unconstrained scoped rule should be rejected"
         );
+    }
+
+    #[test]
+    fn deserialize_ignore_exports_used_in_file_bool() {
+        let config: FallowConfig =
+            serde_json::from_str(r#"{"ignoreExportsUsedInFile":true}"#).unwrap();
+
+        assert!(config.ignore_exports_used_in_file.suppresses(false));
+        assert!(config.ignore_exports_used_in_file.suppresses(true));
+    }
+
+    #[test]
+    fn deserialize_ignore_exports_used_in_file_kind_form() {
+        let config: FallowConfig =
+            serde_json::from_str(r#"{"ignoreExportsUsedInFile":{"type":true}}"#).unwrap();
+
+        assert!(!config.ignore_exports_used_in_file.suppresses(false));
+        assert!(config.ignore_exports_used_in_file.suppresses(true));
     }
 
     #[test]

@@ -1,8 +1,8 @@
 use serde_json::Value;
 
 use super::knip_fields::{
-    migrate_exclude, migrate_ignore_deps, migrate_include, migrate_rules, migrate_simple_field,
-    warn_plugin_keys, warn_unmappable_fields,
+    migrate_exclude, migrate_ignore_deps, migrate_ignore_exports_used_in_file, migrate_include,
+    migrate_rules, migrate_simple_field, warn_plugin_keys, warn_unmappable_fields,
 };
 #[cfg(test)]
 use super::knip_tables::KNIP_RULE_MAP;
@@ -34,6 +34,11 @@ pub(super) fn migrate_knip(
     // ignoreDependencies -> ignoreDependencies (skip regex values)
     if let Some(ignore_deps_val) = obj.get("ignoreDependencies") {
         migrate_ignore_deps(ignore_deps_val, config, warnings);
+    }
+
+    // ignoreExportsUsedInFile -> ignoreExportsUsedInFile
+    if let Some(value) = obj.get("ignoreExportsUsedInFile") {
+        migrate_ignore_exports_used_in_file(value, config, warnings);
     }
 
     // rules -> rules mapping
@@ -186,6 +191,38 @@ mod tests {
             config.get("ignoreDependencies").unwrap(),
             &serde_json::json!(["@org/lib", "lodash"])
         );
+    }
+
+    #[test]
+    fn migrate_knip_ignore_exports_used_in_file_bool() {
+        let knip: serde_json::Value =
+            serde_json::from_str(r#"{"ignoreExportsUsedInFile": true}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreExportsUsedInFile").unwrap(),
+            &serde_json::json!(true)
+        );
+        assert!(warnings.is_empty());
+    }
+
+    #[test]
+    fn migrate_knip_ignore_exports_used_in_file_kind_form() {
+        let knip: serde_json::Value = serde_json::from_str(
+            r#"{"ignoreExportsUsedInFile": {"type": true, "interface": true}}"#,
+        )
+        .unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreExportsUsedInFile").unwrap(),
+            &serde_json::json!({"type": true, "interface": true})
+        );
+        assert!(warnings.is_empty());
     }
 
     #[test]
@@ -565,9 +602,10 @@ mod tests {
 
     #[test]
     fn migrate_knip_unmappable_without_suggestion() {
-        let knip: serde_json::Value =
-            serde_json::from_str(r#"{"ignoreBinaries": ["tsc"], "ignoreExportsUsedInFile": true}"#)
-                .unwrap();
+        let knip: serde_json::Value = serde_json::from_str(
+            r#"{"ignoreBinaries": ["tsc"], "treatConfigHintsAsErrors": true}"#,
+        )
+        .unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);

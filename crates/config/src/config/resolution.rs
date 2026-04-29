@@ -15,6 +15,7 @@ use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
 use super::FallowConfig;
+use super::IgnoreExportsUsedInFileConfig;
 
 /// Rule for ignoring specific exports.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -55,6 +56,8 @@ pub struct ResolvedConfig {
     pub no_cache: bool,
     pub ignore_dependencies: Vec<String>,
     pub ignore_export_rules: Vec<IgnoreExportRule>,
+    /// Whether same-file references should suppress unused-export findings.
+    pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
     /// Class member names that should never be flagged as unused-class-members.
     /// Union of top-level config and active plugin contributions; merged during
     /// config resolution so analysis code reads a single list.
@@ -213,6 +216,7 @@ impl FallowConfig {
             no_cache,
             ignore_dependencies: self.ignore_dependencies,
             ignore_export_rules: self.ignore_exports,
+            ignore_exports_used_in_file: self.ignore_exports_used_in_file,
             used_class_members: self.used_class_members,
             duplicates: self.duplicates,
             health: self.health,
@@ -297,6 +301,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
@@ -336,6 +341,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
@@ -388,6 +394,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),
@@ -448,6 +455,7 @@ mod tests {
             workspaces: None,
             ignore_dependencies: vec![],
             ignore_exports: vec![],
+            ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: DuplicatesConfig::default(),
             health: HealthConfig::default(),

@@ -3,6 +3,7 @@ use std::sync::LazyLock;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_config::ResolvedConfig;
+use fallow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -114,9 +115,85 @@ fn is_export_ignored(
             .any(|exports| exports.contains(&export_name))
 }
 
+fn local_export_binding_name(export: &ExportInfo) -> Option<&str> {
+    export.local_name.as_deref().or(match &export.name {
+        ExportName::Named(name) => Some(name.as_str()),
+        ExportName::Default => None,
+    })
+}
+
+fn is_js_like_source(path: &std::path::Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext,
+                "js" | "jsx" | "mjs" | "cjs" | "ts" | "tsx" | "mts" | "cts"
+            )
+        })
+}
+
+fn collect_exports_used_in_file(module: &ModuleInfo, path: &std::path::Path) -> FxHashSet<String> {
+    if module.exports.is_empty() || !is_js_like_source(path) {
+        return FxHashSet::default();
+    }
+
+    let source = read_source(path);
+    if source.is_empty() {
+        return FxHashSet::default();
+    }
+
+    let source_type = oxc_span::SourceType::from_path(path).unwrap_or_default();
+    let allocator = oxc_allocator::Allocator::default();
+    let parser_return = oxc_parser::Parser::new(&allocator, &source, source_type).parse();
+    let semantic_ret = oxc_semantic::SemanticBuilder::new().build(&parser_return.program);
+    let semantic = semantic_ret.semantic;
+    let scoping = semantic.scoping();
+    let nodes = semantic.nodes();
+    let root_scope = scoping.root_scope_id();
+
+    let mut used = FxHashSet::default();
+    for export in &module.exports {
+        let Some(local_name) = local_export_binding_name(export) else {
+            continue;
+        };
+        let name = oxc_str::Ident::from(local_name);
+        let Some(symbol_id) = scoping.get_binding(root_scope, name) else {
+            continue;
+        };
+        let has_real_use = scoping
+            .get_resolved_references(symbol_id)
+            .any(|reference| !is_inside_export_specifier(nodes, reference.node_id()));
+        if has_real_use {
+            used.insert(export.name.to_string());
+        }
+    }
+
+    used
+}
+
+/// Walk ancestors of `node_id` and return `true` if the reference originates
+/// from inside an `export { foo }` / `export { foo as bar }` specifier or an
+/// `export default foo` declaration. Those identifiers are the export site
+/// itself, not a same-file *use*, so they must not satisfy
+/// `ignoreExportsUsedInFile` (Knip parity).
+fn is_inside_export_specifier(
+    nodes: &oxc_semantic::AstNodes<'_>,
+    node_id: oxc_syntax::node::NodeId,
+) -> bool {
+    nodes
+        .ancestor_kinds(node_id)
+        .any(|kind| matches!(kind, oxc_ast::AstKind::ExportSpecifier(_)))
+        || matches!(
+            nodes.parent_kind(node_id),
+            oxc_ast::AstKind::ExportDefaultDeclaration(_)
+        )
+}
+
 /// Find exports that are never imported by other files.
 pub fn find_unused_exports(
     graph: &ModuleGraph,
+    modules: &[ModuleInfo],
     config: &ResolvedConfig,
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
     suppressions: &SuppressionContext<'_>,
@@ -128,6 +205,12 @@ pub fn find_unused_exports(
 
     let ignore_matchers = compile_ignore_matchers(config);
     let plugin_matchers = compile_plugin_matchers(plugin_result);
+    let module_info_by_id: Option<FxHashMap<FileId, &ModuleInfo>> =
+        if config.ignore_exports_used_in_file.is_enabled() {
+            Some(modules.iter().map(|m| (m.file_id, m)).collect())
+        } else {
+            None
+        };
 
     // Precompute reachable FileIds so we can distinguish meaningful references
     // (from reachable modules) from unreachable-to-unreachable references.
@@ -166,6 +249,16 @@ pub fn find_unused_exports(
         ) {
             continue;
         }
+
+        let same_file_used_exports = if let Some(module_info_by_id) = &module_info_by_id {
+            module_info_by_id
+                .get(&module.file_id)
+                .map_or_else(FxHashSet::default, |info| {
+                    collect_exports_used_in_file(info, &module.path)
+                })
+        } else {
+            FxHashSet::default()
+        };
 
         // Namespace imports are now handled with member-access narrowing in graph.rs:
         // only specific accessed members get references populated. No blanket skip needed.
@@ -223,6 +316,14 @@ pub fn find_unused_exports(
             }
 
             let export_str = export.name.to_string();
+
+            if config
+                .ignore_exports_used_in_file
+                .suppresses(export.is_type_only)
+                && same_file_used_exports.contains(export_str.as_str())
+            {
+                continue;
+            }
 
             if is_export_ignored(&export_str, &matching_ignore, &matching_plugin) {
                 continue;
@@ -1212,6 +1313,7 @@ mod tests {
     ) -> ResolvedConfig {
         fallow_config::FallowConfig {
             ignore_exports: rules,
+            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             ..Default::default()
         }
         .resolve(
@@ -1274,8 +1376,14 @@ mod tests {
         let graph = build_graph(&[]);
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
@@ -1290,8 +1398,14 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].export_name, "helper");
         assert!(types.is_empty());
@@ -1307,8 +1421,14 @@ mod tests {
         graph.modules[1].exports = vec![make_referenced_export("helper", 10, 20, 0)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
@@ -1330,8 +1450,14 @@ mod tests {
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
@@ -1349,8 +1475,14 @@ mod tests {
         ];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].export_name, "valueFn");
         assert_eq!(types.len(), 1);
@@ -1369,8 +1501,14 @@ mod tests {
         graph.modules[1].exports = vec![make_export("orphan", 10, 20)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
@@ -1383,8 +1521,14 @@ mod tests {
         graph.modules[0].exports = vec![make_export("main", 10, 20)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
@@ -1408,6 +1552,7 @@ mod tests {
 
         let (exports, types, _stale) = find_unused_exports(
             &graph,
+            &[],
             &config,
             Some(&plugin),
             &suppressions,
@@ -1433,8 +1578,14 @@ mod tests {
         graph.modules[1].exports = vec![];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
@@ -1450,8 +1601,14 @@ mod tests {
         graph.modules[1].exports = vec![make_export("namedFn", 10, 20)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].export_name, "namedFn");
     }
@@ -1468,8 +1625,14 @@ mod tests {
         graph.modules[1].exports = vec![make_export("count", 10, 20)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(exports.is_empty());
         assert!(types.is_empty());
     }
@@ -1487,8 +1650,14 @@ mod tests {
         graph.modules[1].exports = vec![make_export("helper", 10, 20)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].export_name, "helper");
     }
@@ -1505,8 +1674,14 @@ mod tests {
         graph.modules[1].exports = vec![make_export("foo", 10, 20)];
         let config = test_config(); // no ignore_exports rules
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(
             exports.len(),
             1,
@@ -1539,8 +1714,14 @@ mod tests {
             },
         ]);
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(
             exports.is_empty(),
             "both exports should be ignored by config rules"
@@ -1565,8 +1746,14 @@ mod tests {
         }]);
         let suppressions = SuppressionContext::empty();
         // Should not panic — invalid globs are silently skipped
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(
             exports.len(),
             1,
@@ -1590,8 +1777,14 @@ mod tests {
             exports: vec!["*".to_string()],
         }]);
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(
             exports.is_empty(),
             "wildcard * should ignore all exports in matching file"
@@ -1617,8 +1810,14 @@ mod tests {
             exports: vec!["ignored".to_string()],
         }]);
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(exports.len(), 1);
         assert_eq!(exports[0].export_name, "reported");
     }
@@ -1639,8 +1838,14 @@ mod tests {
             exports: vec!["*".to_string()],
         }]);
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(
             exports.len(),
             1,
@@ -1660,8 +1865,14 @@ mod tests {
         graph.modules[1].exports = vec![make_export("foo", 10, 20)];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(
             exports.len(),
             1,
@@ -1684,6 +1895,7 @@ mod tests {
         let pr = make_plugin_result(vec![]);
         let (exports, _, _stale) = find_unused_exports(
             &graph,
+            &[],
             &config,
             Some(&pr),
             &suppressions,
@@ -1717,6 +1929,7 @@ mod tests {
         )]);
         let (exports, _, _stale) = find_unused_exports(
             &graph,
+            &[],
             &config,
             Some(&pr),
             &suppressions,
@@ -1748,6 +1961,7 @@ mod tests {
         )]);
         let (exports, _, _stale) = find_unused_exports(
             &graph,
+            &[],
             &config,
             Some(&pr),
             &suppressions,
@@ -1775,6 +1989,7 @@ mod tests {
         // Should not panic
         let (exports, _, _stale) = find_unused_exports(
             &graph,
+            &[],
             &config,
             Some(&pr),
             &suppressions,
@@ -1805,8 +2020,14 @@ mod tests {
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, _, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, _, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert_eq!(exports.len(), 1);
         assert!(
             exports[0].is_re_export,
@@ -1907,8 +2128,14 @@ mod tests {
 
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         // Both exports should be flagged: the unreachable-to-unreachable reference doesn't count
         let names: FxHashSet<&str> = exports.iter().map(|e| e.export_name.as_str()).collect();
         assert!(
@@ -1947,8 +2174,14 @@ mod tests {
 
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(
             exports.is_empty(),
             "export referenced by reachable module should not be flagged"
@@ -1975,8 +2208,14 @@ mod tests {
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(
             exports.is_empty(),
             "@internal export should not be flagged as unused"
@@ -2001,8 +2240,14 @@ mod tests {
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(
             exports.is_empty(),
             "@beta export should not be flagged as unused"
@@ -2027,8 +2272,14 @@ mod tests {
         }];
         let config = test_config();
         let suppressions = SuppressionContext::empty();
-        let (exports, types, _stale) =
-            find_unused_exports(&graph, &config, None, &suppressions, &FxHashMap::default());
+        let (exports, types, _stale) = find_unused_exports(
+            &graph,
+            &[],
+            &config,
+            None,
+            &suppressions,
+            &FxHashMap::default(),
+        );
         assert!(
             exports.is_empty(),
             "@alpha export should not be flagged as unused"
@@ -2049,6 +2300,7 @@ mod tests {
         let suppressions = SuppressionContext::empty();
         let (exports_off, _, _stale) = find_unused_exports(
             &graph,
+            &[],
             &config_off,
             None,
             &suppressions,
@@ -2064,6 +2316,7 @@ mod tests {
         config_on.include_entry_exports = true;
         let (exports_on, _, _stale) = find_unused_exports(
             &graph,
+            &[],
             &config_on,
             None,
             &suppressions,

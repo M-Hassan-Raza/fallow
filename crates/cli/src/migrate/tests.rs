@@ -530,6 +530,24 @@ fn migrate_from_file_knip_heuristic_via_ignore_dependencies() {
 }
 
 #[test]
+fn migrate_from_file_knip_heuristic_via_ignore_exports_used_in_file() {
+    let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-ignoreexportsusedinfile");
+    let _ = std::fs::create_dir_all(&tmpdir);
+    let path = tmpdir.join("my-config.json");
+    std::fs::write(&path, r#"{"ignoreExportsUsedInFile": true}"#).unwrap();
+
+    let result = migrate_from_file(&path).unwrap();
+    assert_eq!(result.sources.len(), 1);
+    let config_obj = result.config.as_object().unwrap();
+    assert_eq!(
+        config_obj.get("ignoreExportsUsedInFile").unwrap(),
+        &serde_json::json!(true)
+    );
+
+    let _ = std::fs::remove_dir_all(&tmpdir);
+}
+
+#[test]
 fn migrate_from_file_jscpd_heuristic_via_mode() {
     let tmpdir = std::env::temp_dir().join("fallow-test-migrate-detect-mode");
     let _ = std::fs::create_dir_all(&tmpdir);
@@ -744,6 +762,7 @@ fn jsonc_output_keys_ordered_correctly() {
             "rules": {"unused-files": "warn"},
             "entry": ["src/index.ts"],
             "ignoreDependencies": ["lodash"],
+            "ignoreExportsUsedInFile": true,
             "ignorePatterns": ["dist/**"]
         }),
         warnings: vec![],
@@ -754,11 +773,13 @@ fn jsonc_output_keys_ordered_correctly() {
     let entry_pos = output.find("\"entry\"").unwrap();
     let ignore_pos = output.find("\"ignorePatterns\"").unwrap();
     let ignore_deps_pos = output.find("\"ignoreDependencies\"").unwrap();
+    let ignore_exports_used_in_file_pos = output.find("\"ignoreExportsUsedInFile\"").unwrap();
     let rules_pos = output.find("\"rules\"").unwrap();
     let dupes_pos = output.find("\"duplicates\"").unwrap();
     assert!(entry_pos < ignore_pos);
     assert!(ignore_pos < ignore_deps_pos);
-    assert!(ignore_deps_pos < rules_pos);
+    assert!(ignore_deps_pos < ignore_exports_used_in_file_pos);
+    assert!(ignore_exports_used_in_file_pos < rules_pos);
     assert!(rules_pos < dupes_pos);
 }
 
@@ -1051,6 +1072,38 @@ fn toml_output_only_ignore_dependencies() {
     assert!(!output.contains("[duplicates]"));
     let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
     assert_eq!(config.ignore_dependencies, vec!["lodash", "react"]);
+}
+
+#[test]
+fn toml_output_ignore_exports_used_in_file_bool() {
+    let result = MigrationResult {
+        config: serde_json::json!({
+            "ignoreExportsUsedInFile": true
+        }),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    assert!(output.contains("ignoreExportsUsedInFile = true"));
+    let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
+    assert!(config.ignore_exports_used_in_file.suppresses(false));
+    assert!(config.ignore_exports_used_in_file.suppresses(true));
+}
+
+#[test]
+fn toml_output_ignore_exports_used_in_file_kind_form() {
+    let result = MigrationResult {
+        config: serde_json::json!({
+            "ignoreExportsUsedInFile": {"type": true, "interface": false}
+        }),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    assert!(output.contains("ignoreExportsUsedInFile = { type = true, interface = false }"));
+    let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
+    assert!(!config.ignore_exports_used_in_file.suppresses(false));
+    assert!(config.ignore_exports_used_in_file.suppresses(true));
 }
 
 // -- string_or_array additional edge cases -------------------------------

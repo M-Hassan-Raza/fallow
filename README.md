@@ -437,6 +437,7 @@ Works out of the box. When you need to customize, create `.fallowrc.json` or run
   "entry": ["src/workers/*.ts", "scripts/*.ts"],
   "ignorePatterns": ["**/*.generated.ts"],
   "ignoreDependencies": ["autoprefixer"],
+  "ignoreExportsUsedInFile": true,
   "rules": {
     "unused-files": "error",
     "unused-exports": "warn",
@@ -525,6 +526,8 @@ export const keepThis = 1;
 ```
 
 Also supports JSDoc visibility tags (`/** @public */`, `/** @internal */`, `/** @beta */`, `/** @alpha */`) to suppress unused export reports for library APIs consumed externally.
+
+Set `ignoreExportsUsedInFile: true` when exported helpers should stay quiet while another symbol in the same file still references them, but should be reported once they become completely unreferenced. The `{ "type": true, "interface": true }` object form is accepted for knip parity; fallow groups type aliases and interfaces under one issue, so both type-kind fields behave identically. References inside the export specifier itself (`export { foo }`, `export default foo`) do not count as same-file uses.
 
 ## Limitations
 

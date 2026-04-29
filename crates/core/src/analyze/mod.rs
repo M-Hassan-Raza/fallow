@@ -122,6 +122,7 @@ pub fn find_dead_code_full(
     {
         let (exports, types, stale_expected) = find_unused_exports(
             graph,
+            modules,
             config,
             plugin_result,
             &suppressions,

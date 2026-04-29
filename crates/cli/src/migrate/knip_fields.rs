@@ -160,6 +160,42 @@ pub(super) fn migrate_ignore_deps(
     }
 }
 
+/// Migrate knip `ignoreExportsUsedInFile` to fallow.
+pub(super) fn migrate_ignore_exports_used_in_file(
+    value: &Value,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    if let Some(enabled) = value.as_bool() {
+        config.insert("ignoreExportsUsedInFile".to_string(), Value::Bool(enabled));
+        return;
+    }
+
+    let Some(obj) = value.as_object() else {
+        warnings.push(MigrationWarning {
+            source: "knip",
+            field: "ignoreExportsUsedInFile".to_string(),
+            message: "expected a boolean or object".to_string(),
+            suggestion: Some("use true or {\"type\": true, \"interface\": true}".to_string()),
+        });
+        return;
+    };
+
+    let mut migrated = Map::new();
+    for key in ["type", "interface"] {
+        if let Some(enabled) = obj.get(key).and_then(Value::as_bool) {
+            migrated.insert(key.to_string(), Value::Bool(enabled));
+        }
+    }
+
+    if !migrated.is_empty() {
+        config.insert(
+            "ignoreExportsUsedInFile".to_string(),
+            Value::Object(migrated),
+        );
+    }
+}
+
 /// Warn about knip fields that have no fallow equivalent.
 pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
     for (field, message, suggestion) in KNIP_UNMAPPABLE_FIELDS {

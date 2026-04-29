@@ -255,6 +255,7 @@ fn migrate_from_file(path: &Path) -> Result<MigrationResult, String> {
             || value.get("rules").is_some()
             || value.get("project").is_some()
             || value.get("ignoreDependencies").is_some()
+            || value.get("ignoreExportsUsedInFile").is_some()
         {
             migrate_knip(&value, &mut config, &mut warnings);
             sources.push(path.display().to_string());

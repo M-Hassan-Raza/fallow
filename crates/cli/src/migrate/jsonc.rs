@@ -22,6 +22,7 @@ pub(super) fn generate_jsonc(result: &MigrationResult) -> String {
         "entry",
         "ignorePatterns",
         "ignoreDependencies",
+        "ignoreExportsUsedInFile",
         "rules",
         "duplicates",
     ];
