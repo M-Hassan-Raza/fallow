@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use fallow_config::OutputFormat;
 
 mod deps;
+mod enum_helpers;
 mod enum_members;
 mod exports;
 mod io;
