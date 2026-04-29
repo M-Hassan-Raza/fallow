@@ -21,5 +21,8 @@ serde_json = { workspace = true }
 tracing-subscriber = { workspace = true }
 rustc-hash = { workspace = true }
 
+[dev-dependencies]
+tower = { version = "0.4", default-features = false, features = ["util"] }
+
 [lints]
 workspace = true

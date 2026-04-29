@@ -215,6 +215,31 @@ impl LanguageServer for FallowLspServer {
         Ok(())
     }
 
+    /// Pull-model diagnostic handler (`textDocument/diagnostic`, LSP 3.17).
+    /// Returns cached diagnostics for the requested document.
+    async fn diagnostic(
+        &self,
+        params: DocumentDiagnosticParams,
+    ) -> Result<DocumentDiagnosticReportResult> {
+        let uri = params.text_document.uri;
+        let items = self
+            .cached_diagnostics
+            .read()
+            .await
+            .get(&uri)
+            .cloned()
+            .unwrap_or_default();
+        Ok(DocumentDiagnosticReportResult::Report(
+            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
+                related_documents: None,
+                full_document_diagnostic_report: FullDocumentDiagnosticReport {
+                    result_id: None,
+                    items,
+                },
+            }),
+        ))
+    }
+
     async fn did_save(&self, _params: DidSaveTextDocumentParams) {
         // Debounce: skip if last analysis was less than 500ms ago
         {
@@ -361,30 +386,27 @@ impl LanguageServer for FallowLspServer {
 }
 
 impl FallowLspServer {
-    /// Pull-model diagnostic handler (textDocument/diagnostic, LSP 3.17).
-    /// Returns cached diagnostics for the requested document.
-    async fn diagnostic(
-        &self,
-        params: DocumentDiagnosticParams,
-    ) -> Result<DocumentDiagnosticReportResult> {
-        let uri = params.text_document.uri;
-        let items = self
-            .cached_diagnostics
-            .read()
-            .await
-            .get(&uri)
-            .cloned()
-            .unwrap_or_default();
-        Ok(DocumentDiagnosticReportResult::Report(
-            DocumentDiagnosticReport::Full(RelatedFullDocumentDiagnosticReport {
-                related_documents: None,
-                full_document_diagnostic_report: FullDocumentDiagnosticReport {
-                    result_id: None,
-                    items,
-                },
-            }),
-        ))
+    fn new(client: Client) -> Self {
+        Self {
+            client,
+            root: Arc::new(RwLock::new(None)),
+            results: Arc::new(RwLock::new(None)),
+            duplication: Arc::new(RwLock::new(None)),
+            previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
+            last_analysis: Arc::new(Mutex::new(
+                Instant::now()
+                    .checked_sub(std::time::Duration::from_secs(10))
+                    .unwrap_or_else(Instant::now),
+            )),
+            analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
+            documents: Arc::new(RwLock::new(FxHashMap::default())),
+            disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
+            changed_since: Arc::new(RwLock::new(None)),
+            git_toplevel: Arc::new(RwLock::new(None)),
+            cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
+        }
     }
+
     /// Resolve the canonical git toplevel for `root`, populating the cache
     /// on first call. Returns `None` if the workspace is not in a git
     /// repository or git is unavailable; callers should fall back to
@@ -706,26 +728,7 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(|client| FallowLspServer {
-        client,
-        root: Arc::new(RwLock::new(None)),
-        results: Arc::new(RwLock::new(None)),
-        duplication: Arc::new(RwLock::new(None)),
-        previous_diagnostic_uris: Arc::new(RwLock::new(FxHashSet::default())),
-        last_analysis: Arc::new(Mutex::new(
-            Instant::now()
-                .checked_sub(std::time::Duration::from_secs(10))
-                .unwrap_or_else(Instant::now),
-        )),
-        analysis_guard: Arc::new(tokio::sync::Mutex::new(())),
-        documents: Arc::new(RwLock::new(FxHashMap::default())),
-        disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
-        changed_since: Arc::new(RwLock::new(None)),
-        git_toplevel: Arc::new(RwLock::new(None)),
-        cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
-    })
-    .custom_method("textDocument/diagnostic", FallowLspServer::diagnostic)
-    .finish();
+    let (service, socket) = LspService::build(FallowLspServer::new).finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
 }
@@ -1022,6 +1025,9 @@ mod tests {
         BoundaryViolation, CircularDependency, ExportUsage, TestOnlyDependency, UnlistedDependency,
         UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
     };
+    use serde_json::json;
+    use tower::{Service, ServiceExt};
+    use tower_lsp::jsonrpc::Request;
 
     // -----------------------------------------------------------------------
     // build_server_capabilities
@@ -1058,6 +1064,51 @@ mod tests {
         assert!(caps.code_action_provider.is_some());
         assert!(caps.code_lens_provider.is_some());
         assert!(caps.hover_provider.is_some());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn text_document_diagnostic_request_is_served() {
+        let (mut service, _) = LspService::build(FallowLspServer::new).finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(initialize)
+            .await
+            .expect("initialize request should be handled")
+            .expect("initialize request should return a response");
+        assert!(response.is_ok());
+
+        let diagnostics = Request::build("textDocument/diagnostic")
+            .params(json!({
+                "textDocument": {
+                    "uri": "file:///workspace/src/example.ts"
+                },
+                "identifier": "fallow"
+            }))
+            .id(2)
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(diagnostics)
+            .await
+            .expect("diagnostic request should be handled")
+            .expect("diagnostic request should return a response");
+
+        assert!(
+            response.is_ok(),
+            "textDocument/diagnostic must not return method_not_found"
+        );
+        let result = response.result().expect("diagnostic response should be ok");
+        assert_eq!(result["kind"], json!("full"));
+        assert_eq!(result["items"], json!([]));
     }
 
     // -----------------------------------------------------------------------

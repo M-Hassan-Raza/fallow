@@ -983,6 +983,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tower-lsp",
  "tracing-subscriber",
 ]
