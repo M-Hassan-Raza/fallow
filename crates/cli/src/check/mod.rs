@@ -214,21 +214,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         retained_modules,
         retained_files,
         script_used_packages,
-    ) = if use_trace {
-        match fallow_core::analyze_with_trace(&config) {
-            Ok(output) => (
-                output.results,
-                output.graph,
-                output.timings,
-                None,
-                None,
-                output.script_used_packages,
-            ),
-            Err(e) => {
-                return Err(emit_error(&format!("Analysis error: {e}"), 2, opts.output));
-            }
-        }
-    } else if opts.retain_modules_for_health {
+    ) = if opts.retain_modules_for_health {
         match fallow_core::analyze_retaining_modules(&config, true, true) {
             Ok(output) => (
                 output.results,
@@ -236,6 +222,20 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                 output.timings,
                 output.modules,
                 output.files,
+                output.script_used_packages,
+            ),
+            Err(e) => {
+                return Err(emit_error(&format!("Analysis error: {e}"), 2, opts.output));
+            }
+        }
+    } else if use_trace {
+        match fallow_core::analyze_with_trace(&config) {
+            Ok(output) => (
+                output.results,
+                output.graph,
+                output.timings,
+                None,
+                None,
                 output.script_used_packages,
             ),
             Err(e) => {

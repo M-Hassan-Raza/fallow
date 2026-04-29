@@ -233,10 +233,21 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
 
     let changed_since = Some(base_ref.as_str());
 
-    // Run all three analyses
-    let check_result = run_audit_check(opts, changed_since)?;
+    // Run all three analyses.
+    // Audit mirrors combined mode: when dead-code and health use the same
+    // production settings, retain the parsed dead-code modules so health does
+    // not rediscover and reparse the same project.
+    let check_production = opts.production_dead_code.unwrap_or(opts.production);
+    let health_production = opts.production_health.unwrap_or(opts.production);
+    let share_dead_code_parse_with_health = check_production == health_production;
+    let mut check_result = run_audit_check(opts, changed_since, share_dead_code_parse_with_health)?;
     let dupes_result = run_audit_dupes(opts, changed_since)?;
-    let health_result = run_audit_health(opts, changed_since)?;
+    let shared_parse = if share_dead_code_parse_with_health {
+        check_result.as_mut().and_then(|r| r.shared_parse.take())
+    } else {
+        None
+    };
+    let health_result = run_audit_health(opts, changed_since, shared_parse)?;
 
     let verdict = compute_verdict(
         check_result.as_ref(),
@@ -312,6 +323,7 @@ fn empty_audit_result(base_ref: String, opts: &AuditOptions<'_>, elapsed: Durati
 fn run_audit_check<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
+    retain_modules_for_health: bool,
 ) -> Result<Option<CheckResult>, ExitCode> {
     let filters = IssueFilters::default();
     let trace_opts = TraceOptions {
@@ -353,7 +365,7 @@ fn run_audit_check<'a>(
             scoped: true,
             quiet: opts.quiet,
         },
-        retain_modules_for_health: false,
+        retain_modules_for_health,
     }) {
         Ok(r) => Ok(Some(r)),
         Err(code) => Err(code),
@@ -419,8 +431,9 @@ fn run_audit_dupes<'a>(
 fn run_audit_health<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
+    shared_parse: Option<crate::health::SharedParseData>,
 ) -> Result<Option<HealthResult>, ExitCode> {
-    match crate::health::execute_health(&HealthOptions {
+    let health_opts = HealthOptions {
         root: opts.root,
         config_path: opts.config_path,
         output: opts.output,
@@ -462,10 +475,16 @@ fn run_audit_health<'a>(
         group_by: opts.group_by,
         coverage: None,
         coverage_root: None,
-        performance: false,
+        performance: opts.performance,
         min_severity: None,
         runtime_coverage: None,
-    }) {
+    };
+    let health_run = if let Some(shared) = shared_parse {
+        crate::health::execute_health_with_shared_parse(&health_opts, shared)
+    } else {
+        crate::health::execute_health(&health_opts)
+    };
+    match health_run {
         Ok(r) => Ok(Some(r)),
         Err(code) => Err(code),
     }
@@ -836,5 +855,98 @@ pub fn run_audit(opts: &AuditOptions<'_>) -> ExitCode {
     match execute_audit(opts) {
         Ok(result) => print_audit_result(&result, opts.quiet, opts.explain),
         Err(code) => code,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{fs, process::Command};
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "test")
+            .env("GIT_AUTHOR_EMAIL", "test@test.com")
+            .env("GIT_COMMITTER_NAME", "test")
+            .env("GIT_COMMITTER_EMAIL", "test@test.com")
+            .output()
+            .expect("git command failed");
+        assert!(
+            output.status.success(),
+            "git {:?} failed\nstdout:\n{}\nstderr:\n{}",
+            args,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[test]
+    fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-shared-parse","main":"src/index.ts"}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join("src/index.ts"),
+            "import { used } from './used';\nused();\n",
+        )
+        .expect("index should be written");
+        fs::write(
+            root.join("src/used.ts"),
+            "export function used() {\n  return 1;\n}\n",
+        )
+        .expect("used module should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        fs::write(
+            root.join("src/used.ts"),
+            "export function used() {\n  return 1;\n}\nexport function changed() {\n  return 2;\n}\n",
+        )
+        .expect("changed module should be written");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            performance: true,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        let health = result.health.expect("health should run for changed files");
+        let timings = health.timings.expect("performance timings should be kept");
+        assert!(timings.discover_ms.abs() < f64::EPSILON);
+        assert!(timings.parse_ms.abs() < f64::EPSILON);
     }
 }
