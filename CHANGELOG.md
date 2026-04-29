@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`private-type-leak` issue type for exported function and method signatures.** Detects when an exported `function`, class method, or class field references a type that is not also exported from the same module, producing a finding the consumer cannot name when they need to type a wrapper, mock, or destructured argument. Opt-in via `rules.private-type-leak: "error"` (or `"warn"`); default severity is `"off"` so existing projects don't see new findings without explicit consent. Framework routing convention files (Next.js `app/` route handlers, Nuxt `pages/`, SvelteKit `+page.ts`/`+layout.ts`, Remix routes, TanStack route configs, Astro pages, Solid/Qwik routes) are skipped because their exports are framework contracts rather than public API surface.
+- **`private-type-leak` issue type for exported function and method signatures.** Detects when an exported `function`, class method, or class field references a type that is not also exported from the same module, producing a finding the consumer cannot name when they need to type a wrapper, mock, or destructured argument. Opt-in via the `private-type-leaks` rule (`rules.private-type-leaks: "error"` or `"warn"`); default severity is `"off"` so existing projects don't see new findings without explicit consent. Framework routing convention files (Next.js `app/` route handlers, Nuxt `pages/`, SvelteKit `+page.ts`/`+layout.ts`, Remix routes, TanStack route configs, Astro pages, Solid/Qwik routes) are skipped because their exports are framework contracts rather than public API surface.
 - **`ignoreExportsUsedInFile` config option (knip parity).** When set to `true`, exports that are referenced inside the same file as their declaration are not reported as unused, matching knip's behavior for projects that re-export internal utilities purely for convenience or testing. Default `false` keeps the stricter fallow behavior.
 - **TanStack virtual route configs supported.** The TanStack Router plugin now recognises virtual route files declared via `route(...)` / `index(...)` / `layout(...)` in a config, so route components consumed only by `routeTree.gen.ts` are no longer reported as unused. Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza). (#223)
 
@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pre-push hook now unsets `GIT_DIR` and `GIT_WORK_TREE` so integration tests run from the worktree path even when the user's shell environment exports those variables (fixes flaky push from worktrees with bare-repo-style configs).
 - `.gitignore` updated to exclude crash handover marker files.
 - Dependency bump: `tokio` 1.51.1 → 1.52.1 (#218).
-- Docs touch-ups: MCP `analyze` tool description, agent context note for the new opt-in default of `private-type-leak`, and `crap_max` description refined across coverage_model variants.
+- Docs touch-ups: MCP `analyze` tool description, agent context note for the new opt-in default of the `private-type-leaks` rule, and `crap_max` description refined across coverage_model variants.
 
 ## [2.54.3] - 2026-04-29
 
