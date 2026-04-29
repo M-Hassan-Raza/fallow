@@ -274,8 +274,7 @@ impl PluginRegistry {
     ///
     /// Reuses pre-compiled config matchers and pre-computed relative files from the root
     /// project run, avoiding repeated glob compilation and path computation per workspace.
-    /// Skips external plugins (they only activate at root level) and package.json inline
-    /// config (workspace packages rarely have inline configs).
+    /// Skips package.json inline config (workspace packages rarely have inline configs).
     pub fn run_workspace_fast(
         &self,
         pkg: &PackageJson,
@@ -297,6 +296,11 @@ impl PluginRegistry {
             .map(AsRef::as_ref)
             .collect();
 
+        let workspace_files: Vec<PathBuf> = relative_files
+            .iter()
+            .map(|(abs_path, _)| abs_path.clone())
+            .collect();
+
         tracing::info!(
             plugins = active
                 .iter()
@@ -306,8 +310,16 @@ impl PluginRegistry {
             "active plugins"
         );
 
+        process_external_plugins(
+            &self.external_plugins,
+            &all_deps,
+            root,
+            &workspace_files,
+            &mut result,
+        );
+
         // Early exit if no plugins are active (common for leaf workspace packages)
-        if active.is_empty() {
+        if active.is_empty() && result.active_plugins.is_empty() {
             return result;
         }
 

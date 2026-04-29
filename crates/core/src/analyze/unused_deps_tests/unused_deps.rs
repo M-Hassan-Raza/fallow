@@ -91,7 +91,7 @@ fn implicit_deps_not_flagged_as_unused() {
 }
 
 #[test]
-fn workspace_package_names_not_flagged() {
+fn unused_workspace_package_names_are_flagged() {
     let (graph, _) = build_graph_with_npm_imports(&[]);
     let pkg = make_pkg(&["@myorg/shared"], &[], &[]);
     let config = test_config(PathBuf::from("/project"));
@@ -105,8 +105,8 @@ fn workspace_package_names_not_flagged() {
     let (unused, _, _) = find_unused_dependencies(&graph, &pkg, &config, None, &workspaces);
 
     assert!(
-        !unused.iter().any(|d| d.package_name == "@myorg/shared"),
-        "workspace packages should not be flagged as unused"
+        unused.iter().any(|d| d.package_name == "@myorg/shared"),
+        "declared workspace package dependency should be flagged when unused"
     );
 }
 

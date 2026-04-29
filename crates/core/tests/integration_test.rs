@@ -80,6 +80,8 @@ mod type_only_deps;
 mod unused_enum_members;
 #[path = "integration_test/workspace_cross_imports.rs"]
 mod workspace_cross_imports;
+#[path = "integration_test/workspace_internal_deps.rs"]
+mod workspace_internal_deps;
 
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;

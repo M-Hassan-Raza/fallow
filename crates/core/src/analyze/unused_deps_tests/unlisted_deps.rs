@@ -192,7 +192,7 @@ fn virtual_modules_not_reported_as_unlisted() {
 }
 
 #[test]
-fn workspace_package_names_not_reported_as_unlisted() {
+fn undeclared_workspace_package_names_are_reported_as_unlisted() {
     let (graph, resolved_modules) = build_graph_with_npm_imports(&[("@myorg/utils", false)]);
     let pkg = make_pkg(&[], &[], &[]); // @myorg/utils NOT listed
     let config = test_config(PathBuf::from("/project"));
@@ -215,8 +215,8 @@ fn workspace_package_names_not_reported_as_unlisted() {
     );
 
     assert!(
-        !unlisted.iter().any(|d| d.package_name == "@myorg/utils"),
-        "workspace package names should not be flagged as unlisted"
+        unlisted.iter().any(|d| d.package_name == "@myorg/utils"),
+        "workspace package imports should be flagged when the importing package does not declare them"
     );
 }
 

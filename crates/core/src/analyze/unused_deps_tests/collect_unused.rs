@@ -4,12 +4,11 @@ use super::helpers::*;
 
 #[test]
 fn collect_unused_empty_deps_returns_empty() {
-    let (pr, pt, su, wn, id) = empty_shared_sets();
+    let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
-        workspace_names: &wn,
         ignore_deps: &id,
     };
     let category = DepCategoryConfig {
@@ -32,12 +31,11 @@ fn collect_unused_empty_deps_returns_empty() {
 
 #[test]
 fn collect_unused_all_used_returns_empty() {
-    let (pr, pt, su, wn, id) = empty_shared_sets();
+    let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
-        workspace_names: &wn,
         ignore_deps: &id,
     };
     let category = DepCategoryConfig {
@@ -61,12 +59,11 @@ fn collect_unused_all_used_returns_empty() {
 
 #[test]
 fn collect_unused_some_unused_are_flagged() {
-    let (pr, pt, su, wn, id) = empty_shared_sets();
+    let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
-        workspace_names: &wn,
         ignore_deps: &id,
     };
     let category = DepCategoryConfig {
@@ -101,12 +98,11 @@ fn collect_unused_some_unused_are_flagged() {
 
 #[test]
 fn collect_unused_implicit_filter_skips_react_dom() {
-    let (pr, pt, su, wn, id) = empty_shared_sets();
+    let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
-        workspace_names: &wn,
         ignore_deps: &id,
     };
     // With check_implicit = true, react-dom should be filtered out
@@ -132,12 +128,11 @@ fn collect_unused_implicit_filter_skips_react_dom() {
 
 #[test]
 fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
-    let (pr, pt, su, wn, id) = empty_shared_sets();
+    let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
-        workspace_names: &wn,
         ignore_deps: &id,
     };
     // With check_implicit = false (dev deps), react-dom is NOT filtered
@@ -163,12 +158,11 @@ fn collect_unused_implicit_filter_disabled_keeps_react_dom() {
 
 #[test]
 fn collect_unused_known_tooling_filter_skips_jest() {
-    let (pr, pt, su, wn, id) = empty_shared_sets();
+    let (pr, pt, su, id) = empty_shared_sets();
     let shared = SharedDepSets {
         plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
-        workspace_names: &wn,
         ignore_deps: &id,
     };
     let category = DepCategoryConfig {
@@ -193,8 +187,7 @@ fn collect_unused_known_tooling_filter_skips_jest() {
 
 #[test]
 fn collect_unused_plugin_tooling_filter() {
-    let (pr, su, wn, id) = (
-        FxHashSet::default(),
+    let (pr, su, id) = (
         FxHashSet::default(),
         FxHashSet::default(),
         FxHashSet::default(),
@@ -205,7 +198,6 @@ fn collect_unused_plugin_tooling_filter() {
         plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
-        workspace_names: &wn,
         ignore_deps: &id,
     };
     // check_plugin_tooling = true should filter "my-runtime"
@@ -231,8 +223,7 @@ fn collect_unused_plugin_tooling_filter() {
 
 #[test]
 fn collect_unused_plugin_tooling_disabled_keeps_dep() {
-    let (pr, su, wn, id) = (
-        FxHashSet::default(),
+    let (pr, su, id) = (
         FxHashSet::default(),
         FxHashSet::default(),
         FxHashSet::default(),
@@ -243,7 +234,6 @@ fn collect_unused_plugin_tooling_disabled_keeps_dep() {
         plugin_referenced: &pr,
         plugin_tooling: &pt,
         script_used: &su,
-        workspace_names: &wn,
         ignore_deps: &id,
     };
     // check_plugin_tooling = false (optional deps), "my-runtime" should NOT be filtered

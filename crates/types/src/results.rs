@@ -341,7 +341,7 @@ pub struct PrivateTypeLeak {
 /// A dependency that is listed in package.json but never imported.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnusedDependency {
-    /// npm package name.
+    /// Package name, including internal workspace package names.
     pub package_name: String,
     /// Whether this is in `dependencies`, `devDependencies`, or `optionalDependencies`.
     pub location: DependencyLocation,
@@ -424,7 +424,7 @@ pub struct UnresolvedImport {
 /// A dependency used in code but not listed in package.json.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnlistedDependency {
-    /// npm package name.
+    /// Package name, including internal workspace package names.
     pub package_name: String,
     /// Import sites where this unlisted dependency is used (file path, line, column).
     pub imported_from: Vec<ImportSite>,

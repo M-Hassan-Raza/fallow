@@ -30,10 +30,87 @@ use fallow_config::{
 };
 use rayon::prelude::*;
 use results::AnalysisResults;
+use rustc_hash::FxHashSet;
 use trace::PipelineTimings;
 
 const UNDECLARED_WORKSPACE_WARNING_PREVIEW: usize = 5;
 type LoadedWorkspacePackage<'a> = (&'a fallow_config::WorkspaceInfo, PackageJson);
+
+fn record_graph_package_usage(
+    graph: &mut graph::ModuleGraph,
+    package_name: &str,
+    file_id: discover::FileId,
+    is_type_only: bool,
+) {
+    graph
+        .package_usage
+        .entry(package_name.to_owned())
+        .or_default()
+        .push(file_id);
+    if is_type_only {
+        graph
+            .type_only_package_usage
+            .entry(package_name.to_owned())
+            .or_default()
+            .push(file_id);
+    }
+}
+
+fn workspace_package_name<'a>(
+    source: &str,
+    workspace_names: &'a FxHashSet<&str>,
+) -> Option<&'a str> {
+    if !resolve::is_bare_specifier(source) {
+        return None;
+    }
+    let package_name = resolve::extract_package_name(source);
+    workspace_names.get(package_name.as_str()).copied()
+}
+
+fn credit_workspace_package_usage(
+    graph: &mut graph::ModuleGraph,
+    resolved: &[resolve::ResolvedModule],
+    workspaces: &[fallow_config::WorkspaceInfo],
+) {
+    if workspaces.is_empty() {
+        return;
+    }
+
+    let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
+    for module in resolved {
+        for import in module
+            .resolved_imports
+            .iter()
+            .chain(module.resolved_dynamic_imports.iter())
+        {
+            if matches!(import.target, resolve::ResolveResult::InternalModule(_))
+                && let Some(package_name) =
+                    workspace_package_name(&import.info.source, &workspace_names)
+            {
+                record_graph_package_usage(
+                    graph,
+                    package_name,
+                    module.file_id,
+                    import.info.is_type_only,
+                );
+            }
+        }
+
+        for re_export in &module.re_exports {
+            if matches!(re_export.target, resolve::ResolveResult::InternalModule(_))
+                && let Some(package_name) =
+                    workspace_package_name(&re_export.info.source, &workspace_names)
+            {
+                record_graph_package_usage(
+                    graph,
+                    package_name,
+                    module.file_id,
+                    re_export.info.is_type_only,
+                );
+            }
+        }
+    }
+}
 
 /// Result of the full analysis pipeline, including optional performance timings.
 pub struct AnalysisOutput {
@@ -336,13 +413,14 @@ pub fn analyze_with_parse_result(
     // Stage 5: Build module graph
     let t = Instant::now();
     let pb = progress.stage_spinner("Building module graph...");
-    let graph = graph::ModuleGraph::build_with_reachability_roots(
+    let mut graph = graph::ModuleGraph::build_with_reachability_roots(
         &resolved,
         &entry_points.all,
         &entry_points.runtime,
         &entry_points.test,
         files,
     );
+    credit_workspace_package_usage(&mut graph, &resolved, workspaces);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
     pb.finish_and_clear();
 
@@ -581,13 +659,14 @@ fn analyze_full(
     // Stage 5: Build module graph
     let t = Instant::now();
     let pb = progress.stage_spinner("Building module graph...");
-    let graph = graph::ModuleGraph::build_with_reachability_roots(
+    let mut graph = graph::ModuleGraph::build_with_reachability_roots(
         &resolved,
         &entry_points.all,
         &entry_points.runtime,
         &entry_points.test,
         files,
     );
+    credit_workspace_package_usage(&mut graph, &resolved, workspaces);
     let graph_ms = t.elapsed().as_secs_f64() * 1000.0;
     pb.finish_and_clear();
 

@@ -1813,7 +1813,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "npm package name."
+          "description": "Package name, including internal workspace package names."
         },
         "location": {
           "type": "string",
@@ -1908,7 +1908,7 @@
       "properties": {
         "package_name": {
           "type": "string",
-          "description": "npm package name that is imported but not listed in package.json."
+          "description": "Package name, including internal workspace package names, that is imported but not listed in package.json."
         },
         "imported_from": {
           "type": "array",

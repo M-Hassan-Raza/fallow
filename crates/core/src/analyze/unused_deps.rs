@@ -55,7 +55,6 @@ pub struct SharedDepSets<'a> {
     pub plugin_referenced: &'a FxHashSet<&'a str>,
     pub plugin_tooling: &'a FxHashSet<&'a str>,
     pub script_used: &'a FxHashSet<&'a str>,
-    pub workspace_names: &'a FxHashSet<&'a str>,
     pub ignore_deps: &'a FxHashSet<&'a str>,
 }
 
@@ -176,7 +175,6 @@ pub fn collect_unused_for_category(
         })
         .filter(|dep| !shared.plugin_referenced.contains(dep.as_str()))
         .filter(|dep| !shared.ignore_deps.contains(dep.as_str()))
-        .filter(|dep| !shared.workspace_names.contains(dep.as_str()))
         .map(|dep| {
             let line = pkg_content.map_or(1, |c| find_dep_line_in_json(c, &dep));
             let used_in_workspaces = used_in_workspaces(&dep);
@@ -304,9 +302,6 @@ pub fn find_unused_dependencies(
         .map(|pr| pr.script_used_packages.iter().map(String::as_str).collect())
         .unwrap_or_default();
 
-    // Collect workspace package names — these are internal deps, not npm packages
-    let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
-
     // Pre-compute ignore deps as FxHashSet for O(1) lookups instead of O(n) linear scan
     let ignore_deps: FxHashSet<&str> = config
         .ignore_dependencies
@@ -328,7 +323,6 @@ pub fn find_unused_dependencies(
         plugin_referenced: &plugin_referenced,
         plugin_tooling: &plugin_tooling,
         script_used: &script_used,
-        workspace_names: &workspace_names,
         ignore_deps: &ignore_deps,
     };
 
@@ -678,7 +672,8 @@ pub fn find_unlisted_dependencies(
     // Build a set of all deps across all workspace package.json files.
     // In monorepos, imports in workspace files reference deps from that workspace's package.json.
     let mut all_workspace_deps: FxHashSet<String> = all_deps.clone();
-    // Also collect workspace package names — internal workspace deps should not be flagged
+    // Also collect workspace package names so internal workspace deps can be
+    // checked against the declaring workspace instead of skipped globally.
     let mut workspace_names: FxHashSet<String> = FxHashSet::default();
     // Map: canonical workspace root -> set of dep names (for per-file checks)
     let mut ws_dep_map: Vec<(PathBuf, FxHashSet<String>)> = Vec::new();
@@ -690,7 +685,9 @@ pub fn find_unlisted_dependencies(
             continue;
         }
         if let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path) {
-            let ws_deps: FxHashSet<String> = ws_pkg.all_dependency_names().into_iter().collect();
+            let mut ws_deps: FxHashSet<String> =
+                ws_pkg.all_dependency_names().into_iter().collect();
+            ws_deps.insert(ws.name.clone());
             all_workspace_deps.extend(ws_deps.iter().cloned());
             // Use raw workspace root path for starts_with checks (avoids per-file canonicalize)
             ws_dep_map.push((ws.root.clone(), ws_deps));
@@ -745,9 +742,6 @@ pub fn find_unlisted_dependencies(
         if is_virtual_module(package_name) {
             continue;
         }
-        if workspace_names.contains(package_name) {
-            continue;
-        }
         if ignore_deps.contains(package_name.as_str()) {
             continue;
         }
@@ -762,8 +756,11 @@ pub fn find_unlisted_dependencies(
         }) {
             continue;
         }
-        // Quick check: if listed in any root or workspace deps, skip
-        if all_workspace_deps.contains(package_name) {
+        // Quick check: if an external dependency is listed in any root or workspace
+        // deps, skip. Internal workspace package names need the slower per-file
+        // check below so imports from workspaces that did not declare the internal
+        // dependency are still reported.
+        if all_workspace_deps.contains(package_name) && !workspace_names.contains(package_name) {
             continue;
         }
         // When @types/<package> is listed, the bare package is used for types only —

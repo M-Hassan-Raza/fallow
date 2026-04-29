@@ -153,12 +153,10 @@ pub(super) type SharedSets = (
     FxHashSet<&'static str>,
     FxHashSet<&'static str>,
     FxHashSet<&'static str>,
-    FxHashSet<&'static str>,
 );
 
 pub(super) fn empty_shared_sets() -> SharedSets {
     (
-        FxHashSet::default(),
         FxHashSet::default(),
         FxHashSet::default(),
         FxHashSet::default(),
