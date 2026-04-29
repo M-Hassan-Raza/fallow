@@ -1042,7 +1042,7 @@
         },
         "crap_max": {
           "type": "number",
-          "description": "Maximum CRAP score among functions in this file. Static binary model: test-reachable file = CC, untested = CC^2 + CC (Savoia & Evans, 2007).",
+          "description": "Maximum CRAP score among functions in this file. Computed via the active `coverage_model` per the canonical formula CC^2 * (1 - cov/100)^3 + CC (Savoia & Evans, 2007). Coverage source: `static_estimated` (default, graph-based per-function estimate), `istanbul` (real per-function statement coverage from --coverage), or the legacy `static_binary` (whole-file 0%/100%, retained for compatibility).",
           "minimum": 0
         },
         "crap_above_threshold": {

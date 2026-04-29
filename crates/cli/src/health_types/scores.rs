@@ -474,7 +474,10 @@ pub struct FileHealthScore {
     /// Total lines of code (from line_offsets).
     pub lines: u32,
     /// Maximum CRAP score among functions in this file.
-    /// Static binary model: test-reachable file = CC, untested = CC^2 + CC.
+    /// Computed via the active `CoverageModel`: `StaticEstimated` (default,
+    /// graph-based per-function estimate), `Istanbul` (real per-function
+    /// statement coverage from `--coverage`), or the legacy `StaticBinary`.
+    /// Formula: `CC^2 * (1 - cov/100)^3 + CC`.
     pub crap_max: f64,
     /// Count of functions with CRAP >= 30 (CC >= 5 without test path).
     pub crap_above_threshold: usize,
