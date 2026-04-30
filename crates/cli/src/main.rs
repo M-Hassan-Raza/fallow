@@ -924,8 +924,8 @@ enum CoverageCli {
     /// pairing runtime coverage data with the AST view of "every function
     /// that exists". See <https://docs.fallow.tools/analysis/runtime-coverage>.
     ///
-    /// This command is the only fallow subcommand that makes network calls
-    /// outside of `fallow license`. `fallow dead-code` stays offline.
+    /// This command makes network calls to fallow cloud. `fallow dead-code`
+    /// stays offline.
     ///
     /// Exit codes: 0 ok · 7 network · 10 validation · 11 payload too large
     /// · 12 auth rejected · 13 server error.
@@ -1000,6 +1000,63 @@ enum CoverageCli {
         /// downgrades transport and server errors.
         #[arg(long)]
         ignore_upload_errors: bool,
+    },
+    /// Upload JavaScript source maps to fallow cloud for bundled runtime coverage.
+    ///
+    /// Scans a build output directory for `.map` files and uploads them under
+    /// the selected repo + git SHA. The production beacon reports bundled
+    /// paths; the cloud resolver uses these maps to remap runtime coverage back
+    /// to original source files.
+    UploadSourceMaps {
+        /// Directory to scan recursively for source maps.
+        #[arg(long, value_name = "PATH", default_value = "dist")]
+        dir: PathBuf,
+
+        /// Glob pattern, relative to --dir, selecting maps to upload.
+        #[arg(long, value_name = "GLOB", default_value = "**/*.map")]
+        include: String,
+
+        /// Glob pattern, relative to --dir, selecting files to skip.
+        ///
+        /// Repeatable. Defaults to `**/node_modules/**`.
+        #[arg(long, value_name = "GLOB", default_value = "**/node_modules/**")]
+        exclude: Vec<String>,
+
+        /// Repo name used in the API path.
+        ///
+        /// Defaults to package.json repository.url, then `git remote get-url origin`.
+        #[arg(long, value_name = "NAME")]
+        repo: Option<String>,
+
+        /// Commit SHA to key uploads under.
+        ///
+        /// Defaults to $GITHUB_SHA, $CI_COMMIT_SHA, $COMMIT_SHA, then
+        /// `git rev-parse HEAD`.
+        #[arg(long, value_name = "SHA")]
+        git_sha: Option<String>,
+
+        /// Override the fallow cloud base URL.
+        #[arg(long, value_name = "URL")]
+        endpoint: Option<String>,
+
+        /// Send only the basename as fileName by default.
+        ///
+        /// Use `--strip-path=false` when your runtime coverage reports bundle
+        /// paths relative to the build directory, such as `assets/app.js`.
+        #[arg(long, value_name = "BOOL", default_value_t = true, action = clap::ArgAction::Set)]
+        strip_path: bool,
+
+        /// Print what would be uploaded and exit. No network call.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Parallel upload fanout.
+        #[arg(long, value_name = "N", default_value_t = 4)]
+        concurrency: usize,
+
+        /// Stop on first upload error.
+        #[arg(long)]
+        fail_fast: bool,
     },
 }
 
@@ -2188,6 +2245,29 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
             path_prefix: path_prefix.clone(),
             dry_run: *dry_run,
             ignore_upload_errors: *ignore_upload_errors,
+        }),
+        CoverageCli::UploadSourceMaps {
+            dir,
+            include,
+            exclude,
+            repo,
+            git_sha,
+            endpoint,
+            strip_path,
+            dry_run,
+            concurrency,
+            fail_fast,
+        } => coverage::CoverageSubcommand::UploadSourceMaps(coverage::UploadSourceMapsArgs {
+            dir: dir.clone(),
+            include: include.clone(),
+            exclude: exclude.clone(),
+            repo: repo.clone(),
+            git_sha: git_sha.clone(),
+            endpoint: endpoint.clone(),
+            strip_path: *strip_path,
+            dry_run: *dry_run,
+            concurrency: *concurrency,
+            fail_fast: *fail_fast,
         }),
     }
 }

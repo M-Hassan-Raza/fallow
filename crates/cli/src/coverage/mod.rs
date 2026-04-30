@@ -1,6 +1,6 @@
 //! `fallow coverage` - runtime coverage onboarding and inventory upload.
 //!
-//! Today the subtree holds three commands:
+//! Today the subtree holds four commands:
 //!
 //! - `setup`: resumable first-run state machine (optional license + sidecar
 //!   + recipe + auto-handoff to `fallow health --runtime-coverage`).
@@ -9,6 +9,8 @@
 //! - `upload-inventory`: push a static function inventory to fallow cloud,
 //!   unlocking the `untracked` filter on the dashboard by pairing runtime
 //!   coverage data with the AST view of "every function that exists".
+//! - `upload-source-maps`: push build source maps so bundled runtime coverage
+//!   can resolve back to original source files.
 
 use std::ffi::OsStr;
 use std::io::{self, Write};
@@ -23,10 +25,12 @@ use crate::license;
 
 pub use analyze::AnalyzeArgs;
 pub use upload_inventory::UploadInventoryArgs;
+pub use upload_source_maps::UploadSourceMapsArgs;
 
 mod analyze;
 mod cloud_client;
 mod upload_inventory;
+mod upload_source_maps;
 
 const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-coverage";
 
@@ -39,6 +43,8 @@ pub enum CoverageSubcommand {
     Analyze(AnalyzeArgs),
     /// Upload a static function inventory to fallow cloud.
     UploadInventory(UploadInventoryArgs),
+    /// Upload JavaScript source maps to fallow cloud.
+    UploadSourceMaps(UploadSourceMapsArgs),
 }
 
 /// Context shared by `fallow coverage` subcommands.
@@ -254,6 +260,7 @@ pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
         CoverageSubcommand::Setup(args) => run_setup(args, ctx.root),
         CoverageSubcommand::Analyze(args) => analyze::run(&args, ctx),
         CoverageSubcommand::UploadInventory(args) => upload_inventory::run(&args, ctx.root),
+        CoverageSubcommand::UploadSourceMaps(args) => upload_source_maps::run(&args, ctx.root),
     }
 }
 
