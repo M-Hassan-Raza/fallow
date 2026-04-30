@@ -36,7 +36,7 @@ mod gated {
     use super::sign;
 
     struct Harness {
-        _tmp: TempDir,
+        tmp: TempDir,
         home: PathBuf,
         coverage_file: PathBuf,
         stub_bin: PathBuf,
@@ -59,7 +59,7 @@ mod gated {
             let stub_bin = copy_and_sign_stub(root);
 
             Self {
-                _tmp: tmp,
+                tmp,
                 home,
                 coverage_file,
                 stub_bin,
@@ -101,14 +101,10 @@ mod gated {
         }
 
         fn health_args_with_format(&self, format: &str) -> Vec<String> {
-            self.health_args_for_path_with_format(&self.coverage_file, format)
+            Self::health_args_for_path_with_format(&self.coverage_file, format)
         }
 
-        fn health_args_for_path_with_format(
-            &self,
-            coverage_path: &Path,
-            format: &str,
-        ) -> Vec<String> {
+        fn health_args_for_path_with_format(coverage_path: &Path, format: &str) -> Vec<String> {
             let fixture = fixture_path("coverage-gaps");
             vec![
                 "health".to_owned(),
@@ -123,7 +119,7 @@ mod gated {
         }
 
         fn multi_capture_dir(&self) -> PathBuf {
-            let dir = self._tmp.path().join("multi-capture");
+            let dir = self.tmp.path().join("multi-capture");
             fs::create_dir_all(&dir).expect("create multi-capture dir");
             fs::write(dir.join("capture-a.json"), br#"{"result":[]}"#)
                 .expect("write first capture");
@@ -198,7 +194,7 @@ mod gated {
         let mut cmd = harness.fallow();
         cmd.env("FALLOW_STUB_MODE", "enforce-license-gate");
         let coverage_dir = harness.multi_capture_dir();
-        for arg in harness.health_args_for_path_with_format(&coverage_dir, "human") {
+        for arg in Harness::health_args_for_path_with_format(&coverage_dir, "human") {
             cmd.arg(arg);
         }
         let (stdout, stderr, code) = run_with(cmd);
