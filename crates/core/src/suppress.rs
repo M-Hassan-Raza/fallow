@@ -147,6 +147,16 @@ impl<'a> SuppressionContext<'a> {
         self.by_file.get(&file_id).copied()
     }
 
+    /// Count suppression entries that matched at least one issue.
+    #[must_use]
+    pub fn used_count(&self) -> usize {
+        self.used
+            .values()
+            .flat_map(|used| used.iter())
+            .filter(|used| used.load(Ordering::Relaxed))
+            .count()
+    }
+
     /// Collect all suppressions that were never consumed by any detector.
     ///
     /// Skips suppression kinds that are checked in the CLI layer

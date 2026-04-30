@@ -4,7 +4,10 @@ use std::time::Duration;
 use colored::Colorize;
 use fallow_core::duplicates::DuplicationReport;
 
-use super::{MAX_FLAT_ITEMS, format_path, plural, relative_path, split_dir_filename, thousands};
+use super::{
+    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
+    split_dir_filename, thousands,
+};
 use crate::report::dupes_grouping::DuplicationGrouping;
 
 /// Docs base URL for duplication explanations.
@@ -18,6 +21,7 @@ pub(in crate::report) fn print_duplication_human(
     root: &Path,
     elapsed: Duration,
     quiet: bool,
+    show_explain_tip: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -37,6 +41,8 @@ pub(in crate::report) fn print_duplication_human(
         }
         return;
     }
+
+    print_explain_tip_if_tty(show_explain_tip && !report.clone_groups.is_empty(), quiet);
 
     for line in build_duplication_human_lines(report, root) {
         println!("{line}");

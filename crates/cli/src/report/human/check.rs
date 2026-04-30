@@ -12,7 +12,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::{
     MAX_FLAT_ITEMS, build_grouped_by_file, build_section_header, format_path,
-    push_section_footer_rollup, push_section_footer_with_count,
+    print_explain_tip_if_tty, push_section_footer_rollup, push_section_footer_with_count,
 };
 use crate::report::grouping::OwnershipResolver;
 use crate::report::{
@@ -103,6 +103,7 @@ pub(in crate::report) fn print_human(
     elapsed: Duration,
     quiet: bool,
     top: Option<usize>,
+    show_explain_tip: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -110,13 +111,15 @@ pub(in crate::report) fn print_human(
         emit_config_quality_signal(results, root);
     }
 
+    let total = results.total_issues();
+    print_explain_tip_if_tty(show_explain_tip && total > 0, quiet);
+
     // Human output always includes section footers with doc links.
     for line in build_human_lines(results, root, rules, top) {
         println!("{line}");
     }
 
     if !quiet {
-        let total = results.total_issues();
         if total == 0 {
             eprintln!(
                 "{}",
@@ -148,8 +151,27 @@ pub(in crate::report) fn print_human(
                     .red()
                     .bold()
             );
+            print_suppression_footer(results);
         }
     }
+}
+
+fn print_suppression_footer(results: &AnalysisResults) {
+    if results.suppression_count == 0 && results.stale_suppressions.is_empty() {
+        return;
+    }
+    let total = results.total_issues();
+    let stale = results.stale_suppressions.len();
+    eprintln!(
+        "  {}",
+        format!(
+            "{total} issue{} \u{00b7} {} suppressed \u{00b7} {stale} stale suppression{}",
+            plural(total),
+            results.suppression_count,
+            plural(stale)
+        )
+        .dimmed()
+    );
 }
 
 /// Build human-readable output lines for analysis results.

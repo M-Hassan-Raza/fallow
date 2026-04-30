@@ -403,6 +403,10 @@ pub struct PerAnalysisProductionConfig {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AuditConfig {
+    /// Which findings should make `fallow audit` fail.
+    #[serde(default, skip_serializing_if = "AuditGate::is_default")]
+    pub gate: AuditGate,
+
     /// Path to the dead-code baseline (produced by `fallow dead-code --save-baseline`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dead_code_baseline: Option<String>,
@@ -420,9 +424,28 @@ impl AuditConfig {
     /// True when all baseline paths are unset.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.dead_code_baseline.is_none()
+        self.gate.is_default()
+            && self.dead_code_baseline.is_none()
             && self.health_baseline.is_none()
             && self.dupes_baseline.is_none()
+    }
+}
+
+/// Gating mode for `fallow audit`.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[serde(rename_all = "kebab-case")]
+pub enum AuditGate {
+    /// Only findings introduced by the current changeset affect the verdict.
+    #[default]
+    NewOnly,
+    /// All findings in changed files affect the verdict.
+    All,
+}
+
+impl AuditGate {
+    #[must_use]
+    pub const fn is_default(&self) -> bool {
+        matches!(self, Self::NewOnly)
     }
 }
 

@@ -6,6 +6,37 @@ use std::fs;
 use std::process::Command;
 use tempfile::TempDir;
 
+fn git(dir: &std::path::Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
+        .output()
+        .expect("git command failed");
+    assert!(
+        output.status.success(),
+        "git {:?} failed\nstdout: {}\nstderr: {}",
+        args,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn commit_all(dir: &std::path::Path, message: &str) {
+    git(dir, &["add", "."]);
+    git(
+        dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", message],
+    );
+}
+
 /// Create a temp git repo with a commit, suitable for audit testing.
 /// Returns the `TempDir` guard so the directory lives as long as the caller holds it.
 fn create_audit_fixture(_suffix: &str) -> TempDir {
@@ -258,7 +289,7 @@ fn create_audit_baseline_fixture() -> TempDir {
 }
 
 #[test]
-fn audit_without_baseline_reports_preexisting_issues() {
+fn audit_default_gate_ignores_inherited_issues() {
     let tmp = create_audit_baseline_fixture();
     let output = run_fallow_raw(&[
         "audit",
@@ -272,18 +303,244 @@ fn audit_without_baseline_reports_preexisting_issues() {
     ]);
 
     assert_eq!(
-        output.code, 1,
-        "audit should fail when touched file has pre-existing issues. stderr: {}",
+        output.code, 0,
+        "audit should pass when touched file has only inherited issues. stderr: {}",
         output.stderr
     );
     let json = parse_json(&output);
-    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
     let dead_code_issues = json["summary"]["dead_code_issues"]
         .as_u64()
         .expect("summary.dead_code_issues should be present");
     assert!(
         dead_code_issues >= 5,
         "expected at least 5 pre-existing unused exports, got {dead_code_issues}"
+    );
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0)
+    );
+    assert!(
+        json["attribution"]["dead_code_inherited"]
+            .as_u64()
+            .is_some_and(|count| count >= 5),
+        "expected inherited dead-code attribution"
+    );
+    let inherited_exports = json["dead_code"]["unused_exports"]
+        .as_array()
+        .expect("dead_code.unused_exports should be an array");
+    assert!(
+        inherited_exports
+            .iter()
+            .all(|item| item["introduced"] == false),
+        "all touched legacy exports should be annotated as inherited"
+    );
+}
+
+#[test]
+fn audit_gate_all_reports_preexisting_issues() {
+    let tmp = create_audit_baseline_fixture();
+    fs::write(tmp.path().join("fallow.toml"), "[audit]\ngate = \"all\"\n").unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--config",
+        tmp.path().join("fallow.toml").to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "audit should fail when audit.gate=all and touched file has pre-existing issues. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(json["attribution"]["gate"].as_str(), Some("all"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0),
+        "gate=all should skip base attribution work"
+    );
+    assert_eq!(
+        json["attribution"]["dead_code_inherited"].as_u64(),
+        Some(0),
+        "gate=all should skip base attribution work"
+    );
+    assert!(
+        json["dead_code"]["unused_exports"][0]
+            .get("introduced")
+            .is_none(),
+        "gate=all should not annotate per-issue introduced fields without a base snapshot"
+    );
+}
+
+#[test]
+fn audit_gate_cli_flag_overrides_default() {
+    let tmp = create_audit_baseline_fixture();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        tmp.path().to_str().unwrap(),
+        "--base",
+        "main",
+        "--gate",
+        "all",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "--gate all should fail on inherited findings. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(json["attribution"]["gate"].as_str(), Some("all"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(0)
+    );
+    assert_eq!(json["attribution"]["dead_code_inherited"].as_u64(), Some(0));
+}
+
+#[test]
+fn audit_help_documents_gate() {
+    let output = run_fallow_raw(&["audit", "--help"]);
+    assert_eq!(output.code, 0, "audit --help should succeed");
+    assert!(
+        output.stdout.contains("--gate <GATE>"),
+        "--help should include --gate, got:\n{}",
+        output.stdout
+    );
+    assert!(
+        output.stdout.contains("new-only") && output.stdout.contains("introduced"),
+        "--help should document new-only semantics, got:\n{}",
+        output.stdout
+    );
+}
+
+#[test]
+fn audit_new_unlisted_dependency_import_site_is_introduced() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-unlisted","main":"src/index.ts","dependencies":{}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"bundler"},"include":["src"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/a.ts"),
+        "import leftPad from 'left-pad';\nexport const a = leftPad('a', 2);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { a } from './a';\nconsole.log(a);\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("src/b.ts"),
+        "import leftPad from 'left-pad';\nexport const b = leftPad('b', 2);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { a } from './a';\nimport { b } from './b';\nconsole.log(a, b);\n",
+    )
+    .unwrap();
+    commit_all(dir, "add b");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "new unlisted import site should fail new-only audit. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        json["dead_code"]["unlisted_dependencies"][0]["introduced"],
+        true
+    );
+}
+
+#[test]
+fn audit_dependency_location_change_is_introduced() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-dep-move","main":"src/index.ts","devDependencies":{"left-pad":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("src/index.ts"), "console.log('hi');\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-dep-move","main":"src/index.ts","dependencies":{"left-pad":"1.0.0"}}"#,
+    )
+    .unwrap();
+    commit_all(dir, "move dependency");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+
+    assert_eq!(
+        output.code, 1,
+        "moving an unused package into dependencies should be introduced. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("fail"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(1)
+    );
+    assert_eq!(
+        json["dead_code"]["unused_dependencies"][0]["introduced"],
+        true
     );
 }
 

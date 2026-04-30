@@ -333,6 +333,7 @@ pub fn print_dupes_result(
     quiet: bool,
     explain: bool,
     summary: bool,
+    show_explain_tip: bool,
 ) -> ExitCode {
     let ctx = report::ReportContext {
         root: &result.config.root,
@@ -343,6 +344,7 @@ pub fn print_dupes_result(
         group_by: None,
         top: None,
         summary,
+        show_explain_tip,
         baseline_matched: None,
         health_action_opts: report::HealthActionOptions::default(),
     };
@@ -376,7 +378,14 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
-    print_dupes_result_with_grouping(&result, opts.quiet, opts.explain, resolver, opts.summary)
+    print_dupes_result_with_grouping(
+        &result,
+        opts.quiet,
+        opts.explain,
+        resolver,
+        opts.summary,
+        true,
+    )
 }
 
 fn print_dupes_result_with_grouping(
@@ -385,6 +394,7 @@ fn print_dupes_result_with_grouping(
     explain: bool,
     group_by: Option<report::OwnershipResolver>,
     summary: bool,
+    show_explain_tip: bool,
 ) -> ExitCode {
     let ctx = report::ReportContext {
         root: &result.config.root,
@@ -395,6 +405,7 @@ fn print_dupes_result_with_grouping(
         group_by,
         top: None,
         summary,
+        show_explain_tip,
         baseline_matched: None,
         health_action_opts: report::HealthActionOptions::default(),
     };

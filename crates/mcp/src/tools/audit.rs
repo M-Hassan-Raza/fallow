@@ -1,9 +1,17 @@
 use crate::params::AuditParams;
 
-use super::{push_global, push_scope};
+use super::{VALID_AUDIT_GATES, push_global, push_scope, validation_error_body};
 
 /// Build CLI arguments for the `audit` tool.
-pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
+pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
+    if let Some(ref gate) = params.gate
+        && !VALID_AUDIT_GATES.contains(&gate.as_str())
+    {
+        return Err(validation_error_body(format!(
+            "Invalid gate '{gate}'. Valid values: new-only, all"
+        )));
+    }
+
     let mut args = vec![
         "audit".to_string(),
         "--format".to_string(),
@@ -35,6 +43,9 @@ pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
     if let Some(ref gb) = params.group_by {
         args.extend(["--group-by".to_string(), gb.clone()]);
     }
+    if let Some(ref gate) = params.gate {
+        args.extend(["--gate".to_string(), gate.clone()]);
+    }
     if let Some(ref path) = params.dead_code_baseline {
         args.extend(["--dead-code-baseline".to_string(), path.clone()]);
     }
@@ -48,5 +59,5 @@ pub fn build_audit_args(params: &AuditParams) -> Vec<String> {
         args.extend(["--max-crap".to_string(), format!("{max_crap}")]);
     }
 
-    args
+    Ok(args)
 }

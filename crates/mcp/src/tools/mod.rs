@@ -3,6 +3,7 @@ mod audit;
 mod check_changed;
 mod check_runtime_coverage;
 mod dupes;
+mod explain;
 mod fix;
 mod flags;
 mod health;
@@ -18,6 +19,7 @@ pub use check_runtime_coverage::{
     build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
 };
 pub use dupes::build_find_dupes_args;
+pub use explain::build_explain_args;
 pub use fix::{build_fix_apply_args, build_fix_preview_args};
 pub use flags::build_feature_flags_args;
 pub use health::build_health_args;
@@ -121,6 +123,9 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
 
 /// Valid detection modes for the `find_dupes` tool.
 pub const VALID_DUPES_MODES: &[&str] = &["strict", "mild", "weak", "semantic"];
+
+/// Valid gate values for the `audit` tool.
+pub const VALID_AUDIT_GATES: &[&str] = &["new-only", "all"];
 
 /// Build a structured validation error body matching the shape `run_fallow` emits
 /// for CLI-level errors: `{"error": true, "message": "...", "exit_code": 0}`.

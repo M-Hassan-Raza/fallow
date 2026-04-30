@@ -350,6 +350,7 @@ pub fn find_dead_code_full(
             .stale_suppressions
             .extend(suppressions.find_stale(graph));
     }
+    results.suppression_count = suppressions.used_count();
 
     // Sort all result arrays for deterministic output ordering.
     // Parallel collection and FxHashMap iteration don't guarantee order,

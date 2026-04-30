@@ -667,6 +667,10 @@ pub struct AuditParams {
     /// dupes, health) that audit runs.
     pub group_by: Option<String>,
 
+    /// Which findings affect the audit verdict. Values: "new-only" (default)
+    /// or "all". Passed through to the CLI's `--gate` flag.
+    pub gate: Option<String>,
+
     /// Path to a dead-code baseline file (produced by `fallow dead-code
     /// --save-baseline`). When set, dead-code issues present in the
     /// baseline are excluded from the audit verdict. Passed through to
@@ -691,6 +695,13 @@ pub struct AuditParams {
     /// fallow estimates coverage from the module graph. Passed through to
     /// the CLI's `--max-crap` flag.
     pub max_crap: Option<f64>,
+}
+
+#[derive(Default, Deserialize, JsonSchema)]
+pub struct ExplainParams {
+    /// Issue type or rule id to explain, for example "unused-export",
+    /// "fallow/unused-dependency", "high-complexity", or "code-duplication".
+    pub issue_type: String,
 }
 
 /// Parameters for `list_boundaries`.

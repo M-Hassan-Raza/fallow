@@ -411,12 +411,15 @@ fn run_init_hooks(root: &Path, branch: Option<&str>) -> ExitCode {
 
     let hook_content = format!(
         "#!/bin/sh\n\
-         # fallow pre-commit hook -- catch dead code before it merges\n\
+         # fallow pre-commit hook -- gate commits on dead code, complexity, and duplication.\n\
+         # Audit defaults to gate=new-only, so inherited findings on touched files do not block\n\
+         # commits; only findings introduced by the changeset fail the gate. Set audit.gate = \"all\"\n\
+         # in fallow.toml to fail on every finding in changed files.\n\
          # Remove or edit this file to change the hook behavior.\n\
          # Bypass on a single commit with: git commit --no-verify\n\
          \n\
          command -v fallow >/dev/null 2>&1 || exit 0\n\
-         fallow dead-code --changed-since {base_ref} --fail-on-issues --quiet\n"
+         fallow audit --base {base_ref} --quiet\n"
     );
 
     // Detect hook target: husky > lefthook > simple-git-hooks > bare .git/hooks
@@ -449,7 +452,7 @@ fn run_init_hooks(root: &Path, branch: Option<&str>) -> ExitCode {
                 eprintln!(
                     "Error: .husky/pre-commit already exists. \
                      Add the following line to your existing hook:\n\n  \
-                     fallow dead-code --changed-since {base_ref} --fail-on-issues --quiet"
+                     fallow audit --base {base_ref} --quiet"
                 );
                 return ExitCode::from(2);
             }
@@ -463,7 +466,7 @@ fn run_init_hooks(root: &Path, branch: Option<&str>) -> ExitCode {
             eprintln!(
                 "Lefthook detected. Add the following to your lefthook.yml:\n\n  \
                  pre-commit:\n    commands:\n      fallow:\n        \
-                 run: fallow dead-code --changed-since {base_ref} --fail-on-issues --quiet"
+                 run: fallow audit --base {base_ref} --quiet"
             );
             return ExitCode::SUCCESS;
         }
@@ -472,7 +475,7 @@ fn run_init_hooks(root: &Path, branch: Option<&str>) -> ExitCode {
                 eprintln!(
                     "Error: .git/hooks/pre-commit already exists. \
                      Add the following line to your existing hook:\n\n  \
-                     fallow dead-code --changed-since {base_ref} --fail-on-issues --quiet"
+                     fallow audit --base {base_ref} --quiet"
                 );
                 return ExitCode::from(2);
             }
@@ -484,7 +487,7 @@ fn run_init_hooks(root: &Path, branch: Option<&str>) -> ExitCode {
         }
     }
 
-    eprintln!("\nThe hook runs `fallow dead-code` on files changed since `{base_ref}`.");
+    eprintln!("\nThe hook runs `fallow audit` against `{base_ref}` (gate=new-only by default).");
     eprintln!("To skip the hook on a single commit: git commit --no-verify");
     ExitCode::SUCCESS
 }
@@ -665,10 +668,10 @@ mod tests {
         let hook_path = root.join(".git/hooks/pre-commit");
         assert!(hook_path.exists());
         let content = std::fs::read_to_string(&hook_path).unwrap();
-        assert!(content.contains("fallow dead-code"));
-        assert!(content.contains("--changed-since"));
-        assert!(content.contains("--fail-on-issues"));
+        assert!(content.contains("fallow audit"));
+        assert!(content.contains("--base"));
         assert!(content.contains("command -v fallow"));
+        assert!(content.contains("gate=new-only"));
     }
 
     #[test]
@@ -679,7 +682,7 @@ mod tests {
         let exit = run_init(&hooks_opts(root, Some("develop")));
         assert_eq!(exit, ExitCode::SUCCESS);
         let content = std::fs::read_to_string(root.join(".git/hooks/pre-commit")).unwrap();
-        assert!(content.contains("--changed-since develop"));
+        assert!(content.contains("--base develop"));
     }
 
     #[test]

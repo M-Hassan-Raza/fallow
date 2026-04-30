@@ -32,9 +32,9 @@
 
     "AuditOutput": {
       "title": "fallow audit --format json",
-      "description": "Audit output combining dead code, complexity, and duplication scoped to changed files. Returns a verdict (pass/warn/fail) with per-category summary and full sub-results.",
+      "description": "Audit output combining dead code, complexity, and duplication scoped to changed files. Returns a verdict (pass/warn/fail) with per-category summary, optional new-vs-inherited attribution, and full sub-results.",
       "type": "object",
-      "required": ["schema_version", "version", "command", "verdict", "changed_files_count", "base_ref", "elapsed_ms", "summary"],
+      "required": ["schema_version", "version", "command", "verdict", "changed_files_count", "base_ref", "elapsed_ms", "summary", "attribution"],
       "properties": {
         "schema_version": { "$ref": "#/definitions/SchemaVersion" },
         "version": { "$ref": "#/definitions/ToolVersion" },
@@ -67,10 +67,33 @@
             "duplication_clone_groups": { "type": "integer" }
           }
         },
-        "dead_code": { "$ref": "#/definitions/CheckOutput", "description": "Full dead code results (omitted if no changed files)" },
-        "duplication": { "$ref": "#/definitions/DupesOutput", "description": "Full duplication results (omitted if no changed files)" },
-        "complexity": { "$ref": "#/definitions/HealthOutput", "description": "Full complexity results (omitted if no changed files)" }
+        "attribution": {
+          "type": "object",
+          "description": "Counts split by whether each finding was introduced by the current changeset or already existed at the base ref. The default audit gate is new-only, so inherited findings are context. With audit.gate or --gate set to all, audit skips the extra base-snapshot attribution pass and these counts stay zero.",
+          "required": ["gate", "dead_code_introduced", "dead_code_inherited", "complexity_introduced", "complexity_inherited", "duplication_introduced", "duplication_inherited"],
+          "properties": {
+            "gate": {
+              "type": "string",
+              "enum": ["new-only", "all"],
+              "description": "Which findings affect the audit verdict."
+            },
+            "dead_code_introduced": { "type": "integer" },
+            "dead_code_inherited": { "type": "integer" },
+            "complexity_introduced": { "type": "integer" },
+            "complexity_inherited": { "type": "integer" },
+            "duplication_introduced": { "type": "integer" },
+            "duplication_inherited": { "type": "integer" }
+          }
+        },
+        "dead_code": { "$ref": "#/definitions/CheckOutput", "description": "Full dead code results (omitted if no changed files). Issue objects include introduced: true/false when audit can compare against the base ref." },
+        "duplication": { "$ref": "#/definitions/DupesOutput", "description": "Full duplication results (omitted if no changed files). Clone groups include introduced: true/false when audit can compare against the base ref." },
+        "complexity": { "$ref": "#/definitions/HealthOutput", "description": "Full complexity results (omitted if no changed files). Findings include introduced: true/false when audit can compare against the base ref." }
       }
+    },
+
+    "AuditIntroduced": {
+      "type": "boolean",
+      "description": "Only present inside `fallow audit --format json` sub-results. true means this finding's structural key was not present at the base ref; false means it was inherited from the base ref."
     },
 
     "CoverageSetupOutput": {
@@ -1106,6 +1129,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/HealthFindingAction" },
           "description": "Suggested actions to address this complex finding."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -1852,6 +1878,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -1891,6 +1920,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -1926,6 +1958,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -1959,6 +1994,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -1994,6 +2032,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2021,6 +2062,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2041,6 +2085,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2079,6 +2126,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2120,6 +2170,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2143,6 +2196,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2175,6 +2231,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2215,6 +2274,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/Action" },
           "description": "Suggested actions to resolve this issue."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2257,6 +2319,9 @@
               "description": "A stale @expected-unused JSDoc tag (the export is now used)."
             }
           ]
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },
@@ -2283,6 +2348,9 @@
           "type": "array",
           "items": { "$ref": "#/definitions/CloneGroupAction" },
           "description": "Suggested actions to eliminate this clone group."
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
         }
       }
     },

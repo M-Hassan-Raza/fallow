@@ -122,6 +122,10 @@ expression: redact_sarif_version(&json_str)
               "shortDescription": {
                 "text": "Production dependency only imported by test files"
               },
+              "fullDescription": {
+                "text": "Production dependencies that are only imported from test files. These can usually move to devDependencies because production entry points do not require them at runtime."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#test-only-dependencies",
               "defaultConfiguration": {
                 "level": "warning"
               }
@@ -207,8 +211,12 @@ expression: redact_sarif_version(&json_str)
             {
               "id": "fallow/boundary-violation",
               "shortDescription": {
-                "text": "Import crosses an architecture boundary"
+                "text": "Import crosses a configured architecture boundary"
               },
+              "fullDescription": {
+                "text": "A module imports from a zone that its configured boundary rules do not allow. Boundary checks help keep layered architecture, feature slices, and package ownership rules enforceable."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#boundary-violations",
               "defaultConfiguration": {
                 "level": "warning"
               }

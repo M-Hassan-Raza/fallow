@@ -158,10 +158,11 @@ See [Agent integration](https://docs.fallow.tools/integrations/mcp) for MCP setu
 ## More static commands
 
 ```bash
-fallow audit                # Audit changed files (verdict: pass/warn/fail)
-fallow --production-health  # Combined mode: production health, full dead-code/dupes
-fallow watch                # Re-analyze on file changes
-fallow fix                  # Apply automatic cleanup after previewing
+fallow audit                 # Audit changed files (verdict: pass/warn/fail)
+fallow explain unused-export # Explain a rule without analyzing
+fallow --production-health   # Combined mode: production health, full dead-code/dupes
+fallow watch                 # Re-analyze on file changes
+fallow fix                   # Apply automatic cleanup after previewing
 ```
 
 Combined mode and `fallow audit` support per-analysis production mode. Precedence is CLI flags, then environment variables, then config:
@@ -311,10 +312,13 @@ fallow audit                              # Auto-detects base branch
 fallow audit --base main                  # Explicit base ref
 fallow audit --base HEAD~3               # Audit last 3 commits
 fallow audit --production-health          # Production health, full dead-code/dupes
+fallow audit --gate all                   # Fail on inherited findings too
 fallow audit --format json                # Structured output with verdict
 ```
 
-Returns a verdict: **pass** (exit 0), **warn** (exit 0, warn-severity only), or **fail** (exit 1). JSON output includes a `verdict` field for CI and agent integration.
+Returns a verdict: **pass** (exit 0), **warn** (exit 0, warn-severity only), or **fail** (exit 1). By default, audit compares the current tree with the base ref and gates only findings introduced by the changeset; inherited findings are counted in JSON `attribution`, individual issue objects get `introduced: true|false`, and inherited findings are shown as context. Set `--gate all` or `audit.gate: "all"` to fail on every finding in changed files without running the extra base-snapshot attribution pass.
+
+Audit creates a temporary git worktree to compare against the base ref and removes it on normal exit. If the process is force-killed, run `git worktree prune` to clean up stale `.git/worktrees/fallow-audit-base-*` entries.
 
 **Per-analysis baselines.** When touching legacy files with pre-existing issues, reuse the baselines saved by the individual subcommands so audit only fails on genuinely new findings:
 

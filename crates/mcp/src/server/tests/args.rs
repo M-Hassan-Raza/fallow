@@ -1,8 +1,8 @@
 use crate::params::*;
 use crate::tools::{
     ISSUE_TYPE_FLAGS, VALID_DUPES_MODES, build_analyze_args, build_audit_args,
-    build_check_changed_args, build_check_runtime_coverage_args, build_feature_flags_args,
-    build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
+    build_check_changed_args, build_check_runtime_coverage_args, build_explain_args,
+    build_feature_flags_args, build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
     build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
     build_get_importance_args, build_health_args, build_list_boundaries_args,
     build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
@@ -68,6 +68,17 @@ fn check_changed(since: &str) -> CheckChangedParams {
         no_cache: None,
         threads: None,
     }
+}
+
+#[test]
+fn explain_args_emit_json_quiet() {
+    let args = build_explain_args(&ExplainParams {
+        issue_type: "unused-export".to_string(),
+    });
+    assert_eq!(
+        args,
+        ["explain", "unused-export", "--format", "json", "--quiet"]
+    );
 }
 
 // ── Argument building: analyze ────────────────────────────────────
@@ -1126,7 +1137,7 @@ fn all_arg_builders_include_format_json_and_quiet() {
     })
     .unwrap();
     let health = build_health_args(&HealthParams::default());
-    let audit = build_audit_args(&AuditParams::default());
+    let audit = build_audit_args(&AuditParams::default()).expect("default params are valid");
     let list_boundaries = build_list_boundaries_args(&ListBoundariesParams::default());
     let feature_flags = build_feature_flags_args(&FeatureFlagsParams::default());
     let check_runtime_coverage =
@@ -1524,7 +1535,8 @@ fn no_cache_false_is_omitted_across_all_tools() {
     let audit = build_audit_args(&AuditParams {
         no_cache: Some(false),
         ..Default::default()
-    });
+    })
+    .expect("audit params are valid");
     assert!(!audit.contains(&"--no-cache".to_string()));
 
     let list_boundaries = build_list_boundaries_args(&ListBoundariesParams {
@@ -1544,7 +1556,7 @@ fn no_cache_false_is_omitted_across_all_tools() {
 
 #[test]
 fn audit_args_minimal_produces_base_args() {
-    let args = build_audit_args(&AuditParams::default());
+    let args = build_audit_args(&AuditParams::default()).expect("default params are valid");
     assert_eq!(args, ["audit", "--format", "json", "--quiet", "--explain"]);
 }
 
@@ -1553,7 +1565,8 @@ fn audit_args_with_base() {
     let args = build_audit_args(&AuditParams {
         base: Some("main".to_string()),
         ..Default::default()
-    });
+    })
+    .expect("base is valid");
     assert!(args.contains(&"--base".to_string()));
     assert!(args.contains(&"main".to_string()));
 }
@@ -1572,11 +1585,13 @@ fn audit_args_with_all_options() {
         no_cache: Some(true),
         threads: Some(4),
         group_by: None,
+        gate: Some("all".to_string()),
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,
         max_crap: Some(30.0),
-    });
+    })
+    .expect("all options are valid");
     assert!(args.contains(&"--root".to_string()));
     assert!(args.contains(&"/project".to_string()));
     assert!(args.contains(&"--config".to_string()));
@@ -1590,6 +1605,7 @@ fn audit_args_with_all_options() {
     assert!(args.contains(&"--no-cache".to_string()));
     assert!(args.contains(&"--threads".to_string()));
     assert!(args.contains(&"4".to_string()));
+    assert!(args.windows(2).any(|w| w == ["--gate", "all"]));
 }
 
 #[test]
@@ -1597,7 +1613,8 @@ fn audit_args_group_by_section() {
     let args = build_audit_args(&AuditParams {
         group_by: Some("section".to_string()),
         ..Default::default()
-    });
+    })
+    .expect("group_by is valid");
     assert!(
         args.windows(2).any(|w| w == ["--group-by", "section"]),
         "expected --group-by section, got {args:?}"
@@ -1609,10 +1626,41 @@ fn audit_args_max_crap_forwards_to_cli() {
     let args = build_audit_args(&AuditParams {
         max_crap: Some(42.5),
         ..Default::default()
-    });
+    })
+    .expect("max_crap is valid");
     assert!(
         args.windows(2).any(|w| w == ["--max-crap", "42.5"]),
         "expected --max-crap 42.5, got {args:?}"
+    );
+}
+
+#[test]
+fn audit_args_gate_forwards_to_cli() {
+    let args = build_audit_args(&AuditParams {
+        gate: Some("all".to_string()),
+        ..Default::default()
+    })
+    .expect("gate=all is valid");
+    assert!(
+        args.windows(2).any(|w| w == ["--gate", "all"]),
+        "expected --gate all, got {args:?}"
+    );
+}
+
+#[test]
+fn audit_args_invalid_gate_rejected() {
+    let err = build_audit_args(&AuditParams {
+        gate: Some("strict".to_string()),
+        ..Default::default()
+    })
+    .expect_err("invalid gate must be rejected");
+    assert!(
+        err.contains("Invalid gate 'strict'"),
+        "error should name the offending value, got {err}"
+    );
+    assert!(
+        err.contains("new-only") && err.contains("all"),
+        "error should list valid values, got {err}"
     );
 }
 
@@ -1623,7 +1671,8 @@ fn audit_args_per_analysis_baselines() {
         health_baseline: Some(".fallow-health.json".to_string()),
         dupes_baseline: Some(".fallow-dupes.json".to_string()),
         ..Default::default()
-    });
+    })
+    .expect("baseline paths are valid");
     assert!(
         args.windows(2)
             .any(|w| w == ["--dead-code-baseline", ".fallow-dead-code.json"]),
@@ -1643,7 +1692,7 @@ fn audit_args_per_analysis_baselines() {
 
 #[test]
 fn audit_args_without_baselines_does_not_emit_flags() {
-    let args = build_audit_args(&AuditParams::default());
+    let args = build_audit_args(&AuditParams::default()).expect("default params are valid");
     assert!(!args.iter().any(|a| a == "--dead-code-baseline"));
     assert!(!args.iter().any(|a| a == "--health-baseline"));
     assert!(!args.iter().any(|a| a == "--dupes-baseline"));

@@ -440,16 +440,18 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     })
 }
 
+pub struct PrintCheckOptions {
+    pub quiet: bool,
+    pub explain: bool,
+    pub regression_json: bool,
+    pub group_by: Option<report::OwnershipResolver>,
+    pub top: Option<usize>,
+    pub summary: bool,
+    pub show_explain_tip: bool,
+}
+
 /// Print check results and return appropriate exit code.
-pub fn print_check_result(
-    result: &CheckResult,
-    quiet: bool,
-    explain: bool,
-    regression_json: bool,
-    group_by: Option<report::OwnershipResolver>,
-    top: Option<usize>,
-    summary: bool,
-) -> ExitCode {
+pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> ExitCode {
     let effective_rules = if result.fail_on_issues {
         let mut r = result.config.rules.clone();
         rules::promote_warns_to_errors(&mut r);
@@ -462,11 +464,12 @@ pub fn print_check_result(
         root: &result.config.root,
         rules: &result.config.rules,
         elapsed: result.elapsed,
-        quiet,
-        explain,
-        group_by,
-        top,
-        summary,
+        quiet: opts.quiet,
+        explain: opts.explain,
+        group_by: opts.group_by,
+        top: opts.top,
+        summary: opts.summary,
+        show_explain_tip: opts.show_explain_tip,
         baseline_matched: result.baseline_matched,
         health_action_opts: report::HealthActionOptions::default(),
     };
@@ -474,7 +477,7 @@ pub fn print_check_result(
         &result.results,
         &ctx,
         result.config.output,
-        if regression_json {
+        if opts.regression_json {
             result.regression.as_ref()
         } else {
             None
@@ -486,7 +489,7 @@ pub fn print_check_result(
 
     // Print regression outcome to stderr
     if let Some(ref outcome) = result.regression {
-        if !quiet {
+        if !opts.quiet {
             regression::print_regression_outcome(outcome);
         }
         if outcome.is_failure() {
@@ -523,12 +526,15 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     };
     let exit = print_check_result(
         &result,
-        opts.quiet,
-        opts.explain,
-        true,
-        resolver,
-        opts.top,
-        opts.summary,
+        PrintCheckOptions {
+            quiet: opts.quiet,
+            explain: opts.explain,
+            regression_json: true,
+            group_by: resolver,
+            top: opts.top,
+            summary: opts.summary,
+            show_explain_tip: true,
+        },
     );
 
     // Cross-reference: run duplication analysis on the full results

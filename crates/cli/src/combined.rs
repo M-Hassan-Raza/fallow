@@ -1,3 +1,4 @@
+use std::io::IsTerminal;
 use std::process::ExitCode;
 use std::time::Instant;
 
@@ -252,6 +253,17 @@ fn print_human_sections(
         }
     }
 
+    let has_any_findings = check_result.is_some_and(|result| result.results.total_issues() > 0)
+        || dupes_result.is_some_and(|result| !result.report.clone_groups.is_empty())
+        || health_result.is_some_and(|result| !result.report.findings.is_empty());
+    if show_headers && has_any_findings && std::io::stdout().is_terminal() {
+        println!(
+            "{}",
+            "Tip: run `fallow explain <issue-type>` for any finding below.".dimmed()
+        );
+        println!();
+    }
+
     if let Some(result) = check_result {
         if show_headers {
             eprintln!();
@@ -259,12 +271,15 @@ fn print_human_sections(
         }
         let code = crate::check::print_check_result(
             result,
-            opts.quiet,
-            opts.explain,
-            false,
-            resolver,
-            None,
-            opts.summary,
+            crate::check::PrintCheckOptions {
+                quiet: opts.quiet,
+                explain: opts.explain,
+                regression_json: false,
+                group_by: resolver,
+                top: None,
+                summary: opts.summary,
+                show_explain_tip: false,
+            },
         );
         max_exit = max_exit.max(exit_code_to_u8(code));
     }
@@ -274,7 +289,8 @@ fn print_human_sections(
             eprintln!();
             eprintln!("── Duplication ────────────────────────────────────");
         }
-        let code = crate::dupes::print_dupes_result(result, opts.quiet, opts.explain, opts.summary);
+        let code =
+            crate::dupes::print_dupes_result(result, opts.quiet, opts.explain, opts.summary, false);
         max_exit = max_exit.max(exit_code_to_u8(code));
     }
 
@@ -293,6 +309,7 @@ fn print_human_sections(
             None,
             None,
             opts.summary,
+            false,
         );
         max_exit = max_exit.max(exit_code_to_u8(code));
     }

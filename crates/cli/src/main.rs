@@ -619,12 +619,27 @@ enum Command {
         top: Option<usize>,
     },
 
+    /// Explain one fallow issue type without running an analysis.
+    ///
+    /// Prints the rule rationale, a worked example, fix guidance, and the
+    /// relevant docs URL. Accepts values like `unused-export`,
+    /// `fallow/unused-export`, `unused-exports`, and `code-duplication`.
+    Explain {
+        /// Issue type or rule id to explain
+        issue_type: String,
+    },
+
     /// Audit changed files for dead code, complexity, and duplication.
     ///
     /// Purpose-built for reviewing AI-generated code and PR quality gates.
     /// Combines dead-code + complexity + duplication scoped to changed files
     /// and returns a verdict (pass/warn/fail).
     /// Auto-detects the base branch if --changed-since/--base is not set.
+    /// By default, only findings introduced by the changeset affect the verdict;
+    /// inherited findings are reported with new-vs-inherited attribution and
+    /// individual JSON findings include `introduced: true/false`. Use
+    /// `--gate all` or `[audit] gate = "all"` to fail on every finding in
+    /// changed files without running the extra base-snapshot attribution pass.
     ///
     /// The global --baseline / --save-baseline flags are rejected on audit.
     /// Use --dead-code-baseline, --health-baseline, and --dupes-baseline
@@ -663,6 +678,14 @@ enum Command {
         /// Pair with `--coverage` for accurate scoring.
         #[arg(long)]
         max_crap: Option<f64>,
+
+        /// Which findings affect the audit verdict.
+        ///
+        /// new-only (default): fail only on findings introduced by the current
+        /// changeset. all: fail on every finding in changed files and skip
+        /// base-snapshot attribution.
+        #[arg(long, value_enum)]
+        gate: Option<AuditGateArg>,
     },
 
     /// Dump the CLI interface as machine-readable JSON for agent introspection
@@ -985,6 +1008,24 @@ impl EmailModeArg {
             Self::Raw => fallow_config::EmailMode::Raw,
             Self::Handle => fallow_config::EmailMode::Handle,
             Self::Hash => fallow_config::EmailMode::Hash,
+        }
+    }
+}
+
+/// CLI mirror of [`fallow_config::AuditGate`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
+pub enum AuditGateArg {
+    /// Only findings introduced by the current changeset affect the verdict.
+    NewOnly,
+    /// All findings in changed files affect the verdict.
+    All,
+}
+
+impl From<AuditGateArg> for fallow_config::AuditGate {
+    fn from(value: AuditGateArg) -> Self {
+        match value {
+            AuditGateArg::NewOnly => Self::NewOnly,
+            AuditGateArg::All => Self::All,
         }
     }
 }
@@ -1380,6 +1421,7 @@ fn main() -> ExitCode {
                     | Command::ConfigSchema
                     | Command::PluginSchema
                     | Command::Schema
+                    | Command::Explain { .. }
                     | Command::CiTemplate { .. }
                     | Command::Config { .. }
                     | Command::List { .. }
@@ -1878,6 +1920,7 @@ fn dispatch_subcommand(
                 top,
             })
         }
+        Command::Explain { issue_type } => explain::run_explain(&issue_type, output),
         Command::Audit {
             production_dead_code,
             production_health,
@@ -1886,6 +1929,7 @@ fn dispatch_subcommand(
             health_baseline,
             dupes_baseline,
             max_crap,
+            gate,
         } => {
             if cli.baseline.is_some() || cli.save_baseline.is_some() {
                 return emit_error(
@@ -1953,6 +1997,7 @@ fn dispatch_subcommand(
                 health_baseline: resolved_health_baseline.as_deref(),
                 dupes_baseline: resolved_dupes_baseline.as_deref(),
                 max_crap,
+                gate: gate.map_or(audit_cfg.gate, Into::into),
             })
         }
         Command::Schema => unreachable!("handled above"),

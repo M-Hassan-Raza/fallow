@@ -1416,6 +1416,10 @@
       "description": "Per-analysis baseline paths for the `audit` command.\n\nEach field points to a baseline file produced by the corresponding\nsubcommand (`fallow dead-code --save-baseline`, `fallow health --save-baseline`,\n`fallow dupes --save-baseline`). `audit` passes each baseline through to its\nunderlying analysis; baseline-matched issues are excluded from the verdict.",
       "type": "object",
       "properties": {
+        "gate": {
+          "description": "Which findings should make `fallow audit` fail.",
+          "$ref": "#/$defs/AuditGate"
+        },
         "deadCodeBaseline": {
           "description": "Path to the dead-code baseline (produced by `fallow dead-code --save-baseline`).",
           "type": [
@@ -1438,6 +1442,21 @@
           ]
         }
       }
+    },
+    "AuditGate": {
+      "description": "Gating mode for `fallow audit`.",
+      "oneOf": [
+        {
+          "description": "Only findings introduced by the current changeset affect the verdict.",
+          "type": "string",
+          "const": "new-only"
+        },
+        {
+          "description": "All findings in changed files affect the verdict.",
+          "type": "string",
+          "const": "all"
+        }
+      ]
     }
   }
 }

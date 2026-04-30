@@ -79,6 +79,11 @@ pub struct AnalysisResults {
     /// Suppression comments or JSDoc tags that no longer match any issue.
     #[serde(default)]
     pub stale_suppressions: Vec<StaleSuppression>,
+    /// Number of suppression entries that matched an issue during analysis.
+    /// Human output uses this for the suppression footer; it is skipped in
+    /// machine output to avoid changing the public JSON issue contract.
+    #[serde(skip)]
+    pub suppression_count: usize,
     /// Detected feature flag patterns. Advisory output, not included in issue counts.
     /// Skipped during default serialization: injected separately in JSON output when enabled.
     #[serde(skip)]

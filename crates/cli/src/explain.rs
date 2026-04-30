@@ -4,6 +4,10 @@
 //! and rule means — consumed by the `_meta` object in JSON output and by
 //! SARIF `fullDescription` / `helpUri` fields.
 
+use std::process::ExitCode;
+
+use colored::Colorize;
+use fallow_config::OutputFormat;
 use serde_json::{Value, json};
 
 // ── Docs base URL ────────────────────────────────────────────────
@@ -91,6 +95,13 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#type-only-dependencies",
     },
     RuleDef {
+        id: "fallow/test-only-dependency",
+        name: "Test-only Dependencies",
+        short: "Production dependency only imported by test files",
+        full: "Production dependencies that are only imported from test files. These can usually move to devDependencies because production entry points do not require them at runtime.",
+        docs_path: "explanations/dead-code#test-only-dependencies",
+    },
+    RuleDef {
         id: "fallow/unused-enum-member",
         name: "Unused Enum Members",
         short: "Enum member is never referenced",
@@ -133,6 +144,13 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#circular-dependencies",
     },
     RuleDef {
+        id: "fallow/boundary-violation",
+        name: "Boundary Violations",
+        short: "Import crosses a configured architecture boundary",
+        full: "A module imports from a zone that its configured boundary rules do not allow. Boundary checks help keep layered architecture, feature slices, and package ownership rules enforceable.",
+        docs_path: "explanations/dead-code#boundary-violations",
+    },
+    RuleDef {
         id: "fallow/stale-suppression",
         name: "Stale Suppressions",
         short: "Suppression comment or tag no longer matches any issue",
@@ -155,6 +173,276 @@ pub fn rule_by_id(id: &str) -> Option<&'static RuleDef> {
 #[must_use]
 pub fn rule_docs_url(rule: &RuleDef) -> String {
     format!("{DOCS_BASE}/{}", rule.docs_path)
+}
+
+/// Extra educational content for the standalone `fallow explain <issue-type>`
+/// command. Kept separate from [`RuleDef`] so SARIF and `_meta` payloads remain
+/// compact while terminal users and agents can ask for worked examples on
+/// demand.
+pub struct RuleGuide {
+    pub example: &'static str,
+    pub how_to_fix: &'static str,
+}
+
+/// Look up an issue type from a user-facing token.
+///
+/// Accepts canonical SARIF ids (`fallow/unused-export`), issue tokens
+/// (`unused-export`), and common CLI filter spellings (`unused-exports`).
+#[must_use]
+pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rule) = rule_by_id(trimmed) {
+        return Some(rule);
+    }
+    let normalized = trimmed
+        .strip_prefix("fallow/")
+        .unwrap_or(trimmed)
+        .trim_start_matches("--")
+        .replace('_', "-");
+    let alias = match normalized.as_str() {
+        "unused-files" => Some("fallow/unused-file"),
+        "unused-exports" => Some("fallow/unused-export"),
+        "unused-types" => Some("fallow/unused-type"),
+        "private-type-leaks" => Some("fallow/private-type-leak"),
+        "unused-deps" | "unused-dependencies" => Some("fallow/unused-dependency"),
+        "unused-dev-deps" | "unused-dev-dependencies" => Some("fallow/unused-dev-dependency"),
+        "unused-optional-deps" | "unused-optional-dependencies" => {
+            Some("fallow/unused-optional-dependency")
+        }
+        "type-only-deps" | "type-only-dependencies" => Some("fallow/type-only-dependency"),
+        "test-only-deps" | "test-only-dependencies" => Some("fallow/test-only-dependency"),
+        "unused-enum-members" => Some("fallow/unused-enum-member"),
+        "unused-class-members" => Some("fallow/unused-class-member"),
+        "unresolved-imports" => Some("fallow/unresolved-import"),
+        "unlisted-deps" | "unlisted-dependencies" => Some("fallow/unlisted-dependency"),
+        "duplicate-exports" => Some("fallow/duplicate-export"),
+        "circular-deps" | "circular-dependencies" => Some("fallow/circular-dependency"),
+        "boundary-violations" => Some("fallow/boundary-violation"),
+        "stale-suppressions" => Some("fallow/stale-suppression"),
+        "complexity" | "high-complexity" => Some("fallow/high-complexity"),
+        "cyclomatic" | "high-cyclomatic" | "high-cyclomatic-complexity" => {
+            Some("fallow/high-cyclomatic-complexity")
+        }
+        "cognitive" | "high-cognitive" | "high-cognitive-complexity" => {
+            Some("fallow/high-cognitive-complexity")
+        }
+        "crap" | "high-crap" | "high-crap-score" => Some("fallow/high-crap-score"),
+        "duplication" | "dupes" | "code-duplication" => Some("fallow/code-duplication"),
+        _ => None,
+    };
+    if let Some(id) = alias
+        && let Some(rule) = rule_by_id(id)
+    {
+        return Some(rule);
+    }
+    let singular = normalized
+        .strip_suffix('s')
+        .filter(|_| normalized != "unused-class")
+        .unwrap_or(&normalized);
+    let id = format!("fallow/{singular}");
+    rule_by_id(&id).or_else(|| {
+        CHECK_RULES
+            .iter()
+            .chain(HEALTH_RULES.iter())
+            .chain(DUPES_RULES.iter())
+            .find(|rule| {
+                rule.docs_path.ends_with(&normalized)
+                    || rule.docs_path.ends_with(singular)
+                    || rule.name.eq_ignore_ascii_case(trimmed)
+            })
+    })
+}
+
+/// Return worked-example and fix guidance for a rule.
+#[must_use]
+pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
+    match rule.id {
+        "fallow/unused-file" => RuleGuide {
+            example: "src/old-widget.ts is not imported by any entry point, route, script, or config file.",
+            how_to_fix: "Delete the file if it is genuinely dead. If a framework loads it implicitly, add the right plugin/config pattern or mark it in alwaysUsed.",
+        },
+        "fallow/unused-export" => RuleGuide {
+            example: "export const formatPrice = ... exists in src/money.ts, but no module imports formatPrice.",
+            how_to_fix: "Remove the export or make it file-local. If it is public API, import it from an entry point or add an intentional suppression with context.",
+        },
+        "fallow/unused-type" => RuleGuide {
+            example: "export interface LegacyProps is exported, but no module imports the type.",
+            how_to_fix: "Remove the type export, inline it, or keep it behind an explicit API entry point when consumers rely on it.",
+        },
+        "fallow/private-type-leak" => RuleGuide {
+            example: "export function makeUser(): InternalUser exposes InternalUser even though InternalUser is not exported.",
+            how_to_fix: "Export the referenced type, change the public signature to an exported type, or keep the helper private.",
+        },
+        "fallow/unused-dependency"
+        | "fallow/unused-dev-dependency"
+        | "fallow/unused-optional-dependency" => RuleGuide {
+            example: "package.json lists left-pad, but no source, script, config, or plugin-recognized file imports it.",
+            how_to_fix: "Remove the dependency after checking runtime/plugin usage. If another workspace uses it, move the dependency to that workspace.",
+        },
+        "fallow/type-only-dependency" => RuleGuide {
+            example: "zod is in dependencies but only appears in import type declarations.",
+            how_to_fix: "Move the package to devDependencies unless runtime code imports it as a value.",
+        },
+        "fallow/test-only-dependency" => RuleGuide {
+            example: "vitest is listed in dependencies, but only test files import it.",
+            how_to_fix: "Move the package to devDependencies unless production code imports it at runtime.",
+        },
+        "fallow/unused-enum-member" => RuleGuide {
+            example: "Status.Legacy remains in an exported enum, but no code reads that member.",
+            how_to_fix: "Remove the member after checking serialized/API compatibility, or suppress it with a reason when external data still uses it.",
+        },
+        "fallow/unused-class-member" => RuleGuide {
+            example: "class Parser has a public parseLegacy method that is never called in the project.",
+            how_to_fix: "Remove or privatize the member. For reflection/framework lifecycle hooks, configure or suppress the intentional entry point.",
+        },
+        "fallow/unresolved-import" => RuleGuide {
+            example: "src/app.ts imports ./routes/admin, but no matching file exists after extension and index resolution.",
+            how_to_fix: "Fix the specifier, restore the missing file, install the package, or align tsconfig path aliases with the runtime resolver.",
+        },
+        "fallow/unlisted-dependency" => RuleGuide {
+            example: "src/api.ts imports undici, but the nearest package.json does not list undici.",
+            how_to_fix: "Add the package to dependencies/devDependencies in the workspace that imports it instead of relying on hoisting or transitive deps.",
+        },
+        "fallow/duplicate-export" => RuleGuide {
+            example: "Button is exported from both src/ui/button.ts and src/components/button.ts.",
+            how_to_fix: "Rename or consolidate the exports so consumers have one intentional import target.",
+        },
+        "fallow/circular-dependency" => RuleGuide {
+            example: "src/a.ts imports src/b.ts, and src/b.ts imports src/a.ts.",
+            how_to_fix: "Extract shared code to a third module, invert the dependency, or split initialization-time side effects from type-only contracts.",
+        },
+        "fallow/boundary-violation" => RuleGuide {
+            example: "features/billing imports app/admin even though the configured boundary only allows imports from shared and entities.",
+            how_to_fix: "Move the shared contract to an allowed zone, invert the dependency, or update the boundary config only if the architecture rule was wrong.",
+        },
+        "fallow/stale-suppression" => RuleGuide {
+            example: "// fallow-ignore-next-line unused-export remains above an export that is now used.",
+            how_to_fix: "Remove the suppression. If a different issue is still intentional, replace it with a current, specific suppression.",
+        },
+        "fallow/high-cyclomatic-complexity"
+        | "fallow/high-cognitive-complexity"
+        | "fallow/high-complexity" => RuleGuide {
+            example: "A function contains several nested conditionals, loops, and early exits, exceeding the configured complexity threshold.",
+            how_to_fix: "Extract named helpers, split independent branches, flatten guard clauses, and add tests around the behavior before refactoring.",
+        },
+        "fallow/high-crap-score" => RuleGuide {
+            example: "A complex function has little or no matching Istanbul coverage, so its CRAP score crosses the configured gate.",
+            how_to_fix: "Add focused tests for the risky branches first, then simplify the function if the score remains high.",
+        },
+        "fallow/refactoring-target" => RuleGuide {
+            example: "A file combines high complexity density, churn, fan-in, and dead-code signals.",
+            how_to_fix: "Start with the listed evidence: remove dead exports, extract complex functions, then reduce fan-out or cycles in small steps.",
+        },
+        "fallow/untested-file" | "fallow/untested-export" => RuleGuide {
+            example: "Production-reachable code has no dependency path from discovered test entry points.",
+            how_to_fix: "Add or wire a test that imports the runtime path, or update entry-point/test discovery if the existing test is invisible to fallow.",
+        },
+        "fallow/runtime-safe-to-delete"
+        | "fallow/runtime-review-required"
+        | "fallow/runtime-low-traffic"
+        | "fallow/runtime-coverage-unavailable"
+        | "fallow/runtime-coverage" => RuleGuide {
+            example: "Runtime coverage shows a function was never called, barely called, or could not be matched during the capture window.",
+            how_to_fix: "Treat high-confidence cold static-dead code as delete candidates. For advisory or unavailable coverage, inspect seasonality, workers, source maps, and capture quality first.",
+        },
+        "fallow/code-duplication" => RuleGuide {
+            example: "Two files contain the same normalized token sequence across a multi-line block.",
+            how_to_fix: "Extract the shared logic when the duplicated behavior should evolve together. Leave it duplicated when the similarity is accidental and likely to diverge.",
+        },
+        _ => RuleGuide {
+            example: "Run the relevant command with --format json --quiet --explain to inspect this rule in context.",
+            how_to_fix: "Use the issue action hints, source location, and docs URL to decide whether to remove, move, configure, or suppress the finding.",
+        },
+    }
+}
+
+/// Run the standalone explain subcommand.
+#[must_use]
+pub fn run_explain(issue_type: &str, output: OutputFormat) -> ExitCode {
+    let Some(rule) = rule_by_token(issue_type) else {
+        return crate::error::emit_error(
+            &format!(
+                "unknown issue type '{issue_type}'. Try values like unused-export, unused-dependency, high-complexity, or code-duplication"
+            ),
+            2,
+            output,
+        );
+    };
+    let guide = rule_guide(rule);
+    match output {
+        OutputFormat::Json => crate::report::emit_json(
+            &json!({
+                "id": rule.id,
+                "name": rule.name,
+                "summary": rule.short,
+                "rationale": rule.full,
+                "example": guide.example,
+                "how_to_fix": guide.how_to_fix,
+                "docs": rule_docs_url(rule),
+            }),
+            "explain",
+        ),
+        OutputFormat::Human => print_explain_human(rule, &guide),
+        OutputFormat::Compact => print_explain_compact(rule),
+        OutputFormat::Markdown => print_explain_markdown(rule, &guide),
+        OutputFormat::Sarif | OutputFormat::CodeClimate | OutputFormat::Badge => {
+            crate::error::emit_error(
+                "explain supports human, compact, markdown, and json output",
+                2,
+                output,
+            )
+        }
+    }
+}
+
+fn print_explain_human(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
+    println!("{}", rule.name.bold());
+    println!("{}", rule.id.dimmed());
+    println!();
+    println!("{}", rule.short);
+    println!();
+    println!("{}", "Why it matters".bold());
+    println!("{}", rule.full);
+    println!();
+    println!("{}", "Example".bold());
+    println!("{}", guide.example);
+    println!();
+    println!("{}", "How to fix".bold());
+    println!("{}", guide.how_to_fix);
+    println!();
+    println!("{} {}", "Docs:".dimmed(), rule_docs_url(rule).dimmed());
+    ExitCode::SUCCESS
+}
+
+fn print_explain_compact(rule: &RuleDef) -> ExitCode {
+    println!("explain:{}:{}:{}", rule.id, rule.short, rule_docs_url(rule));
+    ExitCode::SUCCESS
+}
+
+fn print_explain_markdown(rule: &RuleDef, guide: &RuleGuide) -> ExitCode {
+    println!("# {}", rule.name);
+    println!();
+    println!("`{}`", rule.id);
+    println!();
+    println!("{}", rule.short);
+    println!();
+    println!("## Why it matters");
+    println!();
+    println!("{}", rule.full);
+    println!();
+    println!("## Example");
+    println!();
+    println!("{}", guide.example);
+    println!();
+    println!("## How to fix");
+    println!();
+    println!("{}", guide.how_to_fix);
+    println!();
+    println!("[Docs]({})", rule_docs_url(rule));
+    ExitCode::SUCCESS
 }
 
 // ── Health SARIF rules ──────────────────────────────────────────
@@ -1027,7 +1315,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 15);
+        assert_eq!(CHECK_RULES.len(), 17);
     }
 
     #[test]

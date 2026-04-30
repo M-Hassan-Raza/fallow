@@ -12,6 +12,7 @@ pub(super) use health::*;
 pub(super) use perf::*;
 pub(super) use traces::*;
 
+use std::io::IsTerminal;
 use std::path::Path;
 
 use colored::Colorize;
@@ -38,6 +39,16 @@ pub(super) fn thousands(n: usize) -> String {
         result.push(c);
     }
     result
+}
+
+pub(super) fn print_explain_tip_if_tty(has_findings: bool, quiet: bool) {
+    if has_findings && !quiet && std::io::stdout().is_terminal() {
+        println!(
+            "{}",
+            "Tip: run `fallow explain <issue-type>` for any finding below.".dimmed()
+        );
+        println!();
+    }
 }
 
 /// Build a colored section header with bullet, title, and count.

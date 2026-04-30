@@ -48,6 +48,60 @@ fn schema_has_commands_array() {
     );
     assert!(names.contains(&"health"), "should list health command");
     assert!(names.contains(&"dupes"), "should list dupes command");
+    assert!(names.contains(&"explain"), "should list explain command");
+}
+
+#[test]
+fn explain_outputs_rule_guidance_as_json() {
+    let output = run_fallow_raw(&["explain", "unused-exports", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["id"].as_str(), Some("fallow/unused-export"));
+    assert!(json["example"].as_str().is_some_and(|s| !s.is_empty()));
+    assert!(json["how_to_fix"].as_str().is_some_and(|s| !s.is_empty()));
+}
+
+#[test]
+fn explain_compact_is_single_line() {
+    let output = run_fallow_raw(&[
+        "explain",
+        "unused-exports",
+        "--format",
+        "compact",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    assert_eq!(
+        output.stdout.trim(),
+        "explain:fallow/unused-export:Export is never imported:https://docs.fallow.tools/explanations/dead-code#unused-exports"
+    );
+}
+
+#[test]
+fn explain_markdown_is_markdown() {
+    let output = run_fallow_raw(&[
+        "explain",
+        "unused-exports",
+        "--format",
+        "markdown",
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "explain should exit 0: {}", output.stderr);
+    assert!(output.stdout.starts_with("# Unused Exports\n\n"));
+    assert!(output.stdout.contains("## Why it matters"));
+    assert!(
+        output
+            .stdout
+            .contains("[Docs](https://docs.fallow.tools/explanations/dead-code#unused-exports)")
+    );
+}
+
+#[test]
+fn explain_rejects_unknown_issue_type() {
+    let output = run_fallow_raw(&["explain", "not-a-real-rule", "--format", "json", "--quiet"]);
+    assert_eq!(output.code, 2, "unknown explain id should exit 2");
+    let json = parse_json(&output);
+    assert_eq!(json["error"].as_bool(), Some(true));
 }
 
 #[test]

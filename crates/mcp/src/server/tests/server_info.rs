@@ -29,6 +29,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"trace_clone".to_string()));
     assert!(names.contains(&"check_health".to_string()));
     assert!(names.contains(&"audit".to_string()));
+    assert!(names.contains(&"fallow_explain".to_string()));
     assert!(names.contains(&"list_boundaries".to_string()));
     assert!(names.contains(&"feature_flags".to_string()));
     assert!(names.contains(&"check_runtime_coverage".to_string()));
@@ -36,7 +37,7 @@ fn all_tools_registered() {
     assert!(names.contains(&"get_blast_radius".to_string()));
     assert!(names.contains(&"get_importance".to_string()));
     assert!(names.contains(&"get_cleanup_candidates".to_string()));
-    assert_eq!(tools.len(), 19);
+    assert_eq!(tools.len(), 20);
 }
 
 #[test]
@@ -55,6 +56,7 @@ fn read_only_tools_have_annotations() {
         "trace_clone",
         "check_health",
         "audit",
+        "fallow_explain",
         "list_boundaries",
         "feature_flags",
         "check_runtime_coverage",
@@ -183,6 +185,7 @@ fn server_instructions_mention_all_tools() {
     assert!(instructions.contains("trace_clone"));
     assert!(instructions.contains("check_health"));
     assert!(instructions.contains("audit"));
+    assert!(instructions.contains("fallow_explain"));
     assert!(instructions.contains("list_boundaries"));
     assert!(instructions.contains("feature_flags"));
     assert!(instructions.contains("check_runtime_coverage"));
@@ -601,6 +604,7 @@ fn audit_schema_contains_expected_properties() {
         "workspace",
         "no_cache",
         "threads",
+        "gate",
         "max_crap",
     ] {
         assert!(

@@ -4,18 +4,18 @@ use rmcp::model::{CallToolResult, Content, Implementation, ServerCapabilities, S
 use rmcp::{ErrorData as McpError, ServerHandler, tool, tool_router};
 
 use crate::params::{
-    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, FeatureFlagsParams,
-    FindDupesParams, FixParams, HealthParams, ListBoundariesParams, ProjectInfoParams,
-    TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
+    AnalyzeParams, AuditParams, CheckChangedParams, CheckRuntimeCoverageParams, ExplainParams,
+    FeatureFlagsParams, FindDupesParams, FixParams, HealthParams, ListBoundariesParams,
+    ProjectInfoParams, TraceCloneParams, TraceDependencyParams, TraceExportParams, TraceFileParams,
 };
 use crate::tools::{
     build_analyze_args, build_audit_args, build_check_changed_args,
-    build_check_runtime_coverage_args, build_feature_flags_args, build_find_dupes_args,
-    build_fix_apply_args, build_fix_preview_args, build_get_blast_radius_args,
-    build_get_cleanup_candidates_args, build_get_hot_paths_args, build_get_importance_args,
-    build_health_args, build_list_boundaries_args, build_project_info_args, build_trace_clone_args,
-    build_trace_dependency_args, build_trace_export_args, build_trace_file_args, run_fallow,
-    run_fallow_with_top_level_warnings,
+    build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
+    build_find_dupes_args, build_fix_apply_args, build_fix_preview_args,
+    build_get_blast_radius_args, build_get_cleanup_candidates_args, build_get_hot_paths_args,
+    build_get_importance_args, build_health_args, build_list_boundaries_args,
+    build_project_info_args, build_trace_clone_args, build_trace_dependency_args,
+    build_trace_export_args, build_trace_file_args, run_fallow, run_fallow_with_top_level_warnings,
 };
 
 #[cfg(test)]
@@ -208,11 +208,25 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "Audit changed files for dead code, complexity, and duplication. Purpose-built for reviewing AI-generated code. Combines dead-code + complexity + duplication scoped to changed files and returns a verdict (pass/warn/fail). Auto-detects the base branch if not specified. Returns JSON with verdict, summary counts per category, and full issue details with actions array for auto-correction. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Set dead_code_baseline, health_baseline, and/or dupes_baseline to per-analysis baseline file paths (as saved by `fallow dead-code|health|dupes --save-baseline`) so pre-existing issues on touched files do not dominate the verdict; only new issues not present in the respective baseline contribute. Use this after generating code to verify quality before committing.",
+        description = "Audit changed files for dead code, complexity, and duplication. Purpose-built for reviewing AI-generated code. Combines dead-code + complexity + duplication scoped to changed files and returns a verdict (pass/warn/fail). Auto-detects the base branch if not specified. By default, audit runs the base ref too and gates only findings introduced by the changeset; inherited findings are annotated with introduced=false and counted under attribution. Set gate=\"all\" or audit.gate=\"all\" in config to gate every finding. Returns JSON with verdict, summary counts per category, attribution counts, and full issue details with actions array for auto-correction. Set group_by to \"owner\" (CODEOWNERS), \"directory\", \"package\" (workspace), or \"section\" (GitLab CODEOWNERS `[Section]` headers, with `owners` metadata per group) to partition results. Set dead_code_baseline, health_baseline, and/or dupes_baseline to per-analysis baseline file paths (as saved by `fallow dead-code|health|dupes --save-baseline`) so pre-existing issues on touched files do not dominate the verdict; only new issues not present in the respective baseline contribute. Use this after generating code to verify quality before committing.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn audit(&self, params: Parameters<AuditParams>) -> Result<CallToolResult, McpError> {
-        let args = build_audit_args(&params.0);
+        match build_audit_args(&params.0) {
+            Ok(args) => run_fallow(&self.binary, &args).await,
+            Err(msg) => Ok(CallToolResult::error(vec![Content::text(msg)])),
+        }
+    }
+
+    #[tool(
+        description = "Explain one fallow issue type without running analysis. Returns the rule id, name, rationale, worked example, fix guidance, and docs URL as JSON. Use this before applying fixes when an agent or reviewer needs to understand what a finding means.",
+        annotations(read_only_hint = true, open_world_hint = false)
+    )]
+    async fn fallow_explain(
+        &self,
+        params: Parameters<ExplainParams>,
+    ) -> Result<CallToolResult, McpError> {
+        let args = build_explain_args(&params.0);
         run_fallow(&self.binary, &args).await
     }
 
@@ -321,6 +335,7 @@ impl ServerHandler for FallowMcp {
                  check_runtime_coverage (paid; merges a V8 or Istanbul runtime coverage dump into the health report), \
                  get_hot_paths / get_blast_radius / get_importance / get_cleanup_candidates (paid runtime context slices), \
                  audit (combined dead-code + complexity + duplication for changed files, returns verdict), \
+                 fallow_explain (rule rationale and fix guidance without running analysis), \
                  list_boundaries (architecture boundary zones and access rules), \
                  feature_flags (detect feature flag patterns). \
                  Picking check_health vs check_runtime_coverage: use check_runtime_coverage when you have a V8 or Istanbul coverage dump and want surfaced dead-in-production verdicts; use check_health for general complexity / hotspot / CRAP analysis without a coverage dump.",

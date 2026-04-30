@@ -1759,6 +1759,7 @@ pub fn run_health(opts: &HealthOptions<'_>) -> ExitCode {
         opts.min_score,
         opts.min_severity,
         opts.summary,
+        true,
     )
 }
 
@@ -1822,6 +1823,7 @@ pub fn print_health_result(
     min_score: Option<f64>,
     min_severity: Option<FindingSeverity>,
     summary: bool,
+    show_explain_tip: bool,
 ) -> ExitCode {
     let ctx = report::ReportContext {
         root: &result.config.root,
@@ -1832,6 +1834,7 @@ pub fn print_health_result(
         group_by: None,
         top: None,
         summary,
+        show_explain_tip,
         baseline_matched: None,
         health_action_opts: health_action_opts(result),
     };
@@ -2780,7 +2783,7 @@ mod tests {
         };
 
         assert_eq!(
-            print_health_result(&result, true, false, None, None, false),
+            print_health_result(&result, true, false, None, None, false, true),
             ExitCode::from(1),
         );
     }

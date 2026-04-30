@@ -4,7 +4,10 @@ use std::time::Duration;
 
 use colored::Colorize;
 
-use super::{MAX_FLAT_ITEMS, format_path, plural, relative_path, split_dir_filename, thousands};
+use super::{
+    MAX_FLAT_ITEMS, format_path, plural, print_explain_tip_if_tty, relative_path,
+    split_dir_filename, thousands,
+};
 
 /// Docs base URL for health explanations.
 const DOCS_HEALTH: &str = "https://docs.fallow.tools/explanations/health";
@@ -14,6 +17,7 @@ pub(in crate::report) fn print_health_human(
     root: &Path,
     elapsed: Duration,
     quiet: bool,
+    show_explain_tip: bool,
 ) {
     if !quiet {
         eprintln!();
@@ -52,6 +56,16 @@ pub(in crate::report) fn print_health_human(
         }
         return;
     }
+
+    let has_findings = !report.findings.is_empty()
+        || report.coverage_gaps.as_ref().is_some_and(|gaps| {
+            gaps.summary.untested_files > 0 || gaps.summary.untested_exports > 0
+        })
+        || report
+            .runtime_coverage
+            .as_ref()
+            .is_some_and(|coverage| !coverage.findings.is_empty());
+    print_explain_tip_if_tty(show_explain_tip && has_findings, quiet);
 
     for line in build_health_human_lines(report, root) {
         println!("{line}");

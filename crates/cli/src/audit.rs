@@ -1,8 +1,13 @@
-use std::process::ExitCode;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::io::IsTerminal;
+use std::path::{Path, PathBuf};
+use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
 
 use colored::Colorize;
-use fallow_config::OutputFormat;
+use fallow_config::{AuditGate, OutputFormat};
+use rustc_hash::FxHashSet;
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
@@ -35,10 +40,24 @@ pub struct AuditSummary {
     pub duplication_clone_groups: usize,
 }
 
+/// New-vs-inherited issue counts for audit.
+#[derive(Debug, Default, serde::Serialize)]
+pub struct AuditAttribution {
+    pub gate: AuditGate,
+    pub dead_code_introduced: usize,
+    pub dead_code_inherited: usize,
+    pub complexity_introduced: usize,
+    pub complexity_inherited: usize,
+    pub duplication_introduced: usize,
+    pub duplication_inherited: usize,
+}
+
 /// Full audit result containing verdict, summary, and sub-results.
 pub struct AuditResult {
     pub verdict: AuditVerdict,
     pub summary: AuditSummary,
+    pub attribution: AuditAttribution,
+    base_snapshot: Option<AuditKeySnapshot>,
     pub changed_files_count: usize,
     pub base_ref: String,
     pub head_sha: Option<String>,
@@ -75,6 +94,7 @@ pub struct AuditOptions<'a> {
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
     pub max_crap: Option<f64>,
+    pub gate: AuditGate,
 }
 
 // ── Auto-detect base branch ──────────────────────────────────────
@@ -207,6 +227,1004 @@ fn build_summary(
     }
 }
 
+fn compute_audit_attribution(
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+    base: Option<&AuditKeySnapshot>,
+    gate: AuditGate,
+) -> AuditAttribution {
+    let dead_code = check
+        .map(|r| {
+            count_introduced(
+                &dead_code_keys(&r.results, &r.config.root),
+                base.map(|b| &b.dead_code),
+            )
+        })
+        .unwrap_or_default();
+    let complexity = health
+        .map(|r| {
+            count_introduced(
+                &health_keys(&r.report, &r.config.root),
+                base.map(|b| &b.health),
+            )
+        })
+        .unwrap_or_default();
+    let duplication = dupes
+        .map(|r| {
+            count_introduced(
+                &dupes_keys(&r.report, &r.config.root),
+                base.map(|b| &b.dupes),
+            )
+        })
+        .unwrap_or_default();
+
+    AuditAttribution {
+        gate,
+        dead_code_introduced: dead_code.0,
+        dead_code_inherited: dead_code.1,
+        complexity_introduced: complexity.0,
+        complexity_inherited: complexity.1,
+        duplication_introduced: duplication.0,
+        duplication_inherited: duplication.1,
+    }
+}
+
+fn compute_introduced_verdict(
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+    base: Option<&AuditKeySnapshot>,
+) -> AuditVerdict {
+    let mut has_errors = false;
+    let mut has_warnings = false;
+
+    if let Some(result) = check {
+        let base_keys = base.map(|b| &b.dead_code);
+        let mut introduced = result.results.clone();
+        retain_introduced_dead_code(&mut introduced, &result.config.root, base_keys);
+        if crate::check::has_error_severity_issues(
+            &introduced,
+            &result.config.rules,
+            Some(&result.config),
+        ) {
+            has_errors = true;
+        } else if introduced.total_issues() > 0 {
+            has_warnings = true;
+        }
+    }
+
+    if let Some(result) = health {
+        let base_keys = base.map(|b| &b.health);
+        let introduced = result
+            .report
+            .findings
+            .iter()
+            .filter(|finding| {
+                !base_keys.is_some_and(|keys| {
+                    keys.contains(&health_finding_key(finding, &result.config.root))
+                })
+            })
+            .count();
+        if introduced > 0 {
+            has_errors = true;
+        }
+    }
+
+    if let Some(result) = dupes {
+        let base_keys = base.map(|b| &b.dupes);
+        let introduced = result
+            .report
+            .clone_groups
+            .iter()
+            .filter(|group| {
+                !base_keys
+                    .is_some_and(|keys| keys.contains(&dupe_group_key(group, &result.config.root)))
+            })
+            .count();
+        if introduced > 0 {
+            if result.threshold > 0.0
+                && result.report.stats.duplication_percentage > result.threshold
+            {
+                has_errors = true;
+            } else {
+                has_warnings = true;
+            }
+        }
+    }
+
+    if has_errors {
+        AuditVerdict::Fail
+    } else if has_warnings {
+        AuditVerdict::Warn
+    } else {
+        AuditVerdict::Pass
+    }
+}
+
+struct AuditKeySnapshot {
+    dead_code: FxHashSet<String>,
+    health: FxHashSet<String>,
+    dupes: FxHashSet<String>,
+}
+
+fn count_introduced(keys: &FxHashSet<String>, base: Option<&FxHashSet<String>>) -> (usize, usize) {
+    let Some(base) = base else {
+        return (0, 0);
+    };
+    keys.iter().fold((0, 0), |(introduced, inherited), key| {
+        if base.contains(key) {
+            (introduced, inherited + 1)
+        } else {
+            (introduced + 1, inherited)
+        }
+    })
+}
+
+fn compute_base_snapshot(
+    opts: &AuditOptions<'_>,
+    base_ref: &str,
+) -> Result<AuditKeySnapshot, ExitCode> {
+    let Some(worktree) = BaseWorktree::create(opts.root, base_ref) else {
+        return Err(emit_error(
+            &format!("could not create a temporary worktree for base ref '{base_ref}'"),
+            2,
+            opts.output,
+        ));
+    };
+    let base_config_path = opts
+        .config_path
+        .as_ref()
+        .filter(|path| path.is_relative())
+        .map(|path| worktree.path().join(path));
+    let config_path = if base_config_path.is_some() {
+        &base_config_path
+    } else {
+        opts.config_path
+    };
+    let base_opts = AuditOptions {
+        root: worktree.path(),
+        config_path,
+        output: opts.output,
+        no_cache: opts.no_cache,
+        threads: opts.threads,
+        quiet: true,
+        changed_since: None,
+        production: opts.production,
+        production_dead_code: opts.production_dead_code,
+        production_health: opts.production_health,
+        production_dupes: opts.production_dupes,
+        workspace: opts.workspace,
+        changed_workspaces: None,
+        explain: false,
+        performance: false,
+        group_by: opts.group_by,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
+        max_crap: opts.max_crap,
+        gate: AuditGate::All,
+    };
+
+    let mut check = run_audit_check(&base_opts, None, false)?;
+    let dupes = run_audit_dupes(&base_opts, None, None)?;
+    let health = run_audit_health(&base_opts, None, None)?;
+    if let Some(ref mut check) = check {
+        check.shared_parse = None;
+    }
+
+    Ok(AuditKeySnapshot {
+        dead_code: check.as_ref().map_or_else(FxHashSet::default, |r| {
+            dead_code_keys(&r.results, &r.config.root)
+        }),
+        health: health.as_ref().map_or_else(FxHashSet::default, |r| {
+            health_keys(&r.report, &r.config.root)
+        }),
+        dupes: dupes.as_ref().map_or_else(FxHashSet::default, |r| {
+            dupes_keys(&r.report, &r.config.root)
+        }),
+    })
+}
+
+struct BaseWorktree {
+    repo_root: PathBuf,
+    path: PathBuf,
+}
+
+impl BaseWorktree {
+    fn create(repo_root: &Path, base_ref: &str) -> Option<Self> {
+        sweep_orphan_audit_worktrees(repo_root);
+        let path = std::env::temp_dir().join(format!(
+            "fallow-audit-base-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_nanos()
+        ));
+        let output = Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                path.to_str()?,
+                base_ref,
+            ])
+            .current_dir(repo_root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&path);
+            return None;
+        }
+        Some(Self {
+            repo_root: repo_root.to_path_buf(),
+            path,
+        })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+fn sweep_orphan_audit_worktrees(repo_root: &Path) {
+    let Some(worktrees) = list_audit_worktrees(repo_root) else {
+        return;
+    };
+    let mut removed_any = false;
+    for path in worktrees {
+        if !is_fallow_audit_worktree_path(&path) || audit_worktree_process_is_alive(&path) {
+            continue;
+        }
+        let _ = Command::new("git")
+            .args([
+                "worktree",
+                "remove",
+                "--force",
+                path.to_string_lossy().as_ref(),
+            ])
+            .current_dir(repo_root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output();
+        let _ = std::fs::remove_dir_all(&path);
+        removed_any = true;
+    }
+    if removed_any {
+        let _ = Command::new("git")
+            .args(["worktree", "prune", "--expire=now"])
+            .current_dir(repo_root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output();
+    }
+}
+
+fn list_audit_worktrees(repo_root: &Path) -> Option<Vec<PathBuf>> {
+    let output = Command::new("git")
+        .args(["worktree", "list", "--porcelain"])
+        .current_dir(repo_root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(parse_worktree_list(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+fn parse_worktree_list(output: &str) -> Vec<PathBuf> {
+    output
+        .lines()
+        .filter_map(|line| line.strip_prefix("worktree "))
+        .map(PathBuf::from)
+        .filter(|path| is_fallow_audit_worktree_path(path))
+        .collect()
+}
+
+fn is_fallow_audit_worktree_path(path: &Path) -> bool {
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    name.starts_with("fallow-audit-base-") && path_is_inside_temp_dir(path)
+}
+
+fn path_is_inside_temp_dir(path: &Path) -> bool {
+    let temp = std::env::temp_dir();
+    if path.starts_with(&temp) {
+        return true;
+    }
+    let Ok(canonical_temp) = temp.canonicalize() else {
+        return false;
+    };
+    path.starts_with(&canonical_temp)
+        || path
+            .canonicalize()
+            .is_ok_and(|canonical_path| canonical_path.starts_with(canonical_temp))
+}
+
+fn audit_worktree_process_is_alive(path: &Path) -> bool {
+    let Some(pid) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(audit_worktree_pid)
+    else {
+        return false;
+    };
+    process_is_alive(pid)
+}
+
+fn audit_worktree_pid(name: &str) -> Option<u32> {
+    name.strip_prefix("fallow-audit-base-")?
+        .split('-')
+        .next()?
+        .parse()
+        .ok()
+}
+
+#[cfg(unix)]
+fn process_is_alive(pid: u32) -> bool {
+    Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .output()
+        .is_ok_and(|output| output.status.success())
+}
+
+#[cfg(not(unix))]
+fn process_is_alive(_pid: u32) -> bool {
+    true
+}
+
+impl Drop for BaseWorktree {
+    fn drop(&mut self) {
+        let _ = Command::new("git")
+            .args([
+                "worktree",
+                "remove",
+                "--force",
+                self.path.to_string_lossy().as_ref(),
+            ])
+            .current_dir(&self.repo_root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output();
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn relative_key_path(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+fn dependency_location_key(location: &fallow_core::results::DependencyLocation) -> &'static str {
+    match location {
+        fallow_core::results::DependencyLocation::Dependencies => "unused-dependency",
+        fallow_core::results::DependencyLocation::DevDependencies => "unused-dev-dependency",
+        fallow_core::results::DependencyLocation::OptionalDependencies => {
+            "unused-optional-dependency"
+        }
+    }
+}
+
+fn unused_dependency_key(item: &fallow_core::results::UnusedDependency, root: &Path) -> String {
+    format!(
+        "{}:{}:{}",
+        dependency_location_key(&item.location),
+        relative_key_path(&item.path, root),
+        item.package_name
+    )
+}
+
+fn unlisted_dependency_key(item: &fallow_core::results::UnlistedDependency, root: &Path) -> String {
+    let mut sites = item
+        .imported_from
+        .iter()
+        .map(|site| {
+            format!(
+                "{}:{}:{}",
+                relative_key_path(&site.path, root),
+                site.line,
+                site.col
+            )
+        })
+        .collect::<Vec<_>>();
+    sites.sort();
+    sites.dedup();
+    format!(
+        "unlisted-dependency:{}:{}",
+        item.package_name,
+        sites.join("|")
+    )
+}
+
+fn unused_member_key(
+    rule_id: &str,
+    item: &fallow_core::results::UnusedMember,
+    root: &Path,
+) -> String {
+    format!(
+        "{}:{}:{}:{}",
+        rule_id,
+        relative_key_path(&item.path, root),
+        item.parent_name,
+        item.member_name
+    )
+}
+
+fn dead_code_keys(
+    results: &fallow_core::results::AnalysisResults,
+    root: &Path,
+) -> FxHashSet<String> {
+    let mut keys = FxHashSet::default();
+    for item in &results.unused_files {
+        keys.insert(format!(
+            "unused-file:{}",
+            relative_key_path(&item.path, root)
+        ));
+    }
+    for item in &results.unused_exports {
+        keys.insert(format!(
+            "unused-export:{}:{}",
+            relative_key_path(&item.path, root),
+            item.export_name
+        ));
+    }
+    for item in &results.unused_types {
+        keys.insert(format!(
+            "unused-type:{}:{}",
+            relative_key_path(&item.path, root),
+            item.export_name
+        ));
+    }
+    for item in &results.private_type_leaks {
+        keys.insert(format!(
+            "private-type-leak:{}:{}:{}",
+            relative_key_path(&item.path, root),
+            item.export_name,
+            item.type_name
+        ));
+    }
+    for item in results
+        .unused_dependencies
+        .iter()
+        .chain(results.unused_dev_dependencies.iter())
+        .chain(results.unused_optional_dependencies.iter())
+    {
+        keys.insert(unused_dependency_key(item, root));
+    }
+    for item in &results.unused_enum_members {
+        keys.insert(unused_member_key("unused-enum-member", item, root));
+    }
+    for item in &results.unused_class_members {
+        keys.insert(unused_member_key("unused-class-member", item, root));
+    }
+    for item in &results.unresolved_imports {
+        keys.insert(format!(
+            "unresolved-import:{}:{}",
+            relative_key_path(&item.path, root),
+            item.specifier
+        ));
+    }
+    for item in &results.unlisted_dependencies {
+        keys.insert(unlisted_dependency_key(item, root));
+    }
+    for item in &results.duplicate_exports {
+        let mut locations: Vec<String> = item
+            .locations
+            .iter()
+            .map(|loc| relative_key_path(&loc.path, root))
+            .collect();
+        locations.sort();
+        locations.dedup();
+        keys.insert(format!(
+            "duplicate-export:{}:{}",
+            item.export_name,
+            locations.join("|")
+        ));
+    }
+    for item in &results.type_only_dependencies {
+        keys.insert(format!(
+            "type-only-dependency:{}:{}",
+            relative_key_path(&item.path, root),
+            item.package_name
+        ));
+    }
+    for item in &results.test_only_dependencies {
+        keys.insert(format!(
+            "test-only-dependency:{}:{}",
+            relative_key_path(&item.path, root),
+            item.package_name
+        ));
+    }
+    for item in &results.circular_dependencies {
+        let mut files: Vec<String> = item
+            .files
+            .iter()
+            .map(|path| relative_key_path(path, root))
+            .collect();
+        files.sort();
+        keys.insert(format!("circular-dependency:{}", files.join("|")));
+    }
+    for item in &results.boundary_violations {
+        keys.insert(format!(
+            "boundary-violation:{}:{}:{}",
+            relative_key_path(&item.from_path, root),
+            relative_key_path(&item.to_path, root),
+            item.import_specifier
+        ));
+    }
+    for item in &results.stale_suppressions {
+        keys.insert(format!(
+            "stale-suppression:{}:{}",
+            relative_key_path(&item.path, root),
+            item.description()
+        ));
+    }
+    keys
+}
+
+fn retain_introduced_dead_code(
+    results: &mut fallow_core::results::AnalysisResults,
+    root: &Path,
+    base: Option<&FxHashSet<String>>,
+) {
+    let Some(base) = base else {
+        return;
+    };
+    results.unused_files.retain(|item| {
+        !base.contains(&format!(
+            "unused-file:{}",
+            relative_key_path(&item.path, root)
+        ))
+    });
+    results.unused_exports.retain(|item| {
+        !base.contains(&format!(
+            "unused-export:{}:{}",
+            relative_key_path(&item.path, root),
+            item.export_name
+        ))
+    });
+    results.unused_types.retain(|item| {
+        !base.contains(&format!(
+            "unused-type:{}:{}",
+            relative_key_path(&item.path, root),
+            item.export_name
+        ))
+    });
+    // The verdict path only needs correct issue counts and severities. For the
+    // less common categories, rebuild the full key set and retain by membership.
+    let introduced = dead_code_keys(results, root)
+        .into_iter()
+        .filter(|key| !base.contains(key))
+        .collect::<FxHashSet<_>>();
+    let keep = |key: String| introduced.contains(&key);
+    results.private_type_leaks.retain(|item| {
+        keep(format!(
+            "private-type-leak:{}:{}:{}",
+            relative_key_path(&item.path, root),
+            item.export_name,
+            item.type_name
+        ))
+    });
+    results
+        .unused_dependencies
+        .retain(|item| keep(unused_dependency_key(item, root)));
+    results
+        .unused_dev_dependencies
+        .retain(|item| keep(unused_dependency_key(item, root)));
+    results
+        .unused_optional_dependencies
+        .retain(|item| keep(unused_dependency_key(item, root)));
+    results
+        .unused_enum_members
+        .retain(|item| keep(unused_member_key("unused-enum-member", item, root)));
+    results
+        .unused_class_members
+        .retain(|item| keep(unused_member_key("unused-class-member", item, root)));
+    results.unresolved_imports.retain(|item| {
+        keep(format!(
+            "unresolved-import:{}:{}",
+            relative_key_path(&item.path, root),
+            item.specifier
+        ))
+    });
+    results
+        .unlisted_dependencies
+        .retain(|item| keep(unlisted_dependency_key(item, root)));
+    results.duplicate_exports.retain(|item| {
+        let mut locations: Vec<String> = item
+            .locations
+            .iter()
+            .map(|loc| relative_key_path(&loc.path, root))
+            .collect();
+        locations.sort();
+        locations.dedup();
+        keep(format!(
+            "duplicate-export:{}:{}",
+            item.export_name,
+            locations.join("|")
+        ))
+    });
+    results.type_only_dependencies.retain(|item| {
+        keep(format!(
+            "type-only-dependency:{}:{}",
+            relative_key_path(&item.path, root),
+            item.package_name
+        ))
+    });
+    results.test_only_dependencies.retain(|item| {
+        keep(format!(
+            "test-only-dependency:{}:{}",
+            relative_key_path(&item.path, root),
+            item.package_name
+        ))
+    });
+    results.circular_dependencies.retain(|item| {
+        let mut files: Vec<String> = item
+            .files
+            .iter()
+            .map(|path| relative_key_path(path, root))
+            .collect();
+        files.sort();
+        keep(format!("circular-dependency:{}", files.join("|")))
+    });
+    results.boundary_violations.retain(|item| {
+        keep(format!(
+            "boundary-violation:{}:{}:{}",
+            relative_key_path(&item.from_path, root),
+            relative_key_path(&item.to_path, root),
+            item.import_specifier
+        ))
+    });
+    results.stale_suppressions.retain(|item| {
+        keep(format!(
+            "stale-suppression:{}:{}",
+            relative_key_path(&item.path, root),
+            item.description()
+        ))
+    });
+}
+
+fn issue_was_introduced(key: &str, base: &FxHashSet<String>) -> bool {
+    !base.contains(key)
+}
+
+fn annotate_issue_array<I>(json: &mut serde_json::Value, key: &str, introduced: I)
+where
+    I: IntoIterator<Item = bool>,
+{
+    let Some(items) = json.get_mut(key).and_then(serde_json::Value::as_array_mut) else {
+        return;
+    };
+    for (item, introduced) in items.iter_mut().zip(introduced) {
+        if let serde_json::Value::Object(map) = item {
+            map.insert("introduced".to_string(), serde_json::json!(introduced));
+        }
+    }
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "keeps audit attribution keys adjacent to the JSON arrays they annotate"
+)]
+fn annotate_dead_code_json(
+    json: &mut serde_json::Value,
+    results: &fallow_core::results::AnalysisResults,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
+    annotate_issue_array(
+        json,
+        "unused_files",
+        results.unused_files.iter().map(|item| {
+            issue_was_introduced(
+                &format!("unused-file:{}", relative_key_path(&item.path, root)),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "unused_exports",
+        results.unused_exports.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "unused-export:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.export_name
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "unused_types",
+        results.unused_types.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "unused-type:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.export_name
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "private_type_leaks",
+        results.private_type_leaks.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "private-type-leak:{}:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.export_name,
+                    item.type_name
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "unused_dependencies",
+        results
+            .unused_dependencies
+            .iter()
+            .map(|item| issue_was_introduced(&unused_dependency_key(item, root), base)),
+    );
+    annotate_issue_array(
+        json,
+        "unused_dev_dependencies",
+        results
+            .unused_dev_dependencies
+            .iter()
+            .map(|item| issue_was_introduced(&unused_dependency_key(item, root), base)),
+    );
+    annotate_issue_array(
+        json,
+        "unused_optional_dependencies",
+        results
+            .unused_optional_dependencies
+            .iter()
+            .map(|item| issue_was_introduced(&unused_dependency_key(item, root), base)),
+    );
+    annotate_issue_array(
+        json,
+        "unused_enum_members",
+        results.unused_enum_members.iter().map(|item| {
+            issue_was_introduced(&unused_member_key("unused-enum-member", item, root), base)
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "unused_class_members",
+        results.unused_class_members.iter().map(|item| {
+            issue_was_introduced(&unused_member_key("unused-class-member", item, root), base)
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "unresolved_imports",
+        results.unresolved_imports.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "unresolved-import:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.specifier
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "unlisted_dependencies",
+        results
+            .unlisted_dependencies
+            .iter()
+            .map(|item| issue_was_introduced(&unlisted_dependency_key(item, root), base)),
+    );
+    annotate_issue_array(
+        json,
+        "duplicate_exports",
+        results.duplicate_exports.iter().map(|item| {
+            let mut locations: Vec<String> = item
+                .locations
+                .iter()
+                .map(|loc| relative_key_path(&loc.path, root))
+                .collect();
+            locations.sort();
+            locations.dedup();
+            issue_was_introduced(
+                &format!(
+                    "duplicate-export:{}:{}",
+                    item.export_name,
+                    locations.join("|")
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "type_only_dependencies",
+        results.type_only_dependencies.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "type-only-dependency:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.package_name
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "test_only_dependencies",
+        results.test_only_dependencies.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "test-only-dependency:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.package_name
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "circular_dependencies",
+        results.circular_dependencies.iter().map(|item| {
+            let mut files: Vec<String> = item
+                .files
+                .iter()
+                .map(|path| relative_key_path(path, root))
+                .collect();
+            files.sort();
+            issue_was_introduced(&format!("circular-dependency:{}", files.join("|")), base)
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "boundary_violations",
+        results.boundary_violations.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "boundary-violation:{}:{}:{}",
+                    relative_key_path(&item.from_path, root),
+                    relative_key_path(&item.to_path, root),
+                    item.import_specifier
+                ),
+                base,
+            )
+        }),
+    );
+    annotate_issue_array(
+        json,
+        "stale_suppressions",
+        results.stale_suppressions.iter().map(|item| {
+            issue_was_introduced(
+                &format!(
+                    "stale-suppression:{}:{}",
+                    relative_key_path(&item.path, root),
+                    item.description()
+                ),
+                base,
+            )
+        }),
+    );
+}
+
+fn annotate_health_json(
+    json: &mut serde_json::Value,
+    report: &crate::health_types::HealthReport,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
+    let Some(items) = json
+        .get_mut("findings")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for (item, finding) in items.iter_mut().zip(&report.findings) {
+        if let serde_json::Value::Object(map) = item {
+            map.insert(
+                "introduced".to_string(),
+                serde_json::json!(issue_was_introduced(
+                    &health_finding_key(finding, root),
+                    base
+                )),
+            );
+        }
+    }
+}
+
+fn annotate_dupes_json(
+    json: &mut serde_json::Value,
+    report: &fallow_core::duplicates::DuplicationReport,
+    root: &Path,
+    base: &FxHashSet<String>,
+) {
+    let Some(items) = json
+        .get_mut("clone_groups")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    for (item, group) in items.iter_mut().zip(&report.clone_groups) {
+        if let serde_json::Value::Object(map) = item {
+            map.insert(
+                "introduced".to_string(),
+                serde_json::json!(issue_was_introduced(&dupe_group_key(group, root), base)),
+            );
+        }
+    }
+}
+
+fn health_keys(report: &crate::health_types::HealthReport, root: &Path) -> FxHashSet<String> {
+    report
+        .findings
+        .iter()
+        .map(|finding| health_finding_key(finding, root))
+        .collect()
+}
+
+fn health_finding_key(finding: &crate::health_types::HealthFinding, root: &Path) -> String {
+    format!(
+        "complexity:{}:{}:{:?}",
+        relative_key_path(&finding.path, root),
+        finding.name,
+        finding.exceeded
+    )
+}
+
+fn dupes_keys(
+    report: &fallow_core::duplicates::DuplicationReport,
+    root: &Path,
+) -> FxHashSet<String> {
+    report
+        .clone_groups
+        .iter()
+        .map(|group| dupe_group_key(group, root))
+        .collect()
+}
+
+fn dupe_group_key(group: &fallow_core::duplicates::CloneGroup, root: &Path) -> String {
+    let mut files: Vec<String> = group
+        .instances
+        .iter()
+        .map(|instance| relative_key_path(&instance.file, root))
+        .collect();
+    files.sort();
+    files.dedup();
+    let mut hasher = DefaultHasher::new();
+    for instance in &group.instances {
+        instance.fragment.hash(&mut hasher);
+    }
+    format!(
+        "dupe:{}:{}:{}:{:x}",
+        files.join("|"),
+        group.token_count,
+        group.line_count,
+        hasher.finish()
+    )
+}
+
 // ── Execute ──────────────────────────────────────────────────────
 
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.
@@ -262,11 +1280,32 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     };
     let health_result = run_audit_health(opts, changed_since, shared_parse)?;
 
-    let verdict = compute_verdict(
+    let base_snapshot = if matches!(opts.gate, AuditGate::NewOnly) {
+        Some(compute_base_snapshot(opts, &base_ref)?)
+    } else {
+        None
+    };
+    let attribution = compute_audit_attribution(
         check_result.as_ref(),
         dupes_result.as_ref(),
         health_result.as_ref(),
+        base_snapshot.as_ref(),
+        opts.gate,
     );
+    let verdict = if matches!(opts.gate, AuditGate::NewOnly) {
+        compute_introduced_verdict(
+            check_result.as_ref(),
+            dupes_result.as_ref(),
+            health_result.as_ref(),
+            base_snapshot.as_ref(),
+        )
+    } else {
+        compute_verdict(
+            check_result.as_ref(),
+            dupes_result.as_ref(),
+            health_result.as_ref(),
+        )
+    };
     let summary = build_summary(
         check_result.as_ref(),
         dupes_result.as_ref(),
@@ -276,6 +1315,8 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     Ok(AuditResult {
         verdict,
         summary,
+        attribution,
+        base_snapshot,
         changed_files_count,
         base_ref,
         head_sha: get_head_sha(opts.root),
@@ -321,6 +1362,11 @@ fn empty_audit_result(base_ref: String, opts: &AuditOptions<'_>, elapsed: Durati
             max_cyclomatic: None,
             duplication_clone_groups: 0,
         },
+        attribution: AuditAttribution {
+            gate: opts.gate,
+            ..AuditAttribution::default()
+        },
+        base_snapshot: None,
         changed_files_count: 0,
         base_ref,
         head_sha: get_head_sha(opts.root),
@@ -560,6 +1606,14 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
 
     // On fail/warn with findings: show detail sections (reuse existing renderers)
     if has_any_findings {
+        if show_headers && std::io::stdout().is_terminal() {
+            println!(
+                "{}",
+                "Tip: run `fallow explain <issue-type>` for any finding below.".dimmed()
+            );
+            println!();
+        }
+
         // Vital signs summary line (stdout) — only when verdict is pass/warn
         if result.verdict != AuditVerdict::Fail && !quiet {
             print_audit_vital_signs(result);
@@ -570,7 +1624,18 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
                 eprintln!();
                 eprintln!("── Dead Code ──────────────────────────────────────");
             }
-            crate::check::print_check_result(check, quiet, explain, false, None, None, false);
+            crate::check::print_check_result(
+                check,
+                crate::check::PrintCheckOptions {
+                    quiet,
+                    explain,
+                    regression_json: false,
+                    group_by: None,
+                    top: None,
+                    summary: false,
+                    show_explain_tip: false,
+                },
+            );
         }
 
         if has_dupe_groups && let Some(ref dupes) = result.dupes {
@@ -578,7 +1643,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
                 eprintln!();
                 eprintln!("── Duplication ────────────────────────────────────");
             }
-            crate::dupes::print_dupes_result(dupes, quiet, explain, false);
+            crate::dupes::print_dupes_result(dupes, quiet, explain, false, false);
         }
 
         if has_health_findings && let Some(ref health) = result.health {
@@ -586,7 +1651,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
                 eprintln!();
                 eprintln!("── Complexity ─────────────────────────────────────");
             }
-            crate::health::print_health_result(health, quiet, explain, None, None, false);
+            crate::health::print_health_result(health, quiet, explain, None, None, false, false);
         }
     }
 
@@ -689,6 +1754,22 @@ fn print_audit_status_line(result: &AuditResult) {
             );
         }
     }
+
+    if !matches!(result.attribution.gate, AuditGate::All) {
+        let inherited = result.attribution.dead_code_inherited
+            + result.attribution.complexity_inherited
+            + result.attribution.duplication_inherited;
+        if inherited > 0 {
+            eprintln!(
+                "  {}",
+                format!(
+                    "audit gate excluded {inherited} inherited finding{} (run with --gate all to enforce)",
+                    plural(inherited)
+                )
+                .dimmed()
+            );
+        }
+    }
 }
 
 // ── JSON format ──────────────────────────────────────────────────
@@ -732,11 +1813,22 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
     if let Ok(summary_val) = serde_json::to_value(&result.summary) {
         obj.insert("summary".into(), summary_val);
     }
+    if let Ok(attribution_val) = serde_json::to_value(&result.attribution) {
+        obj.insert("attribution".into(), attribution_val);
+    }
 
     // Full sub-results
     if let Some(ref check) = result.check {
         match report::build_json(&check.results, &check.config.root, check.elapsed) {
-            Ok(json) => {
+            Ok(mut json) => {
+                if let Some(ref base) = result.base_snapshot {
+                    annotate_dead_code_json(
+                        &mut json,
+                        &check.results,
+                        &check.config.root,
+                        &base.dead_code,
+                    );
+                }
                 obj.insert("dead_code".into(), json);
             }
             Err(e) => {
@@ -755,6 +1847,9 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
                 let root_prefix = format!("{}/", dupes.config.root.display());
                 report::strip_root_prefix(&mut json, &root_prefix);
                 report::inject_dupes_actions(&mut json);
+                if let Some(ref base) = result.base_snapshot {
+                    annotate_dupes_json(&mut json, &dupes.report, &dupes.config.root, &base.dupes);
+                }
                 obj.insert("duplication".into(), json);
             }
             Err(e) => {
@@ -773,6 +1868,14 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
                 let root_prefix = format!("{}/", health.config.root.display());
                 report::strip_root_prefix(&mut json, &root_prefix);
                 report::inject_health_actions(&mut json, crate::health::health_action_opts(health));
+                if let Some(ref base) = result.base_snapshot {
+                    annotate_health_json(
+                        &mut json,
+                        &health.report,
+                        &health.config.root,
+                        &base.health,
+                    );
+                }
                 obj.insert("complexity".into(), json);
             }
             Err(e) => {
@@ -907,6 +2010,84 @@ mod tests {
     }
 
     #[test]
+    fn audit_worktree_helpers_filter_to_fallow_temp_prefix() {
+        let temp = std::env::temp_dir();
+        let audit_path = temp.join("fallow-audit-base-123-456");
+        let canonical_audit_path = temp
+            .canonicalize()
+            .unwrap_or_else(|_| temp.clone())
+            .join("fallow-audit-base-456-789");
+        let unrelated_temp = temp.join("other-worktree");
+        let output = format!(
+            "worktree /repo\nHEAD abc\n\nworktree {}\nHEAD def\n\nworktree {}\nHEAD ghi\n",
+            audit_path.display(),
+            unrelated_temp.display()
+        );
+
+        assert_eq!(parse_worktree_list(&output), vec![audit_path]);
+        assert!(is_fallow_audit_worktree_path(&canonical_audit_path));
+        assert_eq!(audit_worktree_pid("fallow-audit-base-123-456"), Some(123));
+        assert_eq!(audit_worktree_pid("not-fallow-audit-base-123"), None);
+    }
+
+    #[test]
+    fn audit_gate_all_skips_base_snapshot() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-gate-all","main":"src/index.ts"}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(root.join("src/index.ts"), "export const legacy = 1;\n")
+            .expect("index should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        fs::write(
+            root.join("src/index.ts"),
+            "export const legacy = 1;\nexport const changed = 2;\n",
+        )
+        .expect("changed module should be written");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::All,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        assert!(result.base_snapshot.is_none());
+        assert_eq!(result.attribution.gate, AuditGate::All);
+        assert_eq!(result.attribution.dead_code_introduced, 0);
+        assert_eq!(result.attribution.dead_code_inherited, 0);
+    }
+
+    #[test]
     fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
@@ -961,6 +2142,7 @@ mod tests {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            gate: AuditGate::NewOnly,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
@@ -1035,6 +2217,7 @@ mod tests {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            gate: AuditGate::NewOnly,
         };
 
         let result = execute_audit(&opts).expect("audit should execute");
