@@ -7,7 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.56.0] - 2026-04-30
+## [2.57.0] - 2026-04-30
+
+### Added
+
+- **`fallow coverage analyze` runtime coverage subcommand.** A focused entry point alongside `coverage setup` (onboarding) and `coverage upload-inventory` (inventory). Local mode (`--runtime-coverage <path>`) reads a V8 coverage directory, V8 JSON file, or Istanbul `coverage-final.json`. Cloud mode is explicit opt-in only via `--cloud` / `--runtime-coverage-cloud` / `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud`, fetches `/v1/coverage/{repo}/runtime-context` from fallow cloud, and merges runtime facts with local AST/static analysis. `FALLOW_API_KEY` alone never selects cloud mode; ambiguous combinations are rejected by clap and at runtime. JSON output adds `summary.data_source` (`local`/`cloud`), `summary.last_received_at`, `summary.capture_quality`, kebab-case action vocabulary (`delete-cold-code` / `review-runtime`), and a `cloud_functions_unmatched` warning when cloud sees functions absent from the local AST. `--explain` attaches a top-level `_meta` block with field definitions, enum vocabularies, and warning-code documentation.
+- **`fallow explain <issue-type>` standalone rule explainer.** Prints a rule's rationale, worked example, fix guidance, and docs URL without running an analysis. Accepts `unused-export`, `fallow/unused-export`, `unused-exports`, `code-duplication`, etc. JSON output is stable (`name`, `summary`, `rationale`, `example`, `how_to_fix`, `docs`); MCP exposes the same data via the `fallow_explain` tool.
+- **`fallow audit --gate new-only|all` for adoption-friendly PR gating.** Default `new-only` gates only findings introduced by the changeset and reports inherited findings as context with a JSON `attribution` block plus per-finding `introduced: true|false`. Strict opt-in via `--gate all` (or `[audit] gate = "all"` in TOML / `audit.gate` in JSON) fails on every finding in changed files and skips the extra base-snapshot attribution pass. Suppression footers in the human/markdown output now reflect the gate semantics.
+- **Workspace-aware `fallow coverage setup --json`.** Workspace projects emit a per-runtime-package `members[]` array, union `runtime_targets`, and prefix member file paths; pure aggregator roots and build-only library packages are filtered out. Adds four paid runtime-context MCP tools (`get_blast_radius`, `get_importance`, `get_cleanup_candidates`, `check_runtime_coverage`) backed by the same fallow-cloud `/v1/coverage/:repo/runtime-context` endpoint.
+- **`.fallowrc.jsonc` discovered alongside `.fallowrc.json`.** First-match-wins discovery now accepts a JSON-with-comments file as a peer of `.fallowrc.json`, letting teams annotate config without a TOML rewrite. CLI `--config` accepts the new extension; the discovery helper, init scaffolding, and config docs cover it.
+
+### Fixed
+
+- **`coverage analyze --cloud` Accept-Encoding mismatch.** ureq is built without the `gzip` feature, but the request used to advertise `Accept-Encoding: gzip` and silently fail to JSON-parse the gzipped Fly.io edge response. Switched to `Accept-Encoding: identity`; regression test asserts the request never advertises gzip.
+- **Duplicate `no_runtime_data` warning on empty cloud windows.** The server emits the warning when the rolling window has no data, and the CLI used to emit a near-identical one whose message did not match (because the server's variant embeds `--project-id` while the CLI's did not), bypassing dedup-by-`(code, message)`. The CLI now defers to the server's variant unconditionally.
+- **Markdown / compact / sarif / codeclimate / badge `--format` no longer silently fall through to JSON on `coverage analyze`.** Unsupported formats are now rejected with an actionable message pointing users to `--format json` plus their own converter.
+- **HTTP 400 from the cloud runtime-context endpoint maps to exit 2 (validation), not exit 7 (network).** When the server rejects `--environment`, an out-of-range `--commit-sha`, or a malformed `--repo` with `code: "validation_error"`, the CLI now surfaces `CloudError::Validation` so the exit code matches the user-input semantics. The 404 catch-all branch was narrowed to `repo_not_found` only; routing 404s (e.g. a malformed `--api-endpoint` subpath) now report a generic HTTP 404 message instead of "Repo not accessible to your org".
+- **Cloud-merge IDs match the published JSON schema.** `runtime_coverage.findings[].id` and `hot_paths[].id` were emitted as 16 hex chars while `docs/output-schema.json` constrains the suffix to `[0-9a-f]{8}` and the local sidecar already emits 8 chars. The cloud merge now truncates `xxh3_64` to its lower 32 bits.
+- **GIT_DIR hardening on changed-file git calls + MCP tool name + `ExplainOutput` schema.** Eliminates a race where `--changed-since` git invocations could pick up an inherited `GIT_DIR` env var and resolve against the wrong repo. The `fallow_explain` MCP tool name is now consistent with its CLI counterpart.
+- **`fallow check` runtime coverage allowed without a license for local single captures.** Restores the documented free-tier behaviour where a single local V8/Istanbul capture works offline without activating a license; continuous/cloud monitoring still requires one.
+- **Entrypoint star-barrels propagate transitively through the graph.** Imports like `import * as everything from './barrel'` now correctly carry reachability through chained barrels at entry points.
+- **Nullable class-annotation member-binding.** `class Foo { bar: Baz | null }` now correctly binds `Baz` for member-usage tracking, eliminating false `unused-class-member` findings on type-annotated nullable fields. (Closes [#233](https://github.com/fallow-rs/fallow/issues/233))
+- **Runtime coverage feature-gated clippy + targeted setup follow-ups.** Clippy now passes under the feature-gated runtime-coverage build, and several `coverage setup` rough edges (workspace recipe rendering, sidecar discovery messaging) are smoothed over.
+
+### Changed
+
+- **`docs(mcp)`: runtime-coverage tool docs reflect the single-capture-free contract.** The MCP tool descriptions now cite the same free-vs-licensed split the CLI advertises so agents calling the runtime-coverage tools see consistent gating.
+- **CI enforces conventional commit messages.** A new GitHub Actions check rejects PRs whose commit subjects do not match the conventional-commit prefix grammar.
+
+
 
 ### Added
 
@@ -1840,6 +1868,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
 [Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.56.0...HEAD
+[2.57.0]: https://github.com/fallow-rs/fallow/compare/v2.56.0...v2.57.0
 [2.56.0]: https://github.com/fallow-rs/fallow/compare/v2.55.0...v2.56.0
 [2.55.0]: https://github.com/fallow-rs/fallow/compare/v2.54.3...v2.55.0
 [2.54.3]: https://github.com/fallow-rs/fallow/compare/v2.54.2...v2.54.3
