@@ -18,7 +18,7 @@ MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wra
 - `get_importance` - runtime-context slice. Same params as `check_runtime_coverage`; same free-vs-paid contract. Until `runtime_coverage.importance` ships as a first-class field, agents should combine `runtime_coverage.hot_paths`, `file_scores`, `hotspots`, and `targets`. Always emits a top-level `warnings` array.
 - `get_cleanup_candidates` - runtime-context slice. Same params as `check_runtime_coverage`; same free-vs-paid contract. Steers agents to read `runtime_coverage.findings` for `safe_to_delete`, `review_required`, `low_traffic`, and `coverage_unavailable` verdicts. Always emits a top-level `warnings` array.
 - `audit` - combined dead-code + complexity + duplication for changed files, returns verdict (`fallow audit --format json`). Supports `gate` (`new-only` default, `all` to gate every finding in changed files; forwards to `--gate <value>`) and `max_crap` (forwards `--max-crap <N>` to the health sub-analysis).
-- `explain` - explain one issue type without running analysis (`fallow explain <issue-type> --format json`). Returns rule rationale, examples, fix guidance, docs URL, and aliases for agent planning.
+- `fallow_explain` - explain one issue type without running analysis (`fallow explain <issue-type> --format json`). Returns rule name, summary, rationale, example, fix guidance, and docs URL for agent planning.
 - `fix_preview` - dry-run auto-fix (`fallow fix --dry-run --format json`)
 - `fix_apply` - apply auto-fixes (`fallow fix --yes --format json`), destructive
 - `project_info` - project metadata (`fallow list --format json`), supports section params (`entry_points`, `files`, `plugins`, `boundaries`)

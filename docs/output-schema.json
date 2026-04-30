@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Fallow JSON Output Schemas",
-  "description": "Schemas for the JSON output of fallow commands. Bare `fallow --format json` produces a combined envelope with `check`, `dupes`, and `health` keys. Individual commands (`fallow dead-code --format json`, `fallow health --format json`, `fallow dupes --format json`, `fallow audit --format json`, `fallow coverage setup --json`) produce their own top-level structure.",
+  "description": "Schemas for the JSON output of fallow commands. Bare `fallow --format json` produces a combined envelope with `check`, `dupes`, and `health` keys. Individual commands (`fallow dead-code --format json`, `fallow health --format json`, `fallow dupes --format json`, `fallow audit --format json`, `fallow explain <issue-type> --format json`, `fallow coverage setup --json`) produce their own top-level structure.",
 
   "oneOf": [
     { "$ref": "#/definitions/CombinedOutput" },
@@ -10,6 +10,7 @@
     { "$ref": "#/definitions/HealthOutput" },
     { "$ref": "#/definitions/DupesOutput" },
     { "$ref": "#/definitions/AuditOutput" },
+    { "$ref": "#/definitions/ExplainOutput" },
     { "$ref": "#/definitions/CoverageSetupOutput" }
   ],
 
@@ -94,6 +95,46 @@
     "AuditIntroduced": {
       "type": "boolean",
       "description": "Only present inside `fallow audit --format json` sub-results. true means this finding's structural key was not present at the base ref; false means it was inherited from the base ref."
+    },
+
+    "ExplainOutput": {
+      "title": "fallow explain <issue-type> --format json",
+      "description": "Standalone rule explanation for one issue type. This command does not run project analysis and intentionally returns a compact object without schema_version/version metadata.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "summary", "rationale", "example", "how_to_fix", "docs"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^fallow/",
+          "description": "Canonical rule id, for example fallow/unused-export."
+        },
+        "name": {
+          "type": "string",
+          "description": "Human-readable rule name."
+        },
+        "summary": {
+          "type": "string",
+          "description": "Short one-line explanation of the issue."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Why the issue matters and what fallow checks."
+        },
+        "example": {
+          "type": "string",
+          "description": "Concrete example of the finding."
+        },
+        "how_to_fix": {
+          "type": "string",
+          "description": "Recommended fix or suppression guidance."
+        },
+        "docs": {
+          "type": "string",
+          "format": "uri",
+          "description": "Docs URL for the rule."
+        }
+      }
     },
 
     "CoverageSetupOutput": {

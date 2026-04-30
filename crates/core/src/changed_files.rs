@@ -114,9 +114,7 @@ fn augment_git_failed(stderr: &str) -> String {
 /// absolute form matches what the analysis pipeline emits, regardless of
 /// whether the caller's `cwd` is the repo root or a subdirectory of it.
 pub fn resolve_git_toplevel(cwd: &Path) -> Result<PathBuf, ChangedFilesError> {
-    let output = std::process::Command::new("git")
-        .args(["rev-parse", "--show-toplevel"])
-        .current_dir(cwd)
+    let output = git_command(cwd, &["rev-parse", "--show-toplevel"])
         .output()
         .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
@@ -146,9 +144,7 @@ fn collect_git_paths(
     toplevel: &Path,
     args: &[&str],
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    let output = std::process::Command::new("git")
-        .args(args)
-        .current_dir(cwd)
+    let output = git_command(cwd, args)
         .output()
         .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
@@ -173,6 +169,16 @@ fn collect_git_paths(
         .collect();
 
     Ok(files)
+}
+
+fn git_command(cwd: &Path, args: &[&str]) -> std::process::Command {
+    let mut command = std::process::Command::new("git");
+    command
+        .args(args)
+        .current_dir(cwd)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE");
+    command
 }
 
 /// Get files changed since a git ref. Returns `Err` (with details) when the
@@ -510,6 +516,25 @@ mod tests {
         assert!(
             !proof_path.exists(),
             "invalid changedSince ref must not be passed through to git as an option"
+        );
+    }
+
+    #[test]
+    fn git_command_clears_parent_git_environment() {
+        let command = git_command(Path::new("."), &["status", "--short"]);
+        let overrides: Vec<_> = command.get_envs().collect();
+
+        assert!(
+            overrides
+                .iter()
+                .any(|(key, value)| *key == "GIT_DIR" && value.is_none()),
+            "git helper must clear inherited GIT_DIR"
+        );
+        assert!(
+            overrides
+                .iter()
+                .any(|(key, value)| *key == "GIT_WORK_TREE" && value.is_none()),
+            "git helper must clear inherited GIT_WORK_TREE"
         );
     }
 
