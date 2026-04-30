@@ -86,4 +86,32 @@ Documented as Architecture Decision Records in [`decisions/`](decisions/). Key d
 - Signed commits (`git commit -S`)
 - No AI attribution in commits
 
+## Project communication
+
+- Never reduce fallow to "dead code tool" in taglines or summaries; reference all 5 analysis areas (unused code, circular deps, duplication, complexity hotspots, boundary violations). Category is "codebase analyzer."
+- Comparison pages must be research-backed with source links; never claim a competitor "can't" do something without checking
+- Design specs are definitions, not implementations: tokens, rules, components, ASCII wireframes, table-described behavior; no CSS/JS/HTML code blocks
+
+## Repo layout (for this working tree)
+
+- `~/Sites/fallow-2/` is a working copy of fallow main; primary checkout is the bare-config'd `~/Sites/fallow/`
+- `.internal/`, `quality/`, `reference/`, `benchmarks/fixtures/`, `benchmarks/knip6/` are gitignored symlinks; `.internal/` points at `~/Sites/fallow-cloud/.internal/` (single source of truth, edit only there); the rest point at `~/Sites/fallow/`
+- `npm/fallow/skills/` is a vendored copy of `~/Sites/fallow-skills/`; refresh happens at release time, not manually
+- Edit fallow skills in `~/Sites/fallow-skills/fallow/skills/fallow/`, never in the symlinked `~/.agents/skills/fallow/`
+- GitHub org: `fallow-rs/fallow` (use `gh ... --repo fallow-rs/fallow`); never `bartwaardenburg/fallow`
+- `fallow check` is dead-code only; bare `fallow` runs the full pipeline (dead-code + dupes + health)
+
+## Worktree / parallel-agent rules
+
+Multiple agents and background sessions frequently land commits in fallow main concurrently. Treat every working tree as racy:
+
+- **Commit WIP early.** If a feature takes more than ~10 minutes and parallel sessions are active, switch to a feature branch (`git checkout -b feat/<name>`) and commit per chunk. Uncommitted state in main does not survive even one parallel `git stash` cycle, especially for untracked files.
+- **Verify commit authors before every push.** Run `git log --format="%H %ae %s" <base>..HEAD` and abort if any author is not `bart@waardenburg.dev`, a contributor email, or `...@users.noreply.github.com`. Worktrees and pre-push hooks have leaked `test@example.com` and `test@test.com` commits in the past.
+- **Never push fallow commits via fallow-2 (or any worktree) when WIP exists.** Fix the bare-repo push at its root (e.g. unset `GIT_DIR`/`GIT_WORK_TREE` in `.githooks/pre-push`) or create a fresh ephemeral worktree with `git -C <bare> worktree add /tmp/fallow-push <branch>`.
+- **`combined.rs` is a merge-conflict magnet.** It absorbs orientation header, nudge, entry-point display, summary threading, baseline deltas, health options. Assign ALL `combined.rs` edits to a single agent that runs after parallel crate-level work finishes.
+- **After cherry-picking from worktree agents, always run `cargo fmt --all`.** Worktree agents do not always produce rustfmt-compliant code.
+- **After every worktree merge, scan for orphan conflict markers.** `grep -r '<<<<<<' crates/` (already auto-enforced by the conflict-marker-scan PostToolUse hook, but run manually before pushing).
+- **After cleaning up worktrees, force-remove all of them and `cargo clean -p <crate>` before testing.** Stale worktree compilation artifacts make new code invisible to `cargo test --list`.
+- **Worktree agents may skip commits.** After each worktree agent completes, verify with `git log <base>..<branch> --oneline`; if empty, check for unstaged changes in the worktree directory and commit manually before cleanup.
+
 See `AGENTS.md` for AI agent integration guide.
