@@ -1569,10 +1569,10 @@ pub(super) fn print_trace_json<T: serde::Serialize>(value: &T) {
 mod tests {
     use super::*;
     use crate::health_types::{
-        RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageEvidence,
-        RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage,
-        RuntimeCoverageReport, RuntimeCoverageReportVerdict, RuntimeCoverageSummary,
-        RuntimeCoverageVerdict, RuntimeCoverageWatermark,
+        RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
+        RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
+        RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+        RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
     };
     use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
@@ -1627,6 +1627,8 @@ mod tests {
             runtime_coverage: Some(RuntimeCoverageReport {
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
                 summary: RuntimeCoverageSummary {
+                    data_source: RuntimeCoverageDataSource::Local,
+                    last_received_at: None,
                     functions_tracked: 3,
                     functions_hit: 1,
                     functions_unhit: 1,

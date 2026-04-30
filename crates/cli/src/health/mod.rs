@@ -2517,6 +2517,8 @@ mod tests {
             (hit as f64 / tracked as f64) * 100.0
         };
         crate::health_types::RuntimeCoverageSummary {
+            data_source: crate::health_types::RuntimeCoverageDataSource::Local,
+            last_received_at: None,
             functions_tracked: tracked,
             functions_hit: hit,
             functions_unhit: unhit,

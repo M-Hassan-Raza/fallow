@@ -1942,6 +1942,8 @@ mod tests {
         report.runtime_coverage = Some(crate::health_types::RuntimeCoverageReport {
             verdict: crate::health_types::RuntimeCoverageReportVerdict::ColdCodeDetected,
             summary: crate::health_types::RuntimeCoverageSummary {
+                data_source: crate::health_types::RuntimeCoverageDataSource::Local,
+                last_received_at: None,
                 functions_tracked: 4,
                 functions_hit: 2,
                 functions_unhit: 1,
@@ -2000,6 +2002,8 @@ mod tests {
         crate::health_types::RuntimeCoverageReport {
             verdict: crate::health_types::RuntimeCoverageReportVerdict::Clean,
             summary: crate::health_types::RuntimeCoverageSummary {
+                data_source: crate::health_types::RuntimeCoverageDataSource::Local,
+                last_received_at: None,
                 functions_tracked: 10,
                 functions_hit: 7,
                 functions_unhit: 0,

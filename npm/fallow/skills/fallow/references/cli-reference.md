@@ -939,9 +939,10 @@ Unknown codes fall back to the backend's `message` field, or the raw body.
 
 ## `coverage`: Production-Coverage Workflow
 
-Helper subcommand for the paid runtime-coverage analyzer. Two subcommands today:
+Helper subcommand for the runtime-coverage workflow. Three subcommands today:
 
 - `coverage setup` — resumable state machine that wires license activation, sidecar installation, framework-aware coverage recipe writing, and automatic handoff into `fallow health --runtime-coverage`.
+- `coverage analyze` — focused runtime coverage analysis. Local mode reads `--runtime-coverage <path>`; cloud mode requires explicit `--cloud`, `--runtime-coverage-cloud`, or `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud` and never triggers from `FALLOW_API_KEY` alone.
 - `coverage upload-inventory` — push a static function inventory to fallow cloud so the dashboard can surface `untracked` functions (those in the codebase but never called at runtime).
 
 ```bash
@@ -949,9 +950,29 @@ fallow coverage setup                         # interactive
 fallow coverage setup --yes                   # accept all prompts
 fallow coverage setup --non-interactive       # print instructions, do not prompt
 
+fallow coverage analyze --runtime-coverage ./coverage --format json
+fallow coverage analyze --cloud --repo owner/repo --format json
+
 fallow coverage upload-inventory              # infers project-id, git-sha, API key
 fallow coverage upload-inventory --dry-run    # print what would be uploaded, exit 0
 ```
+
+### `analyze` flags
+
+| Flag | Type | Default | Description |
+|------|------|---------|-------------|
+| `--runtime-coverage <PATH>` | path | none | Local V8 directory, V8 JSON file, or Istanbul coverage map. Mutually exclusive with cloud mode. |
+| `--cloud`, `--runtime-coverage-cloud` | bool | false | Explicitly fetch cloud runtime facts from `/v1/coverage/:repo/runtime-context`. |
+| `--repo <OWNER/REPO>` | string | `$FALLOW_REPO` → `git remote get-url origin` | Repository identifier for cloud mode. Encoded as one URL path segment (`owner%2Frepo`). |
+| `--api-key <KEY>` | string | `$FALLOW_API_KEY` | Fallow cloud bearer token for cloud mode. The env var alone does not opt in to cloud mode. |
+| `--api-endpoint <URL>` | string | `$FALLOW_API_URL` or `https://api.fallow.cloud` | Override for staging / on-prem. |
+| `--coverage-period <DAYS>` | integer | 30 | Cloud observation window, 1 through 90 days. |
+| `--project-id <ID>` | string | none | Optional monorepo/project disambiguator. |
+| `--environment <ENV>` | string | none | Optional cloud environment filter. |
+| `--commit-sha <SHA>` | string | none | Optional cloud commit filter. |
+| `--production` | bool | false | Analyze production code only before joining cloud facts. |
+
+Cloud analysis emits the same `runtime_coverage` JSON block as local mode. Its summary includes `data_source: "cloud"`, `last_received_at`, and `capture_quality` derived from the pulled runtime window. Cloud functions that cannot be matched to the local AST/static index are omitted from findings and reported through a `cloud_functions_unmatched` warning.
 
 ### `setup` flow
 

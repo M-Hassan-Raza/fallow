@@ -1,9 +1,11 @@
 //! `fallow coverage` - runtime coverage onboarding and inventory upload.
 //!
-//! Today the subtree holds two commands:
+//! Today the subtree holds three commands:
 //!
 //! - `setup`: resumable first-run state machine (optional license + sidecar
 //!   + recipe + auto-handoff to `fallow health --runtime-coverage`).
+//! - `analyze`: focused runtime coverage analysis. Local mode reads a coverage
+//!   artifact; cloud mode explicitly fetches runtime facts from fallow cloud.
 //! - `upload-inventory`: push a static function inventory to fallow cloud,
 //!   unlocking the `untracked` filter on the dashboard by pairing runtime
 //!   coverage data with the AST view of "every function that exists".
@@ -13,14 +15,17 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
-use fallow_config::{PackageJson, WorkspaceInfo, discover_workspaces};
+use fallow_config::{OutputFormat, PackageJson, WorkspaceInfo, discover_workspaces};
 use fallow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
 
 use crate::health::coverage as runtime_coverage;
 use crate::license;
 
+pub use analyze::AnalyzeArgs;
 pub use upload_inventory::UploadInventoryArgs;
 
+mod analyze;
+mod cloud_client;
 mod upload_inventory;
 
 const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-coverage";
@@ -30,8 +35,21 @@ const COVERAGE_DOCS_URL: &str = "https://docs.fallow.tools/analysis/runtime-cove
 pub enum CoverageSubcommand {
     /// Resumable first-run setup flow.
     Setup(SetupArgs),
+    /// Analyze runtime coverage from a local artifact or explicit cloud source.
+    Analyze(AnalyzeArgs),
     /// Upload a static function inventory to fallow cloud.
     UploadInventory(UploadInventoryArgs),
+}
+
+/// Context shared by `fallow coverage` subcommands.
+pub struct RunContext<'a> {
+    pub root: &'a Path,
+    pub config_path: &'a Option<PathBuf>,
+    pub output: OutputFormat,
+    pub quiet: bool,
+    pub no_cache: bool,
+    pub threads: usize,
+    pub explain: bool,
 }
 
 /// Arguments for `fallow coverage setup`.
@@ -231,10 +249,11 @@ impl CoverageSetupContext {
 }
 
 /// Dispatch a `fallow coverage <sub>` invocation.
-pub fn run(subcommand: CoverageSubcommand, root: &Path) -> ExitCode {
+pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
     match subcommand {
-        CoverageSubcommand::Setup(args) => run_setup(args, root),
-        CoverageSubcommand::UploadInventory(args) => upload_inventory::run(&args, root),
+        CoverageSubcommand::Setup(args) => run_setup(args, ctx.root),
+        CoverageSubcommand::Analyze(args) => analyze::run(&args, ctx),
+        CoverageSubcommand::UploadInventory(args) => upload_inventory::run(&args, ctx.root),
     }
 }
 

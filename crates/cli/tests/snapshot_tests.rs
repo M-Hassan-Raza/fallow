@@ -1836,6 +1836,8 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
     report.runtime_coverage = Some(RuntimeCoverageReport {
         verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
         summary: RuntimeCoverageSummary {
+            data_source: RuntimeCoverageDataSource::Local,
+            last_received_at: None,
             functions_tracked: 6,
             functions_hit: 3,
             functions_unhit: 2,

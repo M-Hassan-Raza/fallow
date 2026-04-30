@@ -630,7 +630,7 @@
     "RuntimeCoverageReport": {
       "type": "object",
       "required": ["schema_version", "verdict", "summary"],
-      "description": "Runtime coverage findings merged into the health report. Present only when --runtime-coverage is used. Shape mirrors fallow-cov-protocol 0.3.",
+      "description": "Runtime coverage findings merged into the health report or emitted by `fallow coverage analyze`. Present in health output when --runtime-coverage is used. Shape mirrors the runtime coverage JSON contract; cloud mode fetches runtime facts explicitly and merges them locally with AST/static analysis.",
       "properties": {
         "schema_version": {
           "type": "string",
@@ -667,10 +667,47 @@
       }
     },
 
+    "CoverageAnalyzeOutput": {
+      "title": "fallow coverage analyze --format json",
+      "description": "Focused runtime coverage analysis output. Local mode reads --runtime-coverage <path>. Cloud mode requires explicit --cloud / --runtime-coverage-cloud or FALLOW_RUNTIME_COVERAGE_SOURCE=cloud; FALLOW_API_KEY alone does not select cloud mode.",
+      "type": "object",
+      "required": ["schema_version", "version", "elapsed_ms", "runtime_coverage"],
+      "properties": {
+        "schema_version": {
+          "type": "string",
+          "enum": ["1"],
+          "description": "Standalone coverage analyze envelope version."
+        },
+        "version": {
+          "type": "string",
+          "description": "fallow CLI version."
+        },
+        "elapsed_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runtime_coverage": {
+          "$ref": "#/definitions/RuntimeCoverageReport",
+          "description": "The same runtime coverage block emitted by health JSON."
+        },
+        "_meta": { "$ref": "#/definitions/Meta" }
+      }
+    },
+
     "RuntimeCoverageSummary": {
       "type": "object",
-      "required": ["functions_tracked", "functions_hit", "functions_unhit", "functions_untracked", "coverage_percent", "trace_count", "period_days", "deployments_seen"],
+      "required": ["data_source", "last_received_at", "functions_tracked", "functions_hit", "functions_unhit", "functions_untracked", "coverage_percent", "trace_count", "period_days", "deployments_seen"],
       "properties": {
+        "data_source": {
+          "type": "string",
+          "enum": ["local", "cloud"],
+          "description": "Runtime evidence source used for this report. Local mode reads a supplied runtime coverage artifact; cloud mode pulls the latest fallow.cloud runtime context after explicit opt-in."
+        },
+        "last_received_at": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Timestamp of the newest runtime payload included in the report. Null for local single-capture artifacts that do not carry cloud receipt metadata."
+        },
         "functions_tracked": {
           "type": "integer",
           "minimum": 0,
@@ -815,7 +852,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "description": "Action identifier, normalized to `type` in JSON output."
+          "description": "Action identifier, normalized to `type` in JSON output. Known values emitted by `fallow coverage analyze`: `delete-cold-code` (verdict=safe_to_delete), `review-runtime` (verdict=review_required). The sidecar may emit additional protocol-specific identifiers; consumers should treat unknown values as forward-compat extensions."
         },
         "description": {
           "type": "string",

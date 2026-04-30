@@ -853,6 +853,72 @@ enum CoverageCli {
         #[arg(long)]
         json: bool,
     },
+    /// Analyze runtime coverage from a local artifact or explicit cloud source.
+    ///
+    /// Cloud mode is opt-in only. `FALLOW_API_KEY` by itself never selects
+    /// cloud mode; pass `--cloud` / `--runtime-coverage-cloud`, or set
+    /// `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud`.
+    Analyze {
+        /// File or directory containing local runtime coverage input.
+        #[arg(long, value_name = "PATH", conflicts_with = "cloud")]
+        runtime_coverage: Option<PathBuf>,
+
+        /// Fetch latest runtime facts from fallow cloud for the selected repo.
+        #[arg(long, visible_alias = "runtime-coverage-cloud")]
+        cloud: bool,
+
+        /// Fallow cloud API key. Precedence: this flag > $FALLOW_API_KEY.
+        #[arg(long, value_name = "KEY")]
+        api_key: Option<String>,
+
+        /// Override the fallow cloud base URL.
+        #[arg(long, value_name = "URL")]
+        api_endpoint: Option<String>,
+
+        /// Repository identifier, for example `owner/repo`.
+        ///
+        /// Defaults to $FALLOW_REPO, then the parsed origin URL from
+        /// `git remote get-url origin`. Slashes are percent-encoded as one
+        /// URL segment when calling the cloud runtime-context endpoint.
+        #[arg(long, value_name = "OWNER/REPO")]
+        repo: Option<String>,
+
+        /// Optional monorepo/project disambiguator.
+        #[arg(long, value_name = "ID")]
+        project_id: Option<String>,
+
+        /// Runtime observation window to request from cloud (1..=90 days).
+        #[arg(long, value_name = "DAYS", default_value_t = 30)]
+        coverage_period: u16,
+
+        /// Optional runtime environment filter.
+        #[arg(long, value_name = "ENV")]
+        environment: Option<String>,
+
+        /// Optional commit SHA filter for cloud runtime facts.
+        #[arg(long, value_name = "SHA")]
+        commit_sha: Option<String>,
+
+        /// Analyze production code only.
+        #[arg(long)]
+        production: bool,
+
+        /// Threshold for hot-path classification.
+        #[arg(long, default_value_t = 100)]
+        min_invocations_hot: u64,
+
+        /// Minimum total trace volume before high-confidence verdicts.
+        #[arg(long, value_name = "N")]
+        min_observation_volume: Option<u32>,
+
+        /// Fraction of total trace count below which an invoked function is low traffic.
+        #[arg(long, value_name = "RATIO")]
+        low_traffic_threshold: Option<f64>,
+
+        /// Show only the top N runtime findings and hot paths.
+        #[arg(long)]
+        top: Option<usize>,
+    },
     /// Upload a static function inventory to fallow cloud (Production
     /// Coverage, paid). Unlocks the `untracked` filter on the dashboard by
     /// pairing runtime coverage data with the AST view of "every function
@@ -2007,9 +2073,18 @@ fn dispatch_subcommand(
             from,
         } => migrate::run_migrate(root, toml, dry_run, from.as_deref()),
         Command::License { subcommand } => license::run(&map_license_subcommand(subcommand)),
-        Command::Coverage { subcommand } => {
-            coverage::run(map_coverage_subcommand(&subcommand, cli.explain), root)
-        }
+        Command::Coverage { subcommand } => coverage::run(
+            map_coverage_subcommand(&subcommand, cli.explain),
+            &coverage::RunContext {
+                root,
+                config_path: &cli.config,
+                output,
+                quiet,
+                no_cache: cli.no_cache,
+                threads,
+                explain: cli.explain,
+            },
+        ),
         Command::SetupHooks {
             agent,
             dry_run,
@@ -2061,6 +2136,37 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
             non_interactive: *non_interactive || *json,
             json: *json,
             explain,
+        }),
+        CoverageCli::Analyze {
+            runtime_coverage,
+            cloud,
+            api_key,
+            api_endpoint,
+            repo,
+            project_id,
+            coverage_period,
+            environment,
+            commit_sha,
+            production,
+            min_invocations_hot,
+            min_observation_volume,
+            low_traffic_threshold,
+            top,
+        } => coverage::CoverageSubcommand::Analyze(coverage::AnalyzeArgs {
+            runtime_coverage: runtime_coverage.clone(),
+            cloud: *cloud,
+            api_key: api_key.clone(),
+            api_endpoint: api_endpoint.clone(),
+            repo: repo.clone(),
+            project_id: project_id.clone(),
+            coverage_period: *coverage_period,
+            environment: environment.clone(),
+            commit_sha: commit_sha.clone(),
+            production: *production,
+            min_invocations_hot: *min_invocations_hot,
+            min_observation_volume: *min_observation_volume,
+            low_traffic_threshold: *low_traffic_threshold,
+            top: *top,
         }),
         CoverageCli::UploadInventory {
             api_key,

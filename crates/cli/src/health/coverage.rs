@@ -27,10 +27,10 @@ use crate::error::emit_error;
 use crate::health::RuntimeCoverageOptions;
 use crate::health::scoring::IstanbulCoverage;
 use crate::health_types::{
-    RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageEvidence,
-    RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageReport,
-    RuntimeCoverageReportVerdict, RuntimeCoverageSummary, RuntimeCoverageVerdict,
-    RuntimeCoverageWatermark,
+    RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
+    RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
+    RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
+    RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
 };
 use crate::license::verifying_key;
 
@@ -1735,6 +1735,8 @@ fn convert_response(
     RuntimeCoverageReport {
         verdict: map_report_verdict(&response.verdict),
         summary: RuntimeCoverageSummary {
+            data_source: RuntimeCoverageDataSource::Local,
+            last_received_at: None,
             functions_tracked: response.summary.functions_tracked as usize,
             functions_hit: response.summary.functions_hit as usize,
             functions_unhit: response.summary.functions_unhit as usize,

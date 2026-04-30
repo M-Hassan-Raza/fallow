@@ -26,6 +26,9 @@ pub const DUPES_DOCS: &str = "https://docs.fallow.tools/cli/dupes";
 /// Docs URL for the runtime coverage setup command's agent-readable JSON.
 pub const COVERAGE_SETUP_DOCS: &str = "https://docs.fallow.tools/cli/coverage#agent-readable-json";
 
+/// Docs URL for `fallow coverage analyze --format json --explain`.
+pub const COVERAGE_ANALYZE_DOCS: &str = "https://docs.fallow.tools/cli/coverage#analyze";
+
 // ── Check rules ─────────────────────────────────────────────────
 
 /// Rule definition for SARIF `fullDescription` and JSON `_meta`.
@@ -836,6 +839,41 @@ pub fn coverage_setup_meta() -> Value {
     })
 }
 
+/// Build the `_meta` object for `fallow coverage analyze --format json --explain`.
+#[must_use]
+pub fn coverage_analyze_meta() -> Value {
+    json!({
+        "docs_url": COVERAGE_ANALYZE_DOCS,
+        "field_definitions": {
+            "schema_version": "Standalone coverage analyze envelope version. \"1\" for the current shape.",
+            "version": "fallow CLI version that produced this output.",
+            "elapsed_ms": "Wall-clock milliseconds spent producing the report.",
+            "runtime_coverage": "Same RuntimeCoverageReport block emitted by `fallow health --runtime-coverage`.",
+            "runtime_coverage.summary.data_source": "Which evidence source produced the report. local = on-disk artifact via --runtime-coverage <path>; cloud = explicit pull via --cloud / --runtime-coverage-cloud / FALLOW_RUNTIME_COVERAGE_SOURCE=cloud.",
+            "runtime_coverage.summary.last_received_at": "ISO-8601 timestamp of the newest runtime payload included in the report. Null for local artifacts that do not carry receipt metadata.",
+            "runtime_coverage.summary.capture_quality": "Capture-window telemetry derived from the runtime evidence. lazy_parse_warning trips when more than 30% of tracked functions are V8-untracked, which usually indicates a short observation window.",
+            "runtime_coverage.findings[].evidence.static_status": "used = the function is reachable in the AST module graph; unused = it is dead by static analysis.",
+            "runtime_coverage.findings[].evidence.test_coverage": "covered = the local test suite hits the function; not_covered otherwise.",
+            "runtime_coverage.findings[].evidence.v8_tracking": "tracked = V8 observed the function during the capture window; untracked otherwise.",
+            "runtime_coverage.findings[].actions[].type": "Suggested follow-up identifier. delete-cold-code is emitted on safe_to_delete; review-runtime on review_required.",
+            "runtime_coverage.warnings[].code": "Stable warning identifier. cloud_functions_unmatched flags entries dropped because no AST/static counterpart was found locally."
+        },
+        "enums": {
+            "data_source": ["local", "cloud"],
+            "report_verdict": ["clean", "hot-path-changes-needed", "cold-code-detected", "license-expired-grace", "unknown"],
+            "finding_verdict": ["safe_to_delete", "review_required", "coverage_unavailable", "low_traffic", "active", "unknown"],
+            "static_status": ["used", "unused"],
+            "test_coverage": ["covered", "not_covered"],
+            "v8_tracking": ["tracked", "untracked"],
+            "action_type": ["delete-cold-code", "review-runtime"]
+        },
+        "warnings": {
+            "no_runtime_data": "Cloud returned an empty runtime window. Either the period is too narrow or no traces have been ingested yet.",
+            "cloud_functions_unmatched": "One or more cloud-side functions could not be matched against the local AST/static index and were dropped from findings. Common causes: stale runtime data after a rename/move, file path mismatch between deploy and repo, or analysis run on the wrong commit."
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1023,6 +1061,29 @@ mod tests {
                 .unwrap()
                 .contains_key("Package manager was not detected")
         );
+    }
+
+    // ── coverage_analyze_meta ────────────────────────────────────────
+
+    #[test]
+    fn coverage_analyze_meta_documents_data_source_and_action_vocabulary() {
+        let meta = coverage_analyze_meta();
+        assert_eq!(meta["docs_url"], COVERAGE_ANALYZE_DOCS);
+        let fields = meta["field_definitions"].as_object().unwrap();
+        assert!(fields.contains_key("runtime_coverage.summary.data_source"));
+        assert!(fields.contains_key("runtime_coverage.summary.last_received_at"));
+        assert!(fields.contains_key("runtime_coverage.findings[].evidence.test_coverage"));
+        assert!(fields.contains_key("runtime_coverage.findings[].actions[].type"));
+        let enums = meta["enums"].as_object().unwrap();
+        assert_eq!(enums["data_source"], json!(["local", "cloud"]));
+        assert_eq!(enums["test_coverage"], json!(["covered", "not_covered"]));
+        assert_eq!(enums["v8_tracking"], json!(["tracked", "untracked"]));
+        assert_eq!(
+            enums["action_type"],
+            json!(["delete-cold-code", "review-runtime"])
+        );
+        let warnings = meta["warnings"].as_object().unwrap();
+        assert!(warnings.contains_key("cloud_functions_unmatched"));
     }
 
     // ── HEALTH_RULES completeness ──────────────────────────────────

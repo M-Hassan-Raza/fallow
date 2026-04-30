@@ -133,9 +133,36 @@ impl fmt::Display for RuntimeCoverageWatermark {
     }
 }
 
+/// Runtime coverage source used to produce the summary.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCoverageDataSource {
+    #[default]
+    Local,
+    Cloud,
+}
+
+impl RuntimeCoverageDataSource {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Cloud => "cloud",
+        }
+    }
+}
+
+impl fmt::Display for RuntimeCoverageDataSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
 /// Summary block mirroring `fallow_cov_protocol::Summary` (0.3 shape).
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct RuntimeCoverageSummary {
+    pub data_source: RuntimeCoverageDataSource,
+    pub last_received_at: Option<String>,
     pub functions_tracked: usize,
     pub functions_hit: usize,
     pub functions_unhit: usize,

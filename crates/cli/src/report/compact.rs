@@ -390,9 +390,9 @@ pub(super) fn print_duplication_compact(report: &DuplicationReport, root: &Path)
 mod tests {
     use super::*;
     use crate::health_types::{
-        RuntimeCoverageConfidence, RuntimeCoverageEvidence, RuntimeCoverageFinding,
-        RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
-        RuntimeCoverageSummary, RuntimeCoverageVerdict,
+        RuntimeCoverageConfidence, RuntimeCoverageDataSource, RuntimeCoverageEvidence,
+        RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport,
+        RuntimeCoverageReportVerdict, RuntimeCoverageSummary, RuntimeCoverageVerdict,
     };
     use crate::report::test_helpers::sample_results;
     use fallow_core::extract::MemberKind;
@@ -445,6 +445,8 @@ mod tests {
             runtime_coverage: Some(RuntimeCoverageReport {
                 verdict: RuntimeCoverageReportVerdict::ColdCodeDetected,
                 summary: RuntimeCoverageSummary {
+                    data_source: RuntimeCoverageDataSource::Local,
+                    last_received_at: None,
                     functions_tracked: 4,
                     functions_hit: 2,
                     functions_unhit: 1,
