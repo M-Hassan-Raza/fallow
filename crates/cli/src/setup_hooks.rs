@@ -8,10 +8,11 @@
 //! the agent can read `_meta.docs` links and `actions`, fix the findings,
 //! and retry.
 //!
-//! This is the *agent-hook* command. For the *git pre-commit* hook
-//! scaffolder, see `fallow init --hooks`. The two commands target different
-//! surfaces: `init --hooks` writes into `.git/hooks/`, and this one writes
-//! into `.claude/` / `AGENTS.md`.
+//! This is the legacy *agent-hook* command. The clearer namespace is
+//! `fallow hooks install --target agent`. For the *git pre-commit* hook
+//! scaffolder, see `fallow hooks install --target git`. The two targets write
+//! to different surfaces: Git hooks write into `.git/hooks/` or `.husky/`, and
+//! agent hooks write into `.claude/` / `AGENTS.md`.
 
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -91,6 +92,12 @@ enum Mode {
 
 /// Entry point for the `fallow setup-hooks` subcommand.
 pub fn run_setup_hooks(opts: &SetupHooksOptions<'_>) -> ExitCode {
+    run_setup_hooks_with_label(opts, "fallow setup-hooks")
+}
+
+/// Entry point used by the `fallow hooks ... --target agent` namespace while
+/// reusing the same installation engine and summary renderer.
+pub fn run_setup_hooks_with_label(opts: &SetupHooksOptions<'_>, command_label: &str) -> ExitCode {
     let mode = if opts.uninstall {
         Mode::Uninstall
     } else {
@@ -120,7 +127,7 @@ pub fn run_setup_hooks(opts: &SetupHooksOptions<'_>) -> ExitCode {
         }
     };
 
-    print_summary(&report, opts, mode);
+    print_summary(&report, opts, mode, command_label);
     ExitCode::SUCCESS
 }
 
@@ -990,13 +997,13 @@ fn home_dir() -> Option<PathBuf> {
 
 // ── Summary printing ────────────────────────────────────────────────
 
-fn print_summary(report: &Report, opts: &SetupHooksOptions<'_>, mode: Mode) {
+fn print_summary(report: &Report, opts: &SetupHooksOptions<'_>, mode: Mode, command_label: &str) {
     let verb = match mode {
         Mode::Install => "install",
         Mode::Uninstall => "uninstall",
     };
     let suffix = if opts.dry_run { " (dry run)" } else { "" };
-    eprintln!("fallow setup-hooks ({verb}){suffix}:");
+    eprintln!("{command_label} ({verb}){suffix}:");
 
     if let Some(claude) = &report.claude {
         let settings_rel = display_rel(opts.root, &claude.settings_path);

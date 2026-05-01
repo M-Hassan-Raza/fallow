@@ -350,26 +350,34 @@ enum Command {
     /// support; both extensions are auto-discovered.
     ///
     /// `--hooks` scaffolds a shell-level Git pre-commit hook under
-    /// `.git/hooks/` that runs fallow on changed files. This is the HUMAN /
-    /// git-level enforcement path. For the AI-agent-level enforcement (a
-    /// Claude Code `PreToolUse` hook that gates `git commit` / `git push`),
-    /// see `fallow setup-hooks` instead. The two commands target different
-    /// surfaces and can be used together.
+    /// `.git/hooks/` that runs fallow on changed files. The clearer hook
+    /// namespace is `fallow hooks install --target git`; `init --hooks`
+    /// remains as a convenience during project initialization.
     Init {
         /// Generate TOML instead of JSONC
         #[arg(long)]
         toml: bool,
 
         /// Scaffold a shell-level pre-commit git hook in `.git/hooks/` that
-        /// runs fallow on changed files. For a Claude Code PreToolUse gate
-        /// that feeds audit findings back to the agent, use
-        /// `fallow setup-hooks` instead.
+        /// runs fallow on changed files. Alias for
+        /// `fallow hooks install --target git`.
         #[arg(long)]
         hooks: bool,
 
-        /// Base branch/ref for the pre-commit hook (default: auto-detect or "main")
+        /// Fallback base branch/ref for the pre-commit hook when no upstream is set
         #[arg(long, requires = "hooks")]
         branch: Option<String>,
+    },
+
+    /// Install or remove fallow-managed Git and agent hooks.
+    ///
+    /// Use `fallow hooks install --target git` for a shell-level Git
+    /// pre-commit hook. Use `fallow hooks install --target agent` for a
+    /// Claude Code / Codex gate that blocks agent `git commit` / `git push`
+    /// commands until `fallow audit` passes.
+    Hooks {
+        #[command(subcommand)]
+        subcommand: HooksCli,
     },
 
     /// Print the JSON Schema for fallow configuration files
@@ -742,12 +750,13 @@ enum Command {
     /// `git commit` / `git push` on `fallow audit`, so the agent cleans
     /// findings before the command runs.
     ///
-    /// This is the AGENT-level enforcement surface. It writes into
+    /// This is the legacy AGENT-level enforcement command. Prefer
+    /// `fallow hooks install --target agent` for new setup. It writes into
     /// `.claude/settings.json` + `.claude/hooks/fallow-gate.sh` (and
     /// optionally an `AGENTS.md` managed block for Codex). For a
     /// shell-level Git pre-commit hook in `.git/hooks/`, see
-    /// `fallow init --hooks` instead. Both commands can be used together:
-    /// git hooks catch human commits, the setup-hooks gate catches agent
+    /// `fallow hooks install --target git` instead. Both targets can be used
+    /// together: git hooks catch human commits, agent hooks catch agent
     /// commits.
     ///
     /// See `/integrations/claude-hooks` in the docs for the full recipe.
@@ -778,6 +787,71 @@ enum Command {
         /// "unchanged" when nothing to remove.
         #[arg(long)]
         uninstall: bool,
+    },
+}
+
+#[derive(clap::ValueEnum, Clone, Copy, Debug, PartialEq, Eq)]
+enum HooksTargetArg {
+    /// Shell-level Git pre-commit hook under .git/hooks/ or .husky/.
+    Git,
+    /// Agent-level Claude Code / Codex gate.
+    Agent,
+}
+
+#[derive(clap::Subcommand)]
+enum HooksCli {
+    /// Install a fallow-managed hook.
+    Install {
+        /// Hook surface to install.
+        #[arg(long, value_enum)]
+        target: HooksTargetArg,
+
+        /// Fallback base branch/ref for Git pre-commit hooks when no upstream is set.
+        #[arg(long)]
+        branch: Option<String>,
+
+        /// Target a specific agent surface when --target agent is used.
+        #[arg(long, value_enum)]
+        agent: Option<setup_hooks::HookAgentArg>,
+
+        /// Print what would be written without touching the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Overwrite an existing managed or user-edited hook.
+        #[arg(long)]
+        force: bool,
+
+        /// Write agent hooks to the user's home directory instead of the project root.
+        #[arg(long)]
+        user: bool,
+
+        /// Append `.claude/` to the project's `.gitignore` for Claude agent hooks.
+        #[arg(long)]
+        gitignore_claude: bool,
+    },
+
+    /// Remove a fallow-managed hook.
+    Uninstall {
+        /// Hook surface to remove.
+        #[arg(long, value_enum)]
+        target: HooksTargetArg,
+
+        /// Target a specific agent surface when --target agent is used.
+        #[arg(long, value_enum)]
+        agent: Option<setup_hooks::HookAgentArg>,
+
+        /// Print what would be removed without touching the filesystem.
+        #[arg(long)]
+        dry_run: bool,
+
+        /// Remove a user-edited hook script or Git hook instead of preserving it.
+        #[arg(long)]
+        force: bool,
+
+        /// Remove agent hooks from the user's home directory instead of the project root.
+        #[arg(long)]
+        user: bool,
     },
 }
 
@@ -1552,6 +1626,7 @@ fn main() -> ExitCode {
                     | Command::Migrate { .. }
                     | Command::License { .. }
                     | Command::Coverage { .. }
+                    | Command::Hooks { .. }
                     | Command::SetupHooks { .. }
             )
         )
@@ -1867,6 +1942,7 @@ fn dispatch_subcommand(
             hooks,
             branch: branch.as_deref(),
         }),
+        Command::Hooks { subcommand } => run_hooks_command(root, subcommand, output),
         Command::ConfigSchema => init::run_config_schema(),
         Command::PluginSchema => init::run_plugin_schema(),
         Command::CiTemplate { subcommand } => match subcommand {
@@ -2158,6 +2234,105 @@ fn dispatch_subcommand(
             gitignore_claude,
             uninstall,
         }),
+    }
+}
+
+fn run_hooks_command(
+    root: &std::path::Path,
+    subcommand: HooksCli,
+    output: fallow_config::OutputFormat,
+) -> ExitCode {
+    match subcommand {
+        HooksCli::Install {
+            target: HooksTargetArg::Git,
+            branch,
+            agent,
+            dry_run,
+            force,
+            user,
+            gitignore_claude,
+        } => {
+            if agent.is_some() || user || gitignore_claude {
+                return emit_error(
+                    "--agent, --user, and --gitignore-claude are only valid with `fallow hooks install --target agent`",
+                    2,
+                    output,
+                );
+            }
+            init::run_git_hooks_install(&init::GitHooksInstallOptions {
+                root,
+                branch: branch.as_deref(),
+                dry_run,
+                force,
+            })
+        }
+        HooksCli::Install {
+            target: HooksTargetArg::Agent,
+            branch,
+            agent,
+            dry_run,
+            force,
+            user,
+            gitignore_claude,
+        } => {
+            if branch.is_some() {
+                return emit_error(
+                    "--branch is only valid with `fallow hooks install --target git`",
+                    2,
+                    output,
+                );
+            }
+            setup_hooks::run_setup_hooks_with_label(
+                &setup_hooks::SetupHooksOptions {
+                    root,
+                    agent,
+                    dry_run,
+                    force,
+                    user,
+                    gitignore_claude,
+                    uninstall: false,
+                },
+                "fallow hooks install --target agent",
+            )
+        }
+        HooksCli::Uninstall {
+            target: HooksTargetArg::Git,
+            agent,
+            dry_run,
+            force,
+            user,
+        } => {
+            if agent.is_some() || user {
+                return emit_error(
+                    "--agent and --user are only valid with `fallow hooks uninstall --target agent`",
+                    2,
+                    output,
+                );
+            }
+            init::run_git_hooks_uninstall(&init::GitHooksUninstallOptions {
+                root,
+                dry_run,
+                force,
+            })
+        }
+        HooksCli::Uninstall {
+            target: HooksTargetArg::Agent,
+            agent,
+            dry_run,
+            force,
+            user,
+        } => setup_hooks::run_setup_hooks_with_label(
+            &setup_hooks::SetupHooksOptions {
+                root,
+                agent,
+                dry_run,
+                force,
+                user,
+                gitignore_claude: false,
+                uninstall: true,
+            },
+            "fallow hooks uninstall --target agent",
+        ),
     }
 }
 

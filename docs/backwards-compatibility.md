@@ -23,7 +23,7 @@ These interfaces are covered by semver — breaking changes only happen in major
 
 ### CLI interface
 
-- **Subcommands**: `dead-code` (legacy alias: `check`), `dupes`, `health`, `audit`, `explain`, `fix`, `watch`, `init`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`, `config`
+- **Subcommands**: `dead-code` (legacy alias: `check`), `dupes`, `health`, `audit`, `explain`, `fix`, `watch`, `init`, `hooks`, `setup-hooks`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`, `config`
 - **Default behavior**: bare `fallow` (no subcommand) runs dead-code + dupes + health combined
 - **Exit codes**: 0 (success/no errors), 1 (issues with error severity found), 2 (runtime error). `fallow audit` defaults to `--gate new-only`, so inherited error-severity findings in changed files can be reported with exit 0; use `--gate all` to fail on every finding in changed files.
 - **Global flags**: `--format`, `--config`, `--workspace`, `--production`, `--baseline`, `--save-baseline`, `--no-cache`, `--threads`, `--changed-since` (alias: `--base`), `--performance`, `--explain`, `--ci`, `--fail-on-issues`, `--sarif-file`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline`, `--summary`, `--group-by` (owner, directory, package, section)
@@ -31,9 +31,10 @@ These interfaces are covered by semver — breaking changes only happen in major
 - **Bare command flags**: `--only`, `--skip` (select which analyses to run), `--score` (health score in combined mode), `--trend` (compare against snapshot), `--save-snapshot` (save vital signs for trend tracking)
 - **Health flags**: `--score` (project health score 0-100 with letter grade), `--min-score` (CI quality gate), `--max-cyclomatic` / `--max-cognitive` / `--max-crap` (per-function complexity thresholds; CRAP combines complexity with coverage), `--targets` (refactoring recommendations), `--effort` (filter targets by effort level: low/medium/high), `--coverage-gaps` (static test coverage gaps), `--coverage` (Istanbul coverage data for accurate CRAP scores), `--coverage-root` (rebase coverage paths for CI), `--save-snapshot` (saves vital signs snapshot for trend tracking), `--trend` (compare against most recent snapshot)
 - **Audit flags**: `--gate <new-only|all>` (controls whether only introduced findings or all findings affect the verdict), `--max-crap` (forwarded to the health sub-analysis; mirrors `health.maxCrap` in config)
-- **Init flags**: `--toml`, `--hooks` (scaffold pre-commit git hook), `--branch` (base branch for hook)
+- **Init flags**: `--toml`, `--hooks` (scaffold pre-commit git hook), `--branch` (fallback base branch/ref for the hook when no upstream is set)
+- **Hooks command**: `hooks install|uninstall --target <git|agent>` manages Git pre-commit hooks and agent gates. `setup-hooks` remains supported as the legacy agent-hook command.
 - **Environment variables**: `FALLOW_FORMAT`, `FALLOW_QUIET`, `FALLOW_BIN`, `FALLOW_TIMEOUT_SECS`, `FALLOW_EXTENDS_TIMEOUT_SECS`, `FALLOW_COVERAGE`, `FALLOW_PRODUCTION`, `FALLOW_PRODUCTION_DEAD_CODE`, `FALLOW_PRODUCTION_HEALTH`, `FALLOW_PRODUCTION_DUPES`
-- **Generated hook-script env vars**: `FALLOW_GATE_MIN_VERSION` (consumed by `.claude/hooks/fallow-gate.sh` written by `fallow setup-hooks`; controls the minimum fallow version the gate accepts, default `2.46.0`, empty string disables)
+- **Generated hook-script env vars**: `FALLOW_GATE_MIN_VERSION` (consumed by `.claude/hooks/fallow-gate.sh` written by `fallow hooks install --target agent` / `fallow setup-hooks`; controls the minimum fallow version the gate accepts, default `2.46.0`, empty string disables)
 
 ### External plugin format
 
