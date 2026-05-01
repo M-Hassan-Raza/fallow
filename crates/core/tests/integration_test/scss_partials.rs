@@ -197,3 +197,51 @@ fn external_package_scss_subpaths_credit_nested_style_dependencies() {
         "real unused dependencies should still be reported: {unused_dep_names:?}"
     );
 }
+
+#[test]
+fn scss_bare_import_does_not_collide_with_sibling_tsx() {
+    // Issue #245: `@use 'Widget'` from a `.scss` file MUST resolve only to
+    // `Widget.scss` / `_Widget.scss` etc. Sass never sees JS/TS files; a
+    // sibling `Widget.tsx` is invisible to the Sass resolver. The bug
+    // manifested as a phantom 3-file circular dependency chain when both a
+    // `.tsx` component file and its `.scss` style sheet existed alongside.
+    let root = fixture_path("scss-bare-import-tsx-collision");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.circular_dependencies.is_empty(),
+        "expected no circular dependencies, got: {:?}",
+        results
+            .circular_dependencies
+            .iter()
+            .map(|c| c
+                .files
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>())
+            .collect::<Vec<_>>()
+    );
+
+    let unresolved_specs: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved_specs.is_empty(),
+        "expected no unresolved imports, got: {unresolved_specs:?}"
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|f| f.path.file_name())
+        .filter_map(|n| n.to_str())
+        .map(ToString::to_string)
+        .collect();
+    assert!(
+        !unused_files.contains(&"Widget.scss".to_string()),
+        "Widget.scss must be reachable via Helper.scss `@use 'Widget'`: {unused_files:?}"
+    );
+}

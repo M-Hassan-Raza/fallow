@@ -243,6 +243,25 @@ fn is_style_file(path: &Path) -> bool {
         .is_some_and(|ext| matches!(ext, "css" | "scss" | "sass"))
 }
 
+/// Return `true` when the path's extension is a JS/TS-family runtime extension.
+///
+/// Used to reject standard-resolver hits when the importer is a stylesheet:
+/// Sass's resolution algorithm only ever considers `.css` / `.scss` / `.sass`
+/// files, so a sibling `.tsx` / `.ts` / `.js` cannot legally satisfy a Sass
+/// `@use` / `@import`. The resolver's extension list mixes JS/TS and CSS,
+/// so without this guard `@use 'Widget'` from a `.scss` importer would
+/// resolve to a sibling `Widget.tsx` whenever both files exist. See #245.
+fn is_js_ts_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext,
+                "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs"
+            )
+        })
+}
+
 fn is_node_modules_path(path: &Path) -> bool {
     path.components().any(|component| match component {
         std::path::Component::Normal(segment) => segment == "node_modules",
@@ -388,6 +407,24 @@ pub(super) fn resolve_specifier(
     match resolve_file_with_tsconfig_fallback(ctx, from_file, specifier) {
         ResolveFileAttempt::Resolved(resolved) => {
             let resolved_path = resolved.path();
+            // Reject JS/TS hits for stylesheet importers. The standard resolver's
+            // extension list mixes JS/TS with CSS-family extensions and tries
+            // `.tsx` / `.ts` before `.scss` / `.sass` / `.css`, so a `@use 'Widget'`
+            // from a `.scss` file would otherwise resolve to a sibling
+            // `Widget.tsx` even when `Widget.scss` exists next to it. Sass's
+            // actual resolution algorithm only considers stylesheets; redirect
+            // to the SCSS-aware fallback chain (CSS-extension probe, partial
+            // convention, include paths, node_modules) and short-circuit with
+            // `Unresolvable` if those also fail. See issue #245.
+            let is_scss_importer = from_file
+                .extension()
+                .is_some_and(|e| e == "scss" || e == "sass");
+            if is_scss_importer && is_js_ts_extension(resolved_path) {
+                if let Some(result) = try_scss_fallbacks(ctx, from_file, specifier, from_style) {
+                    return result;
+                }
+                return ResolveResult::Unresolvable(specifier.to_string());
+            }
             // Try raw path lookup first (avoids canonicalize syscall in most cases)
             if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
                 return ResolveResult::InternalModule(file_id);

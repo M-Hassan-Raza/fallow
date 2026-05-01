@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`includeEntryExports` config option, and `--include-entry-exports` is now a global CLI flag.** Set `"includeEntryExports": true` (JSON / JSONC) or `includeEntryExports = true` (TOML) in your fallow config to opt in to entry-file export validation persistently, without passing `--include-entry-exports` on every run. The flag is now accepted in combined mode (`fallow --include-entry-exports`) as well as on `fallow dead-code` and `fallow audit`; previously the bare combined invocation rejected the flag because it was only defined on the `dead-code` subcommand. Thanks [@filipw01](https://github.com/filipw01) for the report. (Closes [#249](https://github.com/fallow-rs/fallow/issues/249))
 
+### Fixed
+
+- **SCSS / Sass `@use 'X'` no longer resolves to a sibling `X.tsx`.** When both `Widget.scss` and `Widget.tsx` exist next to each other and a `.scss` importer does `@use 'Widget'`, fallow now resolves the import to `Widget.scss` per Sass's actual resolution algorithm. The standard module resolver's extension list contains `.tsx` / `.ts` before `.scss`, so without this guard a bare specifier from a stylesheet was silently picking the JS/TS sibling, creating phantom circular dependencies in CSS-modules / Angular `styleUrls` patterns where the `.tsx` component imports its own `.scss` and a sibling `.scss` shares variables/mixins. Stylesheet importers now reject any standard-resolver hit whose extension is a JS/TS-family extension (`.tsx`, `.ts`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`) and re-route through the SCSS-aware fallback chain (CSS-extension probe, `_filename` partial convention, framework include paths, `node_modules` walk-up); when those also fail, the import is reported as unresolved instead of falling through to JS/TS extensions. Thanks [@OmerGronich](https://github.com/OmerGronich) for the precise reproduction and the suggested fix. (Closes [#245](https://github.com/fallow-rs/fallow/issues/245))
+
 ## [2.59.0] - 2026-05-01
 
 ### Added
