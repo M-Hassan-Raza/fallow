@@ -43,27 +43,29 @@ impl IntervalIndex {
         start >= s && start + len <= e
     }
 
-    /// Insert `[start, end)` into `slot`, merging with the preceding interval
-    /// when they overlap.
+    /// Insert `[start, end)` into `slot`, coalescing every existing interval
+    /// that touches or overlaps the new range into a single merged interval.
     ///
-    /// **Invariant:** callers must insert intervals in ascending `start` order.
-    /// Only the preceding interval is checked for merge; right-neighbor overlap
-    /// is not handled. This is safe because both `remove_token_subsets` (sorted
-    /// by ascending offset) and `remove_line_subsets` (sorted by ascending
-    /// `start_line`) satisfy this invariant.
+    /// Robust to out-of-order inserts. Both `remove_token_subsets` and
+    /// `remove_line_subsets` process groups in length-/token-desc order, so
+    /// per-slot inserts arrive in arbitrary offset order; coalescing on every
+    /// insert keeps the slot's interval list non-overlapping and accurate so
+    /// `is_covered` does not produce false negatives across fragmented gaps.
     fn insert(&mut self, slot: usize, start: usize, end: usize) {
         let intervals = &mut self.slots[slot];
-        let idx = intervals.partition_point(|&(s, _)| s < start);
-        if idx > 0 {
-            let prev = &mut intervals[idx - 1];
-            if prev.1 >= start {
-                if end > prev.1 {
-                    prev.1 = end;
-                }
-                return;
-            }
+        // First interval whose end >= start: candidate for a left-side merge.
+        let lo = intervals.partition_point(|&(_, e)| e < start);
+        // First interval whose start > end: past the right-side merge boundary.
+        let hi = intervals.partition_point(|&(s, _)| s <= end);
+
+        if lo == hi {
+            intervals.insert(lo, (start, end));
+        } else {
+            let merged_start = intervals[lo].0.min(start);
+            let merged_end = intervals[hi - 1].1.max(end);
+            intervals.drain(lo..hi);
+            intervals.insert(lo, (merged_start, merged_end));
         }
-        intervals.insert(idx, (start, end));
     }
 }
 
@@ -236,7 +238,17 @@ fn remove_line_subsets(clone_groups: Vec<CloneGroup>) -> Vec<CloneGroup> {
 
     for group in clone_groups {
         let all_contained = group.instances.iter().all(|inst| {
-            let fidx = path_to_idx[&inst.file];
+            // Defensive lookup: `path_to_idx` was populated from the same
+            // instances, so a miss should be impossible. Returning `false`
+            // here keeps the group rather than panicking the whole run if
+            // the invariant is ever violated (see issue #243).
+            let Some(&fidx) = path_to_idx.get(&inst.file) else {
+                tracing::error!(
+                    file = %inst.file.display(),
+                    "remove_line_subsets: instance file missing from path_to_idx; please report"
+                );
+                return false;
+            };
             let intervals = &index.slots[fidx];
             let idx = intervals.partition_point(|&(s, _)| s <= inst.start_line);
             idx > 0 && {
@@ -250,7 +262,9 @@ fn remove_line_subsets(clone_groups: Vec<CloneGroup>) -> Vec<CloneGroup> {
         }
 
         for inst in &group.instances {
-            let fidx = path_to_idx[&inst.file];
+            let Some(&fidx) = path_to_idx.get(&inst.file) else {
+                continue;
+            };
             index.insert(fidx, inst.start_line, inst.end_line);
         }
         kept.push(group);
@@ -273,28 +287,54 @@ pub(super) fn build_groups(
         return Vec::new();
     }
 
+    let raw_count = raw_groups.len();
+
     // Step 1: Token-level subset removal (cheap, before line calculation).
+    let t0 = std::time::Instant::now();
     let surviving = remove_token_subsets(raw_groups, files.len());
+    let token_subset_us = t0.elapsed().as_micros();
 
     // Step 2: Pre-compute line offset tables for O(log L) byte-to-line lookup.
+    let t0 = std::time::Instant::now();
     let line_tables = build_line_tables(files);
+    let line_tables_us = t0.elapsed().as_micros();
 
     // Step 3: Convert surviving raw groups into CloneGroups with filtering.
+    let t0 = std::time::Instant::now();
     let mut clone_groups: Vec<CloneGroup> = surviving
         .iter()
         .filter_map(|rg| build_clone_group(rg, files, &line_tables, min_lines, skip_local))
         .collect();
+    let build_clone_us = t0.elapsed().as_micros();
 
     // Step 4: Sort by token count desc, then instance count desc so that
     // N-way groups come before M-way (M<N) subsets at equal token counts.
+    let t0 = std::time::Instant::now();
     clone_groups.sort_by(|a, b| {
         b.token_count
             .cmp(&a.token_count)
             .then(b.instances.len().cmp(&a.instances.len()))
     });
+    let sort_us = t0.elapsed().as_micros();
 
     // Step 5: Line-level subset removal.
-    remove_line_subsets(clone_groups)
+    let t0 = std::time::Instant::now();
+    let kept = remove_line_subsets(clone_groups);
+    let line_subset_us = t0.elapsed().as_micros();
+
+    tracing::debug!(
+        raw_count,
+        surviving_count = surviving.len(),
+        kept_count = kept.len(),
+        token_subset_us,
+        line_tables_us,
+        build_clone_us,
+        sort_us,
+        line_subset_us,
+        "build_groups breakdown"
+    );
+
+    kept
 }
 
 #[cfg(test)]
@@ -420,12 +460,46 @@ mod tests {
     }
 
     #[test]
-    fn insert_multiple_merges_extend_only_previous() {
+    fn insert_overlap_with_left_neighbor_only() {
         let mut index = IntervalIndex::new(1);
         index.insert(0, 0, 5);
         index.insert(0, 10, 15);
-        index.insert(0, 3, 8); // overlaps [0,5), extends to 8 but doesn't merge with [10,15)
+        index.insert(0, 3, 8); // overlaps [0,5), does not reach [10,15)
         assert_eq!(index.slots[0], vec![(0, 8), (10, 15)]);
+    }
+
+    #[test]
+    fn insert_out_of_order_overlapping_merges() {
+        // Late insert lands BEFORE an existing interval and overlaps it; both
+        // halves must coalesce so a span crossing the merged region is
+        // detected as covered.
+        let mut index = IntervalIndex::new(1);
+        index.insert(0, 100, 150);
+        index.insert(0, 50, 110); // overlaps [100, 150) on the right
+        assert_eq!(index.slots[0], vec![(50, 150)]);
+        // [90, 130) crosses what used to be a fragmentation gap.
+        assert!(index.is_covered(0, 90, 40));
+    }
+
+    #[test]
+    fn insert_spans_three_existing_intervals() {
+        let mut index = IntervalIndex::new(1);
+        index.insert(0, 0, 5);
+        index.insert(0, 10, 15);
+        index.insert(0, 20, 25);
+        // Spans all three.
+        index.insert(0, 3, 22);
+        assert_eq!(index.slots[0], vec![(0, 25)]);
+    }
+
+    #[test]
+    fn insert_multiple_merges_coalesce_overlapping_neighbors() {
+        let mut index = IntervalIndex::new(1);
+        index.insert(0, 0, 5);
+        index.insert(0, 10, 15);
+        // Overlaps [0,5) on the left and abuts [10,15) on the right; coalesces both.
+        index.insert(0, 3, 10);
+        assert_eq!(index.slots[0], vec![(0, 15)]);
     }
 
     // ── remove_token_subsets ─────────────────────────────────────

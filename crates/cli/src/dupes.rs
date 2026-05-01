@@ -184,7 +184,18 @@ fn execute_dupes_inner(
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
     let files = pre_discovered.unwrap_or_else(|| fallow_core::discover::discover_files(&config));
-    let mut report = run_duplication_analysis(opts, &config, &files, &dupes_config);
+
+    let changed_files_from_since = resolve_changed_since(opts);
+    let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =
+        opts.changed_files.or(changed_files_from_since.as_ref());
+
+    let mut report = run_duplication_analysis(
+        opts,
+        &config,
+        &files,
+        &dupes_config,
+        effective_changed_files,
+    );
 
     // Handle trace (diagnostic mode — early return)
     if let Some(trace_spec) = opts.trace {
@@ -280,13 +291,12 @@ fn execute_dupes_inner(
         }
     }
 
-    // Filter to only changed files
-    if let Some(changed) = opts.changed_files {
+    // Filter to only changed files. Focused mode in `run_duplication_analysis`
+    // already prunes groups that don't touch a changed file when
+    // `effective_changed_files` is set; this pass is a safety net (no-op when
+    // the focused path was used).
+    if let Some(changed) = effective_changed_files {
         filter_by_changed_files(&mut report, changed, &config.root);
-    } else if let Some(git_ref) = opts.changed_since
-        && let Some(changed) = get_changed_files(opts.root, git_ref)
-    {
-        filter_by_changed_files(&mut report, &changed, &config.root);
     }
 
     // Workspace scoping (either --workspace or --changed-workspaces).
@@ -332,13 +342,31 @@ fn execute_dupes_inner(
     })
 }
 
+/// Resolve `--changed-since` to a concrete file set up front so the focused
+/// fast path engages (shingle prefilter + extraction-time interval pruning)
+/// instead of a full-corpus scan followed by a redundant post-filter.
+///
+/// `opts.changed_files` is set by the audit driver; the standalone dupes CLI
+/// only sets `opts.changed_since`. Returns `None` when neither apply or when
+/// the git lookup fails (caller falls back to the full-corpus path).
+fn resolve_changed_since(
+    opts: &DupesOptions<'_>,
+) -> Option<rustc_hash::FxHashSet<std::path::PathBuf>> {
+    if opts.changed_files.is_some() {
+        return None;
+    }
+    let git_ref = opts.changed_since?;
+    get_changed_files(opts.root, git_ref)
+}
+
 fn run_duplication_analysis(
     opts: &DupesOptions<'_>,
     config: &ResolvedConfig,
     files: &[fallow_types::discover::DiscoveredFile],
     dupes_config: &fallow_config::DuplicatesConfig,
+    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
 ) -> DuplicationReport {
-    if let Some(changed_files) = opts.changed_files {
+    if let Some(changed_files) = changed_files {
         if opts.no_cache {
             fallow_core::duplicates::find_duplicates_touching_files(
                 &config.root,
