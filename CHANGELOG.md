@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.61.0] - 2026-05-01
+
+### Added
+
+- **GraphQL document `#import` edges follow into the module graph.** `.graphql` and `.gql` files are now discovered as source files, and lines matching `#import "./fragment.graphql"` (or `# import '../shared/fragment.gql'`) emit `SideEffect` imports so fragment and schema documents reachable only through GraphQL import comments stay connected. Only relative string specifiers (`./`, `../`) are extracted; package-style imports are left to the resolver. Extensionless relative imports probe `.graphql` and `.gql` automatically. Thanks [@lsbyerley](https://github.com/lsbyerley) for the report. (Closes [#250](https://github.com/fallow-rs/fallow/issues/250))
+- **Vitest `vi.mock()` credits the `__mocks__/` sibling.** `vi.mock('./services/api')` now synthesizes a dynamic namespace import of `./services/__mocks__/api`, crediting the auto-mock sibling file (and all of its exports) as used so vitest's `__mocks__/<file>` convention does not surface as `unused-file`. Handles string-literal sources, expressionless template literals, and the `vi.mock(import('./api'))` argument form. Path-alias prefixes (`@/src/...`) are preserved so the importer's tsconfig aliases resolve the synthetic specifier. Bare-package mocks paired with a project-root `__mocks__/<pkg>.ts` and Jest's `jest.mock(...)` are intentionally out of scope. Thanks [@boroth](https://github.com/boroth) for the report. (Closes [#251](https://github.com/fallow-rs/fallow/issues/251))
+
+### Fixed
+
+- **Playwright POM fixture members consumed only through typed `base.extend<T>(...)` definitions are now credited.** Methods on a Page Object Model class that are referenced exclusively from a Playwright `test('name', async ({ adminPage }) => { adminPage.method() })` callback no longer surface as `unused-class-members`. Fixture definitions accept a named type alias (`type MyFixtures = { adminPage: AdminPage }`), an inline type literal, or any intersection / parenthesized form thereof; the analyzer correlates each typed fixture with the matching callback-side member access and credits the method on the defining POM class. The `base.extend` callee is gated against `@playwright/test`-named imports so the same identifier from any other module is intentionally ignored. Thanks [@vethman](https://github.com/vethman) for the report. (Closes [#246](https://github.com/fallow-rs/fallow/issues/246))
+
 ## [2.60.0] - 2026-05-01
 
 ### Added
@@ -1907,7 +1918,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.60.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.61.0...HEAD
+[2.61.0]: https://github.com/fallow-rs/fallow/compare/v2.60.0...v2.61.0
 [2.60.0]: https://github.com/fallow-rs/fallow/compare/v2.59.0...v2.60.0
 [2.59.0]: https://github.com/fallow-rs/fallow/compare/v2.58.0...v2.59.0
 [2.58.0]: https://github.com/fallow-rs/fallow/compare/v2.57.0...v2.58.0
