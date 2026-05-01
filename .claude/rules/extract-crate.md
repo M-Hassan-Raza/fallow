@@ -15,6 +15,7 @@ Key modules:
 - `mdx.rs` — MDX import/export extraction with multi-line brace tracking
 - `css.rs` — CSS/SCSS directive extraction (`@import`, `@use`, `@forward`, Tailwind `@plugin`, `@apply`, `@tailwind`) and CSS Module class name extraction (`.module.css`/`.module.scss` → named exports)
 - `html.rs` — HTML asset reference extraction (`<script src>`, `<link rel="stylesheet" href>`, `<link rel="modulepreload" href>` → `SideEffect` imports). Regex-based, comment-stripped.
+- `graphql.rs` — GraphQL document `#import "./fragment.graphql"` / `# import '../fragment.gql'` extraction for relative string specifiers. Emits `SideEffect` imports so document-only fragment/schema edges participate in reachability.
 - `parse.rs` — File type dispatcher. Runs `oxc_semantic` after parsing to detect unused import bindings (imports where the binding is never read in the file).
 - `cache.rs` — Incremental bitcode cache with xxh3 hashing. Unchanged files skip parsing and load from cache. Pruned of stale entries on each run.
 - `complexity.rs` — Per-function cyclomatic/cognitive complexity via single-pass `ComplexityVisitor`

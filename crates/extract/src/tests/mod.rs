@@ -1,5 +1,6 @@
 mod astro;
 mod css;
+mod graphql;
 mod js_ts;
 mod mdx;
 mod regex_compile;

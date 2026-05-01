@@ -78,7 +78,7 @@ impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
 
 pub const SOURCE_EXTENSIONS: &[&str] = &[
     "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro", "mdx", "css",
-    "scss", "html",
+    "scss", "html", "graphql", "gql",
 ];
 
 /// Glob patterns for test/dev/story files excluded in production mode.
@@ -293,6 +293,12 @@ mod tests {
     #[test]
     fn source_extensions_include_html() {
         assert!(SOURCE_EXTENSIONS.contains(&"html"));
+    }
+
+    #[test]
+    fn source_extensions_include_graphql_documents() {
+        assert!(SOURCE_EXTENSIONS.contains(&"graphql"));
+        assert!(SOURCE_EXTENSIONS.contains(&"gql"));
     }
 
     // PRODUCTION_EXCLUDE_PATTERNS tests — verify actual glob matching, not just string contains

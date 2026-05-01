@@ -36,6 +36,8 @@ pub(super) fn build_extensions(active_plugins: &[String]) -> Vec<String> {
         ".mdx".into(),
         ".css".into(),
         ".scss".into(),
+        ".graphql".into(),
+        ".gql".into(),
     ];
 
     if has_react_native_plugin(active_plugins) {

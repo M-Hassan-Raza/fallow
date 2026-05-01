@@ -10,6 +10,7 @@ use crate::ExportInfo;
 use crate::ModuleInfo;
 use crate::astro::{is_astro_file, parse_astro_to_module};
 use crate::css::{is_css_file, parse_css_to_module};
+use crate::graphql::{is_graphql_file, parse_graphql_to_module};
 use crate::html::{is_html_file, parse_html_to_module_with_complexity};
 use crate::mdx::{is_mdx_file, parse_mdx_to_module};
 use crate::sfc::{is_sfc_file, parse_sfc_to_module};
@@ -41,6 +42,9 @@ pub fn parse_source_to_module(
     }
     if is_css_file(path) {
         return parse_css_to_module(file_id, path, source, content_hash);
+    }
+    if is_graphql_file(path) {
+        return parse_graphql_to_module(file_id, source, content_hash);
     }
     if is_html_file(path) {
         return parse_html_to_module_with_complexity(
