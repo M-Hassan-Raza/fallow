@@ -591,11 +591,20 @@ jobs:
           pnpm package
 
       - name: Publish to VS Code Marketplace
+        # continue-on-error so a transient failure here does not skip Open VSX
+        # publish below. On a `gh run rerun --failed`, vsce will exit non-zero
+        # with version-exists, but the next step still runs.
+        continue-on-error: true
         run: cd editors/vscode && pnpm exec vsce publish --no-dependencies
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
 
       - name: Publish to Open VSX (Cursor, VSCodium)
+        # continue-on-error so a transient 502 from openvsx.org does not block
+        # an isolated re-run from succeeding. Without this, `gh run rerun
+        # --failed` re-runs the entire job, vsce publish then fails with
+        # version-exists, and Open VSX never gets retried.
+        continue-on-error: true
         run: cd editors/vscode && pnpm exec ovsx publish --no-dependencies
         env:
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
