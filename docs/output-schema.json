@@ -58,6 +58,10 @@
           "description": "Short SHA of HEAD (omitted if git unavailable)"
         },
         "elapsed_ms": { "$ref": "#/definitions/ElapsedMs" },
+        "base_snapshot_skipped": {
+          "type": "boolean",
+          "description": "Only emitted when --performance is set. true means audit reused the current run's keys as the base snapshot because every changed file was either a non-behavioral doc or token-equivalent at the base ref (the docs-only-diff fast path); false means the regular base worktree analysis ran."
+        },
         "summary": {
           "type": "object",
           "properties": {

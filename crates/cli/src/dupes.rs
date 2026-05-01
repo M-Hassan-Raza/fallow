@@ -49,6 +49,7 @@ pub struct DupesOptions<'a> {
     pub production_override: Option<bool>,
     pub trace: Option<&'a str>,
     pub changed_since: Option<&'a str>,
+    pub changed_files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub explain: bool,
@@ -95,6 +96,8 @@ fn build_dupes_config(
         cross_language: opts.cross_language || toml_dupes.cross_language,
         ignore_imports: opts.ignore_imports || toml_dupes.ignore_imports,
         normalization: toml_dupes.normalization.clone(),
+        min_corpus_size_for_shingle_filter: toml_dupes.min_corpus_size_for_shingle_filter,
+        min_corpus_size_for_token_cache: toml_dupes.min_corpus_size_for_token_cache,
     }
 }
 
@@ -181,7 +184,7 @@ fn execute_dupes_inner(
 
     let dupes_config = build_dupes_config(opts, &config.duplicates);
     let files = pre_discovered.unwrap_or_else(|| fallow_core::discover::discover_files(&config));
-    let mut report = fallow_core::duplicates::find_duplicates(&config.root, &files, &dupes_config);
+    let mut report = run_duplication_analysis(opts, &config, &files, &dupes_config);
 
     // Handle trace (diagnostic mode — early return)
     if let Some(trace_spec) = opts.trace {
@@ -278,7 +281,9 @@ fn execute_dupes_inner(
     }
 
     // Filter to only changed files
-    if let Some(git_ref) = opts.changed_since
+    if let Some(changed) = opts.changed_files {
+        filter_by_changed_files(&mut report, changed, &config.root);
+    } else if let Some(git_ref) = opts.changed_since
         && let Some(changed) = get_changed_files(opts.root, git_ref)
     {
         filter_by_changed_files(&mut report, &changed, &config.root);
@@ -325,6 +330,41 @@ fn execute_dupes_inner(
         elapsed,
         threshold: opts.threshold,
     })
+}
+
+fn run_duplication_analysis(
+    opts: &DupesOptions<'_>,
+    config: &ResolvedConfig,
+    files: &[fallow_types::discover::DiscoveredFile],
+    dupes_config: &fallow_config::DuplicatesConfig,
+) -> DuplicationReport {
+    if let Some(changed_files) = opts.changed_files {
+        if opts.no_cache {
+            fallow_core::duplicates::find_duplicates_touching_files(
+                &config.root,
+                files,
+                dupes_config,
+                changed_files,
+            )
+        } else {
+            fallow_core::duplicates::find_duplicates_touching_files_cached(
+                &config.root,
+                files,
+                dupes_config,
+                changed_files,
+                &config.cache_dir,
+            )
+        }
+    } else if opts.no_cache {
+        fallow_core::duplicates::find_duplicates(&config.root, files, dupes_config)
+    } else {
+        fallow_core::duplicates::find_duplicates_cached(
+            &config.root,
+            files,
+            dupes_config,
+            &config.cache_dir,
+        )
+    }
 }
 
 /// Print duplication results and return appropriate exit code.
@@ -487,6 +527,7 @@ mod tests {
             production_override: None,
             trace: None,
             changed_since: None,
+            changed_files: None,
             workspace: None,
             changed_workspaces: None,
             explain: false,

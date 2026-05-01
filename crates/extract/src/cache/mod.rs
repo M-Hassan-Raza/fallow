@@ -15,5 +15,5 @@ pub use conversion::{cached_to_module, module_to_cached};
 pub use store::CacheStore;
 pub use types::{
     CachedDynamicImport, CachedDynamicImportPattern, CachedExport, CachedImport, CachedMember,
-    CachedModule, CachedReExport, CachedRequireCall, CachedSuppression,
+    CachedModule, CachedReExport, CachedRequireCall, CachedSuppression, DUPES_CACHE_VERSION,
 };

@@ -54,6 +54,7 @@ impl CacheStore {
     pub fn save(&self, cache_dir: &Path) -> Result<(), String> {
         std::fs::create_dir_all(cache_dir)
             .map_err(|e| format!("Failed to create cache dir: {e}"))?;
+        write_cache_gitignore(cache_dir)?;
         let cache_file = cache_dir.join("cache.bin");
         let data = bitcode::encode(self);
         std::fs::write(&cache_file, data).map_err(|e| format!("Failed to write cache: {e}"))?;
@@ -132,6 +133,11 @@ impl CacheStore {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+fn write_cache_gitignore(cache_dir: &Path) -> Result<(), String> {
+    std::fs::write(cache_dir.join(".gitignore"), "*\n")
+        .map_err(|e| format!("Failed to write cache .gitignore: {e}"))
 }
 
 impl Default for CacheStore {

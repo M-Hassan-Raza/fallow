@@ -757,14 +757,14 @@ fn make_file_data(path: &str, source: &str, num_tokens: usize) -> FileData {
 
 #[test]
 fn extraction_empty_sa() {
-    let groups = extraction::extract_clone_groups(&[], &[], &[], &[], 3, &[]);
+    let groups = extraction::extract_clone_groups(&[], &[], &[], &[], 3, &[], None);
     assert!(groups.is_empty());
 }
 
 #[test]
 fn extraction_single_suffix_no_groups() {
     // Only one suffix -> cannot form a clone group.
-    let groups = extraction::extract_clone_groups(&[0], &[0], &[0], &[0], 1, &[]);
+    let groups = extraction::extract_clone_groups(&[0], &[0], &[0], &[0], 1, &[], None);
     assert!(groups.is_empty());
 }
 
@@ -787,6 +787,7 @@ fn extraction_below_min_tokens_no_groups() {
         &file_offsets,
         10, // min_tokens > file length
         &files,
+        None,
     );
     assert!(groups.is_empty());
 }
@@ -805,7 +806,7 @@ fn extraction_skips_sentinel_positions() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files);
+        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         for &(fid, _offset) in &group.instances {
@@ -831,7 +832,7 @@ fn extraction_produces_valid_offsets() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files);
+        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         for &(fid, offset) in &group.instances {
@@ -863,7 +864,7 @@ fn extraction_removes_overlapping_same_file() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files);
+        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     // Verify no two instances in the same file overlap.
     for group in &groups {
@@ -900,7 +901,7 @@ fn extraction_at_least_two_instances() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files);
+        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
 
     for group in &groups {
         assert!(
@@ -1284,7 +1285,7 @@ fn pipeline_rank_concat_sa_lcp_roundtrip() {
 
     // Extract groups with min_tokens=3. The shared [10,20,30] should appear.
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 3, &files);
+        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 3, &files, None);
     assert!(
         !groups.is_empty(),
         "Should find clone group for shared [10,20,30]"
@@ -1317,7 +1318,7 @@ fn pipeline_no_false_positives_with_different_files() {
     let lcp_arr = lcp::build_lcp(&text, &sa);
 
     let groups =
-        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files);
+        extraction::extract_clone_groups(&sa, &lcp_arr, &file_of, &file_offsets, 2, &files, None);
     assert!(
         groups.is_empty(),
         "Completely different files should produce no clone groups"

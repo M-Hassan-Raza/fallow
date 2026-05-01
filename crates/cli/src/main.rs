@@ -2022,6 +2022,7 @@ fn dispatch_subcommand(
                 production_override: Some(production),
                 trace: trace.as_deref(),
                 changed_since: cli.changed_since.as_deref(),
+                changed_files: None,
                 workspace: cli.workspace.as_deref(),
                 changed_workspaces: cli.changed_workspaces.as_deref(),
                 explain: cli.explain,

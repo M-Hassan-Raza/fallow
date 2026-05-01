@@ -23,6 +23,7 @@ pub(super) fn extract_clone_groups(
     file_offsets: &[usize],
     min_tokens: usize,
     files: &[FileData],
+    focus_file_ids: Option<&[bool]>,
 ) -> Vec<RawGroup> {
     let n = sa.len();
     if n < 2 {
@@ -33,6 +34,7 @@ pub(super) fn extract_clone_groups(
     // Each stack entry: (lcp_value, start_index_in_sa).
     let mut stack: Vec<(usize, usize)> = Vec::new();
     let mut groups: Vec<RawGroup> = Vec::new();
+    let focus_prefix = focus_file_ids.map(|ids| build_focus_prefix(sa, file_of, ids));
 
     #[expect(
         clippy::needless_range_loop,
@@ -54,6 +56,11 @@ pub(super) fn extract_clone_groups(
                 // length `top_lcp`.
                 let interval_begin = start - 1;
                 let interval_end = i; // exclusive
+                if let Some(prefix) = focus_prefix.as_deref()
+                    && !interval_has_focus(prefix, interval_begin, interval_end)
+                {
+                    continue;
+                }
 
                 if let Some(group) = build_raw_group(
                     sa,
@@ -77,6 +84,26 @@ pub(super) fn extract_clone_groups(
     groups
 }
 
+fn build_focus_prefix(sa: &[usize], file_of: &[usize], focus_file_ids: &[bool]) -> Vec<usize> {
+    let mut prefix = Vec::with_capacity(sa.len() + 1);
+    prefix.push(0);
+    for &pos in sa {
+        let focused = file_of
+            .get(pos)
+            .copied()
+            .filter(|&file_id| file_id != usize::MAX)
+            .and_then(|file_id| focus_file_ids.get(file_id))
+            .copied()
+            .unwrap_or(false);
+        prefix.push(prefix.last().copied().unwrap_or(0) + usize::from(focused));
+    }
+    prefix
+}
+
+fn interval_has_focus(focus_prefix: &[usize], begin: usize, end: usize) -> bool {
+    focus_prefix[end] > focus_prefix[begin]
+}
+
 /// Build a `RawGroup` from an LCP interval, filtering to non-overlapping
 /// instances.
 fn build_raw_group(
@@ -84,13 +111,13 @@ fn build_raw_group(
     file_of: &[usize],
     file_offsets: &[usize],
     files: &[FileData],
-    begin: usize,
-    end: usize,
+    interval_begin: usize,
+    interval_end: usize,
     length: usize,
 ) -> Option<RawGroup> {
-    let mut instances: Vec<(usize, usize)> = Vec::new();
+    let mut instances: Vec<(usize, usize)> = Vec::with_capacity(interval_end - interval_begin);
 
-    for &pos in &sa[begin..end] {
+    for &pos in &sa[interval_begin..interval_end] {
         let fid = file_of[pos];
         if fid == usize::MAX {
             continue; // sentinel position

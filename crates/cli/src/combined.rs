@@ -666,6 +666,7 @@ fn run_combined_dupes(
         production_override: opts.production_dupes,
         trace: None,
         changed_since: opts.changed_since,
+        changed_files: None,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
         explain: opts.explain,

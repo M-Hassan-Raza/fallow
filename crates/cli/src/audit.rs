@@ -58,10 +58,12 @@ pub struct AuditResult {
     pub summary: AuditSummary,
     pub attribution: AuditAttribution,
     base_snapshot: Option<AuditKeySnapshot>,
+    pub base_snapshot_skipped: bool,
     pub changed_files_count: usize,
     pub base_ref: String,
     pub head_sha: Option<String>,
     pub output: OutputFormat,
+    pub performance: bool,
     pub check: Option<CheckResult>,
     pub dupes: Option<DupesResult>,
     pub health: Option<HealthResult>,
@@ -364,6 +366,7 @@ fn count_introduced(keys: &FxHashSet<String>, base: Option<&FxHashSet<String>>) 
 fn compute_base_snapshot(
     opts: &AuditOptions<'_>,
     base_ref: &str,
+    changed_files: &FxHashSet<PathBuf>,
 ) -> Result<AuditKeySnapshot, ExitCode> {
     let Some(worktree) = BaseWorktree::create(opts.root, base_ref) else {
         return Err(emit_error(
@@ -406,8 +409,9 @@ fn compute_base_snapshot(
         gate: AuditGate::All,
     };
 
+    let base_changed_files = remap_focus_files(changed_files, opts.root, worktree.path());
     let mut check = run_audit_check(&base_opts, None, false)?;
-    let dupes = run_audit_dupes(&base_opts, None, None)?;
+    let dupes = run_audit_dupes(&base_opts, None, base_changed_files.as_ref(), None)?;
     let health = run_audit_health(&base_opts, None, None)?;
     if let Some(ref mut check) = check {
         check.shared_parse = None;
@@ -424,6 +428,192 @@ fn compute_base_snapshot(
             dupes_keys(&r.report, &r.config.root)
         }),
     })
+}
+
+fn current_keys_as_base_keys(
+    check: Option<&CheckResult>,
+    dupes: Option<&DupesResult>,
+    health: Option<&HealthResult>,
+) -> AuditKeySnapshot {
+    AuditKeySnapshot {
+        dead_code: check.as_ref().map_or_else(FxHashSet::default, |r| {
+            dead_code_keys(&r.results, &r.config.root)
+        }),
+        health: health.as_ref().map_or_else(FxHashSet::default, |r| {
+            health_keys(&r.report, &r.config.root)
+        }),
+        dupes: dupes.as_ref().map_or_else(FxHashSet::default, |r| {
+            dupes_keys(&r.report, &r.config.root)
+        }),
+    }
+}
+
+fn can_reuse_current_as_base(
+    opts: &AuditOptions<'_>,
+    base_ref: &str,
+    changed_files: &FxHashSet<PathBuf>,
+) -> bool {
+    let Some(git_root) = git_toplevel(opts.root) else {
+        return false;
+    };
+    // `try_get_changed_files` joins the canonical git toplevel onto each
+    // relative diff entry, so changed-file paths land canonical even when
+    // `opts.root` itself was passed un-canonical (typical in tests). Match
+    // against both forms so the cache-artifact check works in either case.
+    let cache_dir = opts.root.join(".fallow");
+    let canonical_cache_dir = cache_dir.canonicalize().ok();
+    changed_files.iter().all(|path| {
+        if is_fallow_cache_artifact(path, &cache_dir, canonical_cache_dir.as_deref()) {
+            return true;
+        }
+        if !is_analysis_input(path) {
+            return is_non_behavioral_doc(path);
+        }
+        let Ok(current) = std::fs::read_to_string(path) else {
+            return false;
+        };
+        let Some(relative) = path.strip_prefix(&git_root).ok() else {
+            return false;
+        };
+        let Some(base) = git_show_file(opts.root, base_ref, relative) else {
+            return false;
+        };
+        if current == base {
+            return true;
+        }
+        js_ts_tokens_equivalent(path, &current, &base)
+    })
+}
+
+// `cache_dir` is the project-local cache root (`<opts.root>/.fallow`).
+// Anything under it is a fallow internal artifact (token cache, parse cache,
+// gitignore stubs) with no semantic effect on analysis, so a "changed" entry
+// inside it must not block the audit-gate base-snapshot fast path. We accept
+// both the as-given and the canonicalized cache_dir because changed-file
+// paths from `try_get_changed_files` are joined onto the canonical git
+// toplevel while `opts.root` may be un-canonical in tests.
+fn is_fallow_cache_artifact(
+    path: &Path,
+    cache_dir: &Path,
+    canonical_cache_dir: Option<&Path>,
+) -> bool {
+    path.starts_with(cache_dir)
+        || canonical_cache_dir.is_some_and(|canonical| path.starts_with(canonical))
+}
+
+fn git_toplevel(root: &Path) -> Option<PathBuf> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--show-toplevel"])
+        .current_dir(root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    Some(path.canonicalize().unwrap_or(path))
+}
+
+fn git_show_file(root: &Path, base_ref: &str, relative: &Path) -> Option<String> {
+    let spec = format!(
+        "{}:{}",
+        base_ref,
+        relative.to_string_lossy().replace('\\', "/")
+    );
+    let output = Command::new("git")
+        .args(["show", "--end-of-options", &spec])
+        .current_dir(root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .ok()?;
+    output
+        .status
+        .success()
+        .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn is_analysis_input(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some(
+            "js" | "jsx"
+                | "ts"
+                | "tsx"
+                | "mjs"
+                | "mts"
+                | "cjs"
+                | "cts"
+                | "vue"
+                | "svelte"
+                | "astro"
+                | "mdx"
+                | "css"
+                | "scss"
+        )
+    )
+}
+
+fn is_non_behavioral_doc(path: &Path) -> bool {
+    matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("md" | "markdown" | "txt" | "rst" | "adoc")
+    )
+}
+
+fn js_ts_tokens_equivalent(path: &Path, current: &str, base: &str) -> bool {
+    if current.contains("fallow-ignore") || base.contains("fallow-ignore") {
+        return false;
+    }
+    if !matches!(
+        path.extension().and_then(|ext| ext.to_str()),
+        Some("js" | "jsx" | "ts" | "tsx" | "mjs" | "mts" | "cjs" | "cts")
+    ) {
+        return false;
+    }
+    let current_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, current, false);
+    let base_tokens = fallow_core::duplicates::tokenize::tokenize_file(path, base, false);
+    current_tokens
+        .tokens
+        .iter()
+        .map(|token| &token.kind)
+        .eq(base_tokens.tokens.iter().map(|token| &token.kind))
+}
+
+// Remap focused-file paths from the current working tree into the base
+// worktree, used so the duplication detector can scope clone-group
+// extraction at base to the same files we focus on at HEAD.
+//
+// Path matching at base must align with `discover_files`, which walks
+// `config.root` un-canonicalized and emits paths under that exact prefix.
+// Canonicalizing here would silently shift the prefix on systems where the
+// tempdir path traverses a symlink (`/tmp` → `/private/tmp`, `/var` →
+// `/private/var` on macOS); the focus set would then miss every discovered
+// file at base and disable the optimization. Use the prefixes as-is.
+//
+// `opts.root` is already canonical (from `validate_root`), and
+// `changed_files` was joined onto the canonical git toplevel, so
+// `strip_prefix(from_root)` succeeds for paths inside `opts.root`. Files
+// outside `opts.root` (e.g., a sibling workspace touched in the same
+// commit) are skipped rather than collapsing the whole set, so the focus
+// optimization stays active for the in-scope subset.
+fn remap_focus_files(
+    files: &FxHashSet<PathBuf>,
+    from_root: &Path,
+    to_root: &Path,
+) -> Option<FxHashSet<PathBuf>> {
+    let mut remapped = FxHashSet::default();
+    for file in files {
+        if let Ok(relative) = file.strip_prefix(from_root) {
+            remapped.insert(to_root.join(relative));
+        }
+    }
+    if remapped.is_empty() {
+        return None;
+    }
+    Some(remapped)
 }
 
 struct BaseWorktree {
@@ -1272,7 +1462,7 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     } else {
         None
     };
-    let dupes_result = run_audit_dupes(opts, changed_since, dupes_files)?;
+    let dupes_result = run_audit_dupes(opts, changed_since, Some(&changed_files), dupes_files)?;
     let shared_parse = if share_dead_code_parse_with_health {
         check_result.as_mut().and_then(|r| r.shared_parse.take())
     } else {
@@ -1280,10 +1470,24 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     };
     let health_result = run_audit_health(opts, changed_since, shared_parse)?;
 
-    let base_snapshot = if matches!(opts.gate, AuditGate::NewOnly) {
-        Some(compute_base_snapshot(opts, &base_ref)?)
+    let (base_snapshot, base_snapshot_skipped) = if matches!(opts.gate, AuditGate::NewOnly) {
+        if can_reuse_current_as_base(opts, &base_ref, &changed_files) {
+            (
+                Some(current_keys_as_base_keys(
+                    check_result.as_ref(),
+                    dupes_result.as_ref(),
+                    health_result.as_ref(),
+                )),
+                true,
+            )
+        } else {
+            (
+                Some(compute_base_snapshot(opts, &base_ref, &changed_files)?),
+                false,
+            )
+        }
     } else {
-        None
+        (None, false)
     };
     let attribution = compute_audit_attribution(
         check_result.as_ref(),
@@ -1317,10 +1521,12 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
         summary,
         attribution,
         base_snapshot,
+        base_snapshot_skipped,
         changed_files_count,
         base_ref,
         head_sha: get_head_sha(opts.root),
         output: opts.output,
+        performance: opts.performance,
         check: check_result,
         dupes: dupes_result,
         health: health_result,
@@ -1367,10 +1573,12 @@ fn empty_audit_result(base_ref: String, opts: &AuditOptions<'_>, elapsed: Durati
             ..AuditAttribution::default()
         },
         base_snapshot: None,
+        base_snapshot_skipped: false,
         changed_files_count: 0,
         base_ref,
         head_sha: get_head_sha(opts.root),
         output: opts.output,
+        performance: opts.performance,
         check: None,
         dupes: None,
         health: None,
@@ -1439,6 +1647,7 @@ fn run_audit_check<'a>(
 fn run_audit_dupes<'a>(
     opts: &'a AuditOptions<'a>,
     changed_since: Option<&'a str>,
+    changed_files: Option<&'a FxHashSet<PathBuf>>,
     pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
 ) -> Result<Option<DupesResult>, ExitCode> {
     let dupes_cfg = match crate::load_config_for_analysis(
@@ -1476,6 +1685,7 @@ fn run_audit_dupes<'a>(
         production_override: opts.production_dupes,
         trace: None,
         changed_since,
+        changed_files,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
         explain: opts.explain,
@@ -1770,6 +1980,12 @@ fn print_audit_status_line(result: &AuditResult) {
             );
         }
     }
+    if result.performance {
+        eprintln!(
+            "  {}",
+            format!("base_snapshot_skipped: {}", result.base_snapshot_skipped).dimmed()
+        );
+    }
 }
 
 // ── JSON format ──────────────────────────────────────────────────
@@ -1808,6 +2024,12 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
         "elapsed_ms".into(),
         serde_json::Value::Number(serde_json::Number::from(result.elapsed.as_millis() as u64)),
     );
+    if result.performance {
+        obj.insert(
+            "base_snapshot_skipped".into(),
+            serde_json::Value::Bool(result.base_snapshot_skipped),
+        );
+    }
 
     // Summary
     if let Ok(summary_val) = serde_json::to_value(&result.summary) {
@@ -2088,6 +2310,95 @@ mod tests {
     }
 
     #[test]
+    fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-docs-only","main":"src/index.ts"}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"duplicates":{"minTokens":5,"minLines":2,"mode":"strict"}}"#,
+        )
+        .expect("config should be written");
+        let duplicated = "export function same(input: number): number {\n  const doubled = input * 2;\n  const shifted = doubled + 1;\n  return shifted;\n}\n";
+        fs::write(root.join("src/index.ts"), duplicated).expect("index should be written");
+        fs::write(root.join("src/copy.ts"), duplicated).expect("copy should be written");
+        fs::write(root.join("README.md"), "before\n").expect("readme should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        fs::write(root.join("README.md"), "after\n").expect("readme should be modified");
+        fs::create_dir_all(root.join(".fallow/cache/dupes-tokens-v2"))
+            .expect("cache dir should be created");
+        fs::write(
+            root.join(".fallow/cache/dupes-tokens-v2/cache.bin"),
+            b"cache",
+        )
+        .expect("cache artifact should be written");
+
+        let before_worktrees = audit_worktree_names(root);
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            performance: true,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        assert_eq!(result.verdict, AuditVerdict::Pass);
+        assert_eq!(result.changed_files_count, 2);
+        assert!(result.base_snapshot_skipped);
+        assert!(result.base_snapshot.is_some());
+
+        let after_worktrees = audit_worktree_names(root);
+        assert_eq!(
+            before_worktrees, after_worktrees,
+            "base snapshot skip must not create a temporary base worktree"
+        );
+    }
+
+    fn audit_worktree_names(repo_root: &Path) -> Vec<String> {
+        let mut names: Vec<String> = list_audit_worktrees(repo_root)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|path| {
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .map(str::to_owned)
+            })
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
     fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
@@ -2222,5 +2533,267 @@ mod tests {
 
         let result = execute_audit(&opts).expect("audit should execute");
         assert!(result.dupes.is_some(), "dupes should still run");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remap_focus_files_does_not_canonicalize_through_symlinks() {
+        // Function-level contract: `remap_focus_files` must NOT canonicalize
+        // `to_root`. The base worktree path comes from `std::env::temp_dir()`
+        // un-canonicalized, and `discover_files` walks the worktree using that
+        // exact prefix; resolving symlinks here would silently shift the prefix
+        // on systems where the tempdir traverses one (`/tmp` -> `/private/tmp`,
+        // `/var` -> `/private/var` on macOS) and miss every discovered file at
+        // base. Pin the contract via a synthetic `from_root` and a real
+        // symlinked `to_root`; the matching end-to-end behavior is covered by
+        // `audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files`.
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let real = tmp.path().join("real");
+        let link = tmp.path().join("link");
+        fs::create_dir_all(&real).expect("real dir");
+        std::os::unix::fs::symlink(&real, &link).expect("symlink");
+        // Sanity: `link` and `link.canonicalize()` differ. If the OS canonicalized
+        // them to the same path, the test premise doesn't hold and the assertion
+        // below is meaningless.
+        let canonical = link.canonicalize().expect("canonicalize symlink");
+        assert_ne!(link, canonical, "symlink should not equal its target");
+
+        let from_root = PathBuf::from("/repo");
+        let mut focus = FxHashSet::default();
+        focus.insert(from_root.join("src/foo.ts"));
+
+        let remapped = remap_focus_files(&focus, &from_root, &link)
+            .expect("remap should succeed for in-prefix files");
+
+        let expected = link.join("src/foo.ts");
+        assert!(
+            remapped.contains(&expected),
+            "remapped paths must keep the un-canonical to_root prefix; got {remapped:?}, expected entry {expected:?}"
+        );
+    }
+
+    #[test]
+    fn remap_focus_files_skips_paths_outside_from_root() {
+        // A file outside `from_root` (e.g., a sibling workspace touched in the
+        // same diff) must not collapse the entire focus set. The optimization
+        // should stay active for the in-scope subset.
+        let from_root = PathBuf::from("/repo/apps/web");
+        let to_root = PathBuf::from("/wt/apps/web");
+        let mut focus = FxHashSet::default();
+        focus.insert(PathBuf::from("/repo/apps/web/src/in.ts"));
+        focus.insert(PathBuf::from("/repo/services/api/src/out.ts"));
+
+        let remapped =
+            remap_focus_files(&focus, &from_root, &to_root).expect("partial map should succeed");
+
+        assert_eq!(remapped.len(), 1);
+        assert!(remapped.contains(&PathBuf::from("/wt/apps/web/src/in.ts")));
+    }
+
+    #[test]
+    fn remap_focus_files_returns_none_when_no_paths_map() {
+        let from_root = PathBuf::from("/repo/apps/web");
+        let to_root = PathBuf::from("/wt/apps/web");
+        let mut focus = FxHashSet::default();
+        focus.insert(PathBuf::from("/elsewhere/foo.ts"));
+
+        let remapped = remap_focus_files(&focus, &from_root, &to_root);
+        assert!(
+            remapped.is_none(),
+            "remap should return None when no paths can be mapped, falling caller back to full corpus"
+        );
+    }
+
+    #[test]
+    fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
+        // Regression test for the dupe-focus optimization: when changed files
+        // contain duplicates that ALSO existed at base (HEAD~1), the audit gate
+        // must classify them as `inherited`, not `introduced`. The original
+        // implementation canonicalized `to_root` in `remap_focus_files`, which
+        // on macOS shifted the prefix from `/var/folders/...` to
+        // `/private/var/folders/...`. `discover_files` in the base worktree
+        // walked the un-canonical path, so set membership at base missed every
+        // remapped focus path. `find_duplicates_touching_files` returned 0
+        // groups at base, base_keys was empty, and every current finding
+        // misclassified as `introduced`.
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        // Mirror production: `validate_root` canonicalizes user-supplied roots
+        // before they reach `execute_audit`. This test exercises the *base
+        // worktree* side of the bug, where the worktree path comes from
+        // `std::env::temp_dir()` and is canonical-vs-un-canonical INDEPENDENT
+        // of what `opts.root` looks like. On macOS, `std::env::temp_dir()`
+        // returns `/var/folders/...` and `canonicalize` resolves it to
+        // `/private/var/folders/...`, so a buggy remap loses every focus path
+        // even when `opts.root` is already canonical.
+        let root_buf = tmp
+            .path()
+            .canonicalize()
+            .expect("temp root should canonicalize");
+        let root = root_buf.as_path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-newonly-inherit","main":"src/changed.ts"}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"duplicates":{"minTokens":10,"minLines":3,"mode":"strict"}}"#,
+        )
+        .expect("config should be written");
+
+        let dup_block = "export function processItems(input: number[]): number[] {\n  const doubled = input.map((value) => value * 2);\n  const filtered = doubled.filter((value) => value > 0);\n  const summed = filtered.reduce((acc, value) => acc + value, 0);\n  const shifted = summed + 10;\n  const scaled = shifted * 3;\n  const rounded = Math.round(scaled / 7);\n  return [rounded, scaled, summed];\n}\n";
+        fs::write(root.join("src/changed.ts"), dup_block).expect("changed should be written");
+        fs::write(root.join("src/peer.ts"), dup_block).expect("peer should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        // Append a comment-only line so the file is "changed" without altering
+        // the duplicated token sequence.
+        fs::write(
+            root.join("src/changed.ts"),
+            format!("{dup_block}// touched\n"),
+        )
+        .expect("changed file should be modified");
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "touch"],
+        );
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD~1"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        assert!(
+            result.base_snapshot_skipped,
+            "comment-only JS/TS diffs should reuse current keys as the base snapshot"
+        );
+        let dupes_report = &result.dupes.as_ref().expect("dupes should run").report;
+        assert!(
+            !dupes_report.clone_groups.is_empty(),
+            "current run should detect the pre-existing duplicate"
+        );
+        assert_eq!(
+            result.attribution.duplication_introduced, 0,
+            "pre-existing duplicate must not be classified as introduced; \
+             attribution = {:?}",
+            result.attribution
+        );
+        assert!(
+            result.attribution.duplication_inherited > 0,
+            "pre-existing duplicate must be classified as inherited; \
+             attribution = {:?}",
+            result.attribution
+        );
+    }
+
+    #[test]
+    fn audit_dupes_only_materializes_groups_touching_changed_files() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root_path = tmp
+            .path()
+            .canonicalize()
+            .expect("temp root should canonicalize");
+        let root = root_path.as_path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-dupes-focus","main":"src/changed.ts"}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"duplicates":{"minTokens":5,"minLines":2,"mode":"strict"}}"#,
+        )
+        .expect("config should be written");
+
+        let focused_code = "export function focused(input: number): number {\n  const doubled = input * 2;\n  const shifted = doubled + 10;\n  return shifted / 2;\n}\n";
+        let untouched_code = "export function untouched(input: string): string {\n  const lowered = input.toLowerCase();\n  const padded = lowered.padStart(10, \"x\");\n  return padded.slice(0, 8);\n}\n";
+        fs::write(root.join("src/changed.ts"), focused_code).expect("changed should be written");
+        fs::write(root.join("src/focused-copy.ts"), focused_code)
+            .expect("focused copy should be written");
+        fs::write(root.join("src/untouched-a.ts"), untouched_code)
+            .expect("untouched a should be written");
+        fs::write(root.join("src/untouched-b.ts"), untouched_code)
+            .expect("untouched b should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        fs::write(
+            root.join("src/changed.ts"),
+            format!("{focused_code}export const changedMarker = true;\n"),
+        )
+        .expect("changed file should be modified");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::All,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        let dupes = result.dupes.expect("dupes should run");
+        let changed_path = root.join("src/changed.ts");
+
+        assert!(
+            !dupes.report.clone_groups.is_empty(),
+            "changed file should still match unchanged duplicate code"
+        );
+        assert!(dupes.report.clone_groups.iter().all(|group| {
+            group
+                .instances
+                .iter()
+                .any(|instance| instance.file == changed_path)
+        }));
     }
 }

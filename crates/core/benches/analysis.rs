@@ -780,6 +780,38 @@ fn bench_dupe_detect_100x200_mixed(c: &mut Criterion) {
     });
 }
 
+fn bench_dupe_detect_100x200_mixed_focused(c: &mut Criterion) {
+    use fallow_core::duplicates::detect::CloneDetector;
+    use rustc_hash::FxHashSet;
+
+    let hashes: Vec<u64> = (1..=200).collect();
+    let data: DupeInput = (0..100)
+        .map(|i| {
+            let h = if i < 20 {
+                make_hashed_tokens(&hashes)
+            } else {
+                let base = (i * 10000) as u64;
+                let unique_hashes: Vec<u64> = (base..base + 200).collect();
+                make_hashed_tokens(&unique_hashes)
+            };
+            (
+                PathBuf::from(format!("dir{i}/file{i}.ts")),
+                h,
+                make_file_tokens_for(200),
+            )
+        })
+        .collect();
+    let focus: FxHashSet<PathBuf> = std::iter::once(PathBuf::from("dir0/file0.ts")).collect();
+
+    c.bench_function("dupe_detect_100x200_mixed_focused", |b| {
+        b.iter_batched(
+            || data.clone(),
+            |d| CloneDetector::new(30, 5, false).detect_touching_files(d, &focus),
+            criterion::BatchSize::SmallInput,
+        );
+    });
+}
+
 fn bench_dupe_suffix_array_only(c: &mut Criterion) {
     // Benchmark just the suffix array construction on a large input
     // to isolate its cost. We access it through the public detect() API.
@@ -811,6 +843,7 @@ criterion_group!(
     bench_dupe_detect_10x500,
     bench_dupe_detect_50x200_diverse,
     bench_dupe_detect_100x200_mixed,
+    bench_dupe_detect_100x200_mixed_focused,
     bench_dupe_suffix_array_only,
 );
 

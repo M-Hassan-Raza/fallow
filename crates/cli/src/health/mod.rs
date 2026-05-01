@@ -586,11 +586,20 @@ fn execute_health_inner(
     let t = Instant::now();
     if opts.score {
         let scoped_files = filter_files_to_paths(&files, &candidate_paths);
-        let dupes_report = fallow_core::duplicates::find_duplicates(
-            &config.root,
-            &scoped_files,
-            &config.duplicates,
-        );
+        let dupes_report = if opts.no_cache {
+            fallow_core::duplicates::find_duplicates(
+                &config.root,
+                &scoped_files,
+                &config.duplicates,
+            )
+        } else {
+            fallow_core::duplicates::find_duplicates_cached(
+                &config.root,
+                &scoped_files,
+                &config.duplicates,
+                &config.cache_dir,
+            )
+        };
         apply_duplication_metrics(&mut vital_signs, &mut counts, &dupes_report);
     }
     let duplication_ms = t.elapsed().as_secs_f64() * 1000.0;

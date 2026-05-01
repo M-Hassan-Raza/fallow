@@ -539,6 +539,10 @@ fn cache_save_and_load_roundtrip() {
     let loaded = loaded.unwrap();
     assert_eq!(loaded.len(), 1);
     assert!(loaded.get(Path::new("test.ts"), 42).is_some());
+    assert_eq!(
+        std::fs::read_to_string(dir.join(".gitignore")).unwrap(),
+        "*\n"
+    );
 
     let _ = std::fs::remove_dir_all(&dir);
 }

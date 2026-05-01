@@ -9,6 +9,10 @@ use crate::MemberKind;
 /// Cache version — bump when the cache format or cached extraction semantics change.
 pub(super) const CACHE_VERSION: u32 = 58;
 
+/// Duplication token cache version — bump when duplicate tokenization,
+/// normalization, or the on-disk token cache schema changes.
+pub const DUPES_CACHE_VERSION: u32 = 2;
+
 /// Maximum cache file size to deserialize (256 MB).
 pub(super) const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;
 

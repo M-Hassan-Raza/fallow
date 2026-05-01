@@ -3,6 +3,7 @@
 //! Contains the normalized token types (`TokenKind`, `KeywordType`, `OperatorType`,
 //! `PunctuationType`), the `SourceToken` wrapper, and `FileTokens` result struct.
 
+use bitcode::{Decode, Encode};
 use oxc_span::Span;
 
 /// A single token extracted from the AST with its source location.
@@ -15,7 +16,7 @@ pub struct SourceToken {
 }
 
 /// Normalized token types for clone detection.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum TokenKind {
     // Keywords
     Keyword(KeywordType),
@@ -35,7 +36,7 @@ pub enum TokenKind {
 }
 
 /// TypeScript/JavaScript keyword types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum KeywordType {
     Var,
     Let,
@@ -89,7 +90,7 @@ pub enum KeywordType {
 }
 
 /// Operator categories.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum OperatorType {
     Assign,
     Add,
@@ -144,7 +145,7 @@ pub enum OperatorType {
 }
 
 /// Punctuation / delimiter types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Encode, Decode)]
 pub enum PunctuationType {
     OpenParen,
     CloseParen,

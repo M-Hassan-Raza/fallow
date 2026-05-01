@@ -98,7 +98,9 @@
         "skipLocal": false,
         "crossLanguage": false,
         "ignoreImports": false,
-        "normalization": {}
+        "normalization": {},
+        "minCorpusSizeForShingleFilter": 1024,
+        "minCorpusSizeForTokenCache": 5000
       }
     },
     "health": {
@@ -610,6 +612,20 @@
           "description": "Fine-grained normalization overrides on top of the detection mode.",
           "$ref": "#/$defs/NormalizationConfig",
           "default": {}
+        },
+        "minCorpusSizeForShingleFilter": {
+          "description": "Minimum tokenized file count before focused duplicate analysis prefilters\nunchanged files with k-token shingles.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 1024
+        },
+        "minCorpusSizeForTokenCache": {
+          "description": "Minimum source file count before the persistent duplication token cache\nactivates. Below this threshold the cache load/save overhead exceeds the\ntokenize savings, so the cache stays disabled even when not running with\n`--no-cache`.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0,
+          "default": 5000
         }
       }
     },

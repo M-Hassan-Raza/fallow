@@ -18,6 +18,8 @@ mod tests;
 
 use std::path::PathBuf;
 
+use rustc_hash::FxHashSet;
+
 use super::normalize::HashedToken;
 use super::tokenize::FileTokens;
 use super::types::{DuplicationReport, DuplicationStats};
@@ -62,6 +64,28 @@ impl CloneDetector {
         &self,
         file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
     ) -> DuplicationReport {
+        self.detect_inner(file_data, None)
+    }
+
+    /// Run clone detection while only materializing groups that touch one of the
+    /// given files.
+    ///
+    /// All files still participate in matching, so focused files can be reported
+    /// as duplicated against unchanged files. Groups that only involve
+    /// non-focused files are dropped before expensive result building.
+    pub fn detect_touching_files(
+        &self,
+        file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
+        focus_files: &FxHashSet<PathBuf>,
+    ) -> DuplicationReport {
+        self.detect_inner(file_data, Some(focus_files))
+    }
+
+    fn detect_inner(
+        &self,
+        file_data: Vec<(PathBuf, Vec<HashedToken>, FileTokens)>,
+        focus_files: Option<&FxHashSet<PathBuf>>,
+    ) -> DuplicationReport {
         let _span = tracing::info_span!("clone_detect").entered();
 
         if file_data.is_empty() || self.min_tokens == 0 {
@@ -81,11 +105,20 @@ impl CloneDetector {
         let total_files = files.len();
         let total_lines: usize = files.iter().map(|f| f.file_tokens.line_count).sum();
         let total_tokens: usize = files.iter().map(|f| f.hashed_tokens.len()).sum();
+        let focus_file_ids = focus_files.map(|focus| {
+            files
+                .iter()
+                .map(|file| focus.contains(&file.path))
+                .collect::<Vec<_>>()
+        });
 
         tracing::debug!(
             total_files,
             total_tokens,
             total_lines,
+            focused_files = focus_file_ids
+                .as_ref()
+                .map_or(0, |ids| ids.iter().filter(|&&is_focus| is_focus).count()),
             "clone detection input"
         );
 
@@ -145,6 +178,7 @@ impl CloneDetector {
             &file_offsets,
             self.min_tokens,
             &files,
+            focus_file_ids.as_deref(),
         );
         let extract_time = t0.elapsed();
         tracing::debug!(

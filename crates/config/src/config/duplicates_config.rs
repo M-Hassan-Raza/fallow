@@ -13,6 +13,14 @@ const fn default_min_lines() -> usize {
     5
 }
 
+const fn default_min_corpus_size_for_shingle_filter() -> usize {
+    1024
+}
+
+const fn default_min_corpus_size_for_token_cache() -> usize {
+    5_000
+}
+
 /// Configuration for code duplication detection.
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -66,6 +74,18 @@ pub struct DuplicatesConfig {
     /// Fine-grained normalization overrides on top of the detection mode.
     #[serde(default)]
     pub normalization: NormalizationConfig,
+
+    /// Minimum tokenized file count before focused duplicate analysis prefilters
+    /// unchanged files with k-token shingles.
+    #[serde(default = "default_min_corpus_size_for_shingle_filter")]
+    pub min_corpus_size_for_shingle_filter: usize,
+
+    /// Minimum source file count before the persistent duplication token cache
+    /// activates. Below this threshold the cache load/save overhead exceeds the
+    /// tokenize savings, so the cache stays disabled even when not running with
+    /// `--no-cache`.
+    #[serde(default = "default_min_corpus_size_for_token_cache")]
+    pub min_corpus_size_for_token_cache: usize,
 }
 
 impl Default for DuplicatesConfig {
@@ -81,6 +101,8 @@ impl Default for DuplicatesConfig {
             cross_language: false,
             ignore_imports: false,
             normalization: NormalizationConfig::default(),
+            min_corpus_size_for_shingle_filter: default_min_corpus_size_for_shingle_filter(),
+            min_corpus_size_for_token_cache: default_min_corpus_size_for_token_cache(),
         }
     }
 }
@@ -199,6 +221,8 @@ mod tests {
         assert!(!config.skip_local);
         assert!(!config.cross_language);
         assert!(!config.ignore_imports);
+        assert_eq!(config.min_corpus_size_for_shingle_filter, 1024);
+        assert_eq!(config.min_corpus_size_for_token_cache, 5_000);
     }
 
     // ── DetectionMode FromStr ────────────────────────────────────────
@@ -522,6 +546,8 @@ ignoreNumericValues = false
                 ignore_string_values: None,
                 ignore_numeric_values: Some(false),
             },
+            min_corpus_size_for_shingle_filter: 2048,
+            min_corpus_size_for_token_cache: 8_000,
         };
         let json = serde_json::to_string(&config).unwrap();
         let restored: DuplicatesConfig = serde_json::from_str(&json).unwrap();
@@ -532,6 +558,8 @@ ignoreNumericValues = false
         assert!((restored.threshold - 5.5).abs() < f64::EPSILON);
         assert!(restored.skip_local);
         assert!(restored.cross_language);
+        assert_eq!(restored.min_corpus_size_for_shingle_filter, 2048);
+        assert_eq!(restored.min_corpus_size_for_token_cache, 8_000);
         assert!(restored.ignore_imports);
         assert_eq!(restored.normalization.ignore_identifiers, Some(true));
         assert!(restored.normalization.ignore_string_values.is_none());

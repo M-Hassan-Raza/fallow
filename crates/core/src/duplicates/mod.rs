@@ -5,9 +5,11 @@
 //! modes from strict (exact matches only) to semantic (structure-aware
 //! matching that ignores identifier names and literal values).
 
+mod cache;
 pub mod detect;
 pub mod families;
 pub mod normalize;
+mod shingle_filter;
 pub mod token_types;
 mod token_visitor;
 pub mod tokenize;
@@ -18,7 +20,9 @@ use std::path::{Path, PathBuf};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rayon::prelude::*;
+use rustc_hash::FxHashSet;
 
+use cache::{TokenCache, TokenCacheEntry, TokenCacheMode};
 use detect::CloneDetector;
 use normalize::normalize_and_hash_resolved;
 use tokenize::{tokenize_file, tokenize_file_cross_language};
@@ -29,6 +33,16 @@ pub use types::{
 
 use crate::discover::{self, DiscoveredFile};
 use crate::suppress::{self, IssueKind, Suppression};
+
+#[derive(Clone)]
+pub(super) struct TokenizedFile {
+    path: PathBuf,
+    hashed_tokens: Vec<normalize::HashedToken>,
+    file_tokens: tokenize::FileTokens,
+    metadata: Option<std::fs::Metadata>,
+    cache_hit: bool,
+    suppressions: Vec<Suppression>,
+}
 
 /// Run duplication detection on the given files.
 ///
@@ -42,6 +56,59 @@ pub fn find_duplicates(
     root: &Path,
     files: &[DiscoveredFile],
     config: &DuplicatesConfig,
+) -> DuplicationReport {
+    find_duplicates_inner(root, files, config, None, None)
+}
+
+/// Run duplication detection with the persistent token cache enabled.
+pub fn find_duplicates_cached(
+    root: &Path,
+    files: &[DiscoveredFile],
+    config: &DuplicatesConfig,
+    cache_root: &Path,
+) -> DuplicationReport {
+    find_duplicates_inner(root, files, config, None, Some(cache_root))
+}
+
+/// Run duplication detection and only return clone groups touching `focus_files`.
+///
+/// This keeps all files in the matching corpus, which preserves changed-file
+/// versus unchanged-file detection for diff-scoped audit runs, but avoids
+/// materializing duplicate groups that cannot appear in the scoped report.
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow uses FxHashSet for changed-file sets throughout analysis"
+)]
+pub fn find_duplicates_touching_files(
+    root: &Path,
+    files: &[DiscoveredFile],
+    config: &DuplicatesConfig,
+    focus_files: &FxHashSet<PathBuf>,
+) -> DuplicationReport {
+    find_duplicates_inner(root, files, config, Some(focus_files), None)
+}
+
+/// Run focused duplication detection with the persistent token cache enabled.
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow uses FxHashSet for changed-file sets throughout analysis"
+)]
+pub fn find_duplicates_touching_files_cached(
+    root: &Path,
+    files: &[DiscoveredFile],
+    config: &DuplicatesConfig,
+    focus_files: &FxHashSet<PathBuf>,
+    cache_root: &Path,
+) -> DuplicationReport {
+    find_duplicates_inner(root, files, config, Some(focus_files), Some(cache_root))
+}
+
+fn find_duplicates_inner(
+    root: &Path,
+    files: &[DiscoveredFile],
+    config: &DuplicatesConfig,
+    focus_files: Option<&FxHashSet<PathBuf>>,
+    cache_root: Option<&Path>,
 ) -> DuplicationReport {
     let _span = tracing::info_span!("find_duplicates").entered();
 
@@ -60,13 +127,12 @@ pub fn find_duplicates(
         "duplication tokenization config"
     );
 
+    let token_cache_mode = TokenCacheMode::new(normalization, strip_types, skip_imports);
+    let cache_root = cache_root.filter(|_| files.len() >= config.min_corpus_size_for_token_cache);
+    let token_cache = cache_root.map(TokenCache::load);
+
     // Step 1 & 2: Tokenize and normalize all files in parallel, also parse suppressions
-    let file_data: Vec<(
-        PathBuf,
-        Vec<normalize::HashedToken>,
-        tokenize::FileTokens,
-        Vec<Suppression>,
-    )> = files
+    let mut file_data: Vec<TokenizedFile> = files
         .par_iter()
         .filter_map(|file| {
             // Apply extra ignore patterns
@@ -77,59 +143,123 @@ pub fn find_duplicates(
                 return None;
             }
 
-            // Read the file
-            let source = std::fs::read_to_string(&file.path).ok()?;
+            let metadata = std::fs::metadata(&file.path).ok()?;
 
-            // Parse inline suppression comments
-            let suppressions = suppress::parse_suppressions_from_source(&source);
+            let cached_entry = token_cache
+                .as_ref()
+                .and_then(|cache| cache.get(&file.path, &metadata, token_cache_mode));
+            let cache_hit = cached_entry.is_some();
 
-            // Check for file-wide code-duplication suppression
-            if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
-                return None;
-            }
-
-            // Tokenize (with optional type stripping for cross-language detection)
-            let file_tokens = if strip_types {
-                tokenize_file_cross_language(&file.path, &source, true, skip_imports)
+            let (mut entry, suppressions) = if let Some(entry) = cached_entry {
+                let suppressions =
+                    suppress::parse_suppressions_from_source(&entry.file_tokens.source);
+                if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
+                    return None;
+                }
+                (entry, suppressions)
             } else {
-                tokenize_file(&file.path, &source, skip_imports)
+                let source = std::fs::read_to_string(&file.path).ok()?;
+                let suppressions = suppress::parse_suppressions_from_source(&source);
+                if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
+                    return None;
+                }
+
+                // Tokenize (with optional type stripping for cross-language detection)
+                let file_tokens = if strip_types {
+                    tokenize_file_cross_language(&file.path, &source, true, skip_imports)
+                } else {
+                    tokenize_file(&file.path, &source, skip_imports)
+                };
+                if file_tokens.tokens.is_empty() {
+                    return None;
+                }
+
+                // Normalize and hash using resolved normalization flags
+                let hashed = normalize_and_hash_resolved(&file_tokens.tokens, normalization);
+                let entry = TokenCacheEntry {
+                    hashed_tokens: hashed,
+                    file_tokens,
+                };
+                (entry, suppressions)
             };
-            if file_tokens.tokens.is_empty() {
+            if entry.file_tokens.tokens.is_empty() {
+                return None;
+            }
+            if entry.hashed_tokens.len() < config.min_tokens {
                 return None;
             }
 
-            // Normalize and hash using resolved normalization flags
-            let hashed = normalize_and_hash_resolved(&file_tokens.tokens, normalization);
-            if hashed.len() < config.min_tokens {
-                return None;
-            }
-
-            Some((file.path.clone(), hashed, file_tokens, suppressions))
+            Some(TokenizedFile {
+                path: file.path.clone(),
+                hashed_tokens: std::mem::take(&mut entry.hashed_tokens),
+                file_tokens: entry.file_tokens,
+                metadata: Some(metadata),
+                cache_hit,
+                suppressions,
+            })
         })
         .collect();
+
+    if let (Some(cache_root), Some(mut cache)) = (cache_root, token_cache) {
+        for file in &file_data {
+            if !file.cache_hit
+                && let Some(metadata) = &file.metadata
+            {
+                cache.insert(
+                    &file.path,
+                    metadata,
+                    token_cache_mode,
+                    &file.hashed_tokens,
+                    &file.file_tokens,
+                );
+            }
+        }
+        cache.retain_paths(files);
+        match cache.save_if_dirty() {
+            Ok(true) => {
+                tracing::debug!(cache_root = %cache_root.display(), "saved duplication token cache");
+            }
+            Ok(false) => {
+                tracing::debug!(cache_root = %cache_root.display(), "duplication token cache unchanged");
+            }
+            Err(err) => {
+                tracing::warn!("Failed to save duplication token cache: {err}");
+            }
+        }
+    }
 
     tracing::info!(
         files = file_data.len(),
         "tokenized files for duplication analysis"
     );
 
+    if let Some(focus_files) = focus_files
+        && file_data.len() >= config.min_corpus_size_for_shingle_filter
+    {
+        shingle_filter::filter_to_focus_candidates(&mut file_data, focus_files, config.min_tokens);
+    }
+
     // Collect per-file suppressions for line-level filtering
     let suppressions_by_file: FxHashMap<PathBuf, Vec<Suppression>> = file_data
         .iter()
-        .filter(|(_, _, _, supps)| !supps.is_empty())
-        .map(|(path, _, _, supps)| (path.clone(), supps.clone()))
+        .filter(|file| !file.suppressions.is_empty())
+        .map(|file| (file.path.clone(), file.suppressions.clone()))
         .collect();
 
     // Strip suppressions from the data passed to the detector
     let detector_data: Vec<(PathBuf, Vec<normalize::HashedToken>, tokenize::FileTokens)> =
         file_data
             .into_iter()
-            .map(|(path, hashed, tokens, _)| (path, hashed, tokens))
+            .map(|file| (file.path, file.hashed_tokens, file.file_tokens))
             .collect();
 
     // Step 3 & 4: Detect clones
     let detector = CloneDetector::new(config.min_tokens, config.min_lines, config.skip_local);
-    let mut report = detector.detect(detector_data);
+    let mut report = if let Some(focus_files) = focus_files {
+        detector.detect_touching_files(detector_data, focus_files)
+    } else {
+        detector.detect(detector_data)
+    };
 
     // Step 5: Apply line-level suppressions
     if !suppressions_by_file.is_empty() {
@@ -303,6 +433,139 @@ export function validateInput(data: string): boolean {
             !report.clone_families.is_empty(),
             "Should group clones into families"
         );
+    }
+
+    #[test]
+    fn find_duplicates_cached_skips_token_cache_for_small_corpus() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let code = "export function same(input: number): number {\n  const doubled = input * 2;\n  return doubled + 1;\n}\n";
+        let first = src_dir.join("first.ts");
+        let second = src_dir.join("second.ts");
+        std::fs::write(&first, code).expect("write first");
+        std::fs::write(&second, code).expect("write second");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: first,
+                size_bytes: code.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: second,
+                size_bytes: code.len() as u64,
+            },
+        ];
+        let config = DuplicatesConfig {
+            min_tokens: 5,
+            min_lines: 2,
+            ..DuplicatesConfig::default()
+        };
+        let cache_root = dir.path().join(".fallow");
+
+        let report = find_duplicates_cached(dir.path(), &files, &config, &cache_root);
+
+        assert!(!report.clone_groups.is_empty());
+        assert!(
+            !cache_root.exists(),
+            "small projects should avoid token-cache IO overhead"
+        );
+    }
+
+    #[test]
+    fn find_duplicates_touching_files_keeps_cross_corpus_matches_only_for_focus() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let focused_code = r"
+export function focused(input: number): number {
+    const doubled = input * 2;
+    const shifted = doubled + 10;
+    return shifted / 2;
+}
+";
+        let untouched_code = r#"
+export function untouched(input: string): string {
+    const lowered = input.toLowerCase();
+    const padded = lowered.padStart(10, "x");
+    return padded.slice(0, 8);
+}
+"#;
+
+        let changed_path = src_dir.join("changed.ts");
+        let focused_copy_path = src_dir.join("focused-copy.ts");
+        let untouched_a_path = src_dir.join("untouched-a.ts");
+        let untouched_b_path = src_dir.join("untouched-b.ts");
+        std::fs::write(&changed_path, focused_code).expect("write changed");
+        std::fs::write(&focused_copy_path, focused_code).expect("write focused copy");
+        std::fs::write(&untouched_a_path, untouched_code).expect("write untouched a");
+        std::fs::write(&untouched_b_path, untouched_code).expect("write untouched b");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: changed_path.clone(),
+                size_bytes: focused_code.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: focused_copy_path,
+                size_bytes: focused_code.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: untouched_a_path,
+                size_bytes: untouched_code.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(3),
+                path: untouched_b_path,
+                size_bytes: untouched_code.len() as u64,
+            },
+        ];
+
+        let config = DuplicatesConfig {
+            mode: DetectionMode::Strict,
+            min_tokens: 5,
+            min_lines: 2,
+            min_corpus_size_for_shingle_filter: 1,
+            ..DuplicatesConfig::default()
+        };
+        let mut focus = FxHashSet::default();
+        focus.insert(changed_path.clone());
+
+        let full_report = find_duplicates(dir.path(), &files, &config);
+        let report = find_duplicates_touching_files(dir.path(), &files, &config, &focus);
+        let expected_touching = full_report
+            .clone_groups
+            .iter()
+            .filter(|group| {
+                group
+                    .instances
+                    .iter()
+                    .any(|instance| instance.file == changed_path)
+            })
+            .count();
+
+        assert!(
+            !report.clone_groups.is_empty(),
+            "focused file should still match an unchanged duplicate"
+        );
+        assert_eq!(
+            report.clone_groups.len(),
+            expected_touching,
+            "focused shingle filtering must not drop clone groups touching the focused file"
+        );
+        assert!(report.clone_groups.iter().all(|group| {
+            group
+                .instances
+                .iter()
+                .any(|instance| instance.file == changed_path)
+        }));
     }
 
     #[test]

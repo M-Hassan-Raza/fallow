@@ -569,6 +569,7 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
         production_override: resolved.production_override,
         trace: None,
         changed_since: resolved.changed_since.as_deref(),
+        changed_files: None,
         workspace: resolved.workspace.as_deref(),
         changed_workspaces: resolved.changed_workspaces.as_deref(),
         explain: resolved.explain,
