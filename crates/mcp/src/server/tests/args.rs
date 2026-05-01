@@ -1593,6 +1593,7 @@ fn audit_args_with_all_options() {
         dupes_baseline: None,
         explain_skipped: Some(true),
         max_crap: Some(30.0),
+        include_entry_exports: None,
     })
     .expect("all options are valid");
     assert!(args.contains(&"--root".to_string()));
@@ -1635,6 +1636,28 @@ fn audit_args_max_crap_forwards_to_cli() {
     assert!(
         args.windows(2).any(|w| w == ["--max-crap", "42.5"]),
         "expected --max-crap 42.5, got {args:?}"
+    );
+}
+
+#[test]
+fn audit_args_include_entry_exports_forwards_to_cli() {
+    let args = build_audit_args(&AuditParams {
+        include_entry_exports: Some(true),
+        ..Default::default()
+    })
+    .expect("include_entry_exports is valid");
+    assert!(
+        args.contains(&"--include-entry-exports".to_string()),
+        "expected --include-entry-exports, got {args:?}"
+    );
+}
+
+#[test]
+fn audit_args_include_entry_exports_omitted_by_default() {
+    let args = build_audit_args(&AuditParams::default()).expect("default params are valid");
+    assert!(
+        !args.contains(&"--include-entry-exports".to_string()),
+        "expected no --include-entry-exports by default, got {args:?}"
     );
 }
 

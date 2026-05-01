@@ -61,6 +61,9 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
     if let Some(max_crap) = params.max_crap {
         args.extend(["--max-crap".to_string(), format!("{max_crap}")]);
     }
+    if params.include_entry_exports == Some(true) {
+        args.push("--include-entry-exports".to_string());
+    }
 
     Ok(args)
 }

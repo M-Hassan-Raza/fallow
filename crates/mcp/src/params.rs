@@ -703,6 +703,14 @@ pub struct AuditParams {
     /// fallow estimates coverage from the module graph. Passed through to
     /// the CLI's `--max-crap` flag.
     pub max_crap: Option<f64>,
+
+    /// Report unused exports in entry files instead of auto-marking them as
+    /// used. Catches typos in framework exports (e.g. `meatdata` instead of
+    /// `metadata`). Also configurable persistently via
+    /// `includeEntryExports: true` in the fallow config file; this param
+    /// ORs with the config value. Passed through to the CLI's
+    /// `--include-entry-exports` flag.
+    pub include_entry_exports: Option<bool>,
 }
 
 #[derive(Default, Deserialize, JsonSchema)]
