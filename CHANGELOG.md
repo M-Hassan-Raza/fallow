@@ -7,9 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.60.0] - 2026-05-01
+
 ### Added
 
-- **`includeEntryExports` config option, and `--include-entry-exports` is now a global CLI flag.** Set `"includeEntryExports": true` (JSON / JSONC) or `includeEntryExports = true` (TOML) in your fallow config to opt in to entry-file export validation persistently, without passing `--include-entry-exports` on every run. The flag is now accepted in combined mode (`fallow --include-entry-exports`) as well as on `fallow dead-code` and `fallow audit`; previously the bare combined invocation rejected the flag because it was only defined on the `dead-code` subcommand. Thanks [@filipw01](https://github.com/filipw01) for the report. (Closes [#249](https://github.com/fallow-rs/fallow/issues/249))
+- **`includeEntryExports` config option, and `--include-entry-exports` is now a global CLI flag.** Set `"includeEntryExports": true` (JSON / JSONC) or `includeEntryExports = true` (TOML) in your fallow config to opt in to entry-file export validation persistently, without passing `--include-entry-exports` on every run. The flag is now accepted in combined mode (`fallow --include-entry-exports`) as well as on `fallow dead-code` and `fallow audit`; previously the bare combined invocation rejected the flag because it was only defined on the `dead-code` subcommand. The `audit` MCP tool also gains an `include_entry_exports` param to match `analyze` / `check_changed`. Thanks [@filipw01](https://github.com/filipw01) for the report. (Closes [#249](https://github.com/fallow-rs/fallow/issues/249))
 
 ### Fixed
 
@@ -1905,7 +1907,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.59.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.60.0...HEAD
+[2.60.0]: https://github.com/fallow-rs/fallow/compare/v2.59.0...v2.60.0
 [2.59.0]: https://github.com/fallow-rs/fallow/compare/v2.58.0...v2.59.0
 [2.58.0]: https://github.com/fallow-rs/fallow/compare/v2.57.0...v2.58.0
 [2.57.0]: https://github.com/fallow-rs/fallow/compare/v2.56.0...v2.57.0
