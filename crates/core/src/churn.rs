@@ -163,42 +163,8 @@ pub fn parse_since(input: &str) -> Result<SinceDuration, String> {
 /// Returns `None` if git is not available or the directory is not a git repository.
 pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
     let shallow = is_shallow_clone(root);
-
-    let output = Command::new("git")
-        .args([
-            "log",
-            "--numstat",
-            "--no-merges",
-            "--no-renames",
-            "--use-mailmap",
-            "--format=format:%at|%ae",
-            &format!("--after={}", since.git_after),
-        ])
-        .current_dir(root)
-        .output();
-
-    let output = match output {
-        Ok(o) => o,
-        Err(e) => {
-            tracing::warn!("hotspot analysis skipped: failed to run git: {e}");
-            return None;
-        }
-    };
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        tracing::warn!("hotspot analysis skipped: git log failed: {stderr}");
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let (files, author_pool) = parse_git_log(&stdout, root);
-
-    Some(ChurnResult {
-        files,
-        shallow_clone: shallow,
-        author_pool,
-    })
+    let state = analyze_churn_events(root, since, None)?;
+    Some(build_churn_result(state, shallow))
 }
 
 /// Check if the repository is a shallow clone.
@@ -229,46 +195,53 @@ pub fn is_git_repo(root: &Path) -> bool {
 
 // ── Churn cache ──────────────────────────────────────────────────
 
-/// Maximum size of a churn cache file (16 MB).
-const MAX_CHURN_CACHE_SIZE: usize = 16 * 1024 * 1024;
+/// Maximum size of a churn cache file (64 MB). The incremental cache stores
+/// per-commit events, so it needs more headroom than the old aggregate rows.
+const MAX_CHURN_CACHE_SIZE: usize = 64 * 1024 * 1024;
 
 /// Cache schema version. Bump when the on-disk shape of [`ChurnCache`]
-/// changes so older payloads are rejected on load. Bumped to 2 in v2.37.0
-/// when per-author contributions and the author pool were added.
-const CHURN_CACHE_VERSION: u8 = 2;
+/// changes so older payloads are rejected on load. Bumped to 3 when the cache
+/// switched from aggregate rows to per-commit events for incremental updates.
+const CHURN_CACHE_VERSION: u8 = 3;
 
-/// Serializable per-author contribution entry for the disk cache.
-#[derive(bitcode::Encode, bitcode::Decode)]
-struct CachedAuthorContribution {
-    author_idx: u32,
-    commits: u32,
-    weighted_commits: f64,
-    first_commit_ts: u64,
-    last_commit_ts: u64,
+/// Serializable per-commit event for the disk cache.
+#[derive(Clone, bitcode::Encode, bitcode::Decode)]
+struct CachedCommitEvent {
+    timestamp: u64,
+    lines_added: u32,
+    lines_deleted: u32,
+    author_idx: Option<u32>,
 }
 
 /// Serializable per-file churn entry for the disk cache.
-#[derive(bitcode::Encode, bitcode::Decode)]
+#[derive(Clone, bitcode::Encode, bitcode::Decode)]
 struct CachedFileChurn {
     path: String,
-    commits: u32,
-    weighted_commits: f64,
-    lines_added: u32,
-    lines_deleted: u32,
-    trend: ChurnTrend,
-    authors: Vec<CachedAuthorContribution>,
+    events: Vec<CachedCommitEvent>,
 }
 
-/// Cached churn data keyed by HEAD SHA and since string.
-#[derive(bitcode::Encode, bitcode::Decode)]
+/// Cached churn data keyed by last indexed SHA and since string.
+#[derive(Clone, bitcode::Encode, bitcode::Decode)]
 struct ChurnCache {
     /// Schema version; must equal [`CHURN_CACHE_VERSION`] to be accepted.
     version: u8,
-    head_sha: String,
+    last_indexed_sha: String,
     git_after: String,
     files: Vec<CachedFileChurn>,
     shallow_clone: bool,
-    /// Author email pool referenced by [`CachedAuthorContribution::author_idx`].
+    /// Author email pool referenced by [`CachedCommitEvent::author_idx`].
+    author_pool: Vec<String>,
+}
+
+/// Per-file commit events retained in memory while building or updating churn.
+struct FileEvents {
+    events: Vec<CachedCommitEvent>,
+}
+
+/// Event-level churn state. Unlike [`ChurnResult`], this preserves commit
+/// timestamps so a cache can merge new commits and recompute trend/recency.
+struct ChurnEventState {
+    files: FxHashMap<PathBuf, FileEvents>,
     author_pool: Vec<String>,
 }
 
@@ -283,91 +256,53 @@ fn get_head_sha(root: &Path) -> Option<String> {
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
 }
 
+/// Check whether `ancestor` is still reachable from `descendant`.
+fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> bool {
+    Command::new("git")
+        .args(["merge-base", "--is-ancestor", ancestor, descendant])
+        .current_dir(root)
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
 /// Try to load churn data from disk cache. Returns `None` on cache miss
 /// or version mismatch.
-fn load_churn_cache(cache_dir: &Path, head_sha: &str, git_after: &str) -> Option<ChurnResult> {
+fn load_churn_cache(cache_dir: &Path, git_after: &str) -> Option<ChurnCache> {
     let cache_file = cache_dir.join("churn.bin");
     let data = std::fs::read(&cache_file).ok()?;
     if data.len() > MAX_CHURN_CACHE_SIZE {
         return None;
     }
     let cache: ChurnCache = bitcode::decode(&data).ok()?;
-    if cache.version != CHURN_CACHE_VERSION
-        || cache.head_sha != head_sha
-        || cache.git_after != git_after
-    {
+    if cache.version != CHURN_CACHE_VERSION || cache.git_after != git_after {
         return None;
     }
-    let mut files = FxHashMap::default();
-    for entry in cache.files {
-        let path = PathBuf::from(&entry.path);
-        let authors = entry
-            .authors
-            .into_iter()
-            .map(|a| {
-                (
-                    a.author_idx,
-                    AuthorContribution {
-                        commits: a.commits,
-                        weighted_commits: a.weighted_commits,
-                        first_commit_ts: a.first_commit_ts,
-                        last_commit_ts: a.last_commit_ts,
-                    },
-                )
-            })
-            .collect();
-        files.insert(
-            path.clone(),
-            FileChurn {
-                path,
-                commits: entry.commits,
-                weighted_commits: entry.weighted_commits,
-                lines_added: entry.lines_added,
-                lines_deleted: entry.lines_deleted,
-                trend: entry.trend,
-                authors,
-            },
-        );
-    }
-    Some(ChurnResult {
-        files,
-        shallow_clone: cache.shallow_clone,
-        author_pool: cache.author_pool,
-    })
+    Some(cache)
 }
 
 /// Save churn data to disk cache.
-fn save_churn_cache(cache_dir: &Path, head_sha: &str, git_after: &str, result: &ChurnResult) {
-    let files: Vec<CachedFileChurn> = result
+fn save_churn_cache(
+    cache_dir: &Path,
+    last_indexed_sha: &str,
+    git_after: &str,
+    state: &ChurnEventState,
+    shallow_clone: bool,
+) {
+    let files: Vec<CachedFileChurn> = state
         .files
-        .values()
+        .iter()
         .map(|f| CachedFileChurn {
-            path: f.path.to_string_lossy().to_string(),
-            commits: f.commits,
-            weighted_commits: f.weighted_commits,
-            lines_added: f.lines_added,
-            lines_deleted: f.lines_deleted,
-            trend: f.trend,
-            authors: f
-                .authors
-                .iter()
-                .map(|(&idx, c)| CachedAuthorContribution {
-                    author_idx: idx,
-                    commits: c.commits,
-                    weighted_commits: c.weighted_commits,
-                    first_commit_ts: c.first_commit_ts,
-                    last_commit_ts: c.last_commit_ts,
-                })
-                .collect(),
+            path: f.0.to_string_lossy().to_string(),
+            events: f.1.events.clone(),
         })
         .collect();
     let cache = ChurnCache {
         version: CHURN_CACHE_VERSION,
-        head_sha: head_sha.to_string(),
+        last_indexed_sha: last_indexed_sha.to_string(),
         git_after: git_after.to_string(),
         files,
-        shallow_clone: result.shallow_clone,
-        author_pool: result.author_pool.clone(),
+        shallow_clone,
+        author_pool: state.author_pool.clone(),
     };
     let _ = std::fs::create_dir_all(cache_dir);
     let data = bitcode::encode(&cache);
@@ -379,9 +314,11 @@ fn save_churn_cache(cache_dir: &Path, head_sha: &str, git_after: &str, result: &
 }
 
 /// Analyze churn with disk caching. Uses cached result when HEAD SHA and
-/// since duration match. On cache miss, runs `git log` and saves the result.
+/// since duration match. If HEAD advanced from the cached SHA, runs an
+/// incremental `git log <cached>..HEAD --numstat` scan and merges it.
 ///
-/// Returns `(ChurnResult, bool)` where the bool indicates whether the cache was hit.
+/// Returns `(ChurnResult, bool)` where the bool indicates whether reusable
+/// cache state was used.
 /// Returns `None` if git analysis fails.
 pub fn analyze_churn_cached(
     root: &Path,
@@ -391,48 +328,149 @@ pub fn analyze_churn_cached(
 ) -> Option<(ChurnResult, bool)> {
     let head_sha = get_head_sha(root)?;
 
-    if !no_cache && let Some(cached) = load_churn_cache(cache_dir, &head_sha, &since.git_after) {
-        return Some((cached, true));
+    if !no_cache && let Some(cache) = load_churn_cache(cache_dir, &since.git_after) {
+        if cache.last_indexed_sha == head_sha {
+            let shallow_clone = cache.shallow_clone;
+            let state = cache.into_event_state();
+            return Some((build_churn_result(state, shallow_clone), true));
+        }
+
+        if is_ancestor(root, &cache.last_indexed_sha, &head_sha) {
+            let shallow_clone = is_shallow_clone(root);
+            let range = format!("{}..HEAD", cache.last_indexed_sha);
+            if let Some(delta) = analyze_churn_events(root, since, Some(&range)) {
+                let mut state = cache.into_event_state();
+                merge_churn_states(&mut state, delta);
+                save_churn_cache(
+                    cache_dir,
+                    &head_sha,
+                    &since.git_after,
+                    &state,
+                    shallow_clone,
+                );
+                return Some((build_churn_result(state, shallow_clone), true));
+            }
+        }
     }
 
-    let result = analyze_churn(root, since)?;
-
+    let shallow_clone = is_shallow_clone(root);
+    let state = analyze_churn_events(root, since, None)?;
     if !no_cache {
-        save_churn_cache(cache_dir, &head_sha, &since.git_after, &result);
+        save_churn_cache(
+            cache_dir,
+            &head_sha,
+            &since.git_after,
+            &state,
+            shallow_clone,
+        );
     }
 
+    let result = build_churn_result(state, shallow_clone);
     Some((result, false))
 }
 
 // ── Internal ──────────────────────────────────────────────────────
 
-/// Intermediate per-file accumulator during git log parsing.
-struct FileAccum {
-    /// Commit timestamps (epoch seconds) for trend computation.
-    commit_timestamps: Vec<u64>,
-    /// Recency-weighted commit sum.
-    weighted_commits: f64,
-    lines_added: u32,
-    lines_deleted: u32,
-    /// Per-author contributions keyed by interned author index.
-    authors: FxHashMap<u32, AuthorContribution>,
+impl ChurnCache {
+    fn into_event_state(self) -> ChurnEventState {
+        let files = self
+            .files
+            .into_iter()
+            .map(|entry| {
+                (
+                    PathBuf::from(entry.path),
+                    FileEvents {
+                        events: entry.events,
+                    },
+                )
+            })
+            .collect();
+        ChurnEventState {
+            files,
+            author_pool: self.author_pool,
+        }
+    }
 }
 
-/// Parse `git log --numstat --format=format:%at|%ae` output.
-///
-/// Returns a per-file churn map plus the author email pool referenced by
-/// interned indices in [`FileChurn::authors`].
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "commit count per file is bounded by git history depth"
-)]
-fn parse_git_log(stdout: &str, root: &Path) -> (FxHashMap<PathBuf, FileChurn>, Vec<String>) {
+/// Run `git log --numstat` and return event-level churn state.
+fn analyze_churn_events(
+    root: &Path,
+    since: &SinceDuration,
+    revision_range: Option<&str>,
+) -> Option<ChurnEventState> {
+    let mut command = Command::new("git");
+    command.arg("log");
+    if let Some(range) = revision_range {
+        command.arg(range);
+    }
+    command
+        .args([
+            "--numstat",
+            "--no-merges",
+            "--no-renames",
+            "--use-mailmap",
+            "--format=format:%at|%ae",
+            &format!("--after={}", since.git_after),
+        ])
+        .current_dir(root);
+
+    let output = match command.output() {
+        Ok(o) => o,
+        Err(e) => {
+            tracing::warn!("hotspot analysis skipped: failed to run git: {e}");
+            return None;
+        }
+    };
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        tracing::warn!("hotspot analysis skipped: git log failed: {stderr}");
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Some(parse_git_log_events(&stdout, root))
+}
+
+/// Merge new churn events into cached event state.
+fn merge_churn_states(base: &mut ChurnEventState, delta: ChurnEventState) {
+    let mut base_author_index: FxHashMap<String, u32> = base
+        .author_pool
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, email)| u32::try_from(idx).ok().map(|idx| (email.clone(), idx)))
+        .collect();
+
+    let mut author_mapping: FxHashMap<u32, u32> = FxHashMap::default();
+    for (old_idx, email) in delta.author_pool.into_iter().enumerate() {
+        let Ok(old_idx) = u32::try_from(old_idx) else {
+            continue;
+        };
+        let new_idx = intern_author(&email, &mut base.author_pool, &mut base_author_index);
+        author_mapping.insert(old_idx, new_idx);
+    }
+
+    for (path, mut file) in delta.files {
+        for event in &mut file.events {
+            event.author_idx = event
+                .author_idx
+                .and_then(|idx| author_mapping.get(&idx).copied());
+        }
+        base.files
+            .entry(path)
+            .and_modify(|existing| existing.events.append(&mut file.events))
+            .or_insert(file);
+    }
+}
+
+/// Parse `git log --numstat --format=format:%at|%ae` output into events.
+fn parse_git_log_events(stdout: &str, root: &Path) -> ChurnEventState {
     let now_secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
 
-    let mut accum: FxHashMap<PathBuf, FileAccum> = FxHashMap::default();
+    let mut files: FxHashMap<PathBuf, FileEvents> = FxHashMap::default();
     let mut author_pool: Vec<String> = Vec::new();
     let mut author_index: FxHashMap<String, u32> = FxHashMap::default();
     let mut current_timestamp: Option<u64> = None;
@@ -464,47 +502,71 @@ fn parse_git_log(stdout: &str, root: &Path) -> (FxHashMap<PathBuf, FileChurn>, V
         if let Some((added, deleted, path)) = parse_numstat_line(line) {
             let abs_path = root.join(path);
             let ts = current_timestamp.unwrap_or(now_secs);
-            let age_days = (now_secs.saturating_sub(ts)) as f64 / SECS_PER_DAY;
-            let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
-
-            let entry = accum.entry(abs_path).or_insert_with(|| FileAccum {
-                commit_timestamps: Vec::new(),
-                weighted_commits: 0.0,
-                lines_added: 0,
-                lines_deleted: 0,
-                authors: FxHashMap::default(),
-            });
-            entry.commit_timestamps.push(ts);
-            entry.weighted_commits += weight;
-            entry.lines_added += added;
-            entry.lines_deleted += deleted;
-
-            if let Some(idx) = current_author_idx {
-                entry
-                    .authors
-                    .entry(idx)
-                    .and_modify(|c| {
-                        c.commits += 1;
-                        c.weighted_commits += weight;
-                        c.first_commit_ts = c.first_commit_ts.min(ts);
-                        c.last_commit_ts = c.last_commit_ts.max(ts);
-                    })
-                    .or_insert(AuthorContribution {
-                        commits: 1,
-                        weighted_commits: weight,
-                        first_commit_ts: ts,
-                        last_commit_ts: ts,
-                    });
-            }
+            files
+                .entry(abs_path)
+                .or_insert_with(|| FileEvents { events: Vec::new() })
+                .events
+                .push(CachedCommitEvent {
+                    timestamp: ts,
+                    lines_added: added,
+                    lines_deleted: deleted,
+                    author_idx: current_author_idx,
+                });
         }
     }
 
-    let files = accum
+    ChurnEventState { files, author_pool }
+}
+
+/// Convert event-level churn state into the public aggregate result.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "commit count per file is bounded by git history depth"
+)]
+fn build_churn_result(state: ChurnEventState, shallow_clone: bool) -> ChurnResult {
+    let now_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let files = state
+        .files
         .into_iter()
-        .map(|(path, acc)| {
-            let commits = acc.commit_timestamps.len() as u32;
-            let trend = compute_trend(&acc.commit_timestamps);
-            let mut authors = acc.authors;
+        .map(|(path, file)| {
+            let mut timestamps = Vec::with_capacity(file.events.len());
+            let mut weighted_commits = 0.0;
+            let mut lines_added = 0;
+            let mut lines_deleted = 0;
+            let mut authors: FxHashMap<u32, AuthorContribution> = FxHashMap::default();
+
+            for event in file.events {
+                timestamps.push(event.timestamp);
+                let age_days = (now_secs.saturating_sub(event.timestamp)) as f64 / SECS_PER_DAY;
+                let weight = 0.5_f64.powf(age_days / HALF_LIFE_DAYS);
+                weighted_commits += weight;
+                lines_added += event.lines_added;
+                lines_deleted += event.lines_deleted;
+
+                if let Some(idx) = event.author_idx {
+                    authors
+                        .entry(idx)
+                        .and_modify(|c| {
+                            c.commits += 1;
+                            c.weighted_commits += weight;
+                            c.first_commit_ts = c.first_commit_ts.min(event.timestamp);
+                            c.last_commit_ts = c.last_commit_ts.max(event.timestamp);
+                        })
+                        .or_insert(AuthorContribution {
+                            commits: 1,
+                            weighted_commits: weight,
+                            first_commit_ts: event.timestamp,
+                            last_commit_ts: event.timestamp,
+                        });
+                }
+            }
+
+            let commits = timestamps.len() as u32;
+            let trend = compute_trend(&timestamps);
             // Round per-author weighted sums for cache stability.
             for c in authors.values_mut() {
                 c.weighted_commits = (c.weighted_commits * 100.0).round() / 100.0;
@@ -512,9 +574,9 @@ fn parse_git_log(stdout: &str, root: &Path) -> (FxHashMap<PathBuf, FileChurn>, V
             let churn = FileChurn {
                 path: path.clone(),
                 commits,
-                weighted_commits: (acc.weighted_commits * 100.0).round() / 100.0,
-                lines_added: acc.lines_added,
-                lines_deleted: acc.lines_deleted,
+                weighted_commits: (weighted_commits * 100.0).round() / 100.0,
+                lines_added,
+                lines_deleted,
                 trend,
                 authors,
             };
@@ -522,7 +584,21 @@ fn parse_git_log(stdout: &str, root: &Path) -> (FxHashMap<PathBuf, FileChurn>, V
         })
         .collect();
 
-    (files, author_pool)
+    ChurnResult {
+        files,
+        shallow_clone,
+        author_pool: state.author_pool,
+    }
+}
+
+/// Parse `git log --numstat --format=format:%at|%ae` output.
+///
+/// Returns a per-file churn map plus the author email pool referenced by
+/// interned indices in [`FileChurn::authors`].
+#[cfg(test)]
+fn parse_git_log(stdout: &str, root: &Path) -> (FxHashMap<PathBuf, FileChurn>, Vec<String>) {
+    let result = build_churn_result(parse_git_log_events(stdout, root), false);
+    (result.files, result.author_pool)
 }
 
 /// Intern an author email into the pool, returning its stable index.
@@ -1270,5 +1346,63 @@ mod tests {
         assert_eq!(intern_author("bob@x", &mut pool, &mut index), 1);
         assert_eq!(intern_author("carol@x", &mut pool, &mut index), 2);
         assert_eq!(intern_author("alice@x", &mut pool, &mut index), 0);
+    }
+
+    // ── incremental cache ───────────────────────────────────────
+
+    fn git(root: &Path, args: &[&str]) {
+        let status = std::process::Command::new("git")
+            .args(args)
+            .current_dir(root)
+            .status()
+            .expect("run git");
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn write(root: &Path, path: &str, contents: &str) {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().expect("test path has parent")).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
+
+    #[test]
+    fn cached_churn_merges_new_commits_after_head_advances() {
+        let repo = tempfile::tempdir().expect("create repo");
+        let root = repo.path();
+        git(root, &["init"]);
+        git(root, &["config", "user.email", "churn@example.test"]);
+        git(root, &["config", "user.name", "Churn Test"]);
+        git(root, &["config", "commit.gpgsign", "false"]);
+
+        write(root, "src/a.ts", "export const a = 1;\n");
+        git(root, &["add", "."]);
+        git(root, &["commit", "-m", "initial"]);
+
+        let since = parse_since("1y").unwrap();
+        let cache = tempfile::tempdir().expect("create cache dir");
+        let (cold, cold_hit) = analyze_churn_cached(root, &since, cache.path(), false).unwrap();
+        assert!(!cold_hit);
+        let file = root.join("src/a.ts");
+        assert_eq!(cold.files[&file].commits, 1);
+
+        let (_warm, warm_hit) = analyze_churn_cached(root, &since, cache.path(), false).unwrap();
+        assert!(warm_hit);
+
+        write(
+            root,
+            "src/a.ts",
+            "export const a = 1;\nexport const b = 2;\n",
+        );
+        git(root, &["add", "."]);
+        git(root, &["commit", "-m", "update a"]);
+        let head = get_head_sha(root).unwrap();
+
+        let (incremental, incremental_hit) =
+            analyze_churn_cached(root, &since, cache.path(), false).unwrap();
+        assert!(incremental_hit);
+        assert_eq!(incremental.files[&file].commits, 2);
+
+        let cache = load_churn_cache(cache.path(), &since.git_after).unwrap();
+        assert_eq!(cache.last_indexed_sha, head);
     }
 }
