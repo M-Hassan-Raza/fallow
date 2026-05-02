@@ -91,7 +91,7 @@ pub struct RulesConfig {
     pub type_only_dependencies: Severity,
     #[serde(default = "Severity::default_warn")]
     pub test_only_dependencies: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "circular-dependency")]
     pub circular_dependencies: Severity,
     #[serde(default)]
     pub boundary_violation: Severity,
@@ -224,7 +224,11 @@ pub struct PartialRulesConfig {
     pub type_only_dependencies: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_only_dependencies: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "circular-dependency",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub circular_dependencies: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub boundary_violation: Option<Severity>,
@@ -277,6 +281,15 @@ mod tests {
         assert_eq!(rules.unused_types, Severity::Off);
         // Unset fields default to error
         assert_eq!(rules.unresolved_imports, Severity::Error);
+    }
+
+    #[test]
+    fn rules_deserialize_circular_dependency_alias() {
+        let json_str = r#"{
+            "circular-dependency": "off"
+        }"#;
+        let rules: RulesConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(rules.circular_dependencies, Severity::Off);
     }
 
     #[test]
@@ -414,6 +427,15 @@ mod tests {
         assert_eq!(partial.unused_files, Some(Severity::Warn));
         assert_eq!(partial.circular_dependencies, Some(Severity::Off));
         assert!(partial.unused_exports.is_none());
+    }
+
+    #[test]
+    fn partial_rules_deserialize_circular_dependency_alias() {
+        let json = r#"{
+            "circular-dependency": "warn"
+        }"#;
+        let partial: PartialRulesConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(partial.circular_dependencies, Some(Severity::Warn));
     }
 
     #[test]

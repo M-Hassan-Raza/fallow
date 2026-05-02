@@ -295,6 +295,7 @@ mod tests {
             ("duplicate-export", IssueKind::DuplicateExport),
             ("code-duplication", IssueKind::CodeDuplication),
             ("circular-dependency", IssueKind::CircularDependency),
+            ("circular-dependencies", IssueKind::CircularDependency),
         ];
         for (token, expected_kind) in &kinds {
             let source = format!("// fallow-ignore-file {token}\nexport const foo = 1;\n");

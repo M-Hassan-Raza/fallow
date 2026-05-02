@@ -47,6 +47,48 @@ pub fn byte_offset_to_line_col(
         })
 }
 
+fn cycle_edge_line_col(
+    graph: &ModuleGraph,
+    line_offsets_map: &LineOffsetsMap<'_>,
+    cycle: &[FileId],
+    edge_index: usize,
+) -> Option<(u32, u32)> {
+    if cycle.is_empty() {
+        return None;
+    }
+
+    let from = cycle[edge_index];
+    let to = cycle[(edge_index + 1) % cycle.len()];
+    graph
+        .find_import_span_start(from, to)
+        .map(|span_start| byte_offset_to_line_col(line_offsets_map, from, span_start))
+}
+
+fn is_circular_dependency_suppressed(
+    graph: &ModuleGraph,
+    line_offsets_map: &LineOffsetsMap<'_>,
+    suppressions: &crate::suppress::SuppressionContext<'_>,
+    cycle: &[FileId],
+) -> bool {
+    if cycle
+        .iter()
+        .any(|&id| suppressions.is_file_suppressed(id, IssueKind::CircularDependency))
+    {
+        return true;
+    }
+
+    let mut line_suppressed = false;
+    for edge_index in 0..cycle.len() {
+        let from = cycle[edge_index];
+        if let Some((line, _)) = cycle_edge_line_col(graph, line_offsets_map, cycle, edge_index)
+            && suppressions.is_suppressed(from, line, IssueKind::CircularDependency)
+        {
+            line_suppressed = true;
+        }
+    }
+    line_suppressed
+}
+
 /// Read source content from disk, returning empty string on failure.
 /// Only used for LSP Code Lens reference resolution where the referencing
 /// file may not be in the line offsets map.
@@ -272,35 +314,31 @@ pub fn find_dead_code_full(
         let cycles = graph.find_cycles();
         results.circular_dependencies = cycles
             .into_iter()
-            .filter(|cycle| {
-                // Skip cycles where any participating file has a file-level suppression
-                !cycle
-                    .iter()
-                    .any(|&id| suppressions.is_file_suppressed(id, IssueKind::CircularDependency))
-            })
-            .map(|cycle| {
+            .filter_map(|cycle| {
+                if is_circular_dependency_suppressed(
+                    graph,
+                    &line_offsets_by_file,
+                    &suppressions,
+                    &cycle,
+                ) {
+                    return None;
+                }
+
                 let files: Vec<std::path::PathBuf> = cycle
                     .iter()
                     .map(|&id| graph.modules[id.0 as usize].path.clone())
                     .collect();
                 let length = files.len();
                 // Look up the import span from cycle[0] → cycle[1] for precise location
-                let (line, col) = if cycle.len() >= 2 {
-                    graph
-                        .find_import_span_start(cycle[0], cycle[1])
-                        .map_or((1, 0), |span_start| {
-                            byte_offset_to_line_col(&line_offsets_by_file, cycle[0], span_start)
-                        })
-                } else {
-                    (1, 0)
-                };
-                CircularDependency {
+                let (line, col) =
+                    cycle_edge_line_col(graph, &line_offsets_by_file, &cycle, 0).unwrap_or((1, 0));
+                Some(CircularDependency {
                     files,
                     length,
                     line,
                     col,
                     is_cross_package: false,
-                }
+                })
             })
             .collect();
 

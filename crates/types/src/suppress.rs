@@ -78,7 +78,7 @@ impl IssueKind {
             "unlisted-dependency" => Some(Self::UnlistedDependency),
             "duplicate-export" => Some(Self::DuplicateExport),
             "code-duplication" => Some(Self::CodeDuplication),
-            "circular-dependency" => Some(Self::CircularDependency),
+            "circular-dependency" | "circular-dependencies" => Some(Self::CircularDependency),
             "type-only-dependency" => Some(Self::TypeOnlyDependency),
             "test-only-dependency" => Some(Self::TestOnlyDependency),
             "boundary-violation" => Some(Self::BoundaryViolation),
@@ -232,6 +232,10 @@ mod tests {
         );
         assert_eq!(
             IssueKind::parse("circular-dependency"),
+            Some(IssueKind::CircularDependency)
+        );
+        assert_eq!(
+            IssueKind::parse("circular-dependencies"),
             Some(IssueKind::CircularDependency)
         );
         assert_eq!(

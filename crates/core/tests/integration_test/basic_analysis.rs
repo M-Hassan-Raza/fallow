@@ -326,3 +326,41 @@ fn circular_import_does_not_crash() {
     );
     assert_eq!(results.circular_dependencies[0].length, 2);
 }
+
+#[test]
+fn circular_import_next_line_suppression_hides_cycle() {
+    let tmp = tempfile::tempdir().expect("failed to create temp dir");
+    let temp_dir = tmp.path().to_path_buf();
+    std::fs::create_dir_all(temp_dir.join("src")).unwrap();
+
+    std::fs::write(
+        temp_dir.join("package.json"),
+        r#"{"name": "circular", "main": "src/a.ts"}"#,
+    )
+    .unwrap();
+
+    std::fs::write(
+        temp_dir.join("src/a.ts"),
+        "// fallow-ignore-next-line circular-dependency\nimport { b } from './b';\nexport const a = b + 1;\n",
+    )
+    .unwrap();
+
+    std::fs::write(
+        temp_dir.join("src/b.ts"),
+        "// fallow-ignore-next-line circular-dependency\nimport { a } from './a';\nexport const b = a + 1;\n",
+    )
+    .unwrap();
+
+    let config = create_config(temp_dir);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    assert!(
+        results.circular_dependencies.is_empty(),
+        "line-level circular-dependency suppression should hide the cycle, got: {:?}",
+        results.circular_dependencies
+    );
+    assert!(
+        results.stale_suppressions.is_empty(),
+        "consumed circular-dependency suppressions should not be stale, got: {:?}",
+        results.stale_suppressions
+    );
+}

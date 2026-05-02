@@ -175,8 +175,7 @@ fn issue_types_schema() -> serde_json::Value {
                 "filter_flag": "--circular-deps",
                 "fixable": false,
                 "suppressible": true,
-                "suppress_comment": "// fallow-ignore-file circular-dependency",
-                "note": "Only file-level suppression is supported (fallow-ignore-file), not next-line suppression"
+                "suppress_comment": "// fallow-ignore-next-line circular-dependency"
             }
     ])
 }
