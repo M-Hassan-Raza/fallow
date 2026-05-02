@@ -5,8 +5,9 @@ use fallow_config::{ResolvedConfig, RulesConfig, Severity};
 /// Remove issues whose effective severity is `Off` from the results.
 ///
 /// When overrides are configured, per-file rule resolution is used for
-/// file-scoped issue types. Non-file-scoped issues (unused deps, unlisted deps,
-/// duplicate exports) use the base rules only.
+/// file-scoped issue types. Circular dependencies resolve against every file in
+/// the cycle. Non-file-scoped issues (unused deps, unlisted deps, duplicate
+/// exports) use the base rules only.
 pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: &ResolvedConfig) {
     let rules = &config.rules;
     let has_overrides = !config.overrides.is_empty();
@@ -37,6 +38,11 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
         results
             .stale_suppressions
             .retain(|s| config.resolve_rules_for_path(&s.path).stale_suppressions != Severity::Off);
+        results.circular_dependencies.retain(|c| {
+            c.files.iter().any(|path| {
+                config.resolve_rules_for_path(path).circular_dependencies != Severity::Off
+            })
+        });
     } else {
         if rules.unused_files == Severity::Off {
             results.unused_files.clear();
@@ -97,7 +103,8 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
 ///
 /// When overrides are configured, per-file rule resolution is used for
-/// file-scoped issue types to determine if any individual issue has Error severity.
+/// file-scoped issue types to determine if any individual issue has Error
+/// severity. Circular dependencies resolve against every file in the cycle.
 pub fn has_error_severity_issues(
     results: &fallow_core::results::AnalysisResults,
     rules: &RulesConfig,
@@ -135,6 +142,11 @@ pub fn has_error_severity_issues(
             || results.stale_suppressions.iter().any(|s| {
                 config.resolve_rules_for_path(&s.path).stale_suppressions == Severity::Error
             })
+            || results.circular_dependencies.iter().any(|c| {
+                c.files.iter().any(|path| {
+                    config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
+                })
+            })
     } else {
         (rules.unused_files == Severity::Error && !results.unused_files.is_empty())
             || (rules.unused_exports == Severity::Error && !results.unused_exports.is_empty())
@@ -165,7 +177,8 @@ pub fn has_error_severity_issues(
             && !results.type_only_dependencies.is_empty())
         || (rules.test_only_dependencies == Severity::Error
             && !results.test_only_dependencies.is_empty())
-        || (rules.circular_dependencies == Severity::Error
+        || (!has_overrides
+            && rules.circular_dependencies == Severity::Error
             && !results.circular_dependencies.is_empty())
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
 }
@@ -637,6 +650,60 @@ mod tests {
         )
     }
 
+    fn config_with_circular_override(pattern: &str, severity: Severity) -> ResolvedConfig {
+        fallow_config::FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+            used_class_members: vec![],
+            duplicates: fallow_config::DuplicatesConfig::default(),
+            health: fallow_config::HealthConfig::default(),
+            rules: RulesConfig::default(),
+            boundaries: fallow_config::BoundaryConfig::default(),
+            production: false.into(),
+            plugins: vec![],
+            dynamically_loaded: vec![],
+            regression: None,
+            audit: fallow_config::AuditConfig::default(),
+            codeowners: None,
+            public_packages: vec![],
+            flags: fallow_config::FlagsConfig::default(),
+            resolve: fallow_config::ResolveConfig::default(),
+            sealed: false,
+            include_entry_exports: false,
+            overrides: vec![fallow_config::ConfigOverride {
+                files: vec![pattern.to_string()],
+                rules: fallow_config::PartialRulesConfig {
+                    circular_dependencies: Some(severity),
+                    ..Default::default()
+                },
+            }],
+        }
+        .resolve(
+            PathBuf::from("/project"),
+            fallow_config::OutputFormat::Human,
+            1,
+            true,
+            true,
+        )
+    }
+
+    fn circular_dependency(files: &[&str]) -> CircularDependency {
+        CircularDependency {
+            files: files.iter().map(PathBuf::from).collect(),
+            length: files.len(),
+            line: 1,
+            col: 0,
+            is_cross_package: false,
+        }
+    }
+
     #[test]
     fn apply_rules_with_override_filters_matching_files() {
         let mut results = AnalysisResults::default();
@@ -683,6 +750,34 @@ mod tests {
     }
 
     #[test]
+    fn apply_rules_with_override_filters_circular_cycle_when_all_files_off() {
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(circular_dependency(&[
+            "/project/src/generated/a.ts",
+            "/project/src/generated/b.ts",
+        ]));
+
+        let config = config_with_circular_override("src/generated/**", Severity::Off);
+        apply_rules(&mut results, &config);
+
+        assert!(results.circular_dependencies.is_empty());
+    }
+
+    #[test]
+    fn apply_rules_with_override_preserves_circular_cycle_when_any_file_is_on() {
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(circular_dependency(&[
+            "/project/src/generated/a.ts",
+            "/project/src/live/b.ts",
+        ]));
+
+        let config = config_with_circular_override("src/generated/**", Severity::Off);
+        apply_rules(&mut results, &config);
+
+        assert_eq!(results.circular_dependencies.len(), 1);
+    }
+
+    #[test]
     fn has_error_with_override_per_file_resolution() {
         let mut results = AnalysisResults::default();
         // Only a test file has unused exports — override turns that off
@@ -726,6 +821,40 @@ mod tests {
         assert!(
             has_error_severity_issues(&results, rules, Some(&config)),
             "non-test file should still have Error severity"
+        );
+    }
+
+    #[test]
+    fn has_error_with_override_circular_cycle_uses_file_severity() {
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(circular_dependency(&[
+            "/project/src/generated/a.ts",
+            "/project/src/generated/b.ts",
+        ]));
+
+        let config = config_with_circular_override("src/generated/**", Severity::Warn);
+        let rules = &config.rules;
+
+        assert!(
+            !has_error_severity_issues(&results, rules, Some(&config)),
+            "cycle files downgraded to Warn should not produce an Error verdict"
+        );
+    }
+
+    #[test]
+    fn has_error_with_override_circular_cycle_keeps_error_for_unmatched_file() {
+        let mut results = AnalysisResults::default();
+        results.circular_dependencies.push(circular_dependency(&[
+            "/project/src/generated/a.ts",
+            "/project/src/live/b.ts",
+        ]));
+
+        let config = config_with_circular_override("src/generated/**", Severity::Off);
+        let rules = &config.rules;
+
+        assert!(
+            has_error_severity_issues(&results, rules, Some(&config)),
+            "a cycle touching any Error-severity file should still fail"
         );
     }
 
