@@ -81,6 +81,10 @@ pub struct CloudRuntimeContext {
     #[serde(default)]
     pub functions: Vec<CloudRuntimeFunction>,
     #[serde(default)]
+    pub blast_radius: Vec<CloudRuntimeBlastRadiusEntry>,
+    #[serde(default)]
+    pub importance: Vec<CloudRuntimeImportanceEntry>,
+    #[serde(default)]
     pub warnings: Vec<CloudRuntimeWarning>,
 }
 
@@ -128,6 +132,42 @@ pub struct CloudRuntimeFunction {
     pub deployments_observed: u32,
     #[serde(default)]
     pub untracked_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CloudRuntimeBlastRadiusEntry {
+    pub id: String,
+    pub file: String,
+    pub function: String,
+    pub line: u32,
+    pub caller_count: u32,
+    pub caller_count_weighted_by_traffic: u64,
+    #[serde(default)]
+    pub deploys_touched: Option<u32>,
+    pub risk_band: CloudRuntimeRiskBand,
+}
+
+#[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CloudRuntimeRiskBand {
+    Low,
+    Medium,
+    High,
+    #[default]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CloudRuntimeImportanceEntry {
+    pub id: String,
+    pub file: String,
+    pub function: String,
+    pub line: u32,
+    pub invocations: u64,
+    pub cyclomatic: u32,
+    pub owner_count: u32,
+    pub importance_score: f64,
+    pub reason: String,
 }
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq)]

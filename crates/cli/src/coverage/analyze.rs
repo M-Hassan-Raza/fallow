@@ -18,7 +18,8 @@ use crate::health_types::{
     RuntimeCoverageAction, RuntimeCoverageCaptureQuality, RuntimeCoverageConfidence,
     RuntimeCoverageDataSource, RuntimeCoverageEvidence, RuntimeCoverageFinding,
     RuntimeCoverageHotPath, RuntimeCoverageMessage, RuntimeCoverageReport,
-    RuntimeCoverageReportVerdict, RuntimeCoverageSummary, RuntimeCoverageVerdict,
+    RuntimeCoverageReportVerdict, RuntimeCoverageRiskBand, RuntimeCoverageSummary,
+    RuntimeCoverageVerdict,
 };
 
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
@@ -39,6 +40,8 @@ pub struct AnalyzeArgs {
     pub min_observation_volume: Option<u32>,
     pub low_traffic_threshold: Option<f64>,
     pub top: Option<usize>,
+    pub blast_radius: bool,
+    pub importance: bool,
 }
 
 pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
@@ -153,7 +156,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
     let Some(report) = result.report.runtime_coverage else {
         return emit_error("runtime coverage report was not produced", 2, ctx.output);
     };
-    print_runtime_report(&report, ctx, result.elapsed, args.top)
+    print_runtime_report(&report, ctx, result.elapsed, args)
 }
 
 fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
@@ -185,11 +188,8 @@ fn run_cloud(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
         Err(code) => return code,
     };
     let mut report = merge_cloud_snapshot(&snapshot, &static_index, args.min_invocations_hot);
-    if let Some(top) = args.top {
-        report.findings.truncate(top);
-        report.hot_paths.truncate(top);
-    }
-    print_runtime_report(&report, ctx, start.elapsed(), args.top)
+    apply_top_limit(&mut report, args.top);
+    print_runtime_report(&report, ctx, start.elapsed(), args)
 }
 
 fn runtime_coverage_source_env_is_cloud() -> bool {
@@ -280,6 +280,9 @@ struct StaticFunctionInfo {
     end_line: u32,
     static_used: bool,
     test_covered: bool,
+    cyclomatic: u32,
+    caller_count: u32,
+    owner_count: Option<u32>,
 }
 
 #[derive(Default)]
@@ -309,11 +312,14 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
     let analysis_output = fallow_core::analyze_with_parse_result(&config, &parse_result.modules)
         .map_err(|err| emit_error(&format!("analysis failed: {err}"), 2, ctx.output))?;
     let file_paths: FxHashMap<_, _> = files.iter().map(|file| (file.id, &file.path)).collect();
+    let codeowners =
+        crate::codeowners::CodeOwners::load(&config.root, config.codeowners.as_deref()).ok();
     Ok(build_index_from_analysis(
         &config.root,
         &parse_result.modules,
         &analysis_output,
         &file_paths,
+        codeowners.as_ref(),
     ))
 }
 
@@ -322,6 +328,7 @@ fn build_index_from_analysis(
     modules: &[fallow_types::extract::ModuleInfo],
     analysis_output: &fallow_core::AnalysisOutput,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
+    codeowners: Option<&crate::codeowners::CodeOwners>,
 ) -> StaticIndex {
     let unused_files: FxHashSet<PathBuf> = analysis_output
         .results
@@ -343,11 +350,17 @@ fn build_index_from_analysis(
     }
 
     let mut out = StaticIndex::default();
+    let graph = analysis_output.graph.as_ref();
     for module in modules {
         let Some(path) = file_paths.get(&module.file_id) else {
             continue;
         };
         let rel = normalize_runtime_path(path.strip_prefix(root).unwrap_or(path));
+        let caller_count = graph
+            .and_then(|g| g.reverse_deps.get(module.file_id.0 as usize))
+            .map_or(0_usize, Vec::len);
+        let caller_count = u32::try_from(caller_count).unwrap_or(u32::MAX);
+        let owner_count = codeowners.map(|co| co.owner_count_of(Path::new(&rel)).unwrap_or(0));
         for function in &module.complexity {
             let end_line = function.line.saturating_add(function.line_count);
             let static_used = !unused_files.contains(path.as_path())
@@ -364,6 +377,9 @@ fn build_index_from_analysis(
                 end_line,
                 static_used,
                 test_covered: false,
+                cyclomatic: u32::from(function.cyclomatic),
+                caller_count,
+                owner_count,
             };
             out.by_key.insert(
                 (rel.clone(), function.name.clone(), function.line),
@@ -385,6 +401,8 @@ fn merge_cloud_snapshot(
 ) -> RuntimeCoverageReport {
     let mut findings = Vec::new();
     let mut hot_paths = Vec::new();
+    let mut synthesized_blast_radius = Vec::new();
+    let mut synthesized_importance = Vec::new();
     let mut unmatched_cloud_functions = 0_usize;
     for function in &snapshot.functions {
         let Some(local) = match_cloud_function(function, static_index) else {
@@ -396,6 +414,10 @@ fn merge_cloud_snapshot(
                 && invocations >= min_invocations_hot
             {
                 hot_paths.push(cloud_hot_path(&local, invocations));
+            }
+            if let Some(invocations) = function.hit_count {
+                synthesized_blast_radius.push(cloud_blast_radius(&local, invocations, function));
+                synthesized_importance.push(cloud_importance(&local, invocations));
             }
             continue;
         }
@@ -415,6 +437,47 @@ fn merge_cloud_snapshot(
             .then_with(|| left.path.cmp(&right.path))
             .then_with(|| left.function.cmp(&right.function))
     });
+    let blast_radius = if snapshot.blast_radius.is_empty() {
+        synthesized_blast_radius
+    } else {
+        snapshot
+            .blast_radius
+            .iter()
+            .map(
+                |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
+                    id: entry.id.clone(),
+                    file: PathBuf::from(&entry.file),
+                    function: entry.function.clone(),
+                    line: entry.line,
+                    caller_count: entry.caller_count,
+                    caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+                    deploys_touched: entry.deploys_touched,
+                    risk_band: map_cloud_risk_band(entry.risk_band),
+                },
+            )
+            .collect::<Vec<_>>()
+    };
+    let importance = if snapshot.importance.is_empty() {
+        rank_importance(synthesized_importance)
+    } else {
+        snapshot
+            .importance
+            .iter()
+            .map(
+                |entry| crate::health_types::RuntimeCoverageImportanceEntry {
+                    id: entry.id.clone(),
+                    file: PathBuf::from(&entry.file),
+                    function: entry.function.clone(),
+                    line: entry.line,
+                    invocations: entry.invocations,
+                    cyclomatic: entry.cyclomatic,
+                    owner_count: entry.owner_count,
+                    importance_score: entry.importance_score,
+                    reason: entry.reason.clone(),
+                },
+            )
+            .collect::<Vec<_>>()
+    };
 
     let warnings = cloud_warnings(snapshot, unmatched_cloud_functions);
 
@@ -439,6 +502,8 @@ fn merge_cloud_snapshot(
         },
         findings,
         hot_paths,
+        blast_radius,
+        importance,
         watermark: None,
         warnings,
     }
@@ -454,6 +519,48 @@ fn cloud_hot_path(local: &StaticFunctionInfo, invocations: u64) -> RuntimeCovera
         percentile: 100,
         actions: Vec::new(),
     }
+}
+
+fn cloud_blast_radius(
+    local: &StaticFunctionInfo,
+    invocations: u64,
+    function: &CloudRuntimeFunction,
+) -> crate::health_types::RuntimeCoverageBlastRadiusEntry {
+    let weighted = invocations.saturating_mul(u64::from(local.caller_count));
+    crate::health_types::RuntimeCoverageBlastRadiusEntry {
+        id: stable_runtime_id("blast", &local.path, &local.name, local.start_line),
+        file: local.path.clone(),
+        function: local.name.clone(),
+        line: local.start_line,
+        caller_count: local.caller_count,
+        caller_count_weighted_by_traffic: weighted,
+        deploys_touched: Some(function.deployments_observed),
+        risk_band: blast_radius_risk_band(local.caller_count, weighted),
+    }
+}
+
+fn cloud_importance(
+    local: &StaticFunctionInfo,
+    invocations: u64,
+) -> (
+    crate::health_types::RuntimeCoverageImportanceEntry,
+    Option<u32>,
+) {
+    let owner_count = local.owner_count.unwrap_or(0);
+    (
+        crate::health_types::RuntimeCoverageImportanceEntry {
+            id: stable_runtime_id("importance", &local.path, &local.name, local.start_line),
+            file: local.path.clone(),
+            function: local.name.clone(),
+            line: local.start_line,
+            invocations,
+            cyclomatic: local.cyclomatic,
+            owner_count,
+            importance_score: 0.0,
+            reason: importance_reason(invocations, local.cyclomatic, local.owner_count),
+        },
+        local.owner_count,
+    )
 }
 
 fn cloud_finding(
@@ -484,6 +591,97 @@ fn cloud_finding(
             deployments_observed: function.deployments_observed,
         },
         actions: runtime_actions(verdict),
+    }
+}
+
+fn rank_importance(
+    entries: Vec<(
+        crate::health_types::RuntimeCoverageImportanceEntry,
+        Option<u32>,
+    )>,
+) -> Vec<crate::health_types::RuntimeCoverageImportanceEntry> {
+    let max_log = entries
+        .iter()
+        .map(|(entry, _)| (entry.invocations as f64).ln_1p())
+        .fold(0.0_f64, f64::max);
+    let mut ranked = entries
+        .into_iter()
+        .map(|(mut entry, owner_count)| {
+            let normalized_traffic = if max_log <= f64::EPSILON {
+                0.0
+            } else {
+                (entry.invocations as f64).ln_1p() / max_log
+            };
+            let complexity_weight = 1.0 + (f64::from(entry.cyclomatic).min(20.0) / 20.0);
+            let ownership_risk_weight = match owner_count {
+                Some(count) if count <= 1 => 1.5,
+                Some(_) => 1.0,
+                None => 1.2,
+            };
+            entry.importance_score =
+                (normalized_traffic * 50.0 * complexity_weight * ownership_risk_weight)
+                    .clamp(0.0, 100.0);
+            entry.importance_score = (entry.importance_score * 10.0).round() / 10.0;
+            entry
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|left, right| {
+        right
+            .importance_score
+            .total_cmp(&left.importance_score)
+            .then_with(|| right.invocations.cmp(&left.invocations))
+            .then_with(|| left.file.cmp(&right.file))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+    ranked
+}
+
+fn importance_reason(invocations: u64, cyclomatic: u32, owner_count: Option<u32>) -> String {
+    let traffic = if invocations >= 1_000_000 {
+        "High traffic"
+    } else if invocations >= 10_000 {
+        "Moderate traffic"
+    } else {
+        "Low traffic"
+    };
+    let complexity = if cyclomatic >= 10 {
+        "high complexity"
+    } else if cyclomatic >= 5 {
+        "moderate complexity"
+    } else {
+        "low complexity"
+    };
+    let ownership = match owner_count {
+        Some(0) => "unowned",
+        Some(1) => "single owner",
+        Some(_) => "multiple owners",
+        None => "no CODEOWNERS data",
+    };
+    format!("{traffic}, {complexity}, {ownership}")
+}
+
+fn blast_radius_risk_band(caller_count: u32, weighted: u64) -> RuntimeCoverageRiskBand {
+    if caller_count >= 20 || weighted >= 1_000_000 {
+        RuntimeCoverageRiskBand::High
+    } else if caller_count >= 5 || weighted >= 50_000 {
+        RuntimeCoverageRiskBand::Medium
+    } else {
+        RuntimeCoverageRiskBand::Low
+    }
+}
+
+const fn map_cloud_risk_band(
+    risk_band: crate::coverage::cloud_client::CloudRuntimeRiskBand,
+) -> RuntimeCoverageRiskBand {
+    match risk_band {
+        crate::coverage::cloud_client::CloudRuntimeRiskBand::Low => RuntimeCoverageRiskBand::Low,
+        crate::coverage::cloud_client::CloudRuntimeRiskBand::Medium => {
+            RuntimeCoverageRiskBand::Medium
+        }
+        crate::coverage::cloud_client::CloudRuntimeRiskBand::High => RuntimeCoverageRiskBand::High,
+        crate::coverage::cloud_client::CloudRuntimeRiskBand::Unknown => {
+            RuntimeCoverageRiskBand::Low
+        }
     }
 }
 
@@ -684,29 +882,35 @@ const fn runtime_verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 }
 
 fn stable_runtime_id(prefix: &str, path: &Path, function: &str, line: u32) -> String {
-    let input = format!(
-        "{prefix}:{}:{function}:{line}",
-        normalize_runtime_path(path)
-    );
-    // Match the canonical 8-hex-char shape that the local sidecar emits and
-    // that `docs/output-schema.json` constrains via regex (`fallow:prod:[0-9a-f]{8}`).
-    // Keep the lower 32 bits of xxh3_64; collisions across realistic populations
-    // (~64K functions before 50% birthday probability) are tolerable for an
-    // identifier the schema treats as opaque.
-    let truncated = (xxhash_rust::xxh3::xxh3_64(input.as_bytes()) & 0xFFFF_FFFF) as u32;
-    format!("fallow:{prefix}:{truncated:08x}")
+    let file = normalize_runtime_path(path);
+    match prefix {
+        "hot" => fallow_cov_protocol::hot_path_id(&file, function, line),
+        "blast" => fallow_cov_protocol::blast_radius_id(&file, function, line),
+        "importance" => fallow_cov_protocol::importance_id(&file, function, line),
+        _ => fallow_cov_protocol::finding_id(&file, function, line),
+    }
 }
 
 fn print_runtime_report(
     report: &RuntimeCoverageReport,
     ctx: &RunContext<'_>,
     elapsed: std::time::Duration,
-    top: Option<usize>,
+    args: &AnalyzeArgs,
 ) -> ExitCode {
     match ctx.output {
-        OutputFormat::Human => print_runtime_human(report, elapsed, top),
+        OutputFormat::Human => print_runtime_human(report, elapsed, args),
         _ => print_runtime_json(report, elapsed, ctx.explain),
     }
+}
+
+fn apply_top_limit(report: &mut RuntimeCoverageReport, top: Option<usize>) {
+    let Some(top) = top else {
+        return;
+    };
+    report.findings.truncate(top);
+    report.hot_paths.truncate(top);
+    report.blast_radius.truncate(top);
+    report.importance.truncate(top);
 }
 
 fn print_runtime_json(
@@ -756,9 +960,9 @@ const HUMAN_DEFAULT_DISPLAY_LIMIT: usize = 10;
 fn print_runtime_human(
     report: &RuntimeCoverageReport,
     elapsed: std::time::Duration,
-    top: Option<usize>,
+    args: &AnalyzeArgs,
 ) -> ExitCode {
-    let display_limit = top.unwrap_or(HUMAN_DEFAULT_DISPLAY_LIMIT);
+    let display_limit = args.top.unwrap_or(HUMAN_DEFAULT_DISPLAY_LIMIT);
     println!("Runtime coverage: {}", report.verdict);
     println!(
         "  {} tracked, {} hit, {} unhit, {} untracked ({:.1}% covered)",
@@ -785,6 +989,36 @@ fn print_runtime_human(
             finding.verdict.human_label(),
         );
     }
+    if args.blast_radius && !report.blast_radius.is_empty() {
+        println!("  blast radius:");
+        for entry in report.blast_radius.iter().take(display_limit) {
+            println!(
+                "  {}:{} {} ({} callers, weighted {}, {})",
+                entry.file.display(),
+                entry.line,
+                entry.function,
+                entry.caller_count,
+                entry.caller_count_weighted_by_traffic,
+                entry.risk_band,
+            );
+        }
+    }
+    if args.importance && !report.importance.is_empty() {
+        println!("  importance:");
+        for entry in report.importance.iter().take(display_limit) {
+            println!(
+                "  {}:{} {} ({:.1}, {} invocations, cyclomatic {}, owners {}) - {}",
+                entry.file.display(),
+                entry.line,
+                entry.function,
+                entry.importance_score,
+                entry.invocations,
+                entry.cyclomatic,
+                entry.owner_count,
+                entry.reason,
+            );
+        }
+    }
     for warning in &report.warnings {
         println!("  warning [{}]: {}", warning.code, warning.message);
     }
@@ -795,6 +1029,7 @@ fn print_runtime_human(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::health_types::{RuntimeCoverageBlastRadiusEntry, RuntimeCoverageImportanceEntry};
 
     #[test]
     fn api_key_alone_does_not_enable_cloud_source() {
@@ -821,6 +1056,9 @@ mod tests {
             end_line: 20,
             static_used: false,
             test_covered: false,
+            cyclomatic: 4,
+            caller_count: 0,
+            owner_count: None,
         };
         static_index.by_key.insert(
             ("src/a.ts".to_owned(), "oldFlow".to_owned(), 10),
@@ -844,6 +1082,8 @@ mod tests {
                 coverage_percent: 0.0,
                 last_received_at: Some("2026-04-30T10:00:00.000Z".to_owned()),
             },
+            blast_radius: vec![],
+            importance: vec![],
             functions: vec![
                 CloudRuntimeFunction {
                     file_path: "src/a.ts".to_owned(),
@@ -928,6 +1168,8 @@ mod tests {
                 coverage_percent: 0.0,
                 last_received_at: None,
             },
+            blast_radius: vec![],
+            importance: vec![],
             functions: vec![],
             warnings: vec![CloudRuntimeWarning::Object {
                 code: Some("no_runtime_data".to_owned()),
@@ -967,6 +1209,8 @@ mod tests {
                 coverage_percent: 0.0,
                 last_received_at: None,
             },
+            blast_radius: vec![],
+            importance: vec![],
             functions: vec![],
             warnings: vec![CloudRuntimeWarning::Object {
                 code: Some("no_runtime_data".to_owned()),
@@ -990,6 +1234,53 @@ mod tests {
     fn validate_output_format_accepts_json_and_human() {
         assert!(validate_output_format(OutputFormat::Json).is_ok());
         assert!(validate_output_format(OutputFormat::Human).is_ok());
+    }
+
+    #[test]
+    fn top_limit_truncates_all_runtime_arrays() {
+        let mut report = RuntimeCoverageReport {
+            verdict: RuntimeCoverageReportVerdict::Clean,
+            summary: RuntimeCoverageSummary::default(),
+            findings: vec![
+                runtime_finding("fallow:prod:00000001"),
+                runtime_finding("fallow:prod:00000002"),
+            ],
+            hot_paths: vec![
+                runtime_hot_path("fallow:hot:00000001"),
+                runtime_hot_path("fallow:hot:00000002"),
+            ],
+            blast_radius: vec![
+                runtime_blast_radius("fallow:blast:00000001"),
+                runtime_blast_radius("fallow:blast:00000002"),
+            ],
+            importance: vec![
+                runtime_importance("fallow:importance:00000001"),
+                runtime_importance("fallow:importance:00000002"),
+            ],
+            watermark: None,
+            warnings: vec![],
+        };
+        apply_top_limit(&mut report, Some(1));
+        assert_eq!(report.findings.len(), 1);
+        assert_eq!(report.hot_paths.len(), 1);
+        assert_eq!(report.blast_radius.len(), 1);
+        assert_eq!(report.importance.len(), 1);
+    }
+
+    #[test]
+    fn cloud_importance_scores_missing_codeowners_lower_than_unowned() {
+        let no_codeowners = runtime_importance("fallow:importance:00000001");
+        let unowned = RuntimeCoverageImportanceEntry {
+            id: "fallow:importance:00000002".to_owned(),
+            owner_count: 0,
+            reason: "High traffic, low complexity, unowned".to_owned(),
+            ..runtime_importance("fallow:importance:00000002")
+        };
+
+        let ranked = rank_importance(vec![(no_codeowners, None), (unowned, Some(0))]);
+        assert_eq!(ranked[0].id, "fallow:importance:00000002");
+        assert!((ranked[0].importance_score - 78.8).abs() < f64::EPSILON);
+        assert!((ranked[1].importance_score - 63.0).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -1025,6 +1316,66 @@ mod tests {
                 err.contains("only supports --format json or --format human"),
                 "rejection message must guide users; got: {err}"
             );
+        }
+    }
+
+    fn runtime_finding(id: &str) -> RuntimeCoverageFinding {
+        RuntimeCoverageFinding {
+            id: id.to_owned(),
+            path: PathBuf::from("src/a.ts"),
+            function: "a".to_owned(),
+            line: 1,
+            verdict: RuntimeCoverageVerdict::ReviewRequired,
+            invocations: Some(0),
+            confidence: RuntimeCoverageConfidence::Medium,
+            evidence: RuntimeCoverageEvidence {
+                static_status: "used".to_owned(),
+                test_coverage: "not_covered".to_owned(),
+                v8_tracking: "tracked".to_owned(),
+                untracked_reason: None,
+                observation_days: 0,
+                deployments_observed: 0,
+            },
+            actions: vec![],
+        }
+    }
+
+    fn runtime_hot_path(id: &str) -> RuntimeCoverageHotPath {
+        RuntimeCoverageHotPath {
+            id: id.to_owned(),
+            path: PathBuf::from("src/a.ts"),
+            function: "a".to_owned(),
+            line: 1,
+            invocations: 1,
+            percentile: 100,
+            actions: vec![],
+        }
+    }
+
+    fn runtime_blast_radius(id: &str) -> RuntimeCoverageBlastRadiusEntry {
+        RuntimeCoverageBlastRadiusEntry {
+            id: id.to_owned(),
+            file: PathBuf::from("src/a.ts"),
+            function: "a".to_owned(),
+            line: 1,
+            caller_count: 1,
+            caller_count_weighted_by_traffic: 1,
+            deploys_touched: None,
+            risk_band: RuntimeCoverageRiskBand::Low,
+        }
+    }
+
+    fn runtime_importance(id: &str) -> RuntimeCoverageImportanceEntry {
+        RuntimeCoverageImportanceEntry {
+            id: id.to_owned(),
+            file: PathBuf::from("src/a.ts"),
+            function: "a".to_owned(),
+            line: 1,
+            invocations: 1,
+            cyclomatic: 1,
+            owner_count: 1,
+            importance_score: 1.0,
+            reason: "Low traffic, low complexity, single owner".to_owned(),
         }
     }
 }

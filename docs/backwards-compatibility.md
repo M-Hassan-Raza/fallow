@@ -23,7 +23,9 @@ These interfaces are covered by semver — breaking changes only happen in major
 
 ### CLI interface
 
-- **Subcommands**: `dead-code` (legacy alias: `check`), `dupes`, `health`, `audit`, `explain`, `fix`, `watch`, `init`, `hooks`, `setup-hooks`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`, `config`
+- **Subcommands**: `dead-code` (legacy alias: `check`), `dupes`, `health`, `audit`, `explain`, `fix`, `watch`, `init`, `hooks`, `setup-hooks`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`, `config`, `coverage`, `license`
+- **`coverage` subcommands**: `setup`, `analyze`, `upload-source-maps`, `upload-inventory`. `analyze` accepts `--runtime-coverage <path>` for local mode and `--cloud` / `--runtime-coverage-cloud` (or `FALLOW_RUNTIME_COVERAGE_SOURCE=cloud`) for explicit cloud-pull; `FALLOW_API_KEY` alone never selects cloud mode.
+- **`license` subcommands**: `activate`, `status`, `refresh`, `deactivate`, `trial`. JWT verification is offline-only; `activate` and `refresh` are the only network-touching operations.
 - **Default behavior**: bare `fallow` (no subcommand) runs dead-code + dupes + health combined
 - **Exit codes**: 0 (success/no errors), 1 (issues with error severity found), 2 (runtime error). `fallow audit` defaults to `--gate new-only`, so inherited error-severity findings in changed files can be reported with exit 0; use `--gate all` to fail on every finding in changed files.
 - **Global flags**: `--format`, `--config`, `--workspace`, `--production`, `--baseline`, `--save-baseline`, `--no-cache`, `--threads`, `--changed-since` (alias: `--base`), `--performance`, `--explain`, `--ci`, `--fail-on-issues`, `--sarif-file`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline`, `--summary`, `--group-by` (owner, directory, package, section), `--include-entry-exports`

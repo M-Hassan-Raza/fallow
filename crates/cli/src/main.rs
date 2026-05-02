@@ -1000,6 +1000,14 @@ enum CoverageCli {
         /// Show only the top N runtime findings and hot paths.
         #[arg(long)]
         top: Option<usize>,
+
+        /// Show the first-class blast-radius section in human output.
+        #[arg(long)]
+        blast_radius: bool,
+
+        /// Show the first-class importance section in human output.
+        #[arg(long)]
+        importance: bool,
     },
     /// Upload a static function inventory to fallow cloud (Production
     /// Coverage, paid). Unlocks the `untracked` filter on the dashboard by
@@ -1496,6 +1504,59 @@ fn build_regression_opts<'a>(
     }
 }
 
+struct DispatchContext<'a> {
+    cli: &'a Cli,
+    root: &'a std::path::Path,
+    output: fallow_config::OutputFormat,
+    quiet: bool,
+    cli_format_was_explicit: bool,
+    threads: usize,
+    tolerance: regression::Tolerance,
+    save_regression_file: Option<&'a std::path::PathBuf>,
+    save_to_config: bool,
+}
+
+impl DispatchContext<'_> {
+    fn ci_defaults(&self) -> (fallow_config::OutputFormat, bool, bool) {
+        apply_ci_defaults(
+            self.cli.ci,
+            self.cli.fail_on_issues,
+            self.output,
+            self.quiet,
+            self.cli_format_was_explicit,
+        )
+    }
+
+    fn production_modes(
+        &self,
+        dead_code: bool,
+        health: bool,
+        dupes: bool,
+    ) -> Result<ProductionModes, ExitCode> {
+        resolve_production_modes(self.cli, self.root, self.output, dead_code, health, dupes)
+    }
+
+    fn production_for(
+        &self,
+        analysis: fallow_config::ProductionAnalysis,
+    ) -> Result<bool, ExitCode> {
+        self.production_modes(false, false, false)
+            .map(|modes| modes.for_analysis(analysis))
+    }
+
+    fn regression_opts(&self, scoped: bool) -> regression::RegressionOpts<'_> {
+        build_regression_opts(
+            self.cli.fail_on_regression,
+            self.tolerance,
+            self.cli.regression_baseline.as_deref(),
+            self.save_regression_file,
+            self.save_to_config,
+            scoped,
+            self.quiet,
+        )
+    }
+}
+
 #[derive(Clone, Copy)]
 struct ProductionModes {
     dead_code: bool,
@@ -1679,60 +1740,28 @@ fn main() -> ExitCode {
     let save_to_config = cli.save_regression_baseline.is_some() && save_regression_file.is_none();
 
     let command = cli.command.take();
-    match command {
-        None => dispatch_bare_command(
-            &cli,
-            &root,
-            output,
-            quiet,
-            cli_format_was_explicit,
-            threads,
-            tolerance,
-            save_regression_file.as_ref(),
-            save_to_config,
-        ),
-        Some(cmd) => dispatch_subcommand(
-            cmd,
-            &cli,
-            &root,
-            output,
-            quiet,
-            cli_format_was_explicit,
-            threads,
-            tolerance,
-            save_regression_file.as_ref(),
-            save_to_config,
-        ),
-    }
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "CLI dispatch forwards many flags"
-)]
-fn dispatch_bare_command(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-    cli_format_was_explicit: bool,
-    threads: usize,
-    tolerance: regression::Tolerance,
-    save_regression_file: Option<&std::path::PathBuf>,
-    save_to_config: bool,
-) -> ExitCode {
-    let (output, quiet, fail_on_issues) = apply_ci_defaults(
-        cli.ci,
-        cli.fail_on_issues,
+    let dispatch = DispatchContext {
+        cli: &cli,
+        root: &root,
         output,
         quiet,
         cli_format_was_explicit,
-    );
+        threads,
+        tolerance,
+        save_regression_file: save_regression_file.as_ref(),
+        save_to_config,
+    };
+    match command {
+        None => dispatch_bare_command(&dispatch),
+        Some(cmd) => dispatch_subcommand(cmd, &dispatch),
+    }
+}
+
+fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
+    let cli = dispatch.cli;
+    let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
     let (run_check, run_dupes, run_health) = combined::resolve_analyses(&cli.only, &cli.skip);
-    let production = match resolve_production_modes(
-        cli,
-        root,
-        output,
+    let production = match dispatch.production_modes(
         cli.production_dead_code,
         cli.production_health,
         cli.production_dupes,
@@ -1741,11 +1770,11 @@ fn dispatch_bare_command(
         Err(code) => return code,
     };
     combined::run_combined(&combined::CombinedOptions {
-        root,
+        root: dispatch.root,
         config_path: &cli.config,
         output,
         no_cache: cli.no_cache,
-        threads,
+        threads: dispatch.threads,
         quiet,
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
@@ -1772,40 +1801,24 @@ fn dispatch_bare_command(
         trend: cli.trend,
         save_snapshot: cli.save_snapshot.as_ref(),
         include_entry_exports: cli.include_entry_exports,
-        regression_opts: build_regression_opts(
-            cli.fail_on_regression,
-            tolerance,
-            cli.regression_baseline.as_deref(),
-            save_regression_file,
-            save_to_config,
+        regression_opts: dispatch.regression_opts(
             cli.changed_since.is_some()
                 || cli.workspace.is_some()
                 || cli.changed_workspaces.is_some(),
-            quiet,
         ),
     })
 }
 
 #[expect(
-    clippy::too_many_arguments,
-    reason = "CLI dispatch forwards many flags"
-)]
-#[expect(
     clippy::too_many_lines,
     reason = "CLI dispatch handles all subcommands"
 )]
-fn dispatch_subcommand(
-    command: Command,
-    cli: &Cli,
-    root: &std::path::Path,
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-    cli_format_was_explicit: bool,
-    threads: usize,
-    tolerance: regression::Tolerance,
-    save_regression_file: Option<&std::path::PathBuf>,
-    save_to_config: bool,
-) -> ExitCode {
+fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
+    let cli = dispatch.cli;
+    let root = dispatch.root;
+    let output = dispatch.output;
+    let quiet = dispatch.quiet;
+    let threads = dispatch.threads;
     match command {
         Command::Check {
             unused_files,
@@ -1827,80 +1840,35 @@ fn dispatch_subcommand(
             trace_dependency,
             top,
             file,
-        } => {
-            let (output, quiet, fail_on_issues) = apply_ci_defaults(
-                cli.ci,
-                cli.fail_on_issues,
-                output,
-                quiet,
-                cli_format_was_explicit,
-            );
-            let production = match resolve_production_modes(cli, root, output, false, false, false)
-            {
-                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
-                Err(code) => return code,
-            };
-            let filters = IssueFilters {
-                unused_files,
-                unused_exports,
-                unused_deps,
-                unused_types,
-                private_type_leaks,
-                unused_enum_members,
-                unused_class_members,
-                unresolved_imports,
-                unlisted_deps,
-                duplicate_exports,
-                circular_deps,
-                boundary_violations,
-                stale_suppressions,
-            };
-            let trace_opts = TraceOptions {
-                trace_export: trace,
-                trace_file,
-                trace_dependency,
-                performance: cli.performance,
-            };
-            check::run_check(&CheckOptions {
-                root,
-                config_path: &cli.config,
-                output,
-                no_cache: cli.no_cache,
-                threads,
-                quiet,
-                fail_on_issues,
-                filters: &filters,
-                changed_since: cli.changed_since.as_deref(),
-                baseline: cli.baseline.as_deref(),
-                save_baseline: cli.save_baseline.as_deref(),
-                sarif_file: cli.sarif_file.as_deref(),
-                production,
-                production_override: Some(production),
-                workspace: cli.workspace.as_deref(),
-                changed_workspaces: cli.changed_workspaces.as_deref(),
-                group_by: cli.group_by,
+        } => dispatch_check(
+            dispatch,
+            &CheckDispatchArgs {
+                filters: IssueFilters {
+                    unused_files,
+                    unused_exports,
+                    unused_deps,
+                    unused_types,
+                    private_type_leaks,
+                    unused_enum_members,
+                    unused_class_members,
+                    unresolved_imports,
+                    unlisted_deps,
+                    duplicate_exports,
+                    circular_deps,
+                    boundary_violations,
+                    stale_suppressions,
+                },
+                trace_opts: TraceOptions {
+                    trace_export: trace,
+                    trace_file,
+                    trace_dependency,
+                    performance: cli.performance,
+                },
                 include_dupes,
-                trace_opts: &trace_opts,
-                explain: cli.explain,
                 top,
-                file: &file,
-                include_entry_exports: cli.include_entry_exports,
-                summary: cli.summary,
-                regression_opts: build_regression_opts(
-                    cli.fail_on_regression,
-                    tolerance,
-                    cli.regression_baseline.as_deref(),
-                    save_regression_file,
-                    save_to_config,
-                    cli.changed_since.is_some()
-                        || cli.workspace.is_some()
-                        || cli.changed_workspaces.is_some()
-                        || !file.is_empty(),
-                    quiet,
-                ),
-                retain_modules_for_health: false,
-            })
-        }
+                file,
+            },
+        ),
         Command::Watch { no_clear } => {
             let production = match resolve_production_modes(cli, root, output, false, false, false)
             {
@@ -1994,26 +1962,9 @@ fn dispatch_subcommand(
             ignore_imports,
             top,
             trace,
-        } => {
-            let (output, quiet, _fail_on_issues) = apply_ci_defaults(
-                cli.ci,
-                cli.fail_on_issues,
-                output,
-                quiet,
-                cli_format_was_explicit,
-            );
-            let production = match resolve_production_modes(cli, root, output, false, false, false)
-            {
-                Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::Dupes),
-                Err(code) => return code,
-            };
-            dupes::run_dupes(&DupesOptions {
-                root,
-                config_path: &cli.config,
-                output,
-                no_cache: cli.no_cache,
-                threads,
-                quiet,
+        } => dispatch_dupes(
+            dispatch,
+            &DupesDispatchArgs {
                 mode,
                 min_tokens,
                 min_lines,
@@ -2022,21 +1973,9 @@ fn dispatch_subcommand(
                 cross_language,
                 ignore_imports,
                 top,
-                baseline_path: cli.baseline.as_deref(),
-                save_baseline_path: cli.save_baseline.as_deref(),
-                production,
-                production_override: Some(production),
-                trace: trace.as_deref(),
-                changed_since: cli.changed_since.as_deref(),
-                changed_files: None,
-                workspace: cli.workspace.as_deref(),
-                changed_workspaces: cli.changed_workspaces.as_deref(),
-                explain: cli.explain,
-                explain_skipped: cli.explain_skipped,
-                summary: cli.summary,
-                group_by: cli.group_by,
-            })
-        }
+                trace,
+            },
+        ),
         Command::Health {
             max_cyclomatic,
             max_cognitive,
@@ -2072,38 +2011,35 @@ fn dispatch_subcommand(
             let ownership = ownership || ownership_emails.is_some();
             let hotspots = hotspots || ownership;
             dispatch_health(
-                cli,
-                root,
-                output,
-                quiet,
-                cli_format_was_explicit,
-                threads,
-                max_cyclomatic,
-                max_cognitive,
-                max_crap,
-                top,
-                sort,
-                complexity,
-                file_scores,
-                coverage_gaps,
-                hotspots,
-                ownership,
-                ownership_emails.map(EmailModeArg::to_config),
-                targets,
-                effort,
-                score,
-                min_score,
-                min_severity,
-                since.as_deref(),
-                min_commits,
-                save_snapshot.as_ref(),
-                trend,
-                coverage.as_deref(),
-                coverage_root.as_deref(),
-                runtime_coverage.as_deref(),
-                min_invocations_hot,
-                min_observation_volume,
-                low_traffic_threshold,
+                dispatch,
+                HealthDispatchArgs {
+                    max_cyclomatic,
+                    max_cognitive,
+                    max_crap,
+                    top,
+                    sort,
+                    complexity,
+                    file_scores,
+                    coverage_gaps,
+                    hotspots,
+                    ownership,
+                    ownership_emails: ownership_emails.map(EmailModeArg::to_config),
+                    targets,
+                    effort,
+                    score,
+                    min_score,
+                    min_severity,
+                    since: since.as_deref(),
+                    min_commits,
+                    save_snapshot: save_snapshot.as_ref(),
+                    trend,
+                    coverage: coverage.as_deref(),
+                    coverage_root: coverage_root.as_deref(),
+                    runtime_coverage: runtime_coverage.as_deref(),
+                    min_invocations_hot,
+                    min_observation_volume,
+                    low_traffic_threshold,
+                },
             )
         }
         Command::Flags { top } => {
@@ -2394,6 +2330,8 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
             min_observation_volume,
             low_traffic_threshold,
             top,
+            blast_radius,
+            importance,
         } => coverage::CoverageSubcommand::Analyze(coverage::AnalyzeArgs {
             runtime_coverage: runtime_coverage.clone(),
             cloud: *cloud,
@@ -2409,6 +2347,8 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
             min_observation_volume: *min_observation_volume,
             low_traffic_threshold: *low_traffic_threshold,
             top: *top,
+            blast_radius: *blast_radius,
+            importance: *importance,
         }),
         CoverageCli::UploadInventory {
             api_key,
@@ -2457,17 +2397,107 @@ fn map_coverage_subcommand(sub: &CoverageCli, explain: bool) -> coverage::Covera
     }
 }
 
-#[expect(
-    clippy::too_many_arguments,
-    reason = "CLI dispatch forwards many flags"
-)]
-fn dispatch_health(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: fallow_config::OutputFormat,
-    quiet: bool,
-    cli_format_was_explicit: bool,
-    threads: usize,
+struct CheckDispatchArgs {
+    filters: IssueFilters,
+    trace_opts: TraceOptions,
+    include_dupes: bool,
+    top: Option<usize>,
+    file: Vec<std::path::PathBuf>,
+}
+
+fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> ExitCode {
+    let cli = dispatch.cli;
+    let (output, quiet, fail_on_issues) = dispatch.ci_defaults();
+    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
+        Ok(production) => production,
+        Err(code) => return code,
+    };
+    check::run_check(&CheckOptions {
+        root: dispatch.root,
+        config_path: &cli.config,
+        output,
+        no_cache: cli.no_cache,
+        threads: dispatch.threads,
+        quiet,
+        fail_on_issues,
+        filters: &args.filters,
+        changed_since: cli.changed_since.as_deref(),
+        baseline: cli.baseline.as_deref(),
+        save_baseline: cli.save_baseline.as_deref(),
+        sarif_file: cli.sarif_file.as_deref(),
+        production,
+        production_override: Some(production),
+        workspace: cli.workspace.as_deref(),
+        changed_workspaces: cli.changed_workspaces.as_deref(),
+        group_by: cli.group_by,
+        include_dupes: args.include_dupes,
+        trace_opts: &args.trace_opts,
+        explain: cli.explain,
+        top: args.top,
+        file: &args.file,
+        include_entry_exports: cli.include_entry_exports,
+        summary: cli.summary,
+        regression_opts: dispatch.regression_opts(
+            cli.changed_since.is_some()
+                || cli.workspace.is_some()
+                || cli.changed_workspaces.is_some()
+                || !args.file.is_empty(),
+        ),
+        retain_modules_for_health: false,
+    })
+}
+
+struct DupesDispatchArgs {
+    mode: DupesMode,
+    min_tokens: usize,
+    min_lines: usize,
+    threshold: f64,
+    skip_local: bool,
+    cross_language: bool,
+    ignore_imports: bool,
+    top: Option<usize>,
+    trace: Option<String>,
+}
+
+fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> ExitCode {
+    let cli = dispatch.cli;
+    let (output, quiet, _fail_on_issues) = dispatch.ci_defaults();
+    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::Dupes) {
+        Ok(production) => production,
+        Err(code) => return code,
+    };
+    dupes::run_dupes(&DupesOptions {
+        root: dispatch.root,
+        config_path: &cli.config,
+        output,
+        no_cache: cli.no_cache,
+        threads: dispatch.threads,
+        quiet,
+        mode: args.mode,
+        min_tokens: args.min_tokens,
+        min_lines: args.min_lines,
+        threshold: args.threshold,
+        skip_local: args.skip_local,
+        cross_language: args.cross_language,
+        ignore_imports: args.ignore_imports,
+        top: args.top,
+        baseline_path: cli.baseline.as_deref(),
+        save_baseline_path: cli.save_baseline.as_deref(),
+        production,
+        production_override: Some(production),
+        trace: args.trace.as_deref(),
+        changed_since: cli.changed_since.as_deref(),
+        changed_files: None,
+        workspace: cli.workspace.as_deref(),
+        changed_workspaces: cli.changed_workspaces.as_deref(),
+        explain: cli.explain,
+        explain_skipped: cli.explain_skipped,
+        summary: cli.summary,
+        group_by: cli.group_by,
+    })
+}
+
+struct HealthDispatchArgs<'a> {
     max_cyclomatic: Option<u16>,
     max_cognitive: Option<u16>,
     max_crap: Option<f64>,
@@ -2484,24 +2514,51 @@ fn dispatch_health(
     score: bool,
     min_score: Option<f64>,
     min_severity: Option<health_types::FindingSeverity>,
-    since: Option<&str>,
+    since: Option<&'a str>,
     min_commits: Option<u32>,
-    save_snapshot: Option<&Option<String>>,
+    save_snapshot: Option<&'a Option<String>>,
     trend: bool,
-    coverage: Option<&std::path::Path>,
-    coverage_root: Option<&std::path::Path>,
-    runtime_coverage: Option<&std::path::Path>,
+    coverage: Option<&'a std::path::Path>,
+    coverage_root: Option<&'a std::path::Path>,
+    runtime_coverage: Option<&'a std::path::Path>,
     min_invocations_hot: u64,
     min_observation_volume: Option<u32>,
     low_traffic_threshold: Option<f64>,
-) -> ExitCode {
-    let (output, quiet, _fail_on_issues) = apply_ci_defaults(
-        cli.ci,
-        cli.fail_on_issues,
-        output,
-        quiet,
-        cli_format_was_explicit,
-    );
+}
+
+fn dispatch_health(dispatch: &DispatchContext<'_>, args: HealthDispatchArgs<'_>) -> ExitCode {
+    let cli = dispatch.cli;
+    let root = dispatch.root;
+    let threads = dispatch.threads;
+    let (output, quiet, _fail_on_issues) = dispatch.ci_defaults();
+    let HealthDispatchArgs {
+        max_cyclomatic,
+        max_cognitive,
+        max_crap,
+        top,
+        sort,
+        complexity,
+        file_scores,
+        coverage_gaps,
+        hotspots,
+        ownership,
+        ownership_emails,
+        targets,
+        effort,
+        score,
+        min_score,
+        min_severity,
+        since,
+        min_commits,
+        save_snapshot,
+        trend,
+        coverage,
+        coverage_root,
+        runtime_coverage,
+        min_invocations_hot,
+        min_observation_volume,
+        low_traffic_threshold,
+    } = args;
     // --effort implies --targets
     let targets = targets || effort.is_some();
     // --min-score, --save-snapshot, --trend, and --format badge imply --score

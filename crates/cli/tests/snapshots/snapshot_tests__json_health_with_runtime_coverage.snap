@@ -119,6 +119,8 @@ expression: redact_version(&json_str)
         "percentile": 99
       }
     ],
+    "blast_radius": [],
+    "importance": [],
     "watermark": "license-expired-grace",
     "warnings": [
       {

@@ -118,6 +118,8 @@ fn emit_clean_response(
         },
         findings: Vec::new(),
         hot_paths: Vec::new(),
+        blast_radius: Vec::new(),
+        importance: Vec::new(),
         watermark: None,
         errors: Vec::new(),
         warnings: Vec::new(),

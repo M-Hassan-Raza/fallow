@@ -249,6 +249,59 @@ pub struct RuntimeCoverageHotPath {
     pub actions: Vec<RuntimeCoverageAction>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeCoverageRiskBand {
+    Low,
+    Medium,
+    High,
+}
+
+impl RuntimeCoverageRiskBand {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
+impl fmt::Display for RuntimeCoverageRiskBand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RuntimeCoverageBlastRadiusEntry {
+    /// Stable content-hash ID of the form `fallow:blast:<hash>`.
+    pub id: String,
+    pub file: PathBuf,
+    pub function: String,
+    pub line: u32,
+    pub caller_count: u32,
+    pub caller_count_weighted_by_traffic: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deploys_touched: Option<u32>,
+    pub risk_band: RuntimeCoverageRiskBand,
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct RuntimeCoverageImportanceEntry {
+    /// Stable content-hash ID of the form `fallow:importance:<hash>`.
+    pub id: String,
+    pub file: PathBuf,
+    pub function: String,
+    pub line: u32,
+    pub invocations: u64,
+    pub cyclomatic: u32,
+    pub owner_count: u32,
+    pub importance_score: f64,
+    pub reason: String,
+}
+
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct RuntimeCoverageReport {
     pub verdict: RuntimeCoverageReportVerdict,
@@ -257,6 +310,8 @@ pub struct RuntimeCoverageReport {
     pub findings: Vec<RuntimeCoverageFinding>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub hot_paths: Vec<RuntimeCoverageHotPath>,
+    pub blast_radius: Vec<RuntimeCoverageBlastRadiusEntry>,
+    pub importance: Vec<RuntimeCoverageImportanceEntry>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<RuntimeCoverageWatermark>,
     #[serde(skip_serializing_if = "Vec::is_empty")]

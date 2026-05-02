@@ -9,7 +9,7 @@ use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use fallow_config::OutputFormat;
 use fallow_cov_protocol::{
     CaptureQuality, Confidence, CoverageSource, Evidence, PROTOCOL_VERSION, ReportVerdict, Request,
-    Response, StaticFile, StaticFindings, StaticFunction, Verdict, Watermark,
+    Response, RiskBand, StaticFile, StaticFindings, StaticFunction, Verdict, Watermark,
 };
 use fallow_license::{
     DEFAULT_HARD_FAIL_DAYS, Feature, LicenseStatus, load_and_verify, load_raw_jwt,
@@ -30,7 +30,8 @@ use crate::health_types::{
     RuntimeCoverageAction, RuntimeCoverageConfidence, RuntimeCoverageDataSource,
     RuntimeCoverageEvidence, RuntimeCoverageFinding, RuntimeCoverageHotPath,
     RuntimeCoverageMessage, RuntimeCoverageReport, RuntimeCoverageReportVerdict,
-    RuntimeCoverageSummary, RuntimeCoverageVerdict, RuntimeCoverageWatermark,
+    RuntimeCoverageRiskBand, RuntimeCoverageSummary, RuntimeCoverageVerdict,
+    RuntimeCoverageWatermark,
 };
 use crate::license::verifying_key;
 
@@ -212,6 +213,7 @@ pub(super) fn analyze(
     changed_files: Option<&FxHashSet<PathBuf>>,
     ws_roots: Option<&[PathBuf]>,
     top: Option<usize>,
+    codeowners_path: Option<&str>,
     quiet: bool,
     output: OutputFormat,
 ) -> Result<RuntimeCoverageReport, ExitCode> {
@@ -225,6 +227,7 @@ pub(super) fn analyze(
         options,
         root,
         modules,
+        analysis_output,
         &static_signals,
         istanbul_coverage,
         file_paths,
@@ -232,10 +235,11 @@ pub(super) fn analyze(
         changed_files,
         ws_roots,
         prepared_sources.sources,
+        codeowners_path,
     );
     let response = run_sidecar(&sidecar, &request, quiet, output)?;
-    let report = convert_response(response, &locations, options.watermark);
-    let _ = top;
+    let mut report = convert_response(response, &locations, options.watermark);
+    apply_top_limit(&mut report, top);
     Ok(report)
 }
 
@@ -678,6 +682,7 @@ fn build_request(
     options: &RuntimeCoverageOptions,
     root: &Path,
     modules: &[fallow_types::extract::ModuleInfo],
+    analysis_output: &fallow_core::AnalysisOutput,
     static_signals: &StaticSignalIndex,
     istanbul_coverage: Option<&IstanbulCoverage>,
     file_paths: &FxHashMap<fallow_types::discover::FileId, &PathBuf>,
@@ -685,6 +690,7 @@ fn build_request(
     changed_files: Option<&FxHashSet<PathBuf>>,
     ws_roots: Option<&[PathBuf]>,
     coverage_sources: Vec<CoverageSource>,
+    codeowners_path: Option<&str>,
 ) -> (Request, FunctionLocations) {
     // Sidecar expects a single project_root for path relativization. When a
     // single workspace is scoped, use it; otherwise fall back to the repo root
@@ -695,6 +701,8 @@ fn build_request(
     };
     let mut files = Vec::new();
     let mut locations = FxHashMap::default();
+    let graph = analysis_output.graph.as_ref();
+    let codeowners = crate::codeowners::CodeOwners::load(root, codeowners_path).ok();
     for module in modules {
         let Some(&path) = file_paths.get(&module.file_id) else {
             continue;
@@ -702,6 +710,13 @@ fn build_request(
         let canonical_path =
             istanbul_coverage.map(|_| dunce::canonicalize(path).unwrap_or_else(|_| path.clone()));
         let relative = path.strip_prefix(root).unwrap_or(path);
+        let caller_count = graph
+            .and_then(|g| g.reverse_deps.get(module.file_id.0 as usize))
+            .map_or(0_usize, Vec::len);
+        let caller_count = u32::try_from(caller_count).unwrap_or(u32::MAX);
+        let owner_count = codeowners
+            .as_ref()
+            .map(|co| co.owner_count_of(relative).unwrap_or(0));
         if ignore_set.is_match(relative) {
             continue;
         }
@@ -747,11 +762,13 @@ fn build_request(
                     // conservative fallback. We intentionally do not infer "covered"
                     // for every function in a test-reachable file.
                     test_covered,
+                    caller_count,
+                    owner_count,
                 }
             })
             .collect();
         files.push(StaticFile {
-            path: path.to_string_lossy().into_owned(),
+            path: relative.to_string_lossy().into_owned(),
             functions,
         });
     }
@@ -1725,6 +1742,61 @@ fn convert_response(
             .then_with(|| left.function.cmp(&right.function))
     });
 
+    let mut blast_radius = response
+        .blast_radius
+        .into_iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageBlastRadiusEntry {
+                id: entry.id,
+                file: PathBuf::from(entry.file),
+                function: entry.function,
+                line: entry.line,
+                caller_count: entry.caller_count,
+                caller_count_weighted_by_traffic: entry.caller_count_weighted_by_traffic,
+                deploys_touched: entry.deploys_touched,
+                risk_band: map_risk_band(entry.risk_band),
+            },
+        )
+        .collect::<Vec<_>>();
+    blast_radius.sort_by(|left, right| {
+        risk_band_rank(right.risk_band)
+            .cmp(&risk_band_rank(left.risk_band))
+            .then_with(|| {
+                right
+                    .caller_count_weighted_by_traffic
+                    .cmp(&left.caller_count_weighted_by_traffic)
+            })
+            .then_with(|| right.caller_count.cmp(&left.caller_count))
+            .then_with(|| left.file.cmp(&right.file))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+
+    let mut importance = response
+        .importance
+        .into_iter()
+        .map(
+            |entry| crate::health_types::RuntimeCoverageImportanceEntry {
+                id: entry.id,
+                file: PathBuf::from(entry.file),
+                function: entry.function,
+                line: entry.line,
+                invocations: entry.invocations,
+                cyclomatic: entry.cyclomatic,
+                owner_count: entry.owner_count,
+                importance_score: entry.importance_score,
+                reason: entry.reason,
+            },
+        )
+        .collect::<Vec<_>>();
+    importance.sort_by(|left, right| {
+        right
+            .importance_score
+            .total_cmp(&left.importance_score)
+            .then_with(|| right.invocations.cmp(&left.invocations))
+            .then_with(|| left.file.cmp(&right.file))
+            .then_with(|| left.function.cmp(&right.function))
+    });
+
     let coverage_percent = response.summary.coverage_percent;
     let clamped_percent = if coverage_percent.is_finite() {
         coverage_percent
@@ -1753,6 +1825,8 @@ fn convert_response(
         },
         findings,
         hot_paths,
+        blast_radius,
+        importance,
         watermark: watermark.or_else(|| response.watermark.as_ref().map(map_watermark)),
         warnings: response
             .warnings
@@ -1762,6 +1836,32 @@ fn convert_response(
                 message: warning.message,
             })
             .collect(),
+    }
+}
+
+fn apply_top_limit(report: &mut RuntimeCoverageReport, top: Option<usize>) {
+    let Some(top) = top else {
+        return;
+    };
+    report.findings.truncate(top);
+    report.hot_paths.truncate(top);
+    report.blast_radius.truncate(top);
+    report.importance.truncate(top);
+}
+
+const fn map_risk_band(risk_band: RiskBand) -> RuntimeCoverageRiskBand {
+    match risk_band {
+        RiskBand::Low => RuntimeCoverageRiskBand::Low,
+        RiskBand::Medium => RuntimeCoverageRiskBand::Medium,
+        RiskBand::High => RuntimeCoverageRiskBand::High,
+    }
+}
+
+const fn risk_band_rank(risk_band: RuntimeCoverageRiskBand) -> u8 {
+    match risk_band {
+        RuntimeCoverageRiskBand::Low => 0,
+        RuntimeCoverageRiskBand::Medium => 1,
+        RuntimeCoverageRiskBand::High => 2,
     }
 }
 
@@ -1857,12 +1957,23 @@ mod tests {
     };
     use globset::GlobSetBuilder;
     use oxc_coverage_instrument::{Location, Position};
-    use rustc_hash::FxHashMap;
+    use rustc_hash::{FxHashMap, FxHashSet};
     use std::collections::BTreeMap;
     use std::path::Path;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
     use url::Url;
+
+    fn empty_analysis_output() -> fallow_core::AnalysisOutput {
+        fallow_core::AnalysisOutput {
+            results: fallow_core::results::AnalysisResults::default(),
+            timings: None,
+            graph: None,
+            modules: None,
+            files: None,
+            script_used_packages: FxHashSet::default(),
+        }
+    }
 
     #[test]
     fn detects_istanbul_file_by_name() {
@@ -2393,6 +2504,8 @@ mod tests {
                     invocations: 20,
                     percentile: 50,
                 }],
+                blast_radius: vec![],
+                importance: vec![],
                 watermark: None,
                 errors: vec![],
                 warnings: vec![DiagnosticMessage {
@@ -2436,6 +2549,7 @@ mod tests {
             &options,
             &root,
             &[],
+            &empty_analysis_output(),
             &StaticSignalIndex::default(),
             None,
             &FxHashMap::default(),
@@ -2443,6 +2557,7 @@ mod tests {
             None,
             Some(&ws_roots),
             vec![],
+            None,
         );
 
         assert_eq!(request.project_root, ws_root.to_string_lossy());
@@ -2532,6 +2647,7 @@ mod tests {
             &options,
             &root,
             &modules,
+            &empty_analysis_output(),
             &static_signals,
             None,
             &file_paths,
@@ -2539,6 +2655,7 @@ mod tests {
             None,
             None,
             vec![],
+            None,
         );
 
         let app_file = request

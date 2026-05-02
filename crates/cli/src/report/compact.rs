@@ -484,6 +484,8 @@ mod tests {
                     percentile: 99,
                     actions: vec![],
                 }],
+                blast_radius: vec![],
+                importance: vec![],
                 watermark: None,
                 warnings: vec![],
             }),

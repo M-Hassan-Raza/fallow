@@ -130,25 +130,43 @@ fn build_json_config(info: &ProjectInfo) -> String {
         "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
     });
 
-    // Entry patterns
-    let extensions = if info.has_typescript {
+    add_json_entry_config(&mut config, info);
+    add_json_workspace_config(&mut config, info);
+    add_json_ignore_config(&mut config, info);
+    add_json_rules_config(&mut config, info);
+
+    let mut output = serde_json::to_string_pretty(&config)
+        .expect("config built from json! literals is always serializable");
+    insert_json_duplicates_template(&mut output);
+    output.push('\n');
+    output
+}
+
+fn json_entry_extensions(info: &ProjectInfo) -> &'static str {
+    if info.has_typescript {
         "{ts,tsx,js,jsx}"
     } else {
         "{js,jsx,mjs}"
-    };
+    }
+}
+
+fn add_json_entry_config(config: &mut serde_json::Value, info: &ProjectInfo) {
+    let extensions = json_entry_extensions(info);
     config["entry"] = serde_json::json!([
         format!("src/index.{extensions}"),
         format!("src/main.{extensions}"),
     ]);
+}
 
-    // Workspace patterns
+fn add_json_workspace_config(config: &mut serde_json::Value, info: &ProjectInfo) {
     if info.is_monorepo && !info.workspace_patterns.is_empty() {
         config["workspaces"] = serde_json::json!({
             "packages": info.workspace_patterns,
         });
     }
+}
 
-    // Ignore patterns
+fn add_json_ignore_config(config: &mut serde_json::Value, info: &ProjectInfo) {
     let mut ignore = Vec::new();
     if info.has_storybook {
         ignore.push(".storybook/**");
@@ -156,24 +174,22 @@ fn build_json_config(info: &ProjectInfo) -> String {
     if !ignore.is_empty() {
         config["ignorePatterns"] = serde_json::json!(ignore);
     }
+}
 
-    // Rules
+fn add_json_rules_config(config: &mut serde_json::Value, info: &ProjectInfo) {
     let mut rules = serde_json::Map::new();
     if info.test_framework.is_some() {
         rules.insert("unused-dependencies".to_string(), serde_json::json!("warn"));
     }
     config["rules"] = serde_json::Value::Object(rules);
+}
 
-    // serde_json pretty-print + trailing newline
-    let mut output = serde_json::to_string_pretty(&config)
-        .expect("config built from json! literals is always serializable");
-    output = output.replacen(
+fn insert_json_duplicates_template(output: &mut String) {
+    *output = output.replacen(
         "  \"rules\":",
         "  \"duplicates\": {\n    // Common additions (uncomment to enable):\n    // \"ignore\": [\n    //   \"**/lib/**\",          // for repos that publish transpiled output to lib/\n    //   \"**/legacy/**\",       // for repos with legacy-build artifacts\n    //   \"**/__generated__/**\", // Relay, GraphQL Code Generator\n    //   \"**/generated/**\"     // OpenAPI, Protobuf codegen\n    // ]\n  },\n  \"rules\":",
         1,
     );
-    output.push('\n');
-    output
 }
 
 /// Build a TOML config string tailored to the detected project.

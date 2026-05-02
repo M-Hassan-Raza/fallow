@@ -1981,6 +1981,8 @@ mod tests {
                 percentile: 99,
                 actions: vec![],
             }],
+            blast_radius: vec![],
+            importance: vec![],
             watermark: Some(crate::health_types::RuntimeCoverageWatermark::LicenseExpiredGrace),
             warnings: vec![],
         });
@@ -2016,6 +2018,8 @@ mod tests {
             },
             findings: vec![],
             hot_paths: vec![],
+            blast_radius: vec![],
+            importance: vec![],
             watermark: None,
             warnings: vec![],
         }

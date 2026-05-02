@@ -127,6 +127,20 @@ pub struct HealthOptions<'a> {
     pub runtime_coverage: Option<RuntimeCoverageOptions>,
 }
 
+struct HealthPipelineTimings {
+    config: f64,
+    discover: f64,
+    parse: f64,
+}
+
+struct HealthPipelineInput {
+    config: ResolvedConfig,
+    files: Vec<fallow_types::discover::DiscoveredFile>,
+    modules: Vec<fallow_types::extract::ModuleInfo>,
+    timings: HealthPipelineTimings,
+    pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
+}
+
 /// Run health analysis using pre-parsed modules from the dead-code pipeline.
 ///
 /// Skips file discovery and parsing (saves ~1.9s on 21K-file projects).
@@ -147,13 +161,17 @@ pub fn execute_health_with_shared_parse(
     )?;
     execute_health_inner(
         opts,
-        config,
-        shared.files,
-        shared.modules,
-        0.0,
-        0.0,
-        0.0,
-        shared.analysis_output,
+        HealthPipelineInput {
+            config,
+            files: shared.files,
+            modules: shared.modules,
+            timings: HealthPipelineTimings {
+                config: 0.0,
+                discover: 0.0,
+                parse: 0.0,
+            },
+            pre_computed_analysis: shared.analysis_output,
+        },
     )
 }
 
@@ -188,13 +206,17 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
 
     execute_health_inner(
         opts,
-        config,
-        files,
-        parse_result.modules,
-        config_ms,
-        discover_ms,
-        parse_ms,
-        None,
+        HealthPipelineInput {
+            config,
+            files,
+            modules: parse_result.modules,
+            timings: HealthPipelineTimings {
+                config: config_ms,
+                discover: discover_ms,
+                parse: parse_ms,
+            },
+            pre_computed_analysis: None,
+        },
     )
 }
 
@@ -202,25 +224,23 @@ pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode
     clippy::too_many_lines,
     reason = "health pipeline orchestration with many optional features"
 )]
-#[expect(
-    clippy::needless_pass_by_value,
-    reason = "owned files/modules transferred from shared parse or local parse"
-)]
-#[expect(
-    clippy::too_many_arguments,
-    reason = "inner function receives all pipeline state from two entry points"
-)]
 fn execute_health_inner(
     opts: &HealthOptions<'_>,
-    config: ResolvedConfig,
-    files: Vec<fallow_types::discover::DiscoveredFile>,
-    modules: Vec<fallow_types::extract::ModuleInfo>,
-    config_ms: f64,
-    discover_ms: f64,
-    parse_ms: f64,
-    pre_computed_analysis: Option<fallow_core::AnalysisOutput>,
+    input: HealthPipelineInput,
 ) -> Result<HealthResult, ExitCode> {
     let start = Instant::now();
+    let HealthPipelineInput {
+        config,
+        files,
+        modules,
+        timings:
+            HealthPipelineTimings {
+                config: config_ms,
+                discover: discover_ms,
+                parse: parse_ms,
+            },
+        pre_computed_analysis,
+    } = input;
 
     // Resolve thresholds: CLI flags override config
     let max_cyclomatic = opts.max_cyclomatic.unwrap_or(config.health.max_cyclomatic);
@@ -359,6 +379,7 @@ fn execute_health_inner(
             changed_files.as_ref(),
             ws_roots.as_deref(),
             opts.top,
+            config.codeowners.as_deref(),
             opts.quiet,
             opts.output,
         )?)
@@ -680,30 +701,32 @@ fn execute_health_inner(
 
     let report = assemble_health_report(
         opts,
-        report_coverage_gaps,
-        findings,
-        files_analyzed,
-        total_functions,
-        total_above_threshold,
-        max_cyclomatic,
-        max_cognitive,
-        max_crap,
-        files_scored,
-        average_maintainability,
-        vital_signs,
-        health_score,
-        score_output,
-        hotspots,
-        hotspot_summary,
-        targets,
-        target_thresholds,
-        health_trend,
-        istanbul_coverage.is_some(),
-        runtime_coverage,
-        large_functions,
-        sev_critical,
-        sev_high,
-        sev_moderate,
+        HealthReportAssembly {
+            report_coverage_gaps,
+            findings,
+            files_analyzed,
+            total_functions,
+            total_above_threshold,
+            max_cyclomatic,
+            max_cognitive,
+            max_crap,
+            files_scored,
+            average_maintainability,
+            vital_signs,
+            health_score,
+            score_output,
+            hotspots,
+            hotspot_summary,
+            targets,
+            target_thresholds,
+            health_trend,
+            has_istanbul_coverage: istanbul_coverage.is_some(),
+            runtime_coverage,
+            large_functions,
+            sev_critical,
+            sev_high,
+            sev_moderate,
+        },
     );
 
     let timings = if opts.performance {
@@ -1188,13 +1211,7 @@ fn compute_health_trend(
     )
 }
 
-/// Assemble the final `HealthReport` from all computed data.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "assembles report from many computed pieces"
-)]
-fn assemble_health_report(
-    opts: &HealthOptions<'_>,
+struct HealthReportAssembly {
     report_coverage_gaps: bool,
     findings: Vec<HealthFinding>,
     files_analyzed: usize,
@@ -1219,7 +1236,39 @@ fn assemble_health_report(
     sev_critical: usize,
     sev_high: usize,
     sev_moderate: usize,
+}
+
+/// Assemble the final `HealthReport` from all computed data.
+fn assemble_health_report(
+    opts: &HealthOptions<'_>,
+    assembly: HealthReportAssembly,
 ) -> HealthReport {
+    let HealthReportAssembly {
+        report_coverage_gaps,
+        findings,
+        files_analyzed,
+        total_functions,
+        total_above_threshold,
+        max_cyclomatic,
+        max_cognitive,
+        max_crap,
+        files_scored,
+        average_maintainability,
+        vital_signs,
+        health_score,
+        score_output,
+        hotspots,
+        hotspot_summary,
+        targets,
+        target_thresholds,
+        health_trend,
+        has_istanbul_coverage,
+        runtime_coverage,
+        large_functions,
+        sev_critical,
+        sev_high,
+        sev_moderate,
+    } = assembly;
     let coverage_gaps = if report_coverage_gaps {
         score_output.as_ref().map(|o| o.coverage.report.clone())
     } else {
@@ -2635,6 +2684,8 @@ mod tests {
                     actions: vec![],
                 },
             ],
+            blast_radius: vec![],
+            importance: vec![],
             watermark: None,
             warnings: vec![],
         };
@@ -2680,6 +2731,8 @@ mod tests {
                 actions: vec![],
             }],
             hot_paths: vec![],
+            blast_radius: vec![],
+            importance: vec![],
             watermark: None,
             warnings: vec![],
         };
@@ -2716,6 +2769,8 @@ mod tests {
                 percentile: 99,
                 actions: vec![],
             }],
+            blast_radius: vec![],
+            importance: vec![],
             watermark: None,
             warnings: vec![],
         };
@@ -2746,6 +2801,8 @@ mod tests {
                 percentile: 90,
                 actions: vec![],
             }],
+            blast_radius: vec![],
+            importance: vec![],
             watermark: None,
             warnings: vec![],
         };
@@ -2778,6 +2835,8 @@ mod tests {
                         actions: vec![],
                     }],
                     hot_paths: vec![],
+                    blast_radius: vec![],
+                    importance: vec![],
                     watermark: None,
                     warnings: vec![],
                 }),

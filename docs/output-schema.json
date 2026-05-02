@@ -659,6 +659,16 @@
           "description": "Top runtime functions by invocation count. Omitted when empty.",
           "items": { "$ref": "#/definitions/RuntimeCoverageHotPath" }
         },
+        "blast_radius": {
+          "type": "array",
+          "description": "First-class blast-radius entries for runtime-observed functions. Present whenever runtime coverage analysis runs.",
+          "items": { "$ref": "#/definitions/RuntimeCoverageBlastRadiusEntry" }
+        },
+        "importance": {
+          "type": "array",
+          "description": "First-class production-importance entries for runtime-observed functions. Present whenever runtime coverage analysis runs.",
+          "items": { "$ref": "#/definitions/RuntimeCoverageImportanceEntry" }
+        },
         "watermark": {
           "$ref": "#/definitions/RuntimeCoverageWatermark",
           "description": "License/trial watermark for grace-mode output. Omitted when not applicable."
@@ -965,6 +975,105 @@
           "type": "array",
           "description": "Suggested actions for this hot path (e.g., review-on-change). Omitted when empty.",
           "items": { "$ref": "#/definitions/RuntimeCoverageAction" }
+        }
+      }
+    },
+
+    "RuntimeCoverageRiskBand": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Blast-radius risk band. The current thresholds are high at >=20 static callers or >=1,000,000 traffic-weighted caller reach; medium at >=5 callers or >=50,000 weighted reach; low otherwise."
+    },
+
+    "RuntimeCoverageBlastRadiusEntry": {
+      "type": "object",
+      "required": ["id", "file", "function", "line", "caller_count", "caller_count_weighted_by_traffic", "risk_band"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^fallow:blast:[0-9a-f]{8}$",
+          "description": "Stable content-hash ID of the form `fallow:blast:<hash>`."
+        },
+        "file": {
+          "type": "string",
+          "description": "File path relative to the project root."
+        },
+        "function": {
+          "type": "string",
+          "description": "Function name for the blast-radius entry."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed line number the function starts on."
+        },
+        "caller_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Static caller count from the module graph."
+        },
+        "caller_count_weighted_by_traffic": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Caller reach weighted by observed runtime traffic."
+        },
+        "deploys_touched": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Distinct deploy SHAs that touched the function in the observation window. Cloud mode only; omitted in local mode."
+        },
+        "risk_band": {
+          "$ref": "#/definitions/RuntimeCoverageRiskBand"
+        }
+      }
+    },
+
+    "RuntimeCoverageImportanceEntry": {
+      "type": "object",
+      "required": ["id", "file", "function", "line", "invocations", "cyclomatic", "owner_count", "importance_score", "reason"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^fallow:importance:[0-9a-f]{8}$",
+          "description": "Stable content-hash ID of the form `fallow:importance:<hash>`."
+        },
+        "file": {
+          "type": "string",
+          "description": "File path relative to the project root."
+        },
+        "function": {
+          "type": "string",
+          "description": "Function name for the importance entry."
+        },
+        "line": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "1-indexed line number the function starts on."
+        },
+        "invocations": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Observed invocation count for this function."
+        },
+        "cyclomatic": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cyclomatic complexity from the static health pipeline."
+        },
+        "owner_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of CODEOWNERS owners matched for this file. Zero means no owner was resolved."
+        },
+        "importance_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "0-100 explainable score from log-scaled traffic, capped complexity weight, and ownership-risk weight."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Templated one-sentence explanation for the score."
         }
       }
     },

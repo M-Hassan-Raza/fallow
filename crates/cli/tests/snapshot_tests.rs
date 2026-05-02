@@ -1903,6 +1903,8 @@ fn health_report_with_runtime_coverage(root: &Path) -> HealthReport {
             percentile: 99,
             actions: vec![],
         }],
+        blast_radius: vec![],
+        importance: vec![],
         watermark: Some(RuntimeCoverageWatermark::LicenseExpiredGrace),
         warnings: vec![RuntimeCoverageMessage {
             code: "partial-input".to_string(),

@@ -37,6 +37,9 @@ pub struct CodeOwners {
     /// Primary owner per rule, indexed by glob position in the `GlobSet`.
     /// Empty string for negation rules (see `is_negation`).
     owners: Vec<String>,
+    /// Number of owners matched by each rule, indexed by glob position.
+    /// Zero for negation rules.
+    owner_counts: Vec<u32>,
     /// Original CODEOWNERS pattern per rule (e.g. `/src/` or `*.ts`).
     /// For negations, the raw pattern is prefixed with `!`.
     patterns: Vec<String>,
@@ -114,6 +117,7 @@ impl CodeOwners {
     pub(crate) fn parse(content: &str) -> Result<Self, String> {
         let mut builder = GlobSetBuilder::new();
         let mut owners = Vec::new();
+        let mut owner_counts = Vec::new();
         let mut patterns = Vec::new();
         let mut is_negation = Vec::new();
         let mut sections: Vec<Option<String>> = Vec::new();
@@ -149,16 +153,22 @@ impl CodeOwners {
             let Some(pattern) = parts.next() else {
                 continue;
             };
-            let first_inline_owner = parts.next();
+            let inline_owners = parts.collect::<Vec<_>>();
 
-            let effective_owner: &str = if negate {
+            let (effective_owner, owner_count): (&str, u32) = if negate {
                 // Negations clear ownership on match, so an owner token is
                 // irrelevant. GitLab doesn't require one anyway.
-                ""
-            } else if let Some(o) = first_inline_owner {
-                o
-            } else if let Some(o) = current_section_owners.first() {
-                o.as_str()
+                ("", 0)
+            } else if let Some(owner) = inline_owners.first() {
+                (
+                    owner,
+                    u32::try_from(inline_owners.len()).unwrap_or(u32::MAX),
+                )
+            } else if let Some(owner) = current_section_owners.first() {
+                (
+                    owner.as_str(),
+                    u32::try_from(current_section_owners.len()).unwrap_or(u32::MAX),
+                )
             } else {
                 // Pattern without owners and no section default, skip.
                 continue;
@@ -170,6 +180,7 @@ impl CodeOwners {
 
             builder.add(glob);
             owners.push(effective_owner.to_string());
+            owner_counts.push(owner_count);
             patterns.push(if negate {
                 format!("!{pattern}")
             } else {
@@ -186,6 +197,7 @@ impl CodeOwners {
 
         Ok(Self {
             owners,
+            owner_counts,
             patterns,
             is_negation,
             sections,
@@ -208,6 +220,21 @@ impl CodeOwners {
                 None
             } else {
                 Some(self.owners[idx].as_str())
+            }
+        })
+    }
+
+    /// Look up the number of owners matched by the last matching CODEOWNERS rule.
+    ///
+    /// Returns `Some(0)` when the path is explicitly unowned by a GitLab
+    /// negation, and `None` when no CODEOWNERS rule matches.
+    pub fn owner_count_of(&self, relative_path: &Path) -> Option<u32> {
+        let matches = self.globs.matches(relative_path);
+        matches.iter().max().map(|&idx| {
+            if self.is_negation[idx] {
+                0
+            } else {
+                self.owner_counts[idx]
             }
         })
     }
@@ -974,6 +1001,29 @@ src/components/
         let (section, owners) = co.section_and_owners_of(Path::new("README.md")).unwrap();
         assert_eq!(section, None);
         assert!(owners.is_empty());
+    }
+
+    #[test]
+    fn owner_count_of_counts_all_matched_owners() {
+        let content = "\
+            * @default\n\
+            src/api/ @backend @payments @security\n\
+            [Frontend] @ui @design\n\
+            src/ui/\n\
+            !src/generated/\n\
+        ";
+        let co = CodeOwners::parse(content).unwrap();
+        assert_eq!(co.owner_count_of(Path::new("src/api/payments.ts")), Some(3));
+        assert_eq!(co.owner_count_of(Path::new("src/ui/button.tsx")), Some(2));
+        assert_eq!(co.owner_count_of(Path::new("README.md")), Some(1));
+        assert_eq!(
+            co.owner_count_of(Path::new("src/generated/types.ts")),
+            Some(0)
+        );
+        assert_eq!(
+            co.owner_count_of(Path::new("other/generated/types.ts")),
+            Some(1)
+        );
     }
 
     #[test]

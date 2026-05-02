@@ -1676,6 +1676,8 @@ mod tests {
                     percentile: 99,
                     actions: vec![],
                 }],
+                blast_radius: vec![],
+                importance: vec![],
                 watermark: Some(RuntimeCoverageWatermark::LicenseExpiredGrace),
                 warnings: vec![RuntimeCoverageMessage {
                     code: "partial-merge".to_owned(),

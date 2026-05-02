@@ -448,64 +448,123 @@ fn snippets_to_json(snippets: &[SetupSnippet], prefix: &str) -> Vec<serde_json::
         .collect()
 }
 
+const NEXT_INSTRUMENTATION_SNIPPET: &str = r#"export async function register() {
+  if (process.env.NEXT_RUNTIME === "nodejs") {
+    const { createNodeBeacon } = await import("@fallow-cli/beacon");
+    const beacon = createNodeBeacon({
+      apiKey: process.env.FALLOW_API_KEY,
+      projectId: process.env.FALLOW_PROJECT_ID ?? "my-app",
+      endpoint: process.env.FALLOW_API_URL ?? "https://api.fallow.cloud",
+      transport: process.env.FALLOW_TRANSPORT === "fs" ? "fs" : "http",
+      writeToDir: process.env.FALLOW_WRITE_TO_DIR,
+    });
+    beacon.start();
+  }
+}
+"#;
+
+const NODE_BEACON_SNIPPET: &str = r#"import { createNodeBeacon } from "@fallow-cli/beacon";
+
+const fallowBeacon = createNodeBeacon({
+  apiKey: process.env.FALLOW_API_KEY,
+  projectId: process.env.FALLOW_PROJECT_ID ?? "my-app",
+  endpoint: process.env.FALLOW_API_URL ?? "https://api.fallow.cloud",
+  transport: process.env.FALLOW_TRANSPORT === "fs" ? "fs" : "http",
+  writeToDir: process.env.FALLOW_WRITE_TO_DIR,
+});
+
+fallowBeacon.start();
+"#;
+
+const NUXT_SERVER_PLUGIN_SNIPPET: &str = r#"export default defineNitroPlugin(async () => {
+  const { createNodeBeacon } = await import("@fallow-cli/beacon");
+  const beacon = createNodeBeacon({
+    apiKey: process.env.FALLOW_API_KEY,
+    projectId: process.env.FALLOW_PROJECT_ID ?? "my-app",
+    endpoint: process.env.FALLOW_API_URL ?? "https://api.fallow.cloud",
+    transport: process.env.FALLOW_TRANSPORT === "fs" ? "fs" : "http",
+    writeToDir: process.env.FALLOW_WRITE_TO_DIR,
+  });
+  beacon.start();
+});
+"#;
+
+const BROWSER_BEACON_SNIPPET: &str = r#"import { createBrowserBeacon } from "@fallow-cli/beacon/browser";
+
+const fallowBeacon = createBrowserBeacon({
+  apiKey: import.meta.env.VITE_FALLOW_API_KEY,
+  projectId: import.meta.env.VITE_FALLOW_PROJECT_ID ?? "my-app",
+  endpoint: import.meta.env.VITE_FALLOW_API_URL ?? "https://api.fallow.cloud",
+  sampleRate: 0.01,
+});
+
+fallowBeacon.start();
+"#;
+
+fn setup_snippet(
+    label: &'static str,
+    path: impl Into<String>,
+    reason: &'static str,
+    content: &'static str,
+) -> SetupSnippet {
+    SetupSnippet {
+        label,
+        path: path.into(),
+        reason,
+        content: content.to_owned(),
+    }
+}
+
 fn setup_snippets(context: &CoverageSetupContext) -> Vec<SetupSnippet> {
     match context.framework {
-        FrameworkKind::NextJs => vec![SetupSnippet {
-            label: "Next.js instrumentation",
-            path: "instrumentation.ts".to_owned(),
-            reason: "Initialize the Node runtime beacon during Next.js startup.",
-            content: "export async function register() {\n  if (process.env.NEXT_RUNTIME === \"nodejs\") {\n    const { createNodeBeacon } = await import(\"@fallow-cli/beacon\");\n    const beacon = createNodeBeacon({\n      apiKey: process.env.FALLOW_API_KEY,\n      projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n      endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n      transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n      writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n    });\n    beacon.start();\n  }\n}\n"
-                .to_owned(),
-        }],
-        FrameworkKind::NestJs => vec![SetupSnippet {
-            label: "NestJS bootstrap",
-            path: "src/main.ts".to_owned(),
-            reason: "Start the Node runtime beacon before creating the Nest app.",
-            content: "import { createNodeBeacon } from \"@fallow-cli/beacon\";\n\nconst fallowBeacon = createNodeBeacon({\n  apiKey: process.env.FALLOW_API_KEY,\n  projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n  writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n});\n\nfallowBeacon.start();\n"
-                .to_owned(),
-        }],
-        FrameworkKind::Nuxt => vec![SetupSnippet {
-            label: "Nuxt server plugin",
-            path: "server/plugins/fallow.ts".to_owned(),
-            reason: "Start the Node runtime beacon when the Nuxt server boots.",
-            content: "export default defineNitroPlugin(async () => {\n  const { createNodeBeacon } = await import(\"@fallow-cli/beacon\");\n  const beacon = createNodeBeacon({\n    apiKey: process.env.FALLOW_API_KEY,\n    projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n    endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n    transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n    writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n  });\n  beacon.start();\n});\n"
-                .to_owned(),
-        }],
-        FrameworkKind::SvelteKit => vec![SetupSnippet {
-            label: "SvelteKit server hook",
-            path: "src/hooks.server.ts".to_owned(),
-            reason: "Start the Node runtime beacon before handling server requests.",
-            content: "import { createNodeBeacon } from \"@fallow-cli/beacon\";\n\nconst fallowBeacon = createNodeBeacon({\n  apiKey: process.env.FALLOW_API_KEY,\n  projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n  writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n});\n\nfallowBeacon.start();\n"
-                .to_owned(),
-        }],
-        FrameworkKind::Astro => vec![SetupSnippet {
-            label: "Astro middleware",
-            path: "src/middleware.ts".to_owned(),
-            reason: "Start the Node runtime beacon from the server middleware module.",
-            content: "import { createNodeBeacon } from \"@fallow-cli/beacon\";\n\nconst fallowBeacon = createNodeBeacon({\n  apiKey: process.env.FALLOW_API_KEY,\n  projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n  writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n});\n\nfallowBeacon.start();\n"
-                .to_owned(),
-        }],
-        FrameworkKind::Remix => vec![SetupSnippet {
-            label: "Remix server entry",
-            path: "app/entry.server.tsx".to_owned(),
-            reason: "Start the Node runtime beacon from the server entry module.",
-            content: "import { createNodeBeacon } from \"@fallow-cli/beacon\";\n\nconst fallowBeacon = createNodeBeacon({\n  apiKey: process.env.FALLOW_API_KEY,\n  projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n  writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n});\n\nfallowBeacon.start();\n"
-                .to_owned(),
-        }],
-        FrameworkKind::ViteBrowser => vec![SetupSnippet {
-            label: "Vite browser entry",
-            path: "src/main.ts".to_owned(),
-            reason: "Start the browser runtime beacon from the client entry module.",
-            content: "import { createBrowserBeacon } from \"@fallow-cli/beacon/browser\";\n\nconst fallowBeacon = createBrowserBeacon({\n  apiKey: import.meta.env.VITE_FALLOW_API_KEY,\n  projectId: import.meta.env.VITE_FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: import.meta.env.VITE_FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  sampleRate: 0.01,\n});\n\nfallowBeacon.start();\n"
-                .to_owned(),
-        }],
-        FrameworkKind::PlainNode | FrameworkKind::Other => vec![SetupSnippet {
-            label: "Node entrypoint",
-            path: context.node_entry_path.clone(),
-            reason: "Start the Node runtime beacon before application code handles traffic.",
-            content: "import { createNodeBeacon } from \"@fallow-cli/beacon\";\n\nconst fallowBeacon = createNodeBeacon({\n  apiKey: process.env.FALLOW_API_KEY,\n  projectId: process.env.FALLOW_PROJECT_ID ?? \"my-app\",\n  endpoint: process.env.FALLOW_API_URL ?? \"https://api.fallow.cloud\",\n  transport: process.env.FALLOW_TRANSPORT === \"fs\" ? \"fs\" : \"http\",\n  writeToDir: process.env.FALLOW_WRITE_TO_DIR,\n});\n\nfallowBeacon.start();\n"
-                .to_owned(),
-        }],
+        FrameworkKind::NextJs => vec![setup_snippet(
+            "Next.js instrumentation",
+            "instrumentation.ts",
+            "Initialize the Node runtime beacon during Next.js startup.",
+            NEXT_INSTRUMENTATION_SNIPPET,
+        )],
+        FrameworkKind::NestJs => vec![setup_snippet(
+            "NestJS bootstrap",
+            "src/main.ts",
+            "Start the Node runtime beacon before creating the Nest app.",
+            NODE_BEACON_SNIPPET,
+        )],
+        FrameworkKind::Nuxt => vec![setup_snippet(
+            "Nuxt server plugin",
+            "server/plugins/fallow.ts",
+            "Start the Node runtime beacon when the Nuxt server boots.",
+            NUXT_SERVER_PLUGIN_SNIPPET,
+        )],
+        FrameworkKind::SvelteKit => vec![setup_snippet(
+            "SvelteKit server hook",
+            "src/hooks.server.ts",
+            "Start the Node runtime beacon before handling server requests.",
+            NODE_BEACON_SNIPPET,
+        )],
+        FrameworkKind::Astro => vec![setup_snippet(
+            "Astro middleware",
+            "src/middleware.ts",
+            "Start the Node runtime beacon from the server middleware module.",
+            NODE_BEACON_SNIPPET,
+        )],
+        FrameworkKind::Remix => vec![setup_snippet(
+            "Remix server entry",
+            "app/entry.server.tsx",
+            "Start the Node runtime beacon from the server entry module.",
+            NODE_BEACON_SNIPPET,
+        )],
+        FrameworkKind::ViteBrowser => vec![setup_snippet(
+            "Vite browser entry",
+            "src/main.ts",
+            "Start the browser runtime beacon from the client entry module.",
+            BROWSER_BEACON_SNIPPET,
+        )],
+        FrameworkKind::PlainNode | FrameworkKind::Other => vec![setup_snippet(
+            "Node entrypoint",
+            context.node_entry_path.clone(),
+            "Start the Node runtime beacon before application code handles traffic.",
+            NODE_BEACON_SNIPPET,
+        )],
     }
 }
 
