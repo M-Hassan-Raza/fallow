@@ -489,6 +489,7 @@ pub fn analyze_with_parse_result(
         resolve_imports_ms: resolve_ms,
         build_graph_ms: graph_ms,
         analyze_ms,
+        duplication_ms: None,
         total_ms,
     });
 
@@ -749,6 +750,7 @@ fn analyze_full(
             resolve_imports_ms: resolve_ms,
             build_graph_ms: graph_ms,
             analyze_ms,
+            duplication_ms: None,
             total_ms,
         })
     } else {

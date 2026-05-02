@@ -143,6 +143,8 @@ pub struct PipelineTimings {
     pub resolve_imports_ms: f64,
     pub build_graph_ms: f64,
     pub analyze_ms: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub duplication_ms: Option<f64>,
     pub total_ms: f64,
 }
 

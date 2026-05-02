@@ -85,6 +85,30 @@ fn check_json_format_produces_valid_json() {
 }
 
 #[test]
+fn combined_performance_includes_duplication_stage() {
+    let output = run_fallow_combined(
+        "duplicate-code",
+        &["--only", "dead-code,dupes", "--performance", "--quiet"],
+    );
+    assert!(
+        output.code == 0 || output.code == 1,
+        "combined performance run should not crash: stdout={}\nstderr={}",
+        output.stdout,
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("Pipeline Performance"),
+        "combined --performance should print pipeline table: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("duplication:"),
+        "pipeline table should include duplication stage: {}",
+        output.stderr
+    );
+}
+
+#[test]
 fn check_compact_format_has_no_ansi() {
     let output = run_fallow(
         "check",

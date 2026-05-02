@@ -2444,6 +2444,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
                 || !args.file.is_empty(),
         ),
         retain_modules_for_health: false,
+        defer_performance: false,
     })
 }
 

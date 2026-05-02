@@ -430,6 +430,7 @@ fn build_check_options<'a>(
             quiet: true,
         },
         retain_modules_for_health: false,
+        defer_performance: false,
     }
 }
 

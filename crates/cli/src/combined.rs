@@ -109,6 +109,7 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
             summary: opts.summary,
             regression_opts: opts.regression_opts,
             retain_modules_for_health: opts.run_health,
+            defer_performance: true,
         };
         match crate::check::execute_check(&check_opts) {
             Ok(result) => {
@@ -126,6 +127,16 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
             }
             Err(code) => return code,
         }
+    }
+
+    if opts.performance
+        && let Some(ref mut check) = check_result
+        && let Some(ref mut timings) = check.timings
+    {
+        timings.duplication_ms = dupes_result
+            .as_ref()
+            .map(|dupes| dupes.elapsed.as_secs_f64() * 1000.0);
+        report::print_performance(timings, opts.output);
     }
 
     // Run health (complexity analysis)

@@ -163,6 +163,9 @@ pub struct CheckOptions<'a> {
     pub regression_opts: RegressionOpts<'a>,
     /// When true, retain parsed modules and discovered files for sharing with health.
     pub retain_modules_for_health: bool,
+    /// When true, return timings without printing them so combined mode can add
+    /// later stages before rendering the table.
+    pub defer_performance: bool,
 }
 
 /// Result of executing check analysis without printing.
@@ -175,6 +178,7 @@ pub struct CheckResult {
     pub baseline_deltas: Option<crate::baseline::BaselineDeltas>,
     /// When a baseline was loaded: (total entries in baseline, entries that matched current issues).
     pub baseline_matched: Option<(usize, usize)>,
+    pub timings: Option<fallow_core::trace::PipelineTimings>,
     /// Retained parse data for sharing with health (only populated when retain_modules_for_health=true).
     pub shared_parse: Option<crate::health::SharedParseData>,
 }
@@ -275,6 +279,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     // Performance output
     if let Some(ref timings) = trace_timings
         && opts.trace_opts.performance
+        && !opts.defer_performance
     {
         report::print_performance(timings, config.output);
     }
@@ -436,6 +441,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         regression: regression_outcome,
         baseline_deltas: None,
         baseline_matched,
+        timings: trace_timings,
         shared_parse,
     })
 }

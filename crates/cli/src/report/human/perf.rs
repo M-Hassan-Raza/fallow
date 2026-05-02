@@ -84,6 +84,13 @@ pub(in crate::report) fn build_performance_human_lines(t: &PipelineTimings) -> V
             .dimmed()
             .to_string(),
     );
+    if let Some(duplication_ms) = t.duplication_ms {
+        lines.push(
+            format!("│  duplication:      {duplication_ms:>8.1}ms")
+                .dimmed()
+                .to_string(),
+        );
+    }
     lines.push(
         "│  ────────────────────────────────────────────────"
             .dimmed()
@@ -218,6 +225,7 @@ mod tests {
             resolve_imports_ms: 8.0,
             build_graph_ms: 15.0,
             analyze_ms: 10.0,
+            duplication_ms: Some(7.2),
             total_ms: 102.7,
         };
         let lines = build_performance_human_lines(&timings);
@@ -237,6 +245,8 @@ mod tests {
         assert!(text.contains("resolve imports"));
         assert!(text.contains("build graph"));
         assert!(text.contains("analyze"));
+        assert!(text.contains("duplication"));
+        assert!(text.contains("7.2"));
         assert!(text.contains("TOTAL"));
         assert!(text.contains("102.7"));
     }
@@ -260,6 +270,7 @@ mod tests {
             resolve_imports_ms: 3.0,
             build_graph_ms: 5.0,
             analyze_ms: 4.0,
+            duplication_ms: None,
             total_ms: 46.8,
         };
         let lines = build_performance_human_lines(&timings);
@@ -287,6 +298,7 @@ mod tests {
             resolve_imports_ms: 3.0,
             build_graph_ms: 5.0,
             analyze_ms: 4.0,
+            duplication_ms: None,
             total_ms: 46.8,
         };
         let lines = build_performance_human_lines(&timings);
