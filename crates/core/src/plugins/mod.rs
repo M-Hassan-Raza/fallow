@@ -751,7 +751,7 @@ fn builtin_entry_point_role(name: &str) -> EntryPointRole {
 ///
 /// All fields except `struct` and `enablers` are optional and default to `&[]` / `vec![]`.
 macro_rules! define_plugin {
-    // Variant with `resolve_config: imports_only` — generates a resolve_config method
+    // Variant with `resolve_config: imports_only`: generates a resolve_config method
     // that extracts imports from config files and registers them as referenced dependencies.
     (
         struct $name:ident => $display:expr,
@@ -762,6 +762,7 @@ macro_rules! define_plugin {
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
+        $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         , resolve_config: imports_only
         $(,)?
@@ -783,6 +784,7 @@ macro_rules! define_plugin {
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
+            $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
 
             $(
                 fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
@@ -807,7 +809,7 @@ macro_rules! define_plugin {
         }
     };
 
-    // Variant with custom resolve_config body — generates a resolve_config method
+    // Variant with custom resolve_config body: generates a resolve_config method
     // with the caller-supplied block. Parameter names are caller-controlled (use
     // `_root` for unused params to satisfy clippy).
     (
@@ -819,6 +821,7 @@ macro_rules! define_plugin {
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
+        $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, package_json_config_key: $pkg_key:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         , resolve_config($cp:ident, $src:ident, $root:ident) $body:block
@@ -841,6 +844,7 @@ macro_rules! define_plugin {
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
+            $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
 
             $(
                 fn package_json_config_key(&self) -> Option<&'static str> {
@@ -864,7 +868,7 @@ macro_rules! define_plugin {
         }
     };
 
-    // Base variant — no resolve_config.
+    // Base variant: no resolve_config.
     (
         struct $name:ident => $display:expr,
         enablers: $enablers:expr
@@ -874,6 +878,7 @@ macro_rules! define_plugin {
         $(, tooling_dependencies: $tooling:expr)?
         $(, fixture_glob_patterns: $fixtures:expr)?
         $(, virtual_module_prefixes: $virtual:expr)?
+        $(, virtual_package_suffixes: $virtual_suffixes:expr)?
         $(, used_exports: [$( ($pat:expr, $exports:expr) ),* $(,)?])?
         $(,)?
     ) => {
@@ -894,6 +899,7 @@ macro_rules! define_plugin {
             $( fn tooling_dependencies(&self) -> &'static [&'static str] { $tooling } )?
             $( fn fixture_glob_patterns(&self) -> &'static [&'static str] { $fixtures } )?
             $( fn virtual_module_prefixes(&self) -> &'static [&'static str] { $virtual } )?
+            $( fn virtual_package_suffixes(&self) -> &'static [&'static str] { $virtual_suffixes } )?
 
             $(
                 fn used_exports(&self) -> Vec<(&'static str, &'static [&'static str])> {
@@ -1566,6 +1572,26 @@ mod tests {
         let plugin = remix::RemixPlugin;
         assert_eq!(plugin.name(), "remix");
         assert!(!plugin.used_exports().is_empty());
+    }
+
+    #[test]
+    fn macro_passes_through_virtual_package_suffixes() {
+        // Synthetic smoke check: a plugin defined via define_plugin! that
+        // declares virtual_package_suffixes returns those suffixes from the
+        // trait method. Guards against future macro regressions where the
+        // field name silently drops out of one of the three variants.
+        define_plugin! {
+            struct MacroSuffixSmokePlugin => "macro-suffix-smoke",
+            enablers: &["macro-suffix-smoke"],
+            virtual_package_suffixes: &["/__macro_smoke__"],
+        }
+
+        let plugin = MacroSuffixSmokePlugin;
+        assert_eq!(
+            plugin.virtual_package_suffixes(),
+            &["/__macro_smoke__"],
+            "macro-declared virtual_package_suffixes must propagate to the trait method"
+        );
     }
 
     #[test]

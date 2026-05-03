@@ -1647,6 +1647,50 @@ mod tests {
         assert_eq!(result[0].export_name, "helper");
     }
 
+    #[test]
+    fn dynamic_import_named_mismatched_with_wrapper_export_still_flagged() {
+        // Wrapper(2) exports `Foo` AND dynamically imports `Bar` from source(1).
+        // Source(1) also exports `Foo`. The wrapper's dynamic import name `Bar`
+        // does NOT match its own export `Foo`, so the matches_export check must
+        // reject the edge: otherwise the (source, wrapper) `Foo` duplicate
+        // would be silently suppressed.
+        //
+        // Regression-strength for the Named branch of matches_export: removing
+        // the matches_export check makes this test fail.
+        use crate::extract::ImportedName;
+
+        let mut graph = build_graph(&[
+            ("/src/entry.ts", true),
+            ("/src/source.ts", false),
+            ("/src/wrapper.ts", false),
+        ]);
+        graph.modules[1].set_reachable(true);
+        graph.modules[1].exports = vec![make_export("Foo", 10, 30)];
+        graph.modules[2].set_reachable(true);
+        graph.modules[2].exports = vec![make_export("Foo", 10, 30)];
+        graph.reverse_deps[1] = vec![FileId(0)];
+        graph.reverse_deps[2] = vec![FileId(0)];
+
+        let mut wrapper = make_resolved_module(2, "/src/wrapper.ts");
+        wrapper.resolved_dynamic_imports =
+            vec![dynamic_import_to(1, ImportedName::Named("Bar".to_string()))];
+
+        let resolved_modules = vec![make_resolved_module(1, "/src/source.ts"), wrapper];
+        let suppressions = SuppressionContext::empty();
+        let result = find_duplicate_exports(
+            &graph,
+            &suppressions,
+            &FxHashMap::default(),
+            &resolved_modules,
+        );
+        assert_eq!(
+            result.len(),
+            1,
+            "Named dynamic import whose name does not match the wrapper's own export must not suppress the duplicate"
+        );
+        assert_eq!(result[0].export_name, "Foo");
+    }
+
     // ---- find_unused_exports tests (exercises compile_ignore_matchers, compile_plugin_matchers,
     //       should_skip_module, is_export_ignored) ----
 
