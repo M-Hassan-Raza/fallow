@@ -28,13 +28,19 @@ cargo test --workspace --all-targets
 echo "→ cargo doc (rustdoc warnings)"
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items 2>&1 | tail -1
 
-# Miri on fast crates (~10s) — skip if nightly/miri not installed
+# Miri on fast crates (~10s) — skip if nightly/miri not installed.
+# Use `rustup run nightly cargo miri` consistently rather than mixing with
+# `cargo +nightly`. The `+toolchain` shorthand only works when `cargo` resolves
+# to rustup's proxy (~/.cargo/bin/cargo); on machines where Homebrew's bare
+# cargo wins the PATH lookup, `cargo +nightly` errors with `no such command:
+# +nightly`. `rustup run` is identical in effect and works regardless of which
+# `cargo` is first in PATH.
 if rustup run nightly cargo miri --version &>/dev/null; then
     echo "→ miri (types + graph)"
-    cargo +nightly miri test -p fallow-types --lib --tests
-    cargo +nightly miri test -p fallow-graph --lib --tests -- --skip proptests
+    rustup run nightly cargo miri test -p fallow-types --lib --tests
+    rustup run nightly cargo miri test -p fallow-graph --lib --tests -- --skip proptests
 else
-    echo "→ miri (skipped — nightly or miri not installed)"
+    echo "→ miri (skipped: nightly or miri not installed)"
 fi
 
 echo "=== All checks passed ==="
