@@ -507,7 +507,7 @@ impl ModuleInfoExtractor {
         Some(target.name.to_string())
     }
 
-    fn copy_nested_binding_targets(&mut self, source_binding: &str, target_binding: &str) {
+    fn copy_nested_binding_targets(&mut self, source_binding: &str, target_binding: &str) -> bool {
         let source_prefix = format!("{source_binding}.");
         let target_prefix = format!("{target_binding}.");
         let copied: Vec<(String, String)> = self
@@ -520,7 +520,77 @@ impl ModuleInfoExtractor {
             })
             .collect();
 
-        self.binding_target_names.extend(copied);
+        let mut changed = false;
+        for (binding, target) in copied {
+            changed |= self.insert_binding_target(binding, target);
+        }
+        changed
+    }
+
+    fn insert_binding_target(&mut self, binding: String, target: String) -> bool {
+        if self.binding_target_names.get(&binding) == Some(&target) {
+            return false;
+        }
+        self.binding_target_names.insert(binding, target);
+        true
+    }
+
+    pub(super) fn resolve_object_binding_candidate(
+        &mut self,
+        candidate: &super::ObjectBindingCandidate,
+    ) -> bool {
+        let mut changed = false;
+        if self
+            .namespace_binding_names
+            .iter()
+            .any(|name| name == candidate.source_name.as_str())
+        {
+            changed |= self.insert_binding_target(
+                candidate.binding_path.clone(),
+                candidate.source_name.clone(),
+            );
+        } else if let Some(target_name) = self
+            .binding_target_names
+            .get(candidate.source_name.as_str())
+            .cloned()
+        {
+            changed |= self.insert_binding_target(candidate.binding_path.clone(), target_name);
+        }
+        changed | self.copy_nested_binding_targets(&candidate.source_name, &candidate.binding_path)
+    }
+
+    fn record_object_binding_targets(&mut self, binding_name: &str, obj: &ObjectExpression<'_>) {
+        self.record_object_binding_targets_at_path(binding_name, obj);
+    }
+
+    fn record_object_binding_targets_at_path(
+        &mut self,
+        object_path: &str,
+        obj: &ObjectExpression<'_>,
+    ) {
+        for prop in &obj.properties {
+            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                continue;
+            };
+            let Some(key_name) = prop.key.static_name() else {
+                continue;
+            };
+
+            let binding_path = format!("{object_path}.{key_name}");
+            match &prop.value {
+                Expression::Identifier(ident) => {
+                    self.object_binding_candidates
+                        .push(super::ObjectBindingCandidate {
+                            binding_path,
+                            source_name: ident.name.to_string(),
+                        });
+                }
+                Expression::ObjectExpression(child) => {
+                    self.record_object_binding_targets_at_path(&binding_path, child);
+                }
+                _ => {}
+            }
+        }
     }
 
     fn collect_playwright_fixture_type_bindings(&self, ty: &TSType<'_>) -> Vec<(String, String)> {
@@ -1049,6 +1119,12 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 && let Expression::CallExpression(call) = init
             {
                 self.record_playwright_fixture_definitions(id.name.as_str(), call);
+            }
+
+            if let BindingPattern::BindingIdentifier(id) = &declarator.id
+                && let Expression::ObjectExpression(obj) = init
+            {
+                self.record_object_binding_targets(id.name.as_str(), obj);
             }
 
             // `const x = require('./y')` — static require

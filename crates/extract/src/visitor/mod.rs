@@ -35,6 +35,12 @@ struct LocalSignatureTypeReference {
     span: Span,
 }
 
+#[derive(Debug, Clone)]
+struct ObjectBindingCandidate {
+    binding_path: String,
+    source_name: String,
+}
+
 /// One Angular `@Component({ template: \`...\` })` decorator captured during
 /// the visit pass, awaiting synthetic template-block complexity computation
 /// in `parse.rs` (where `line_offsets` is available).
@@ -74,6 +80,9 @@ pub(crate) struct ModuleInfoExtractor {
     /// Used so `x.method()` or `this.service.method()` can be mapped back to the
     /// imported/exported class or interface that owns the member.
     binding_target_names: FxHashMap<String, String>,
+    /// Object literal aliases resolved after the full AST walk so later import
+    /// declarations can still seed namespace bindings.
+    object_binding_candidates: Vec<ObjectBindingCandidate>,
     /// Nesting depth inside `TSModuleDeclaration` (namespace) bodies.
     /// When > 0, inner `export` declarations are collected as namespace members
     /// instead of being extracted as top-level module exports.
@@ -253,6 +262,24 @@ impl ModuleInfoExtractor {
         self.whole_object_uses.extend(additional_whole);
     }
 
+    fn resolve_object_binding_candidates(&mut self) {
+        if self.object_binding_candidates.is_empty() {
+            return;
+        }
+
+        let candidates = self.object_binding_candidates.clone();
+        let max_iterations = candidates.len().saturating_add(1);
+        for _ in 0..max_iterations {
+            let mut changed = false;
+            for candidate in &candidates {
+                changed |= self.resolve_object_binding_candidate(candidate);
+            }
+            if !changed {
+                break;
+            }
+        }
+    }
+
     /// Push a type-only export (type alias or interface).
     fn push_type_export(&mut self, name: &str, span: Span) {
         self.exports.push(ExportInfo {
@@ -275,6 +302,7 @@ impl ModuleInfoExtractor {
     ) -> ModuleInfo {
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();
+        self.resolve_object_binding_candidates();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         ModuleInfo {
@@ -323,6 +351,7 @@ impl ModuleInfoExtractor {
         );
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();
+        self.resolve_object_binding_candidates();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         info.imports.extend(self.imports);

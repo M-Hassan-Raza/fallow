@@ -156,6 +156,28 @@ fn namespace_import_makes_all_exports_used() {
     );
 }
 
+#[test]
+fn namespace_import_used_through_object_alias_and_star_barrel() {
+    let root = fixture_path("issue-269-namespace-object-alias");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_export_names.contains(&"getMetaAssetsTeam"),
+        "getMetaAssetsTeam should be used through API.motionNet.adEngine.getMetaAssetsTeam"
+    );
+    assert!(
+        unused_export_names.contains(&"unusedQuery"),
+        "unusedQuery should remain unused, found: {unused_export_names:?}"
+    );
+}
+
 // ── Namespace exports (issue #52) ────────────────────────────
 
 #[test]
