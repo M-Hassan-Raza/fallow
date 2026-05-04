@@ -69,13 +69,15 @@ pub fn extract_script_file_refs(script: &str) -> Vec<String> {
     refs
 }
 
-/// Check if a token looks like a file path argument (has a directory separator or a
-/// JS/TS file extension).
+/// Check if a token looks like a file path argument (has a directory separator
+/// or a script-like source file extension).
 pub fn looks_like_file_path(token: &str) -> bool {
     if !crate::scripts::could_be_file_path(token) {
         return false;
     }
-    let extensions = [".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx"];
+    let extensions = [
+        ".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".gts", ".gjs",
+    ];
     if extensions.iter().any(|ext| token.ends_with(ext)) {
         return true;
     }
@@ -87,12 +89,15 @@ pub fn looks_like_file_path(token: &str) -> bool {
 }
 
 /// Check if a token looks like a standalone script file reference (must have a
-/// JS/TS extension and a path-like structure, not a bare command name).
+/// script-like source extension and a path-like structure, not a bare command
+/// name).
 pub fn looks_like_script_file(token: &str) -> bool {
     if !crate::scripts::could_be_file_path(token) {
         return false;
     }
-    let extensions = [".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx"];
+    let extensions = [
+        ".js", ".ts", ".mjs", ".cjs", ".mts", ".cts", ".jsx", ".tsx", ".gts", ".gjs",
+    ];
     if !extensions.iter().any(|ext| token.ends_with(ext)) {
         return false;
     }

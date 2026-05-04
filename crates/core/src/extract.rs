@@ -15,7 +15,8 @@ pub use fallow_extract::{
 // Re-export extraction functions
 pub use fallow_extract::{
     extract_astro_frontmatter, extract_css_module_exports, extract_mdx_statements,
-    extract_sfc_scripts, is_sfc_file, parse_all_files, parse_from_content, parse_single_file,
+    extract_sfc_scripts, is_glimmer_file, is_sfc_file, parse_all_files, parse_from_content,
+    parse_single_file, strip_glimmer_templates,
 };
 
 // Re-export sub-modules for code that imports from them directly

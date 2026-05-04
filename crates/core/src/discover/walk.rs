@@ -77,8 +77,8 @@ impl<'s> ignore::ParallelVisitorBuilder<'s> for FileVisitorBuilder<'s> {
 }
 
 pub const SOURCE_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro", "mdx", "css",
-    "scss", "html", "graphql", "gql",
+    "ts", "tsx", "mts", "cts", "gts", "js", "jsx", "mjs", "cjs", "gjs", "vue", "svelte", "astro",
+    "mdx", "css", "scss", "html", "graphql", "gql",
 ];
 
 /// Glob patterns for test/dev/story files excluded in production mode.
@@ -258,6 +258,7 @@ mod tests {
         assert!(SOURCE_EXTENSIONS.contains(&"tsx"));
         assert!(SOURCE_EXTENSIONS.contains(&"mts"));
         assert!(SOURCE_EXTENSIONS.contains(&"cts"));
+        assert!(SOURCE_EXTENSIONS.contains(&"gts"));
     }
 
     #[test]
@@ -266,6 +267,7 @@ mod tests {
         assert!(SOURCE_EXTENSIONS.contains(&"jsx"));
         assert!(SOURCE_EXTENSIONS.contains(&"mjs"));
         assert!(SOURCE_EXTENSIONS.contains(&"cjs"));
+        assert!(SOURCE_EXTENSIONS.contains(&"gjs"));
     }
 
     #[test]

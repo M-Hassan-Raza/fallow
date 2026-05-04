@@ -27,3 +27,23 @@ pub fn parse_ts_with_complexity(source: &str) -> ModuleInfo {
 pub fn parse_tsx(source: &str) -> ModuleInfo {
     parse_source_to_module(FileId(0), Path::new("test.tsx"), source, 0, false)
 }
+
+#[test]
+fn parses_glimmer_typescript_as_typescript() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("component.gts"),
+        "import type Service from './service';\nexport type ServiceRef = Service;\n",
+        0,
+        false,
+    );
+
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.imports[0].source, "./service");
+    assert!(info.imports[0].is_type_only);
+    assert!(
+        info.exports
+            .iter()
+            .any(|export| export.name.matches_str("ServiceRef"))
+    );
+}

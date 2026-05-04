@@ -231,6 +231,42 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
     );
 }
 
+#[test]
+fn glimmer_typescript_imports_use_tsconfig_path_aliases() {
+    let root = fixture_path("glimmer-path-aliases");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_file_paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().to_string())
+        .collect();
+
+    assert!(
+        !unused_file_paths
+            .iter()
+            .any(|path| path.ends_with("app/services/my-service.ts")),
+        ".gts imports should resolve tsconfig path aliases and keep my-service.ts reachable: \
+         {unused_file_paths:?}"
+    );
+    assert!(
+        unused_file_paths
+            .iter()
+            .any(|path| path.ends_with("app/services/unused-service.ts")),
+        "the fixture should still report genuinely unused services: {unused_file_paths:?}"
+    );
+    assert!(
+        results.unresolved_imports.is_empty(),
+        ".gts tsconfig path alias imports should not be unresolved: {:?}",
+        results
+            .unresolved_imports
+            .iter()
+            .map(|import| &import.specifier)
+            .collect::<Vec<_>>()
+    );
+}
+
 // ── Interface-mediated class member usage (issue #132) ──────
 
 #[test]

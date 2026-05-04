@@ -168,9 +168,17 @@ fn empty_tokens(source: &str) -> FileTokens {
 
 /// Tokenize a standard JS/TS file, with JSX fallback for parse errors.
 fn tokenize_js_ts(path: &Path, source: &str, strip_types: bool, skip_imports: bool) -> FileTokens {
-    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let source_type = match path.extension().and_then(|ext| ext.to_str()) {
+        Some("gts") => SourceType::ts(),
+        Some("gjs") => SourceType::mjs(),
+        _ => SourceType::from_path(path).unwrap_or_default(),
+    };
+    let stripped_glimmer_source = crate::extract::is_glimmer_file(path)
+        .then(|| crate::extract::strip_glimmer_templates(source))
+        .flatten();
+    let parser_source = stripped_glimmer_source.as_deref().unwrap_or(source);
     let allocator = Allocator::default();
-    let parser_return = Parser::new(&allocator, source, source_type).parse();
+    let parser_return = Parser::new(&allocator, parser_source, source_type).parse();
 
     let mut extractor = TokenExtractor::new(strip_types, skip_imports);
     extractor.visit_program(&parser_return.program);
@@ -184,7 +192,7 @@ fn tokenize_js_ts(path: &Path, source: &str, strip_types: bool, skip_imports: bo
             SourceType::jsx()
         };
         let allocator2 = Allocator::default();
-        let retry_return = Parser::new(&allocator2, source, jsx_type).parse();
+        let retry_return = Parser::new(&allocator2, parser_source, jsx_type).parse();
         let mut retry_extractor = TokenExtractor::new(strip_types, skip_imports);
         retry_extractor.visit_program(&retry_return.program);
         if retry_extractor.tokens.len() > extractor.tokens.len() {

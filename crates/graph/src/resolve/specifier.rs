@@ -266,7 +266,7 @@ fn is_js_ts_extension(path: &Path) -> bool {
         .is_some_and(|ext| {
             matches!(
                 ext,
-                "ts" | "tsx" | "mts" | "cts" | "js" | "jsx" | "mjs" | "cjs"
+                "ts" | "tsx" | "mts" | "cts" | "gts" | "js" | "jsx" | "mjs" | "cjs" | "gjs"
             )
         })
 }
@@ -423,19 +423,31 @@ pub(super) fn resolve_specifier(
     // `<monorepo-root>/src/main.tsx`. Use the source file's parent directory as
     // the base, which is correct for both workspace members and single projects.
     //
-    // Applied to web-facing source files: HTML, JSX/TSX, and plain JS/TS. The
-    // JSX/TSX case covers SSR frameworks like Hono where JSX templates emit
-    // `<link href="/static/style.css" />`: these paths cannot be AST-resolved
-    // and have the same web-root semantics as HTML. See issue #105 (till's
-    // comment). Applied unconditionally to JS/TS too because the JSX visitor
-    // emits `ImportInfo` with the raw attribute value, and the file extension
-    // after JSX retry may not reflect the original source (`.js` files with
-    // JSX still parse as JSX and get their asset refs recorded here).
+    // Applied to web-facing source files: HTML, JSX/TSX, plain JS/TS, and
+    // Glimmer files. The JSX/TSX case covers SSR frameworks like Hono where JSX
+    // templates emit `<link href="/static/style.css" />`: these paths cannot be
+    // AST-resolved and have the same web-root semantics as HTML. See issue #105
+    // (till's comment). Applied unconditionally to JS/TS too because the JSX
+    // visitor emits `ImportInfo` with the raw attribute value, and the file
+    // extension after JSX retry may not reflect the original source (`.js`
+    // files with JSX still parse as JSX and get their asset refs recorded here).
     if specifier.starts_with('/')
         && from_file.extension().is_some_and(|e| {
             matches!(
                 e.to_str(),
-                Some("html" | "jsx" | "tsx" | "js" | "ts" | "mjs" | "cjs" | "mts" | "cts")
+                Some(
+                    "html"
+                        | "jsx"
+                        | "tsx"
+                        | "js"
+                        | "ts"
+                        | "mjs"
+                        | "cjs"
+                        | "mts"
+                        | "cts"
+                        | "gts"
+                        | "gjs"
+                )
             )
         })
     {

@@ -12,6 +12,7 @@ pub mod cache;
 pub(crate) mod complexity;
 pub mod css;
 pub mod flags;
+pub mod glimmer;
 pub mod graphql;
 pub mod html;
 pub mod inventory;
@@ -42,6 +43,7 @@ pub use fallow_types::extract::{
 // Re-export extraction functions for internal use and fuzzing
 pub use astro::extract_astro_frontmatter;
 pub use css::extract_css_module_exports;
+pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use mdx::extract_mdx_statements;
 pub use sfc::{extract_sfc_scripts, is_sfc_file};
 pub use sfc_template::angular::ANGULAR_TPL_SENTINEL;

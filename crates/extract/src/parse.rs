@@ -10,6 +10,7 @@ use crate::ExportInfo;
 use crate::ModuleInfo;
 use crate::astro::{is_astro_file, parse_astro_to_module};
 use crate::css::{is_css_file, parse_css_to_module};
+use crate::glimmer::{is_glimmer_file, strip_glimmer_templates};
 use crate::graphql::{is_graphql_file, parse_graphql_to_module};
 use crate::html::{is_html_file, parse_html_to_module_with_complexity};
 use crate::mdx::{is_mdx_file, parse_mdx_to_module};
@@ -17,6 +18,14 @@ use crate::sfc::{is_sfc_file, parse_sfc_to_module};
 use crate::visitor::ModuleInfoExtractor;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ImportInfo, VisibilityTag};
+
+fn source_type_for_path(path: &Path) -> SourceType {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("gts") => SourceType::ts(),
+        Some("gjs") => SourceType::mjs(),
+        _ => SourceType::from_path(path).unwrap_or_default(),
+    }
+}
 
 /// Parse source text into a [`ModuleInfo`].
 ///
@@ -55,9 +64,13 @@ pub fn parse_source_to_module(
         );
     }
 
-    let source_type = SourceType::from_path(path).unwrap_or_default();
+    let stripped_glimmer_source = is_glimmer_file(path)
+        .then(|| strip_glimmer_templates(source))
+        .flatten();
+    let parser_source = stripped_glimmer_source.as_deref().unwrap_or(source);
+    let source_type = source_type_for_path(path);
     let allocator = Allocator::default();
-    let parser_return = Parser::new(&allocator, source, source_type).parse();
+    let parser_return = Parser::new(&allocator, parser_source, source_type).parse();
 
     // Parse suppression comments from AST comments initially;
     // re-parsed from retry comments below if JSX retry succeeds.
@@ -113,7 +126,7 @@ pub fn parse_source_to_module(
             SourceType::jsx()
         };
         let allocator2 = Allocator::default();
-        let retry_return = Parser::new(&allocator2, source, jsx_type).parse();
+        let retry_return = Parser::new(&allocator2, parser_source, jsx_type).parse();
         let mut retry_extractor = ModuleInfoExtractor::new();
         retry_extractor.visit_program(&retry_return.program);
         let retry_total = retry_extractor.exports.len()
