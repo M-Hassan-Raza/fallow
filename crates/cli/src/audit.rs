@@ -1,6 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::io::IsTerminal;
+use std::io::{IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::time::{Duration, Instant};
@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use colored::Colorize;
 use fallow_config::{AuditGate, OutputFormat};
 use rustc_hash::FxHashSet;
+use xxhash_rust::xxh3::xxh3_64;
 
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions, DupesResult};
@@ -17,6 +18,9 @@ use crate::report;
 use crate::report::plural;
 
 // ── Types ────────────────────────────────────────────────────────
+
+const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 1;
+const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Verdict for the audit command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -353,6 +357,22 @@ struct AuditKeySnapshot {
     dupes: FxHashSet<String>,
 }
 
+struct AuditBaseSnapshotCacheKey {
+    hash: u64,
+    base_sha: String,
+}
+
+#[derive(bitcode::Encode, bitcode::Decode)]
+struct CachedAuditKeySnapshot {
+    version: u8,
+    cli_version: String,
+    key_hash: u64,
+    base_sha: String,
+    dead_code: Vec<String>,
+    health: Vec<String>,
+    dupes: Vec<String>,
+}
+
 fn count_introduced(keys: &FxHashSet<String>, base: Option<&FxHashSet<String>>) -> (usize, usize) {
     let Some(base) = base else {
         return (0, 0);
@@ -366,12 +386,209 @@ fn count_introduced(keys: &FxHashSet<String>, base: Option<&FxHashSet<String>>) 
     })
 }
 
+fn sorted_keys(keys: &FxHashSet<String>) -> Vec<String> {
+    let mut keys: Vec<String> = keys.iter().cloned().collect();
+    keys.sort_unstable();
+    keys
+}
+
+fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> AuditKeySnapshot {
+    AuditKeySnapshot {
+        dead_code: cached.dead_code.into_iter().collect(),
+        health: cached.health.into_iter().collect(),
+        dupes: cached.dupes.into_iter().collect(),
+    }
+}
+
+fn cached_from_snapshot(
+    key: &AuditBaseSnapshotCacheKey,
+    snapshot: &AuditKeySnapshot,
+) -> CachedAuditKeySnapshot {
+    CachedAuditKeySnapshot {
+        version: AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
+        cli_version: env!("CARGO_PKG_VERSION").to_string(),
+        key_hash: key.hash,
+        base_sha: key.base_sha.clone(),
+        dead_code: sorted_keys(&snapshot.dead_code),
+        health: sorted_keys(&snapshot.health),
+        dupes: sorted_keys(&snapshot.dupes),
+    }
+}
+
+fn audit_base_snapshot_cache_dir(root: &Path) -> PathBuf {
+    root.join(".fallow")
+        .join("cache")
+        .join(format!("audit-base-v{AUDIT_BASE_SNAPSHOT_CACHE_VERSION}"))
+}
+
+fn audit_base_snapshot_cache_file(root: &Path, key: &AuditBaseSnapshotCacheKey) -> PathBuf {
+    audit_base_snapshot_cache_dir(root).join(format!("{:016x}.bin", key.hash))
+}
+
+fn ensure_audit_base_snapshot_cache_dir(dir: &Path) -> Result<(), std::io::Error> {
+    std::fs::create_dir_all(dir)?;
+    let gitignore = dir.join(".gitignore");
+    if std::fs::read_to_string(&gitignore).ok().as_deref() != Some("*\n") {
+        std::fs::write(gitignore, "*\n")?;
+    }
+    Ok(())
+}
+
+fn load_cached_base_snapshot(
+    opts: &AuditOptions<'_>,
+    key: &AuditBaseSnapshotCacheKey,
+) -> Option<AuditKeySnapshot> {
+    let path = audit_base_snapshot_cache_file(opts.root, key);
+    let data = std::fs::read(path).ok()?;
+    if data.len() > MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE {
+        return None;
+    }
+    let cached: CachedAuditKeySnapshot = bitcode::decode(&data).ok()?;
+    if cached.version != AUDIT_BASE_SNAPSHOT_CACHE_VERSION
+        || cached.cli_version != env!("CARGO_PKG_VERSION")
+        || cached.key_hash != key.hash
+        || cached.base_sha != key.base_sha
+    {
+        return None;
+    }
+    Some(snapshot_from_cached(cached))
+}
+
+fn save_cached_base_snapshot(
+    opts: &AuditOptions<'_>,
+    key: &AuditBaseSnapshotCacheKey,
+    snapshot: &AuditKeySnapshot,
+) {
+    let dir = audit_base_snapshot_cache_dir(opts.root);
+    if ensure_audit_base_snapshot_cache_dir(&dir).is_err() {
+        return;
+    }
+    let data = bitcode::encode(&cached_from_snapshot(key, snapshot));
+    let Ok(mut tmp) = tempfile::NamedTempFile::new_in(&dir) else {
+        return;
+    };
+    if tmp.write_all(&data).is_err() {
+        return;
+    }
+    let _ = tmp.persist(audit_base_snapshot_cache_file(opts.root, key));
+}
+
+fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", rev])
+        .current_dir(root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> Vec<String> {
+    let git_root = git_toplevel(root);
+    let mut files: Vec<String> = changed_files
+        .iter()
+        .map(|path| {
+            git_root
+                .as_ref()
+                .and_then(|root| path.strip_prefix(root).ok())
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    files.sort_unstable();
+    files
+}
+
+fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value, ExitCode> {
+    let loaded = if let Some(path) = opts.config_path {
+        let config = fallow_config::FallowConfig::load(path).map_err(|e| {
+            emit_error(
+                &format!("failed to load config '{}': {e}", path.display()),
+                2,
+                opts.output,
+            )
+        })?;
+        Some((config, path.clone()))
+    } else {
+        fallow_config::FallowConfig::find_and_load(opts.root)
+            .map_err(|e| emit_error(&e, 2, opts.output))?
+    };
+
+    let Some((config, path)) = loaded else {
+        return Ok(serde_json::json!({
+            "path": null,
+            "resolved_hash": null,
+        }));
+    };
+    let bytes = serde_json::to_vec(&config).map_err(|e| {
+        emit_error(
+            &format!("failed to serialize resolved config for audit cache key: {e}"),
+            2,
+            opts.output,
+        )
+    })?;
+    Ok(serde_json::json!({
+        "path": path.to_string_lossy(),
+        "resolved_hash": format!("{:016x}", xxh3_64(&bytes)),
+    }))
+}
+
+fn audit_base_snapshot_cache_key(
+    opts: &AuditOptions<'_>,
+    base_ref: &str,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Result<Option<AuditBaseSnapshotCacheKey>, ExitCode> {
+    if opts.no_cache {
+        return Ok(None);
+    }
+    let Some(base_sha) = git_rev_parse(opts.root, base_ref) else {
+        return Ok(None);
+    };
+    let config_file = config_file_fingerprint(opts)?;
+    let payload = serde_json::json!({
+        "cache_version": AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
+        "cli_version": env!("CARGO_PKG_VERSION"),
+        "base_sha": base_sha,
+        "config_file": config_file,
+        "changed_files": normalized_changed_files(opts.root, changed_files),
+        "production": opts.production,
+        "production_dead_code": opts.production_dead_code,
+        "production_health": opts.production_health,
+        "production_dupes": opts.production_dupes,
+        "workspace": opts.workspace,
+        "changed_workspaces": opts.changed_workspaces,
+        "group_by": opts.group_by.map(|g| format!("{g:?}")),
+        "include_entry_exports": opts.include_entry_exports,
+        "max_crap": opts.max_crap,
+        "dead_code_baseline": opts.dead_code_baseline.map(|p| p.to_string_lossy().to_string()),
+        "health_baseline": opts.health_baseline.map(|p| p.to_string_lossy().to_string()),
+        "dupes_baseline": opts.dupes_baseline.map(|p| p.to_string_lossy().to_string()),
+    });
+    let bytes = serde_json::to_vec(&payload).map_err(|e| {
+        emit_error(
+            &format!("failed to build audit cache key: {e}"),
+            2,
+            opts.output,
+        )
+    })?;
+    Ok(Some(AuditBaseSnapshotCacheKey {
+        hash: xxh3_64(&bytes),
+        base_sha,
+    }))
+}
+
 fn compute_base_snapshot(
     opts: &AuditOptions<'_>,
     base_ref: &str,
     changed_files: &FxHashSet<PathBuf>,
+    base_sha: Option<&str>,
 ) -> Result<AuditKeySnapshot, ExitCode> {
-    let Some(worktree) = BaseWorktree::create(opts.root, base_ref) else {
+    let Some(worktree) = BaseWorktree::create(opts.root, base_ref, base_sha) else {
         return Err(emit_error(
             &format!("could not create a temporary worktree for base ref '{base_ref}'"),
             2,
@@ -415,18 +632,26 @@ fn compute_base_snapshot(
     };
 
     let base_changed_files = remap_focus_files(changed_files, opts.root, worktree.path());
-    // Base-snapshot check and dupes share no state: this branch never reuses
-    // the dead-code parse for health (`run_audit_health(..., None)`) and never
-    // hands the file list to dupes (`run_audit_dupes(..., None)`). Running
-    // them concurrently is therefore a pure win, no sharing optimization is
-    // forfeited. Health stays sequential after both complete.
+    let check_production = opts.production_dead_code.unwrap_or(opts.production);
+    let health_production = opts.production_health.unwrap_or(opts.production);
+    let share_dead_code_parse_with_health = check_production == health_production;
+
+    // Base-snapshot check and dupes share no mutable state. Running them
+    // concurrently keeps the expensive duplication pass overlapped with
+    // dead-code analysis; health then consumes check's retained parse when the
+    // production modes match, mirroring the HEAD-side audit pipeline.
     let (check_res, dupes_res) = rayon::join(
-        || run_audit_check(&base_opts, None, false),
+        || run_audit_check(&base_opts, None, share_dead_code_parse_with_health),
         || run_audit_dupes(&base_opts, None, base_changed_files.as_ref(), None),
     );
     let mut check = check_res?;
     let dupes = dupes_res?;
-    let health = run_audit_health(&base_opts, None, None)?;
+    let shared_parse = if share_dead_code_parse_with_health {
+        check.as_mut().and_then(|r| r.shared_parse.take())
+    } else {
+        None
+    };
+    let health = run_audit_health(&base_opts, None, shared_parse)?;
     if let Some(ref mut check) = check {
         check.shared_parse = None;
     }
@@ -633,11 +858,17 @@ fn remap_focus_files(
 struct BaseWorktree {
     repo_root: PathBuf,
     path: PathBuf,
+    persistent: bool,
 }
 
 impl BaseWorktree {
-    fn create(repo_root: &Path, base_ref: &str) -> Option<Self> {
+    fn create(repo_root: &Path, base_ref: &str, base_sha: Option<&str>) -> Option<Self> {
         sweep_orphan_audit_worktrees(repo_root);
+        if let Some(base_sha) = base_sha
+            && let Some(worktree) = Self::reuse_or_create(repo_root, base_sha)
+        {
+            return Some(worktree);
+        }
         let path = std::env::temp_dir().join(format!(
             "fallow-audit-base-{}-{}",
             std::process::id(),
@@ -667,6 +898,45 @@ impl BaseWorktree {
         Some(Self {
             repo_root: repo_root.to_path_buf(),
             path,
+            persistent: false,
+        })
+    }
+
+    fn reuse_or_create(repo_root: &Path, base_sha: &str) -> Option<Self> {
+        let path = reusable_audit_worktree_path(repo_root, base_sha);
+        if reusable_audit_worktree_is_ready(repo_root, &path, base_sha) {
+            return Some(Self {
+                repo_root: repo_root.to_path_buf(),
+                path,
+                persistent: true,
+            });
+        }
+
+        remove_audit_worktree(repo_root, &path);
+        let _ = std::fs::remove_dir_all(&path);
+        let output = Command::new("git")
+            .args([
+                "worktree",
+                "add",
+                "--detach",
+                "--quiet",
+                path.to_string_lossy().as_ref(),
+                base_sha,
+            ])
+            .current_dir(repo_root)
+            .env_remove("GIT_DIR")
+            .env_remove("GIT_WORK_TREE")
+            .output()
+            .ok()?;
+        if !output.status.success() {
+            let _ = std::fs::remove_dir_all(&path);
+            return None;
+        }
+
+        Some(Self {
+            repo_root: repo_root.to_path_buf(),
+            path,
+            persistent: true,
         })
     }
 
@@ -675,26 +945,67 @@ impl BaseWorktree {
     }
 }
 
+fn reusable_audit_worktree_path(repo_root: &Path, base_sha: &str) -> PathBuf {
+    let repo_root = git_toplevel(repo_root).unwrap_or_else(|| repo_root.to_path_buf());
+    let repo_root = repo_root.canonicalize().unwrap_or(repo_root);
+    let repo_hash = xxh3_64(repo_root.to_string_lossy().as_bytes());
+    let sha_prefix = base_sha.get(..16).unwrap_or(base_sha);
+    std::env::temp_dir().join(format!(
+        "fallow-audit-base-cache-{repo_hash:016x}-{sha_prefix}"
+    ))
+}
+
+fn reusable_audit_worktree_is_ready(repo_root: &Path, path: &Path, base_sha: &str) -> bool {
+    if !path.exists() || !audit_worktree_is_registered(repo_root, path) {
+        return false;
+    }
+    git_rev_parse(path, "HEAD").is_some_and(|head| head == base_sha)
+}
+
+fn audit_worktree_is_registered(repo_root: &Path, path: &Path) -> bool {
+    let Some(worktrees) = list_audit_worktrees(repo_root) else {
+        return false;
+    };
+    worktrees.iter().any(|worktree| paths_equal(worktree, path))
+}
+
+fn paths_equal(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn remove_audit_worktree(repo_root: &Path, path: &Path) {
+    let _ = Command::new("git")
+        .args([
+            "worktree",
+            "remove",
+            "--force",
+            path.to_string_lossy().as_ref(),
+        ])
+        .current_dir(repo_root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .output();
+}
+
 fn sweep_orphan_audit_worktrees(repo_root: &Path) {
     let Some(worktrees) = list_audit_worktrees(repo_root) else {
         return;
     };
     let mut removed_any = false;
     for path in worktrees {
-        if !is_fallow_audit_worktree_path(&path) || audit_worktree_process_is_alive(&path) {
+        if !is_fallow_audit_worktree_path(&path)
+            || is_reusable_audit_worktree_path(&path)
+            || audit_worktree_process_is_alive(&path)
+        {
             continue;
         }
-        let _ = Command::new("git")
-            .args([
-                "worktree",
-                "remove",
-                "--force",
-                path.to_string_lossy().as_ref(),
-            ])
-            .current_dir(repo_root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .output();
+        remove_audit_worktree(repo_root, &path);
         let _ = std::fs::remove_dir_all(&path);
         removed_any = true;
     }
@@ -738,6 +1049,12 @@ fn is_fallow_audit_worktree_path(path: &Path) -> bool {
         return false;
     };
     name.starts_with("fallow-audit-base-") && path_is_inside_temp_dir(path)
+}
+
+fn is_reusable_audit_worktree_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with("fallow-audit-base-cache-"))
 }
 
 fn path_is_inside_temp_dir(path: &Path) -> bool {
@@ -788,17 +1105,10 @@ fn process_is_alive(_pid: u32) -> bool {
 
 impl Drop for BaseWorktree {
     fn drop(&mut self) {
-        let _ = Command::new("git")
-            .args([
-                "worktree",
-                "remove",
-                "--force",
-                self.path.to_string_lossy().as_ref(),
-            ])
-            .current_dir(&self.repo_root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .output();
+        if self.persistent {
+            return;
+        }
+        remove_audit_worktree(&self.repo_root, &self.path);
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
@@ -1506,19 +1816,28 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     let changed_since = Some(base_ref.as_str());
 
     // The HEAD analyses (check + dupes + health) operate on the working tree;
-    // the base snapshot operates on a fresh git worktree checked out at
-    // `base_ref`. They share no mutable state, so we can run them concurrently
-    // via `rayon::join`, halving wall-clock time on `--gate new-only` (the
-    // default). Inside each branch we keep the existing share-the-parse
-    // optimization between dead-code and health, since check finishes before
-    // either of its dependants run.
+    // the base snapshot operates on an isolated git worktree checked out at
+    // `base_ref` (reused by SHA when possible). They share no mutable state, so
+    // we can run them concurrently via `rayon::join`, halving wall-clock time
+    // on `--gate new-only` (the default). Inside each branch we keep the
+    // existing share-the-parse optimization between dead-code and health, since
+    // check finishes before either of its dependants run.
     let needs_real_base_snapshot = matches!(opts.gate, AuditGate::NewOnly)
         && !can_reuse_current_as_base(opts, &base_ref, &changed_files);
+    let base_cache_key = if needs_real_base_snapshot {
+        audit_base_snapshot_cache_key(opts, &base_ref, &changed_files)?
+    } else {
+        None
+    };
+    let cached_base_snapshot = base_cache_key
+        .as_ref()
+        .and_then(|key| load_cached_base_snapshot(opts, key));
 
-    let (head_res, base_res) = if needs_real_base_snapshot {
+    let (head_res, base_res) = if needs_real_base_snapshot && cached_base_snapshot.is_none() {
+        let base_sha = base_cache_key.as_ref().map(|key| key.base_sha.as_str());
         let (h, b) = rayon::join(
             || run_audit_head_analyses(opts, changed_since, &changed_files),
-            || compute_base_snapshot(opts, &base_ref, &changed_files),
+            || compute_base_snapshot(opts, &base_ref, &changed_files, base_sha),
         );
         (h, Some(b))
     } else {
@@ -1534,8 +1853,14 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     let health_result = head.health;
 
     let (base_snapshot, base_snapshot_skipped) = if matches!(opts.gate, AuditGate::NewOnly) {
-        if let Some(base_res) = base_res {
-            (Some(base_res?), false)
+        if let Some(snapshot) = cached_base_snapshot {
+            (Some(snapshot), false)
+        } else if let Some(base_res) = base_res {
+            let snapshot = base_res?;
+            if let Some(ref key) = base_cache_key {
+                save_cached_base_snapshot(opts, key, &snapshot);
+            }
+            (Some(snapshot), false)
         } else {
             (
                 Some(current_keys_as_base_keys(
@@ -2305,21 +2630,115 @@ mod tests {
     fn audit_worktree_helpers_filter_to_fallow_temp_prefix() {
         let temp = std::env::temp_dir();
         let audit_path = temp.join("fallow-audit-base-123-456");
+        let reusable_path = temp.join("fallow-audit-base-cache-abcd-1234");
         let canonical_audit_path = temp
             .canonicalize()
             .unwrap_or_else(|_| temp.clone())
             .join("fallow-audit-base-456-789");
         let unrelated_temp = temp.join("other-worktree");
         let output = format!(
-            "worktree /repo\nHEAD abc\n\nworktree {}\nHEAD def\n\nworktree {}\nHEAD ghi\n",
+            "worktree /repo\nHEAD abc\n\nworktree {}\nHEAD def\n\nworktree {}\nHEAD ghi\n\nworktree {}\nHEAD jkl\n",
             audit_path.display(),
-            unrelated_temp.display()
+            unrelated_temp.display(),
+            reusable_path.display()
         );
 
-        assert_eq!(parse_worktree_list(&output), vec![audit_path]);
+        assert_eq!(
+            parse_worktree_list(&output),
+            vec![audit_path, reusable_path.clone()]
+        );
         assert!(is_fallow_audit_worktree_path(&canonical_audit_path));
+        assert!(is_reusable_audit_worktree_path(&reusable_path));
         assert_eq!(audit_worktree_pid("fallow-audit-base-123-456"), Some(123));
+        assert_eq!(
+            audit_worktree_pid("fallow-audit-base-cache-abcd-1234"),
+            None
+        );
         assert_eq!(audit_worktree_pid("not-fallow-audit-base-123"), None);
+    }
+
+    #[test]
+    fn audit_base_snapshot_cache_payload_roundtrips_sets() {
+        let key = AuditBaseSnapshotCacheKey {
+            hash: 42,
+            base_sha: "abc123".to_string(),
+        };
+        let snapshot = AuditKeySnapshot {
+            dead_code: ["dead:a".to_string(), "dead:b".to_string()]
+                .into_iter()
+                .collect(),
+            health: std::iter::once("health:a".to_string()).collect(),
+            dupes: ["dupe:a".to_string(), "dupe:b".to_string()]
+                .into_iter()
+                .collect(),
+        };
+
+        let cached = cached_from_snapshot(&key, &snapshot);
+        assert_eq!(cached.version, AUDIT_BASE_SNAPSHOT_CACHE_VERSION);
+        assert_eq!(cached.key_hash, key.hash);
+        assert_eq!(cached.base_sha, key.base_sha);
+        assert_eq!(cached.dead_code, vec!["dead:a", "dead:b"]);
+
+        let decoded = snapshot_from_cached(cached);
+        assert_eq!(decoded.dead_code, snapshot.dead_code);
+        assert_eq!(decoded.health, snapshot.health);
+        assert_eq!(decoded.dupes, snapshot.dupes);
+    }
+
+    #[test]
+    fn audit_base_snapshot_cache_key_includes_extended_config() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"extends":"base.json","entry":["src/index.ts"]}"#,
+        )
+        .expect("config should be written");
+        fs::write(
+            root.join("base.json"),
+            r#"{"rules":{"unused-exports":"off"}}"#,
+        )
+        .expect("base config should be written");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: false,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let first = config_file_fingerprint(&opts).expect("fingerprint should be computed");
+        fs::write(
+            root.join("base.json"),
+            r#"{"rules":{"unused-exports":"error"}}"#,
+        )
+        .expect("base config should be updated");
+        let second = config_file_fingerprint(&opts).expect("fingerprint should be recomputed");
+
+        assert_ne!(
+            first["resolved_hash"], second["resolved_hash"],
+            "extended config changes must invalidate cached base snapshots"
+        );
     }
 
     #[test]
