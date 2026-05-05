@@ -60,6 +60,11 @@ pub struct DupesOptions<'a> {
     /// standalone report remains ungrouped, but the shared resolver still
     /// validates unsupported modes so global-flag errors are consistent.
     pub group_by: Option<crate::GroupBy>,
+    /// When true, emit a timing panel after the duplication report. Mirrors
+    /// the global `--performance` flag handling for `check` and `health`.
+    /// Standalone `fallow dupes` reads this; combined-mode invocations rely
+    /// on the bare `fallow` pipeline panel and ignore this field.
+    pub performance: bool,
 }
 
 /// Parse a `--trace` spec string into (file_path, line_number).
@@ -448,6 +453,9 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         Ok(r) => r,
         Err(code) => return code,
     };
+    if opts.performance {
+        print_dupes_performance(&result, opts.output);
+    }
     let resolver = match crate::build_ownership_resolver(
         opts.group_by,
         opts.root,
@@ -465,6 +473,56 @@ pub fn run_dupes(opts: &DupesOptions<'_>) -> ExitCode {
         opts.summary,
         true,
     )
+}
+
+/// Emit a stderr timing panel for `fallow dupes --performance`. Stays out of
+/// stdout so JSON / SARIF / CodeClimate envelopes are not corrupted; the
+/// panel renders only for human-readable formats so machine readers don't
+/// see decorative ANSI art.
+fn print_dupes_performance(result: &DupesResult, output: OutputFormat) {
+    if !matches!(
+        output,
+        OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown
+    ) {
+        return;
+    }
+    use colored::Colorize;
+    let stats = &result.report.stats;
+    let total_ms = result.elapsed.as_secs_f64() * 1000.0;
+    let lines = [
+        String::new(),
+        "┌─ Duplication Performance ─────────────────────────"
+            .dimmed()
+            .to_string(),
+        format!("│  total:            {total_ms:>8.1}ms")
+            .dimmed()
+            .to_string(),
+        format!("│  files analyzed:   {:>8}", stats.total_files)
+            .dimmed()
+            .to_string(),
+        format!("│  tokens analyzed:  {:>8}", stats.total_tokens)
+            .dimmed()
+            .to_string(),
+        format!(
+            "│  clone groups:     {:>8}  ({} instances)",
+            stats.clone_groups, stats.clone_instances
+        )
+        .dimmed()
+        .to_string(),
+        format!(
+            "│  duplicated lines: {:>8}  ({:.1}%)",
+            stats.duplicated_lines, stats.duplication_percentage
+        )
+        .dimmed()
+        .to_string(),
+        "└───────────────────────────────────────────────────"
+            .dimmed()
+            .to_string(),
+        String::new(),
+    ];
+    for line in lines {
+        eprintln!("{line}");
+    }
 }
 
 fn print_dupes_result_with_grouping(
@@ -606,6 +664,7 @@ mod tests {
             explain_skipped: false,
             summary: false,
             group_by: None,
+            performance: false,
         }
     }
 

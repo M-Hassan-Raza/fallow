@@ -711,6 +711,10 @@ fn run_combined_dupes(
         explain_skipped: opts.explain_skipped,
         summary: opts.summary,
         group_by: opts.group_by,
+        // Combined mode renders the bare-`fallow` pipeline panel which already
+        // shows the duplication stage; the standalone dupes panel is suppressed
+        // here to avoid double-printing.
+        performance: false,
     };
 
     let check_production = opts.production_dead_code.unwrap_or(opts.production);

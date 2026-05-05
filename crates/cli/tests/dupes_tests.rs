@@ -8,6 +8,40 @@ use tempfile::tempdir;
 // JSON output structure
 // ---------------------------------------------------------------------------
 
+/// `fallow dupes --performance` was previously a no-op: the global flag was
+/// parsed but never wired through to `DupesOptions`, so users got nothing.
+/// This pins the behaviour: human format renders a stderr "Duplication
+/// Performance" panel; structured formats (JSON / SARIF / CodeClimate) stay
+/// silent so the machine envelope is uncorrupted.
+#[test]
+fn dupes_performance_panel_renders_for_human_format() {
+    let output = run_fallow("dupes", "duplicate-code", &["--performance"]);
+    assert!(
+        output.stderr.contains("Duplication Performance"),
+        "human dupes --performance should print panel header. stderr: {}",
+        output.stderr
+    );
+    assert!(
+        output.stderr.contains("clone groups:"),
+        "panel should include clone group count. stderr: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn dupes_performance_panel_suppressed_for_json_format() {
+    let output = run_fallow(
+        "dupes",
+        "duplicate-code",
+        &["--performance", "--format", "json", "--quiet"],
+    );
+    assert!(
+        !output.stderr.contains("Duplication Performance"),
+        "json dupes --performance must not corrupt machine output with the panel. stderr: {}",
+        output.stderr
+    );
+}
+
 #[test]
 fn dupes_json_output_has_clone_groups() {
     let output = run_fallow("dupes", "duplicate-code", &["--format", "json", "--quiet"]);

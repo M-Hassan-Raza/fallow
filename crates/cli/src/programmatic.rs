@@ -578,6 +578,9 @@ pub fn detect_duplication(options: &DuplicationOptions) -> ProgrammaticResult<se
         explain_skipped: false,
         summary: false,
         group_by: None,
+        // The programmatic API returns structured JSON; performance panels go
+        // to stderr in human mode and are not part of the public contract.
+        performance: false,
     };
     let result =
         crate::dupes::execute_dupes(&dupes_options).map_err(|_| generic_analysis_error("dupes"))?;

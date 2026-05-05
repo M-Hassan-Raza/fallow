@@ -2082,6 +2082,9 @@ fn run_audit_dupes<'a>(
         explain_skipped: opts.explain_skipped,
         summary: false,
         group_by: opts.group_by,
+        // Audit emits its own performance breakdown via the audit JSON / human
+        // formatter; the standalone dupes panel would be redundant noise here.
+        performance: false,
     };
     let dupes_run = if let Some(files) = pre_discovered {
         crate::dupes::execute_dupes_with_files(&dupes_opts, files)

@@ -2495,6 +2495,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
         explain_skipped: cli.explain_skipped,
         summary: cli.summary,
         group_by: cli.group_by,
+        performance: cli.performance,
     })
 }
 
