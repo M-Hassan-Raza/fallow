@@ -7,7 +7,7 @@ use bitcode::{Decode, Encode};
 use crate::MemberKind;
 
 /// Cache version — bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 66;
+pub(super) const CACHE_VERSION: u32 = 67;
 
 /// Duplication token cache version — bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -117,6 +117,11 @@ pub struct CachedExport {
     pub is_default: bool,
     /// Whether this is a type-only export.
     pub is_type_only: bool,
+    /// Whether this export is registered through a runtime side effect at
+    /// module load time (Lit `@customElement` decorator or
+    /// `customElements.define` call). Persisted so warm-cache runs continue
+    /// to skip unused-export reporting for these classes.
+    pub is_side_effect_used: bool,
     /// Visibility tag discriminant (0=None, 1=Public, 2=Internal, 3=Beta, 4=Alpha).
     pub visibility: u8,
     /// The local binding name, if different.

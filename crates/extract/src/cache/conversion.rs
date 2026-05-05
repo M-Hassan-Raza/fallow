@@ -41,6 +41,7 @@ pub fn cached_to_module(
             },
             local_name: e.local_name.clone(),
             is_type_only: e.is_type_only,
+            is_side_effect_used: e.is_side_effect_used,
             visibility: match e.visibility {
                 1 => VisibilityTag::Public,
                 2 => VisibilityTag::Internal,
@@ -207,6 +208,7 @@ pub fn module_to_cached(
                 },
                 is_default: matches!(e.name, ExportName::Default),
                 is_type_only: e.is_type_only,
+                is_side_effect_used: e.is_side_effect_used,
                 visibility: e.visibility as u8,
                 local_name: e.local_name.clone(),
                 span_start: e.span.start,

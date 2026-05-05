@@ -1393,6 +1393,7 @@ mod tests {
             fallow_core::graph::ExportSymbol {
                 name: fallow_core::extract::ExportName::Named("a".into()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
@@ -1401,6 +1402,7 @@ mod tests {
             fallow_core::graph::ExportSymbol {
                 name: fallow_core::extract::ExportName::Named("b".into()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
@@ -1409,6 +1411,7 @@ mod tests {
             fallow_core::graph::ExportSymbol {
                 name: fallow_core::extract::ExportName::Named("c".into()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
@@ -1417,6 +1420,7 @@ mod tests {
             fallow_core::graph::ExportSymbol {
                 name: fallow_core::extract::ExportName::Named("MyType".into()),
                 is_type_only: true,
+                is_side_effect_used: false,
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
@@ -1443,6 +1447,7 @@ mod tests {
         let exports = vec![fallow_core::graph::ExportSymbol {
             name: fallow_core::extract::ExportName::Named("Foo".into()),
             is_type_only: true,
+            is_side_effect_used: false,
             visibility: fallow_core::extract::VisibilityTag::None,
             span: oxc_span::Span::empty(0),
             references: vec![],
@@ -1638,6 +1643,7 @@ mod tests {
             fallow_core::graph::ExportSymbol {
                 name: fallow_core::extract::ExportName::Named("a".into()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
@@ -1646,6 +1652,7 @@ mod tests {
             fallow_core::graph::ExportSymbol {
                 name: fallow_core::extract::ExportName::Named("b".into()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 references: vec![],
@@ -1671,6 +1678,7 @@ mod tests {
         let exports = vec![fallow_core::graph::ExportSymbol {
             name: fallow_core::extract::ExportName::Named("a".into()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: fallow_core::extract::VisibilityTag::None,
             span: oxc_span::Span::empty(0),
             references: vec![],
@@ -1693,6 +1701,7 @@ mod tests {
         let exports = vec![fallow_core::graph::ExportSymbol {
             name: fallow_core::extract::ExportName::Named("used".into()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: fallow_core::extract::VisibilityTag::None,
             span: oxc_span::Span::empty(0),
             references: vec![],
@@ -1892,6 +1901,7 @@ mod tests {
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -2179,6 +2189,7 @@ mod tests {
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             }],
             ..Default::default()
@@ -2444,6 +2455,7 @@ mod tests {
                     visibility: fallow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -2453,6 +2465,7 @@ mod tests {
                     visibility: fallow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -2483,6 +2496,7 @@ mod tests {
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
             fallow_types::extract::ExportInfo {
@@ -2492,6 +2506,7 @@ mod tests {
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
         ];
@@ -2578,6 +2593,7 @@ mod tests {
                     visibility: fallow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -2587,6 +2603,7 @@ mod tests {
                     visibility: fallow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 // Simulates a synthesized export from re-export chain resolution
@@ -2598,6 +2615,7 @@ mod tests {
                     visibility: fallow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::new(0, 0),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -2628,6 +2646,7 @@ mod tests {
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
             fallow_types::extract::ExportInfo {
@@ -2637,6 +2656,7 @@ mod tests {
                 visibility: fallow_core::extract::VisibilityTag::None,
                 span: oxc_span::Span::empty(0),
                 members: vec![],
+                is_side_effect_used: false,
                 super_class: None,
             },
         ];
@@ -2804,6 +2824,7 @@ mod tests {
                     visibility: fallow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -2813,6 +2834,7 @@ mod tests {
                     visibility: fallow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
                 fallow_types::extract::ExportInfo {
@@ -2822,6 +2844,7 @@ mod tests {
                     visibility: fallow_core::extract::VisibilityTag::None,
                     span: oxc_span::Span::empty(0),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 },
             ],
@@ -3130,6 +3153,7 @@ mod tests {
         fallow_core::graph::ExportSymbol {
             name: fallow_types::extract::ExportName::Named(name.into()),
             is_type_only,
+            is_side_effect_used: false,
             visibility: fallow_core::extract::VisibilityTag::None,
             span: oxc_span::Span::default(),
             references: vec![],

@@ -161,6 +161,7 @@ fn module_to_cached_roundtrip_named_export() {
             visibility: VisibilityTag::None,
             span: Span::new(10, 20),
             members: vec![],
+            is_side_effect_used: false,
             super_class: None,
         }],
         imports: vec![],
@@ -199,6 +200,52 @@ fn module_to_cached_roundtrip_named_export() {
 }
 
 #[test]
+fn module_to_cached_roundtrip_side_effect_used_export() {
+    let module = ModuleInfo {
+        file_id: FileId(0),
+        exports: vec![ExportInfo {
+            name: ExportName::Named("MyElement".to_string()),
+            local_name: Some("MyElement".to_string()),
+            is_type_only: false,
+            is_side_effect_used: true,
+            visibility: VisibilityTag::None,
+            span: Span::new(10, 20),
+            members: vec![],
+            super_class: Some("HTMLElement".to_string()),
+        }],
+        imports: vec![],
+        re_exports: vec![],
+        dynamic_imports: vec![],
+        require_calls: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        dynamic_import_patterns: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: vec![],
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        content_hash: 789,
+        suppressions: vec![],
+        line_offsets: vec![],
+        complexity: Vec::new(),
+        flag_uses: Vec::new(),
+        class_heritage: vec![],
+        local_type_declarations: Vec::new(),
+        public_signature_type_references: Vec::new(),
+    };
+
+    let cached = module_to_cached(&module, 0, 0);
+    let restored = cached_to_module(&cached, FileId(0));
+
+    assert_eq!(restored.exports.len(), 1);
+    assert!(restored.exports[0].is_side_effect_used);
+    assert_eq!(
+        restored.exports[0].super_class.as_deref(),
+        Some("HTMLElement")
+    );
+}
+
+#[test]
 fn module_to_cached_roundtrip_default_export() {
     let module = ModuleInfo {
         file_id: FileId(0),
@@ -209,6 +256,7 @@ fn module_to_cached_roundtrip_default_export() {
             visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             members: vec![],
+            is_side_effect_used: false,
             super_class: None,
         }],
         imports: vec![],
@@ -450,6 +498,7 @@ fn module_to_cached_roundtrip_members() {
                     has_decorator: false,
                 },
             ],
+            is_side_effect_used: false,
             super_class: None,
         }],
         imports: vec![],
@@ -1060,6 +1109,7 @@ fn module_to_cached_roundtrip_visibility() {
             visibility: VisibilityTag::Public,
             span: Span::new(0, 10),
             members: vec![],
+            is_side_effect_used: false,
             super_class: None,
         }],
         imports: vec![],
@@ -1100,6 +1150,7 @@ fn module_to_cached_roundtrip_visibility_internal() {
             visibility: VisibilityTag::Internal,
             span: Span::new(0, 20),
             members: vec![],
+            is_side_effect_used: false,
             super_class: None,
         }],
         imports: vec![],
@@ -1140,6 +1191,7 @@ fn module_to_cached_roundtrip_visibility_beta() {
             visibility: VisibilityTag::Beta,
             span: Span::new(0, 20),
             members: vec![],
+            is_side_effect_used: false,
             super_class: None,
         }],
         imports: vec![],
@@ -1180,6 +1232,7 @@ fn module_to_cached_roundtrip_visibility_alpha() {
             visibility: VisibilityTag::Alpha,
             span: Span::new(0, 20),
             members: vec![],
+            is_side_effect_used: false,
             super_class: None,
         }],
         imports: vec![],
@@ -1504,6 +1557,7 @@ fn module_to_cached_roundtrip_member_decorators() {
                 span: Span::new(50, 80),
                 has_decorator: true,
             }],
+            is_side_effect_used: false,
             super_class: None,
         }],
         imports: vec![],

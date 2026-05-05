@@ -13,12 +13,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::suppress::Suppression;
 use crate::{
-    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, MemberAccess,
-    MemberInfo, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
+    DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
+    MemberAccess, MemberInfo, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
 };
+use helpers::LitCustomElementDecorator;
 
 #[derive(Debug, Clone)]
 struct LocalClassExportInfo {
@@ -39,6 +40,18 @@ struct LocalSignatureTypeReference {
 struct ObjectBindingCandidate {
     binding_path: String,
     source_name: String,
+}
+
+#[derive(Debug, Clone)]
+enum SideEffectRegistrationTarget {
+    LocalClass(String),
+    AnonymousDefaultExport(usize),
+}
+
+#[derive(Debug, Clone)]
+struct LitCustomElementCandidate {
+    decorator: LitCustomElementDecorator,
+    target: SideEffectRegistrationTarget,
 }
 
 /// One Angular `@Component({ template: \`...\` })` decorator captured during
@@ -117,6 +130,15 @@ pub(crate) struct ModuleInfoExtractor {
     /// `line_offsets` is available) and synthesises `<template>` complexity
     /// findings on the host `.ts` file's `complexity` vec.
     pub(crate) inline_template_findings: Vec<InlineTemplateFinding>,
+    /// Local class names registered as Web Components via either a Lit
+    /// `customElements.define('tag', X)` call. Used in `into_module_info` /
+    /// `merge_into` to flip `is_side_effect_used` on matching exports so they
+    /// survive unused-export detection.
+    pub(crate) side_effect_registered_class_names: FxHashSet<String>,
+    /// Classes with a syntactic `@customElement(...)` decorator. These are
+    /// resolved after the full walk so the decorator binding can be checked
+    /// against imports regardless of source order.
+    lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
 }
 
 impl ModuleInfoExtractor {
@@ -145,6 +167,87 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, String> {
         &self.binding_target_names
+    }
+
+    fn is_lit_custom_element_decorator(&self, decorator: &LitCustomElementDecorator) -> bool {
+        const LIT_DECORATOR_SOURCES: &[&str] =
+            &["lit/decorators.js", "lit/decorators/custom-element.js"];
+
+        self.imports.iter().any(|import| {
+            LIT_DECORATOR_SOURCES.contains(&import.source.as_str())
+                && match decorator {
+                    LitCustomElementDecorator::Named { local_name } => {
+                        import.local_name == *local_name
+                            && matches!(
+                                &import.imported_name,
+                                ImportedName::Named(name) if name == "customElement"
+                            )
+                    }
+                    LitCustomElementDecorator::Namespace { local_name } => {
+                        import.local_name == *local_name
+                            && matches!(import.imported_name, ImportedName::Namespace)
+                    }
+                }
+        })
+    }
+
+    fn apply_lit_custom_element_candidates(&mut self) {
+        if self.lit_custom_element_candidates.is_empty() {
+            return;
+        }
+
+        let mut class_names = Vec::new();
+        let mut anonymous_default_indices = Vec::new();
+        for candidate in &self.lit_custom_element_candidates {
+            if !self.is_lit_custom_element_decorator(&candidate.decorator) {
+                continue;
+            }
+            match &candidate.target {
+                SideEffectRegistrationTarget::LocalClass(class_name) => {
+                    class_names.push(class_name.clone());
+                }
+                SideEffectRegistrationTarget::AnonymousDefaultExport(index) => {
+                    anonymous_default_indices.push(*index);
+                }
+            }
+        }
+
+        self.side_effect_registered_class_names.extend(class_names);
+        for index in anonymous_default_indices {
+            if let Some(export) = self.exports.get_mut(index) {
+                export.is_side_effect_used = true;
+            }
+        }
+    }
+
+    fn record_lit_custom_element_candidate(
+        &mut self,
+        decorator: LitCustomElementDecorator,
+        target: SideEffectRegistrationTarget,
+    ) {
+        self.lit_custom_element_candidates
+            .push(LitCustomElementCandidate { decorator, target });
+    }
+
+    /// Set `is_side_effect_used = true` on each export whose local binding name
+    /// was recorded as side-effect-registered. Runs as a post-walk pass so it
+    /// covers both `export class X {}` (export pushed during the class
+    /// declaration) and `class X {}; export { X }` / `export default X` patterns
+    /// where the export and the registration site are visited at different
+    /// points in the traversal.
+    fn apply_side_effect_registrations(&mut self) {
+        self.apply_lit_custom_element_candidates();
+        if self.side_effect_registered_class_names.is_empty() {
+            return;
+        }
+        for export in &mut self.exports {
+            let Some(local_name) = export.local_name.as_deref() else {
+                continue;
+            };
+            if self.side_effect_registered_class_names.contains(local_name) {
+                export.is_side_effect_used = true;
+            }
+        }
     }
 
     fn enrich_local_class_exports(&mut self) {
@@ -289,6 +392,7 @@ impl ModuleInfoExtractor {
             visibility: VisibilityTag::None,
             span,
             members: vec![],
+            is_side_effect_used: false,
             super_class: None,
         });
     }
@@ -305,6 +409,7 @@ impl ModuleInfoExtractor {
         self.resolve_object_binding_candidates();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
+        self.apply_side_effect_registrations();
         ModuleInfo {
             file_id,
             exports: self.exports,
@@ -354,6 +459,7 @@ impl ModuleInfoExtractor {
         self.resolve_object_binding_candidates();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
+        self.apply_side_effect_registrations();
         info.imports.extend(self.imports);
         info.exports.extend(self.exports);
         info.re_exports.extend(self.re_exports);

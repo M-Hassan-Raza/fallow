@@ -125,6 +125,7 @@ pub(super) fn create_synthetic_exports_for_star_re_exports(
         exports.push(ExportSymbol {
             name: export_name,
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 0),
             references: vec![SymbolReference {
@@ -549,6 +550,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("a".to_string()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 5),
                 references: Vec::new(),
@@ -557,6 +559,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("b".to_string()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(10, 15),
                 references: Vec::new(),
@@ -579,6 +582,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Named("a".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: vec![SymbolReference {
@@ -606,6 +610,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("foo".to_string()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(0, 5),
                 references: Vec::new(),
@@ -614,6 +619,7 @@ mod tests {
             ExportSymbol {
                 name: ExportName::Named("bar".to_string()),
                 is_type_only: false,
+                is_side_effect_used: false,
                 visibility: VisibilityTag::None,
                 span: oxc_span::Span::new(10, 15),
                 references: Vec::new(),
@@ -642,6 +648,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Named("existing".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
@@ -814,6 +821,7 @@ mod tests {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 }],
                 ..Default::default()
@@ -883,6 +891,7 @@ mod tests {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                     fallow_types::extract::ExportInfo {
@@ -892,6 +901,7 @@ mod tests {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                 ],
@@ -970,6 +980,7 @@ mod tests {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                     fallow_types::extract::ExportInfo {
@@ -979,6 +990,7 @@ mod tests {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                 ],
@@ -1049,6 +1061,7 @@ mod tests {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(0, 20),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                     fallow_types::extract::ExportInfo {
@@ -1058,6 +1071,7 @@ mod tests {
                         visibility: VisibilityTag::None,
                         span: oxc_span::Span::new(25, 45),
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     },
                 ],
@@ -1133,6 +1147,7 @@ mod tests {
                     visibility: VisibilityTag::None,
                     span: oxc_span::Span::new(0, 20),
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 }],
                 ..Default::default()
@@ -1193,6 +1208,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Default,
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),
@@ -1215,6 +1231,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Named("foo".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: vec![SymbolReference {
@@ -1242,6 +1259,7 @@ mod tests {
         let mut exports = vec![ExportSymbol {
             name: ExportName::Named("foo".to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: oxc_span::Span::new(0, 5),
             references: Vec::new(),

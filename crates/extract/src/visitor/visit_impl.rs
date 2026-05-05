@@ -23,13 +23,15 @@ use crate::html::is_remote_url;
 
 use super::helpers::{
     extract_angular_component_metadata, extract_class_members, extract_concat_parts,
-    extract_implemented_interface_names, extract_nested_type_bindings, extract_super_class_name,
-    extract_type_annotation_name, has_angular_class_decorator, is_meta_url_arg,
+    extract_custom_elements_define, extract_implemented_interface_names,
+    extract_nested_type_bindings, extract_super_class_name, extract_type_annotation_name,
+    has_angular_class_decorator, is_meta_url_arg, lit_custom_element_decorator,
     regex_pattern_to_suffix,
 };
 use super::{
-    ModuleInfoExtractor, try_extract_arrow_wrapped_import, try_extract_dynamic_import,
-    try_extract_import_then_callback, try_extract_property_callback_import, try_extract_require,
+    ModuleInfoExtractor, SideEffectRegistrationTarget, try_extract_arrow_wrapped_import,
+    try_extract_dynamic_import, try_extract_import_then_callback,
+    try_extract_property_callback_import, try_extract_require,
 };
 
 #[derive(Default)]
@@ -987,6 +989,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         visibility: VisibilityTag::None,
                         span: spec.span,
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     });
                 }
@@ -1079,6 +1082,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             name: ExportName::Default,
             local_name,
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: decl.span,
             members,
@@ -1291,6 +1295,15 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 ));
         }
 
+        // Detect `customElements.define('tag', ClassRef)` Web Component
+        // registration. The class identifier IS referenced syntactically (so
+        // oxc_semantic counts the in-file ref) but no other file imports the
+        // class by name, so the cross-file references list stays empty. Mark
+        // the class export as side-effect-used so unused-export ignores it.
+        if let Some((_tag, class_name)) = extract_custom_elements_define(expr) {
+            self.side_effect_registered_class_names.insert(class_name);
+        }
+
         if let Some(mock_source) =
             vitest_mock_source(expr).and_then(|source| vitest_auto_mock_source(&source))
         {
@@ -1473,6 +1486,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                                     visibility: VisibilityTag::None,
                                     span: p.span,
                                     members: vec![],
+                                    is_side_effect_used: false,
                                     super_class: None,
                                 });
                             }
@@ -1488,6 +1502,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                         visibility: VisibilityTag::None,
                         span: expr.span,
                         members: vec![],
+                        is_side_effect_used: false,
                         super_class: None,
                     });
                 }
@@ -1505,6 +1520,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     visibility: VisibilityTag::None,
                     span: expr.span,
                     members: vec![],
+                    is_side_effect_used: false,
                     super_class: None,
                 });
             }
@@ -1646,6 +1662,31 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_class(&mut self, class: &Class<'a>) {
+        // Detect Lit `@customElement('tag')` decorator. The class is registered
+        // as a Web Component at module load time without anyone importing the
+        // class identifier, so its export must be flagged as side-effect-used.
+        if let Some(decorator) = lit_custom_element_decorator(class) {
+            if let Some(id) = class.id.as_ref() {
+                self.record_lit_custom_element_candidate(
+                    decorator,
+                    SideEffectRegistrationTarget::LocalClass(id.name.to_string()),
+                );
+            } else if let Some(export) = self.exports.last()
+                && matches!(export.name, crate::ExportName::Default)
+                && export.local_name.is_none()
+            {
+                // Anonymous `export default @customElement(...) class extends LitElement {}`
+                // has no class identifier to key off and an unset local_name on the
+                // Default export. Remember the export slot and validate the decorator
+                // import after the full walk.
+                let export_index = self.exports.len() - 1;
+                self.record_lit_custom_element_candidate(
+                    decorator,
+                    SideEffectRegistrationTarget::AnonymousDefaultExport(export_index),
+                );
+            }
+        }
+
         // Detect Angular @Component decorator and extract all metadata:
         // templateUrl/styleUrl imports, inline template refs, host binding refs,
         // and inputs/outputs member names.

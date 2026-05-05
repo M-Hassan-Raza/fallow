@@ -17,6 +17,25 @@ use crate::suppress::{IssueKind, SuppressionContext};
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
+const NATIVE_CUSTOM_ELEMENT_LIFECYCLE_MEMBERS: &[&str] = &[
+    "connectedCallback",
+    "disconnectedCallback",
+    "attributeChangedCallback",
+    "adoptedCallback",
+    "connectedMoveCallback",
+    "observedAttributes",
+    "formAssociated",
+    "formAssociatedCallback",
+    "formDisabledCallback",
+    "formResetCallback",
+    "formStateRestoreCallback",
+];
+
+fn is_native_custom_element_lifecycle_method(member_name: &str, super_class: Option<&str>) -> bool {
+    super_class == Some("HTMLElement")
+        && NATIVE_CUSTOM_ELEMENT_LIFECYCLE_MEMBERS.contains(&member_name)
+}
+
 /// Find unused enum and class members in exported symbols.
 ///
 /// Collects all `Identifier.member` static member accesses from all modules,
@@ -959,8 +978,14 @@ pub fn find_unused_members(
                     continue;
                 }
 
-                // If the export itself is unused, skip member analysis (whole export is dead)
-                if export.references.is_empty() && !graph.has_namespace_import(module.file_id) {
+                // If the export itself is unused, skip member analysis (whole export is dead).
+                // Side-effect-registered exports (Lit @customElement, customElements.define)
+                // are alive at runtime even with empty cross-file references; their members
+                // are runtime-invoked by the browser/Lit framework so member analysis must run.
+                if export.references.is_empty()
+                    && !export.is_side_effect_used
+                    && !graph.has_namespace_import(module.file_id)
+                {
                     continue;
                 }
 
@@ -1017,16 +1042,17 @@ pub fn find_unused_members(
                         continue;
                     }
 
-                    // Skip React class component lifecycle methods — they are called by the
-                    // React runtime, not user code, so they should never be flagged as unused.
-                    // Also skip Angular lifecycle hooks (OnInit, OnDestroy, etc.).
-                    // The user allowlist extends these built-ins with framework-invoked names
-                    // contributed by plugins and top-level config (ag-Grid's `agInit`, etc.).
+                    // Skip lifecycle methods called by runtimes or the browser, not user code:
+                    // React class component lifecycle, Angular lifecycle hooks, and native
+                    // Custom Elements lifecycle on direct HTMLElement subclasses. The user
+                    // allowlist extends these built-ins with framework-invoked names contributed
+                    // by plugins and top-level config (ag-Grid's `agInit`, etc.).
                     if matches!(
                         member.kind,
                         MemberKind::ClassMethod | MemberKind::ClassProperty
                     ) && (is_react_lifecycle_method(&member.name)
                         || is_angular_lifecycle_method(&member.name)
+                        || is_native_custom_element_lifecycle_method(&member.name, super_class)
                         || allowlist.matches(
                             member.name.as_str(),
                             super_class,
@@ -1164,6 +1190,7 @@ mod tests {
         ExportSymbol {
             name: ExportName::Named(name.to_string()),
             is_type_only: false,
+            is_side_effect_used: false,
             visibility: VisibilityTag::None,
             span: Span::new(0, 10),
             references,

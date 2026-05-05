@@ -80,6 +80,8 @@ mod test_only_deps;
 mod type_only_deps;
 #[path = "integration_test/unused_enum_members.rs"]
 mod unused_enum_members;
+#[path = "integration_test/web_components.rs"]
+mod web_components;
 #[path = "integration_test/workspace_cross_imports.rs"]
 mod workspace_cross_imports;
 #[path = "integration_test/workspace_internal_deps.rs"]
@@ -87,6 +89,8 @@ mod workspace_internal_deps;
 
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;
+#[path = "integration_test/lit_custom_element.rs"]
+mod lit_custom_element;
 #[path = "integration_test/scoped_used_class_members.rs"]
 mod scoped_used_class_members;
 #[path = "integration_test/scss_partials.rs"]
