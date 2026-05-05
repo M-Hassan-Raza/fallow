@@ -582,6 +582,127 @@ const items = ref<T[]>([]);
     assert_eq!(info.imports[0].source, "vue");
 }
 
+// Imports referenced ONLY inside `generic="T extends Test<boolean>"` (not
+// inside the script body itself) must still be classified as
+// type-referenced, otherwise the upstream `export type Test` is falsely
+// reported as `unused_types`. The augmented-source probe in
+// `merge_script_into_module` is what makes this work.
+#[test]
+fn vue_generic_attr_marks_type_only_import_as_type_referenced() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts" generic="T extends Test<boolean>">
+import type { Test } from './types';
+defineProps<{ item: T }>();
+</script>
+"#,
+        "Parent.vue",
+    );
+    assert!(
+        info.type_referenced_import_bindings
+            .contains(&"Test".to_string()),
+        "Test referenced only via generic=\"...\" must be type-referenced, got: {:?}",
+        info.type_referenced_import_bindings,
+    );
+    assert!(
+        !info.unused_import_bindings.contains(&"Test".to_string()),
+        "Test referenced only via generic=\"...\" must not be unused, got: {:?}",
+        info.unused_import_bindings,
+    );
+}
+
+// Multi-parameter generic constraints must credit every distinct identifier
+// in the constraint, not just the first one.
+#[test]
+fn vue_generic_attr_marks_each_constraint_identifier() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts" generic="K extends keyof Foo, V extends Bar">
+import type { Foo, Bar } from './shapes';
+defineProps<{ key: K; value: V }>();
+</script>
+"#,
+        "MultiGeneric.vue",
+    );
+    for name in ["Foo", "Bar"] {
+        assert!(
+            info.type_referenced_import_bindings
+                .contains(&name.to_string()),
+            "{name} from a multi-param generic= must be type-referenced, got: {:?}",
+            info.type_referenced_import_bindings,
+        );
+    }
+}
+
+// Svelte's `generics="..."` attribute is the equivalent knob and must walk
+// the same augmented-source path.
+#[test]
+fn svelte_generics_attr_marks_type_only_import_as_type_referenced() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts" generics="T extends Item">
+import type { Item } from './types';
+export let items: T[] = [];
+</script>
+"#,
+        "List.svelte",
+    );
+    assert!(
+        info.type_referenced_import_bindings
+            .contains(&"Item".to_string()),
+        "Item referenced only via generics=\"...\" must be type-referenced, got: {:?}",
+        info.type_referenced_import_bindings,
+    );
+    assert!(
+        !info.unused_import_bindings.contains(&"Item".to_string()),
+        "Item referenced only via generics=\"...\" must not be unused, got: {:?}",
+        info.unused_import_bindings,
+    );
+}
+
+// Single-quoted attribute values must be recognised the same as double.
+#[test]
+fn vue_generic_attr_handles_single_quotes() {
+    let info = parse_sfc(
+        "<script setup lang=\"ts\" generic='T extends Test'>\nimport type { Test } from './types';\ndefineProps<{ item: T }>();\n</script>",
+        "SingleQuotedGeneric.vue",
+    );
+    assert!(
+        info.type_referenced_import_bindings
+            .contains(&"Test".to_string()),
+        "single-quoted generic= must still be scanned, got: {:?}",
+        info.type_referenced_import_bindings,
+    );
+}
+
+// Empty / whitespace-only generic attributes must not produce a parse error
+// or otherwise mark unrelated imports as type-referenced.
+#[test]
+fn vue_generic_attr_empty_value_is_inert() {
+    let info = parse_sfc(
+        r#"
+<script setup lang="ts" generic="">
+import { ref } from 'vue';
+const x = ref(0);
+</script>
+"#,
+        "EmptyGeneric.vue",
+    );
+    // ref is value-referenced (used as `ref(0)`) and must not be type-referenced
+    assert!(
+        !info
+            .type_referenced_import_bindings
+            .contains(&"ref".to_string()),
+        "empty generic= attribute must not introduce spurious type references",
+    );
+    assert!(
+        info.value_referenced_import_bindings
+            .contains(&"ref".to_string()),
+        "ref must remain value-referenced, got: {:?}",
+        info.value_referenced_import_bindings,
+    );
+}
+
 #[test]
 fn vue_empty_script_block() {
     let info = parse_sfc(

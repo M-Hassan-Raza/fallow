@@ -52,6 +52,21 @@ static SETUP_ATTR_RE: LazyLock<regex::Regex> =
 static CONTEXT_MODULE_ATTR_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r#"context\s*=\s*["']module["']"#).expect("valid regex"));
 
+/// Regex to extract Vue's `generic="..."` attribute value (script-setup
+/// generics). Matches the contents between the quotes and stops at the
+/// closing quote, mirroring `LANG_ATTR_RE`.
+static VUE_GENERIC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?:^|\s)generic\s*=\s*"([^"]*)"|(?:^|\s)generic\s*=\s*'([^']*)'"#)
+        .expect("valid regex")
+});
+
+/// Regex to extract Svelte's `generics="..."` attribute value (Svelte 4
+/// generic script attribute, repurposed by some Svelte 5 code).
+static SVELTE_GENERICS_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?:^|\s)generics\s*=\s*"([^"]*)"|(?:^|\s)generics\s*=\s*'([^']*)'"#)
+        .expect("valid regex")
+});
+
 /// Regex to match HTML comments for filtering script blocks inside comments.
 static HTML_COMMENT_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"(?s)<!--.*?-->").expect("valid regex"));
@@ -82,6 +97,10 @@ pub struct SfcScript {
     pub is_setup: bool,
     /// Whether this script is a Svelte module-context block.
     pub is_context_module: bool,
+    /// Type-parameter list from a `generic="..."` (Vue) or `generics="..."`
+    /// (Svelte) attribute on the script tag. Holds the bare constraint, no
+    /// surrounding angle brackets, e.g. `T extends Test<boolean>`.
+    pub generic_attr: Option<String>,
 }
 
 /// Extract all `<script>` blocks from a Vue/Svelte SFC source string.
@@ -119,6 +138,12 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 .map(|m| m.as_str().to_string());
             let is_setup = SETUP_ATTR_RE.is_match(attrs);
             let is_context_module = CONTEXT_MODULE_ATTR_RE.is_match(attrs);
+            let generic_attr = VUE_GENERIC_ATTR_RE
+                .captures(attrs)
+                .or_else(|| SVELTE_GENERICS_ATTR_RE.captures(attrs))
+                .and_then(|cap| cap.get(1).or_else(|| cap.get(2)))
+                .map(|m| m.as_str().to_string())
+                .filter(|value| !value.trim().is_empty());
             SfcScript {
                 body,
                 is_typescript,
@@ -127,6 +152,7 @@ pub fn extract_sfc_scripts(source: &str) -> Vec<SfcScript> {
                 src,
                 is_setup,
                 is_context_module,
+                generic_attr,
             }
         })
         .collect()
@@ -290,7 +316,19 @@ fn merge_script_into_module(
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
 
-    let binding_usage = compute_import_binding_usage(&parser_return.program, &extractor.imports);
+    // The script-tag `generic="..."` (Vue) / `generics="..."` (Svelte)
+    // constraint lives on the tag, not in the script body. Imports referenced
+    // only inside it would be classified as unused without this augmentation.
+    // Append a synthetic `type _<...> = unknown;` declaration so oxc_semantic
+    // sees those references and routes the bindings into `type_referenced`.
+    let augmented_body = build_generic_attr_probe_source(script);
+    let binding_usage = if let Some(augmented) = augmented_body.as_deref() {
+        let augmented_return =
+            Parser::new(&allocator, augmented, source_type_for_script(script)).parse();
+        compute_import_binding_usage(&augmented_return.program, &extractor.imports)
+    } else {
+        compute_import_binding_usage(&parser_return.program, &extractor.imports)
+    };
     combined
         .unused_import_bindings
         .extend(binding_usage.unused.iter().cloned());
@@ -423,6 +461,22 @@ fn source_type_for_script(script: &SfcScript) -> SourceType {
         (false, true) => SourceType::jsx(),
         (false, false) => SourceType::mjs(),
     }
+}
+
+/// Build an augmented script body that pins the `generic="..."` constraint as
+/// a synthetic local type alias. The alias is unexported and uses a sentinel
+/// name so it can't collide with user code. Returns `None` when there is no
+/// generic attribute to pin (the common case), so callers fall back to the
+/// raw body without paying for a second parse.
+fn build_generic_attr_probe_source(script: &SfcScript) -> Option<String> {
+    let constraint = script.generic_attr.as_deref()?.trim();
+    if constraint.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{}\n;type __FALLOW_GENERIC_ATTR_PROBE<{}> = unknown;\n",
+        script.body, constraint,
+    ))
 }
 
 fn apply_template_usage(

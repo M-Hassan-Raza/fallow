@@ -32,6 +32,7 @@ pub fn extract_astro_frontmatter(source: &str) -> Option<SfcScript> {
             src: None,
             is_setup: false,
             is_context_module: false,
+            generic_attr: None,
         }
     })
 }
