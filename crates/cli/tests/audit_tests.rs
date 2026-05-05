@@ -161,6 +161,88 @@ fn audit_pass_verdict_when_no_changes() {
     );
 }
 
+/// Audit's HEAD analyses and base-snapshot computation run concurrently via
+/// `rayon::join`; inside the base snapshot, check and dupes also run
+/// concurrently. Verify nondeterministic scheduling does not leak into the
+/// rendered JSON: repeated runs against the same fixture must produce
+/// byte-identical output once wall-clock fields are stripped.
+#[test]
+fn audit_parallel_output_is_deterministic() {
+    let dir = create_audit_fixture("determinism");
+
+    fs::write(
+        dir.path().join("src/new.ts"),
+        "export const dupA = (x: number) => x + 1;\nexport const dupB = (x: number) => x + 1;\n",
+    )
+    .unwrap();
+    Command::new("git")
+        .args(["add", "."])
+        .current_dir(dir.path())
+        .output()
+        .unwrap();
+    Command::new("git")
+        .args(["-c", "commit.gpgsign=false", "commit", "-m", "add new file"])
+        .current_dir(dir.path())
+        .env("GIT_AUTHOR_NAME", "test")
+        .env("GIT_AUTHOR_EMAIL", "test@test.com")
+        .env("GIT_COMMITTER_NAME", "test")
+        .env("GIT_COMMITTER_EMAIL", "test@test.com")
+        .output()
+        .unwrap();
+
+    fn normalize(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("elapsed_ms");
+                map.remove("head_sha");
+                for v in map.values_mut() {
+                    normalize(v);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for v in items {
+                    normalize(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
+        let output = run_fallow_raw(&[
+            "audit",
+            "--root",
+            dir.path().to_str().unwrap(),
+            "--base",
+            "HEAD~1",
+            "--format",
+            "json",
+            "--quiet",
+        ]);
+        assert!(
+            output.code == 0 || output.code == 1,
+            "audit run should not crash: stdout={}\nstderr={}",
+            output.stdout,
+            output.stderr
+        );
+        let mut value = parse_json(&output);
+        normalize(&mut value);
+        serde_json::to_string(&value).expect("re-serialize canonical json")
+    })
+    .take(3)
+    .collect();
+
+    let first = canonicalized.remove(0);
+    for (idx, run) in canonicalized.iter().enumerate() {
+        assert_eq!(
+            &first,
+            run,
+            "audit parallel run #{} differed from run #0",
+            idx + 1
+        );
+    }
+}
+
 #[test]
 fn audit_json_has_summary_with_changes() {
     let dir = create_audit_fixture("summary");

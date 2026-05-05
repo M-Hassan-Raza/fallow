@@ -415,8 +415,17 @@ fn compute_base_snapshot(
     };
 
     let base_changed_files = remap_focus_files(changed_files, opts.root, worktree.path());
-    let mut check = run_audit_check(&base_opts, None, false)?;
-    let dupes = run_audit_dupes(&base_opts, None, base_changed_files.as_ref(), None)?;
+    // Base-snapshot check and dupes share no state: this branch never reuses
+    // the dead-code parse for health (`run_audit_health(..., None)`) and never
+    // hands the file list to dupes (`run_audit_dupes(..., None)`). Running
+    // them concurrently is therefore a pure win, no sharing optimization is
+    // forfeited. Health stays sequential after both complete.
+    let (check_res, dupes_res) = rayon::join(
+        || run_audit_check(&base_opts, None, false),
+        || run_audit_dupes(&base_opts, None, base_changed_files.as_ref(), None),
+    );
+    let mut check = check_res?;
+    let dupes = dupes_res?;
     let health = run_audit_health(&base_opts, None, None)?;
     if let Some(ref mut check) = check {
         check.shared_parse = None;
@@ -1422,6 +1431,56 @@ fn dupe_group_key(group: &fallow_core::duplicates::CloneGroup, root: &Path) -> S
 
 // ── Execute ──────────────────────────────────────────────────────
 
+/// Bundle of HEAD-side analysis results returned from [`run_audit_head_analyses`].
+///
+/// Lets the call site move all three results out of the parallel branch in one
+/// shot, instead of threading three tuple slots through `rayon::join`.
+struct HeadAnalyses {
+    check: Option<CheckResult>,
+    dupes: Option<DupesResult>,
+    health: Option<HealthResult>,
+}
+
+/// Run the three HEAD-side analyses with intra-pipeline sharing intact:
+/// check first (so its parsed modules are available), then dupes (which can
+/// reuse check's discovered file list when production settings match), then
+/// health (which can reuse check's parsed modules when production settings
+/// match). Designed to be called from inside `rayon::join` alongside
+/// [`compute_base_snapshot`], which operates on an isolated worktree.
+fn run_audit_head_analyses(
+    opts: &AuditOptions<'_>,
+    changed_since: Option<&str>,
+    changed_files: &FxHashSet<PathBuf>,
+) -> Result<HeadAnalyses, ExitCode> {
+    let check_production = opts.production_dead_code.unwrap_or(opts.production);
+    let health_production = opts.production_health.unwrap_or(opts.production);
+    let dupes_production = opts.production_dupes.unwrap_or(opts.production);
+    let share_dead_code_parse_with_health = check_production == health_production;
+    let share_dead_code_files_with_dupes =
+        share_dead_code_parse_with_health && check_production == dupes_production;
+
+    let mut check = run_audit_check(opts, changed_since, share_dead_code_parse_with_health)?;
+    let dupes_files = if share_dead_code_files_with_dupes {
+        check
+            .as_ref()
+            .and_then(|r| r.shared_parse.as_ref().map(|sp| sp.files.clone()))
+    } else {
+        None
+    };
+    let dupes = run_audit_dupes(opts, changed_since, Some(changed_files), dupes_files)?;
+    let shared_parse = if share_dead_code_parse_with_health {
+        check.as_mut().and_then(|r| r.shared_parse.take())
+    } else {
+        None
+    };
+    let health = run_audit_health(opts, changed_since, shared_parse)?;
+    Ok(HeadAnalyses {
+        check,
+        dupes,
+        health,
+    })
+}
+
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.
 pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
     let start = Instant::now();
@@ -1446,37 +1505,38 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
 
     let changed_since = Some(base_ref.as_str());
 
-    // Run all three analyses.
-    // Audit mirrors combined mode: when dead-code and health share the same
-    // production settings, retain the parsed dead-code modules so health does
-    // not rediscover, reparse, and reanalyze the same project. Dupes piggy-backs
-    // on that retention to skip its own file discovery when its production setting
-    // also matches dead-code (the modules themselves are unused by dupes, since it
-    // runs a different tokenizer).
-    let check_production = opts.production_dead_code.unwrap_or(opts.production);
-    let health_production = opts.production_health.unwrap_or(opts.production);
-    let dupes_production = opts.production_dupes.unwrap_or(opts.production);
-    let share_dead_code_parse_with_health = check_production == health_production;
-    let share_dead_code_files_with_dupes =
-        share_dead_code_parse_with_health && check_production == dupes_production;
-    let mut check_result = run_audit_check(opts, changed_since, share_dead_code_parse_with_health)?;
-    let dupes_files = if share_dead_code_files_with_dupes {
-        check_result
-            .as_ref()
-            .and_then(|r| r.shared_parse.as_ref().map(|sp| sp.files.clone()))
+    // The HEAD analyses (check + dupes + health) operate on the working tree;
+    // the base snapshot operates on a fresh git worktree checked out at
+    // `base_ref`. They share no mutable state, so we can run them concurrently
+    // via `rayon::join`, halving wall-clock time on `--gate new-only` (the
+    // default). Inside each branch we keep the existing share-the-parse
+    // optimization between dead-code and health, since check finishes before
+    // either of its dependants run.
+    let needs_real_base_snapshot = matches!(opts.gate, AuditGate::NewOnly)
+        && !can_reuse_current_as_base(opts, &base_ref, &changed_files);
+
+    let (head_res, base_res) = if needs_real_base_snapshot {
+        let (h, b) = rayon::join(
+            || run_audit_head_analyses(opts, changed_since, &changed_files),
+            || compute_base_snapshot(opts, &base_ref, &changed_files),
+        );
+        (h, Some(b))
     } else {
-        None
+        (
+            run_audit_head_analyses(opts, changed_since, &changed_files),
+            None,
+        )
     };
-    let dupes_result = run_audit_dupes(opts, changed_since, Some(&changed_files), dupes_files)?;
-    let shared_parse = if share_dead_code_parse_with_health {
-        check_result.as_mut().and_then(|r| r.shared_parse.take())
-    } else {
-        None
-    };
-    let health_result = run_audit_health(opts, changed_since, shared_parse)?;
+
+    let head = head_res?;
+    let mut check_result = head.check;
+    let dupes_result = head.dupes;
+    let health_result = head.health;
 
     let (base_snapshot, base_snapshot_skipped) = if matches!(opts.gate, AuditGate::NewOnly) {
-        if can_reuse_current_as_base(opts, &base_ref, &changed_files) {
+        if let Some(base_res) = base_res {
+            (Some(base_res?), false)
+        } else {
             (
                 Some(current_keys_as_base_keys(
                     check_result.as_ref(),
@@ -1485,15 +1545,14 @@ pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
                 )),
                 true,
             )
-        } else {
-            (
-                Some(compute_base_snapshot(opts, &base_ref, &changed_files)?),
-                false,
-            )
         }
     } else {
         (None, false)
     };
+    // Drop shared parse data (no longer needed after base snapshot completed).
+    if let Some(ref mut check) = check_result {
+        check.shared_parse = None;
+    }
     let attribution = compute_audit_attribution(
         check_result.as_ref(),
         dupes_result.as_ref(),
