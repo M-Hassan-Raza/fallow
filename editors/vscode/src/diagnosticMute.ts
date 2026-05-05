@@ -2,9 +2,9 @@
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
-  DIAGNOSTIC_CATEGORIES,
   DiagnosticFilter,
   diagnosticCode,
+  getDiagnosticCategories,
   isFallowDiagnostic,
 } from "./diagnosticFilter.js";
 
@@ -24,7 +24,7 @@ const FALLOW_LANGUAGES = [
 ];
 
 const labelFor = (code: string): string =>
-  DIAGNOSTIC_CATEGORIES.find((c) => c.code === code)?.label ?? code;
+  getDiagnosticCategories().find((c) => c.code === code)?.label ?? code;
 
 const categoryWord = (count: number): string =>
   count === 1 ? "category" : "categories";
@@ -143,7 +143,7 @@ const showManageQuickPick = async (filter: DiagnosticFilter): Promise<void> => {
   };
   const items: ManagePickItem[] = [
     globalItem,
-    ...DIAGNOSTIC_CATEGORIES.map(({ code, label }) => ({
+    ...getDiagnosticCategories().map(({ code, label }) => ({
       label,
       description: code,
       code,

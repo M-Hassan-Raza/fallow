@@ -36,6 +36,14 @@ const handle = (message) => {
     send({ jsonrpc: "2.0", id: message.id, result: null });
     return;
   }
+  if (message.id !== undefined) {
+    send({
+      jsonrpc: "2.0",
+      id: message.id,
+      error: { code: -32601, message: "Method not found" },
+    });
+    return;
+  }
   if (message.method === "exit") {
     process.exit(0);
   }

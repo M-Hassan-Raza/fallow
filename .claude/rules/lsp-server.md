@@ -13,7 +13,7 @@ Key modules:
 - `hover.rs` — Hover information showing export usage, unused status, and duplicate block locations
 
 ## initializationOptions
-- `issueTypes` (object): per-issue-type toggles using kebab-case keys, mapped to diagnostic codes by `ISSUE_TYPE_TO_DIAGNOSTIC_CODE`. Disabled types are filtered out before publishing.
+- `issueTypes` (object): per-issue-type toggles using kebab-case keys, mapped to diagnostic codes by `DIAGNOSTIC_ISSUE_TYPES`. Disabled types are filtered out before publishing. The same catalog is exposed to editor clients through the custom `fallow/issueTypes` request so UI labels and fallback lists can stay in sync with LSP-emitted diagnostics.
 - `changedSince` (string): git ref. When non-empty, results and duplication reports are filtered to files changed since the ref via `fallow_core::changed_files::{try_get_changed_files_with_toplevel, filter_results_by_changed_files, filter_duplication_by_changed_files}`. Mirrors the CLI's `--changed-since`. Resolution runs inside `spawn_blocking`; success/failure is surfaced via `log_message`. Path joins use the canonical git toplevel resolved via `git rev-parse --show-toplevel` (cached on the server), so the filter works correctly when the LSP workspace is a subdirectory of the git repo (issue #190).
 
 ## Diagnostic.data

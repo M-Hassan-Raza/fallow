@@ -19,6 +19,11 @@ import {
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
 import {
+  parseDiagnosticCategories,
+  resetDiagnosticCategories,
+  setDiagnosticCategories,
+} from "./diagnosticFilter.js";
+import {
   downloadBinary,
   getBinaryVersion,
   getInstalledBinaryPath,
@@ -105,6 +110,33 @@ const resolveBinaryPath = async (
   return null;
 };
 
+export const loadDiagnosticCategories = async (
+  lspClient: LanguageClient,
+  outputChannel: vscode.OutputChannel
+): Promise<void> => {
+  try {
+    const response = await lspClient.sendRequest<unknown>("fallow/issueTypes");
+    const categories = parseDiagnosticCategories(response);
+    if (!categories) {
+      resetDiagnosticCategories();
+      outputChannel.appendLine(
+        "fallow/issueTypes returned an invalid response; using bundled diagnostic categories."
+      );
+      return;
+    }
+    setDiagnosticCategories(categories);
+    outputChannel.appendLine(
+      `Loaded ${categories.length} diagnostic categories from fallow-lsp.`
+    );
+  } catch (err) {
+    resetDiagnosticCategories();
+    const message = err instanceof Error ? err.message : String(err);
+    outputChannel.appendLine(
+      `fallow/issueTypes unavailable (${message}); using bundled diagnostic categories.`
+    );
+  }
+};
+
 export const startClient = async (
   context: vscode.ExtensionContext,
   outputChannel: vscode.OutputChannel,
@@ -173,6 +205,7 @@ export const startClient = async (
   try {
     await client.start();
     outputChannel.appendLine("Fallow language server started.");
+    await loadDiagnosticCategories(client, outputChannel);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     outputChannel.appendLine(`Failed to start language server: ${message}`);

@@ -19,17 +19,16 @@ const FALLOW_SOURCE = "fallow";
  */
 const MAX_CACHE_ENTRIES = 5000;
 
-/**
- * Diagnostic codes emitted by fallow-lsp. Keep in sync with
- * `ISSUE_TYPE_TO_DIAGNOSTIC_CODE` in `crates/lsp/src/main.rs` plus
- * `code-duplication` and `boundary-violation` from the structural and
- * quality diagnostic builders. Drift is detected by
- * `test/diagnosticFilter.test.ts` (sync assertion).
- */
-export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<{
+export interface DiagnosticCategory {
   readonly code: string;
   readonly label: string;
-}> = [
+}
+
+/**
+ * Fallback diagnostic categories for older fallow-lsp binaries that do not
+ * support `fallow/issueTypes`. Current servers provide the canonical list.
+ */
+export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   { code: "code-duplication", label: "Code Duplication" },
   { code: "unused-file", label: "Unused Files" },
   { code: "unused-export", label: "Unused Exports" },
@@ -47,10 +46,56 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<{
   { code: "unlisted-dependency", label: "Unlisted Dependencies" },
   { code: "duplicate-export", label: "Duplicate Exports" },
   { code: "type-only-dependency", label: "Type-Only Dependencies" },
+  { code: "test-only-dependency", label: "Test-Only Dependencies" },
   { code: "circular-dependency", label: "Circular Dependencies" },
   { code: "boundary-violation", label: "Boundary Violations" },
   { code: "stale-suppression", label: "Stale Suppressions" },
 ];
+
+let activeDiagnosticCategories: ReadonlyArray<DiagnosticCategory> =
+  DIAGNOSTIC_CATEGORIES;
+
+const isDiagnosticCategory = (value: unknown): value is DiagnosticCategory => {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as { code?: unknown; label?: unknown };
+  return (
+    typeof candidate.code === "string" &&
+    candidate.code.length > 0 &&
+    typeof candidate.label === "string" &&
+    candidate.label.length > 0
+  );
+};
+
+export const parseDiagnosticCategories = (
+  value: unknown
+): ReadonlyArray<DiagnosticCategory> | null => {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const categories = value.filter(isDiagnosticCategory);
+  if (categories.length !== value.length || categories.length === 0) {
+    return null;
+  }
+  return categories.map(({ code, label }) => ({ code, label }));
+};
+
+export const setDiagnosticCategories = (
+  categories: ReadonlyArray<DiagnosticCategory>
+): void => {
+  if (categories.length === 0) {
+    return;
+  }
+  activeDiagnosticCategories = categories.slice();
+};
+
+export const resetDiagnosticCategories = (): void => {
+  activeDiagnosticCategories = DIAGNOSTIC_CATEGORIES;
+};
+
+export const getDiagnosticCategories =
+  (): ReadonlyArray<DiagnosticCategory> => activeDiagnosticCategories;
 
 interface PersistedState {
   readonly mutedAll?: boolean;

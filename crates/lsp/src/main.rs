@@ -58,24 +58,124 @@ struct AnalysisCompleteParams {
 }
 
 /// Diagnostic codes that the LSP client can disable via initializationOptions.
-/// Maps config key (e.g. "unused-files") to diagnostic code (e.g. "unused-file").
-const ISSUE_TYPE_TO_DIAGNOSTIC_CODE: &[(&str, &str)] = &[
-    ("unused-files", "unused-file"),
-    ("unused-exports", "unused-export"),
-    ("unused-types", "unused-type"),
-    ("private-type-leaks", "private-type-leak"),
-    ("unused-dependencies", "unused-dependency"),
-    ("unused-dev-dependencies", "unused-dev-dependency"),
-    ("unused-optional-dependencies", "unused-optional-dependency"),
-    ("unused-enum-members", "unused-enum-member"),
-    ("unused-class-members", "unused-class-member"),
-    ("unresolved-imports", "unresolved-import"),
-    ("unlisted-dependencies", "unlisted-dependency"),
-    ("duplicate-exports", "duplicate-export"),
-    ("type-only-dependencies", "type-only-dependency"),
-    ("circular-dependencies", "circular-dependency"),
-    ("stale-suppressions", "stale-suppression"),
+/// The same table also backs the `fallow/issueTypes` custom request used by
+/// editor clients that need user-facing labels for all emitted diagnostic codes.
+#[derive(Debug, Clone, Copy)]
+struct DiagnosticIssueType {
+    config_key: Option<&'static str>,
+    code: &'static str,
+    label: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct IssueTypeInfo {
+    code: String,
+    label: String,
+}
+
+const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
+    DiagnosticIssueType {
+        config_key: None,
+        code: "code-duplication",
+        label: "Code Duplication",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-files"),
+        code: "unused-file",
+        label: "Unused Files",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-exports"),
+        code: "unused-export",
+        label: "Unused Exports",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-types"),
+        code: "unused-type",
+        label: "Unused Types",
+    },
+    DiagnosticIssueType {
+        config_key: Some("private-type-leaks"),
+        code: "private-type-leak",
+        label: "Private Type Leaks",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-dependencies"),
+        code: "unused-dependency",
+        label: "Unused Dependencies",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-dev-dependencies"),
+        code: "unused-dev-dependency",
+        label: "Unused Dev Dependencies",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-optional-dependencies"),
+        code: "unused-optional-dependency",
+        label: "Unused Optional Dependencies",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-enum-members"),
+        code: "unused-enum-member",
+        label: "Unused Enum Members",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unused-class-members"),
+        code: "unused-class-member",
+        label: "Unused Class Members",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unresolved-imports"),
+        code: "unresolved-import",
+        label: "Unresolved Imports",
+    },
+    DiagnosticIssueType {
+        config_key: Some("unlisted-dependencies"),
+        code: "unlisted-dependency",
+        label: "Unlisted Dependencies",
+    },
+    DiagnosticIssueType {
+        config_key: Some("duplicate-exports"),
+        code: "duplicate-export",
+        label: "Duplicate Exports",
+    },
+    DiagnosticIssueType {
+        config_key: Some("type-only-dependencies"),
+        code: "type-only-dependency",
+        label: "Type-Only Dependencies",
+    },
+    DiagnosticIssueType {
+        config_key: Some("test-only-dependencies"),
+        code: "test-only-dependency",
+        label: "Test-Only Dependencies",
+    },
+    DiagnosticIssueType {
+        config_key: Some("circular-dependencies"),
+        code: "circular-dependency",
+        label: "Circular Dependencies",
+    },
+    DiagnosticIssueType {
+        config_key: Some("boundary-violation"),
+        code: "boundary-violation",
+        label: "Boundary Violations",
+    },
+    DiagnosticIssueType {
+        config_key: Some("stale-suppressions"),
+        code: "stale-suppression",
+        label: "Stale Suppressions",
+    },
 ];
+
+fn diagnostic_issue_types() -> Vec<IssueTypeInfo> {
+    DIAGNOSTIC_ISSUE_TYPES
+        .iter()
+        .map(|issue_type| IssueTypeInfo {
+            code: issue_type.code.to_string(),
+            label: issue_type.label.to_string(),
+        })
+        .collect()
+}
 
 struct FallowLspServer {
     client: Client,
@@ -169,13 +269,16 @@ impl LanguageServer for FallowLspServer {
         if let Some(opts) = &params.initialization_options {
             if let Some(issue_types) = opts.get("issueTypes").and_then(|v| v.as_object()) {
                 let mut disabled = FxHashSet::default();
-                for &(config_key, diag_code) in ISSUE_TYPE_TO_DIAGNOSTIC_CODE {
+                for issue_type in DIAGNOSTIC_ISSUE_TYPES {
+                    let Some(config_key) = issue_type.config_key else {
+                        continue;
+                    };
                     if let Some(enabled) = issue_types
                         .get(config_key)
                         .and_then(serde_json::Value::as_bool)
                         && !enabled
                     {
-                        disabled.insert(diag_code.to_string());
+                        disabled.insert(issue_type.code.to_string());
                     }
                 }
                 // "code-duplication" is controlled by the duplication.* settings,
@@ -405,6 +508,14 @@ impl FallowLspServer {
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
         }
+    }
+
+    #[expect(
+        clippy::unused_async,
+        reason = "tower-lsp custom_method handlers are async methods"
+    )]
+    async fn issue_types(&self) -> Result<Vec<IssueTypeInfo>> {
+        Ok(diagnostic_issue_types())
     }
 
     /// Resolve the canonical git toplevel for `root`, populating the cache
@@ -728,7 +839,9 @@ async fn main() {
     let stdin = tokio::io::stdin();
     let stdout = tokio::io::stdout();
 
-    let (service, socket) = LspService::build(FallowLspServer::new).finish();
+    let (service, socket) = LspService::build(FallowLspServer::new)
+        .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+        .finish();
 
     Server::new(stdin, stdout, socket).serve(service).await;
 }
@@ -1066,6 +1179,29 @@ mod tests {
         assert!(caps.hover_provider.is_some());
     }
 
+    #[test]
+    fn diagnostic_issue_types_include_all_lsp_codes_in_user_order() {
+        let issue_types = diagnostic_issue_types();
+        let codes: Vec<&str> = issue_types
+            .iter()
+            .map(|issue| issue.code.as_str())
+            .collect();
+
+        assert_eq!(codes.first(), Some(&"code-duplication"));
+        assert!(codes.contains(&"unused-file"));
+        assert!(codes.contains(&"private-type-leak"));
+        assert!(codes.contains(&"test-only-dependency"));
+        assert!(codes.contains(&"boundary-violation"));
+        assert!(codes.contains(&"stale-suppression"));
+        assert_eq!(
+            issue_types
+                .iter()
+                .find(|issue| issue.code == "test-only-dependency")
+                .map(|issue| issue.label.as_str()),
+            Some("Test-Only Dependencies")
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn text_document_diagnostic_request_is_served() {
         let (mut service, _) = LspService::build(FallowLspServer::new).finish();
@@ -1109,6 +1245,58 @@ mod tests {
         let result = response.result().expect("diagnostic response should be ok");
         assert_eq!(result["kind"], json!("full"));
         assert_eq!(result["items"], json!([]));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fallow_issue_types_request_is_served() {
+        let (mut service, _) = LspService::build(FallowLspServer::new)
+            .custom_method("fallow/issueTypes", FallowLspServer::issue_types)
+            .finish();
+
+        let initialize = Request::build("initialize")
+            .params(json!({"capabilities": {}}))
+            .id(1)
+            .finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(initialize)
+            .await
+            .expect("initialize request should be handled")
+            .expect("initialize request should return a response");
+        assert!(response.is_ok());
+
+        let issue_types = Request::build("fallow/issueTypes").id(2).finish();
+        let response = service
+            .ready()
+            .await
+            .expect("service should be ready")
+            .call(issue_types)
+            .await
+            .expect("custom request should be handled")
+            .expect("custom request should return a response");
+
+        assert!(
+            response.is_ok(),
+            "fallow/issueTypes must not return method_not_found"
+        );
+        let result = response
+            .result()
+            .expect("issue type response should be ok")
+            .as_array()
+            .expect("issue type response should be an array");
+        assert_eq!(
+            result.first().and_then(|v| v["code"].as_str()),
+            Some("code-duplication")
+        );
+        assert!(
+            result
+                .iter()
+                .any(|v| v["code"] == json!("test-only-dependency")
+                    && v["label"] == json!("Test-Only Dependencies")),
+            "response should include every diagnostic code emitted by fallow-lsp"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1761,15 +1949,15 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // ISSUE_TYPE_TO_DIAGNOSTIC_CODE
+    // DIAGNOSTIC_ISSUE_TYPES
     // -----------------------------------------------------------------------
 
     #[test]
     fn issue_type_mapping_has_expected_entries() {
         // Verify all expected issue types are present
-        let keys: Vec<&str> = ISSUE_TYPE_TO_DIAGNOSTIC_CODE
+        let keys: Vec<&str> = DIAGNOSTIC_ISSUE_TYPES
             .iter()
-            .map(|(k, _)| *k)
+            .filter_map(|issue_type| issue_type.config_key)
             .collect();
 
         assert!(keys.contains(&"unused-files"));
@@ -1785,17 +1973,24 @@ mod tests {
         assert!(keys.contains(&"unlisted-dependencies"));
         assert!(keys.contains(&"duplicate-exports"));
         assert!(keys.contains(&"type-only-dependencies"));
+        assert!(keys.contains(&"test-only-dependencies"));
         assert!(keys.contains(&"circular-dependencies"));
+        assert!(keys.contains(&"boundary-violation"));
+        assert!(keys.contains(&"stale-suppressions"));
     }
 
     #[test]
     fn issue_type_mapping_codes_are_singular() {
         // All diagnostic codes should be singular (e.g., "unused-file" not "unused-files")
-        for &(config_key, diag_code) in ISSUE_TYPE_TO_DIAGNOSTIC_CODE {
+        for issue_type in DIAGNOSTIC_ISSUE_TYPES {
+            let Some(config_key) = issue_type.config_key else {
+                continue;
+            };
             // Config keys are plural, diagnostic codes are singular
             assert!(
-                !diag_code.ends_with('s') || diag_code.ends_with("ss"),
-                "Diagnostic code '{diag_code}' for config key '{config_key}' should be singular"
+                !issue_type.code.ends_with('s') || issue_type.code.ends_with("ss"),
+                "Diagnostic code '{}' for config key '{config_key}' should be singular",
+                issue_type.code
             );
         }
     }

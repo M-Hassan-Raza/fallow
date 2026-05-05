@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const vscodeMocks = vi.hoisted(() => ({
   createQuickPick: vi.fn(),
@@ -80,7 +80,11 @@ vi.mock("vscode", () => {
   };
 });
 
-import { DiagnosticFilter } from "../src/diagnosticFilter.js";
+import {
+  DiagnosticFilter,
+  resetDiagnosticCategories,
+  setDiagnosticCategories,
+} from "../src/diagnosticFilter.js";
 import { __testHelpers } from "../src/diagnosticMute.js";
 
 const memento = () => ({
@@ -118,6 +122,10 @@ const quickPickThatAcceptsDefaults = () => {
     dispose: vi.fn(),
   };
 };
+
+afterEach(() => {
+  resetDiagnosticCategories();
+});
 
 describe("diagnostic mute language status", () => {
   it("is hidden until a mute is active, then hides again after clearing", () => {
@@ -163,5 +171,29 @@ describe("diagnostic mute language status", () => {
         (item) => item.code === null
       )
     ).toBe(true);
+  });
+
+  it("uses LSP-provided categories for labels and the manage picker", async () => {
+    setDiagnosticCategories([
+      { code: "future-rule", label: "Future Rule" },
+      { code: "unused-export", label: "Unused Exports" },
+    ]);
+    const pick = quickPickThatAcceptsDefaults();
+    vscodeMocks.createQuickPick.mockReturnValueOnce(pick);
+    const filter = new DiagnosticFilter(memento() as never);
+
+    expect(__testHelpers.labelFor("future-rule")).toBe("Future Rule");
+
+    await __testHelpers.showManageQuickPick(filter);
+
+    expect(
+      (pick.items as Array<{ code: string | null; label: string }>).map(
+        (item) => [item.code, item.label]
+      )
+    ).toEqual([
+      [null, "$(eye-closed) All Fallow Findings"],
+      ["future-rule", "Future Rule"],
+      ["unused-export", "Unused Exports"],
+    ]);
   });
 });

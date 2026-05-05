@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("vscode", () => {
   type Listener<T> = (value: T) => void;
@@ -31,7 +31,11 @@ import {
   DIAGNOSTIC_CATEGORIES,
   DiagnosticFilter,
   diagnosticCode,
+  getDiagnosticCategories,
   isFallowDiagnostic,
+  parseDiagnosticCategories,
+  resetDiagnosticCategories,
+  setDiagnosticCategories,
 } from "../src/diagnosticFilter.js";
 
 interface FakeDiag {
@@ -67,6 +71,10 @@ const flushPersistence = async (): Promise<void> => {
   await Promise.resolve();
   await Promise.resolve();
 };
+
+afterEach(() => {
+  resetDiagnosticCategories();
+});
 
 const collection = () => {
   const sets: Array<{ uri: string; diags: FakeDiag[] }> = [];
@@ -350,9 +358,9 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
   });
 
   it("includes every diagnostic code emitted by fallow-lsp", () => {
-    // Mirrors `ISSUE_TYPE_TO_DIAGNOSTIC_CODE` in `crates/lsp/src/main.rs`
-    // plus `code-duplication` (quality.rs) and `boundary-violation`
-    // (structural.rs). If this list drifts, update both sides at once.
+    // Fallback list for older LSPs. Keep it in sync with
+    // `DIAGNOSTIC_ISSUE_TYPES` / `fallow/issueTypes` in `crates/lsp/src/main.rs`
+    // plus any diagnostics emitted outside the issue-type catalog.
     const expected = [
       "unused-file",
       "unused-export",
@@ -367,6 +375,7 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
       "unlisted-dependency",
       "duplicate-export",
       "type-only-dependency",
+      "test-only-dependency",
       "circular-dependency",
       "stale-suppression",
       "code-duplication",
@@ -376,5 +385,34 @@ describe("DIAGNOSTIC_CATEGORIES", () => {
     for (const code of expected) {
       expect(actual.has(code)).toBe(true);
     }
+  });
+});
+
+describe("dynamic diagnostic categories", () => {
+  it("parses the fallow/issueTypes response shape", () => {
+    const parsed = parseDiagnosticCategories([
+      { code: "future-rule", label: "Future Rule" },
+      { code: "unused-export", label: "Unused Exports" },
+    ]);
+    expect(parsed).toEqual([
+      { code: "future-rule", label: "Future Rule" },
+      { code: "unused-export", label: "Unused Exports" },
+    ]);
+  });
+
+  it("rejects malformed fallow/issueTypes responses", () => {
+    expect(parseDiagnosticCategories(null)).toBeNull();
+    expect(parseDiagnosticCategories([])).toBeNull();
+    expect(parseDiagnosticCategories([{ code: "missing-label" }])).toBeNull();
+  });
+
+  it("updates and resets the active category catalog", () => {
+    setDiagnosticCategories([{ code: "future-rule", label: "Future Rule" }]);
+    expect(getDiagnosticCategories()).toEqual([
+      { code: "future-rule", label: "Future Rule" },
+    ]);
+
+    resetDiagnosticCategories();
+    expect(getDiagnosticCategories()).toBe(DIAGNOSTIC_CATEGORIES);
   });
 });
