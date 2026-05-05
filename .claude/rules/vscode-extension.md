@@ -9,7 +9,9 @@ Wraps the `fallow-lsp` binary with additional UI features. TypeScript codebase b
 
 ## Architecture
 - `src/extension.ts` — Activation, command registration, lifecycle
-- `src/client.ts` — LSP client setup (stdio transport, language selector for JS/TS/Vue/Svelte/Astro/MDX/JSON)
+- `src/client.ts`: LSP client setup (stdio transport, language selector for JS/TS/Vue/Svelte/Astro/MDX/JSON), wires `DiagnosticFilter` middleware
+- `src/diagnosticFilter.ts`: client-side mute filter; caches last unfiltered diagnostics per URI, drops fallow-source diagnostics whose `code` is muted; serves both push (`handleDiagnostics`) and pull (`provideDiagnostics`) middleware paths
+- `src/diagnosticMute.ts`: `LanguageStatusItem` (right-gutter, severity Warning when anything is muted), QuickPick manage UI (`createQuickPick` + `canSelectMany`), CodeAction provider (`source.fallow.mute` quick-fix), per-category and global toggle commands
 - `src/download.ts` — Binary auto-download from GitHub releases (5 platform targets)
 - `src/commands.ts` — Analysis and fix commands (spawns `fallow` CLI via execFile)
 - Tree view providers for dead code (by issue type) and duplicates (by clone family)
@@ -26,6 +28,7 @@ Wraps the `fallow-lsp` binary with additional UI features. TypeScript codebase b
 - **LSP notification** — custom `fallow/analysisComplete` for real-time status bar updates
 - **Config watch** — restarts LSP when `fallow.lspPath` or `fallow.trace.server` changes
 - **Large buffer** — 50MB maxBuffer for CLI output on large monorepos
+- **Diagnostic mute**: purely client-side filter, no LSP changes, instant toggle without restart. State lives in `context.workspaceState` under `fallow.diagnosticFilter.v1`. Filter ALWAYS guards on `Diagnostic.source === "fallow"` so TypeScript / ESLint diagnostics flow through untouched. Cache is bounded by `onDidCloseTextDocument` eviction. The `DIAGNOSTIC_CATEGORIES` list in `diagnosticFilter.ts` mirrors `ISSUE_TYPE_TO_DIAGNOSTIC_CODE` in `crates/lsp/src/main.rs` plus `code-duplication` (quality.rs) and `boundary-violation` (structural.rs); a vitest sync assertion (`DIAGNOSTIC_CATEGORIES > includes every diagnostic code emitted by fallow-lsp`) flags drift.
 
 ## Settings
 `fallow.lspPath`, `fallow.autoDownload`, `fallow.issueTypes`, `fallow.duplication.threshold`, `fallow.duplication.mode`, `fallow.production`, `fallow.changedSince`, `fallow.trace.server`

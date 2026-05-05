@@ -38,6 +38,20 @@ code --install-extension fallow-rs.fallow-vscode
 | `Fallow: Preview Fixes (Dry Run)` | Show what fixes would be applied without changing files |
 | `Fallow: Restart Language Server` | Restart the fallow-lsp process |
 | `Fallow: Show Output Channel` | Open the Fallow output panel for debugging |
+| `Fallow: Toggle Mute Code-Duplication Findings` | Hide or restore Fallow's duplicate-code squiggles in the editor |
+| `Fallow: Toggle Mute All Findings` | Hide or restore every Fallow finding in the editor |
+| `Fallow: Manage Diagnostic Mutes...` | Multi-select picker for individual categories |
+| `Fallow: Show All Findings (Clear Mutes)` | Reset all editor mutes |
+
+### Muting Fallow's editor squiggles
+
+Duplicate-code findings can span many lines and drown out TypeScript / ESLint diagnostics in the editor. Fallow ships three ways to mute them locally without disabling the underlying rule:
+
+- A right-click **Quick Fix** on any Fallow squiggle: "Mute Fallow `<category>` findings in this workspace."
+- The four commands above; bind a keyboard shortcut to `fallow.toggleMuteDuplicates` for one-keystroke noise control.
+- The Fallow language status item (right gutter of the status bar) appears with a yellow indicator whenever anything is muted; click it to open the manage picker.
+
+Mute state is stored in the workspace, so it survives reload but does not bleed across projects. Precedence: rules in your `fallow.config.json` and the `fallow.issueTypes` setting take effect server-side; muting is a **local view filter only**, applied client-side. CI and `fallow check` still report every finding.
 
 ## Settings
 

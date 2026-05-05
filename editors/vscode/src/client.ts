@@ -17,6 +17,7 @@ import {
   getChangedSince,
 } from "./config.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
+import type { DiagnosticFilter } from "./diagnosticFilter.js";
 import {
   downloadBinary,
   getBinaryVersion,
@@ -106,7 +107,8 @@ const resolveBinaryPath = async (
 
 export const startClient = async (
   context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel
+  outputChannel: vscode.OutputChannel,
+  diagnosticFilter?: DiagnosticFilter
 ): Promise<LanguageClient | null> => {
   const binaryPath = await resolveBinaryPath(context, outputChannel);
   if (!binaryPath) {
@@ -140,6 +142,19 @@ export const startClient = async (
       issueTypes: getIssueTypes(),
       changedSince: getChangedSince(),
     },
+    middleware: diagnosticFilter
+      ? {
+          handleDiagnostics: (uri, diagnostics, next) =>
+            diagnosticFilter.handleDiagnostics(uri, diagnostics, next),
+          provideDiagnostics: (document, previousResultId, token, next) =>
+            diagnosticFilter.provideDiagnostics(
+              document,
+              previousResultId,
+              token,
+              next
+            ),
+        }
+      : undefined,
   };
 
   client = new LanguageClient(
@@ -168,6 +183,8 @@ export const startClient = async (
     return null;
   }
 
+  diagnosticFilter?.attachClient(client);
+
   return client;
 };
 
@@ -180,8 +197,13 @@ export const stopClient = async (): Promise<void> => {
 
 export const restartClient = async (
   context: vscode.ExtensionContext,
-  outputChannel: vscode.OutputChannel
+  outputChannel: vscode.OutputChannel,
+  diagnosticFilter?: DiagnosticFilter
 ): Promise<LanguageClient | null> => {
+  // Detach BEFORE stop so a user toggle that fires during the gap can't
+  // call refresh() against a disposed DiagnosticCollection. startClient
+  // re-attaches once the new client is up.
+  diagnosticFilter?.detachClient();
   await stopClient();
-  return startClient(context, outputChannel);
+  return startClient(context, outputChannel, diagnosticFilter);
 };

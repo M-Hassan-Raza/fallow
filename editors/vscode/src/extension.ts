@@ -5,6 +5,8 @@ import { countCheckIssues } from "./analysis-utils.js";
 import { startClient, stopClient, restartClient } from "./client.js";
 import { onConfigChange } from "./config.js";
 import { runAnalysis, runFix } from "./commands.js";
+import { DiagnosticFilter } from "./diagnosticFilter.js";
+import { registerDiagnosticMuteUi } from "./diagnosticMute.js";
 import {
   createStatusBar,
   updateStatusBar,
@@ -34,6 +36,10 @@ export const activate = async (
 
   const statusBar = createStatusBar();
   context.subscriptions.push(statusBar);
+
+  const diagnosticFilter = new DiagnosticFilter(context.workspaceState);
+  context.subscriptions.push({ dispose: () => diagnosticFilter.dispose() });
+  registerDiagnosticMuteUi(context, diagnosticFilter);
 
   const deadCodeProvider = new DeadCodeTreeProvider();
   const duplicatesProvider = new DuplicatesTreeProvider();
@@ -139,7 +145,7 @@ export const activate = async (
       await runFix(context, false);
       // Restart LSP to force fresh analysis — the fix modified files on disk
       // bypassing VS Code's editor, so did_save never fires for those files
-      await restartClient(context, outputChannel);
+      await restartClient(context, outputChannel, diagnosticFilter);
       // Re-run CLI analysis for tree views
       cliAnalysisRan = true;
       await triggerCliAnalysis();
@@ -155,7 +161,7 @@ export const activate = async (
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.restart", async () => {
       outputChannel.appendLine("Restarting language server...");
-      await restartClient(context, outputChannel);
+      await restartClient(context, outputChannel, diagnosticFilter);
     })
   );
 
@@ -204,7 +210,7 @@ export const activate = async (
 
       if (needsRestart) {
         outputChannel.appendLine("Configuration changed, restarting server...");
-        await restartClient(context, outputChannel);
+        await restartClient(context, outputChannel, diagnosticFilter);
       }
 
       if (needsReanalysis) {
@@ -216,7 +222,7 @@ export const activate = async (
   );
 
   // Start LSP client
-  const client = await startClient(context, outputChannel);
+  const client = await startClient(context, outputChannel, diagnosticFilter);
   if (client) {
     context.subscriptions.push({ dispose: () => void stopClient() });
 

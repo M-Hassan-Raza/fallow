@@ -100,6 +100,29 @@
       {
         "command": "fallow.noop",
         "title": "Fallow: No-op (internal)"
+      },
+      {
+        "command": "fallow.toggleMuteDuplicates",
+        "title": "Fallow: Toggle Mute Code-Duplication Findings",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "fallow.toggleAllDiagnostics",
+        "title": "Fallow: Toggle Mute All Findings",
+        "icon": "$(eye-closed)"
+      },
+      {
+        "command": "fallow.manageDiagnosticMutes",
+        "title": "Fallow: Manage Diagnostic Mutes...",
+        "icon": "$(filter)"
+      },
+      {
+        "command": "fallow.clearDiagnosticMutes",
+        "title": "Fallow: Show All Findings (Clear Mutes)"
+      },
+      {
+        "command": "fallow.muteDiagnosticCategory",
+        "title": "Fallow: Mute Diagnostic Category"
       }
     ],
     "configuration": {
@@ -247,6 +270,16 @@
           "command": "fallow.analyze",
           "when": "view == fallow.deadCode || view == fallow.duplicates",
           "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "fallow.muteDiagnosticCategory",
+          "when": "false"
+        },
+        {
+          "command": "fallow.noop",
+          "when": "false"
         }
       ]
     },
