@@ -108,6 +108,58 @@ fn combined_performance_includes_duplication_stage() {
     );
 }
 
+/// Combined mode runs check and dupes via `rayon::join`. Verify the parallel
+/// scheduling does not leak nondeterminism into the rendered JSON: repeated
+/// runs against the same fixture must produce byte-identical output once the
+/// inherently nondeterministic wall-clock fields are stripped.
+#[test]
+fn combined_parallel_output_is_deterministic() {
+    fn normalize(value: &mut serde_json::Value) {
+        match value {
+            serde_json::Value::Object(map) => {
+                map.remove("elapsed_ms");
+                for v in map.values_mut() {
+                    normalize(v);
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for v in items {
+                    normalize(v);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let mut canonicalized: Vec<String> = std::iter::repeat_with(|| {
+        let output = run_fallow_combined(
+            "duplicate-code",
+            &["--only", "dead-code,dupes", "--format", "json", "--quiet"],
+        );
+        assert!(
+            output.code == 0 || output.code == 1,
+            "combined run should not crash: stdout={}\nstderr={}",
+            output.stdout,
+            output.stderr
+        );
+        let mut value = parse_json(&output);
+        normalize(&mut value);
+        serde_json::to_string(&value).expect("re-serialize canonical json")
+    })
+    .take(3)
+    .collect();
+
+    let first = canonicalized.remove(0);
+    for (idx, run) in canonicalized.iter().enumerate() {
+        assert_eq!(
+            &first,
+            run,
+            "combined parallel run #{} differed from run #0",
+            idx + 1
+        );
+    }
+}
+
 #[test]
 fn check_compact_format_has_no_ansi() {
     let output = run_fallow(

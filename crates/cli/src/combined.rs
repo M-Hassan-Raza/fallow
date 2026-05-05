@@ -73,16 +73,17 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
     let mut dupes_result: Option<DupesResult> = None;
     let mut health_result: Option<HealthResult> = None;
 
-    // Run check (dead code analysis)
-    if opts.run_check {
-        let filters = IssueFilters::default();
-        let trace_opts = TraceOptions {
-            trace_export: None,
-            trace_file: None,
-            trace_dependency: None,
-            performance: opts.performance,
-        };
-        let check_opts = CheckOptions {
+    // Build CheckOptions up front. References to `filters` and `trace_opts` need
+    // to outlive both the sequential and parallel branches below.
+    let filters = IssueFilters::default();
+    let trace_opts = TraceOptions {
+        trace_export: None,
+        trace_file: None,
+        trace_dependency: None,
+        performance: opts.performance,
+    };
+    let check_opts = if opts.run_check {
+        Some(CheckOptions {
             root: opts.root,
             config_path: opts.config_path,
             output: opts.output,
@@ -110,22 +111,46 @@ pub fn run_combined(opts: &CombinedOptions<'_>) -> ExitCode {
             regression_opts: opts.regression_opts,
             retain_modules_for_health: opts.run_health,
             defer_performance: true,
-        };
-        match crate::check::execute_check(&check_opts) {
-            Ok(result) => {
-                check_result = Some(result);
-            }
+        })
+    } else {
+        None
+    };
+
+    // When both check and dupes are requested, run them concurrently. They share
+    // no mutable state: each writes to a distinct cache subdir (parse-vN vs
+    // dupes-tokens-vN), each returns a buffered result printed centrally below,
+    // and each sorts its own outputs internally so rayon's work-stealing order
+    // does not leak into the rendered output.
+    //
+    // Trade-off: the opportunistic share_files_with_dupes path (which let dupes
+    // skip discover_files when health was also running and production flags
+    // matched) is forfeited here. That saved ~8ms warm; the parallel join saves
+    // ~100ms by overlapping the dupes suffix array with check's analyze pass.
+    if let (Some(check_opts), true) = (check_opts.as_ref(), opts.run_dupes) {
+        let (check_res, dupes_res) = rayon::join(
+            || crate::check::execute_check(check_opts),
+            || run_combined_dupes(opts, None),
+        );
+        match check_res {
+            Ok(result) => check_result = Some(result),
             Err(code) => return code,
         }
-    }
-
-    // Run dupes (duplication analysis)
-    if opts.run_dupes {
-        match run_combined_dupes(opts, check_result.as_ref()) {
-            Ok(result) => {
-                dupes_result = result;
-            }
+        match dupes_res {
+            Ok(result) => dupes_result = result,
             Err(code) => return code,
+        }
+    } else {
+        if let Some(check_opts) = check_opts.as_ref() {
+            match crate::check::execute_check(check_opts) {
+                Ok(result) => check_result = Some(result),
+                Err(code) => return code,
+            }
+        }
+        if opts.run_dupes {
+            match run_combined_dupes(opts, check_result.as_ref()) {
+                Ok(result) => dupes_result = result,
+                Err(code) => return code,
+            }
         }
     }
 
