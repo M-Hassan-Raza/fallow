@@ -595,19 +595,14 @@ fn compute_base_snapshot(
             opts.output,
         ));
     };
-    let base_config_path = opts
+    let base_root = base_analysis_root(opts.root, worktree.path());
+    let current_config_path = opts
         .config_path
-        .as_ref()
-        .filter(|path| path.is_relative())
-        .map(|path| worktree.path().join(path));
-    let config_path = if base_config_path.is_some() {
-        &base_config_path
-    } else {
-        opts.config_path
-    };
+        .clone()
+        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
     let base_opts = AuditOptions {
-        root: worktree.path(),
-        config_path,
+        root: &base_root,
+        config_path: &current_config_path,
         output: opts.output,
         no_cache: opts.no_cache,
         threads: opts.threads,
@@ -631,7 +626,7 @@ fn compute_base_snapshot(
         include_entry_exports: opts.include_entry_exports,
     };
 
-    let base_changed_files = remap_focus_files(changed_files, opts.root, worktree.path());
+    let base_changed_files = remap_focus_files(changed_files, opts.root, &base_root);
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let share_dead_code_parse_with_health = check_production == health_production;
@@ -667,6 +662,27 @@ fn compute_base_snapshot(
             dupes_keys(&r.report, &r.config.root)
         }),
     })
+}
+
+fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf {
+    let Some(git_root) = git_toplevel(current_root) else {
+        return base_worktree_root.to_path_buf();
+    };
+    let current_root = current_root
+        .canonicalize()
+        .unwrap_or_else(|_| current_root.to_path_buf());
+    match current_root.strip_prefix(&git_root) {
+        Ok(relative) => base_worktree_root.join(relative),
+        Err(err) => {
+            tracing::warn!(
+                current_root = %current_root.display(),
+                git_root = %git_root.display(),
+                error = %err,
+                "Could not remap audit base root into the base worktree; falling back to worktree root"
+            );
+            base_worktree_root.to_path_buf()
+        }
+    }
 }
 
 fn current_keys_as_base_keys(
@@ -2700,6 +2716,22 @@ mod tests {
     }
 
     #[test]
+    fn base_analysis_root_preserves_repo_subdirectory_roots() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = tmp.path().join("repo");
+        let app_root = repo.join("apps/mobile");
+        let base_worktree = tmp.path().join("base-worktree");
+        fs::create_dir_all(&app_root).expect("app root should be created");
+        fs::create_dir_all(&base_worktree).expect("base worktree should be created");
+        git(&repo, &["init", "-b", "main"]);
+
+        assert_eq!(
+            base_analysis_root(&app_root, &base_worktree),
+            base_worktree.join("apps/mobile")
+        );
+    }
+
+    #[test]
     fn audit_base_worktree_reuses_current_node_modules_context() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root = tmp.path();
@@ -3370,6 +3402,489 @@ mod tests {
             "pre-existing duplicate must be classified as inherited; \
              attribution = {:?}",
             result.attribution
+        );
+    }
+
+    #[test]
+    fn audit_base_preserves_tsconfig_paths_when_extends_is_in_untracked_node_modules() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src/screens")).expect("src dir should be created");
+        fs::create_dir_all(root.join("node_modules/@react-native/typescript-config"))
+            .expect("node_modules config dir should be created");
+        fs::write(root.join(".gitignore"), "node_modules/\n").expect("gitignore should be written");
+        fs::write(
+            root.join("package.json"),
+            r#"{
+                "name": "audit-react-native-tsconfig-base",
+                "private": true,
+                "main": "src/App.tsx",
+                "dependencies": {
+                    "react-native": "0.80.0"
+                }
+            }"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{
+                "extends": "./node_modules/@react-native/typescript-config/tsconfig.json",
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "@/*": ["src/*"]
+                    }
+                },
+                "include": ["src/**/*"]
+            }"#,
+        )
+        .expect("tsconfig should be written");
+        fs::write(
+            root.join("node_modules/@react-native/typescript-config/tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"jsx":"react-jsx"}}"#,
+        )
+        .expect("react native tsconfig should be written");
+        fs::write(
+            root.join("src/App.tsx"),
+            r#"import { homeTitle } from "@/screens/Home";
+
+export function App() {
+  return homeTitle;
+}
+"#,
+        )
+        .expect("app should be written");
+        fs::write(
+            root.join("src/screens/Home.ts"),
+            r#"export const homeTitle = "home";
+"#,
+        )
+        .expect("home should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        fs::write(
+            root.join("src/App.tsx"),
+            r#"import { homeTitle } from "@/screens/Home";
+
+export function App() {
+  return homeTitle.toUpperCase();
+}
+"#,
+        )
+        .expect("app should be modified");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        assert!(
+            !result.base_snapshot_skipped,
+            "source diffs should run a real base snapshot"
+        );
+        let base = result
+            .base_snapshot
+            .as_ref()
+            .expect("base snapshot should run");
+        assert!(
+            !base
+                .dead_code
+                .contains("unresolved-import:src/App.tsx:@/screens/Home"),
+            "base audit must keep local @/* tsconfig aliases when extends points into ignored node_modules: {:?}",
+            base.dead_code
+        );
+        assert!(
+            !base.dead_code.contains("unused-file:src/screens/Home.ts"),
+            "alias target should stay reachable in the base worktree: {:?}",
+            base.dead_code
+        );
+        let check = result.check.as_ref().expect("dead-code audit should run");
+        assert!(
+            check.results.unresolved_imports.is_empty(),
+            "HEAD audit should also resolve @/* aliases: {:?}",
+            check.results.unresolved_imports
+        );
+    }
+
+    #[test]
+    fn audit_base_preserves_subdirectory_root_resolution() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = tmp.path().join("repo");
+        let root = repo.join("apps/mobile");
+        fs::create_dir_all(root.join("src/screens")).expect("src dir should be created");
+        fs::create_dir_all(root.join("node_modules/@react-native/typescript-config"))
+            .expect("node_modules config dir should be created");
+        fs::write(repo.join(".gitignore"), "apps/mobile/node_modules/\n")
+            .expect("gitignore should be written");
+        fs::write(
+            root.join("package.json"),
+            r#"{
+                "name": "audit-subdir-react-native-tsconfig-base",
+                "private": true,
+                "main": "src/App.tsx",
+                "dependencies": {
+                    "react-native": "0.80.0"
+                }
+            }"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{
+                "extends": "./node_modules/@react-native/typescript-config/tsconfig.json",
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "@/*": ["src/*"]
+                    }
+                },
+                "include": ["src/**/*"]
+            }"#,
+        )
+        .expect("tsconfig should be written");
+        fs::write(
+            root.join("node_modules/@react-native/typescript-config/tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"jsx":"react-jsx"}}"#,
+        )
+        .expect("react native tsconfig should be written");
+        fs::write(
+            root.join("src/App.tsx"),
+            r#"import { homeTitle } from "@/screens/Home";
+
+export function App() {
+  return homeTitle;
+}
+"#,
+        )
+        .expect("app should be written");
+        fs::write(
+            root.join("src/screens/Home.ts"),
+            r#"export const homeTitle = "home";
+"#,
+        )
+        .expect("home should be written");
+
+        git(&repo, &["init", "-b", "main"]);
+        git(&repo, &["add", "."]);
+        git(
+            &repo,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        fs::write(
+            root.join("src/App.tsx"),
+            r#"import { homeTitle } from "@/screens/Home";
+
+export function App() {
+  return homeTitle.toUpperCase();
+}
+"#,
+        )
+        .expect("app should be modified");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root: &root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        assert!(
+            !result.base_snapshot_skipped,
+            "source diffs should run a real base snapshot"
+        );
+        let base = result
+            .base_snapshot
+            .as_ref()
+            .expect("base snapshot should run");
+        assert!(
+            !base
+                .dead_code
+                .contains("unresolved-import:src/App.tsx:@/screens/Home"),
+            "base audit should analyze from the app subdirectory, not the repo root: {:?}",
+            base.dead_code
+        );
+        assert!(
+            !base.dead_code.contains("unused-file:src/screens/Home.ts"),
+            "subdirectory base audit should keep alias targets reachable: {:?}",
+            base.dead_code
+        );
+    }
+
+    #[test]
+    fn audit_base_uses_new_explicit_config_without_hard_failure() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-new-config","main":"src/index.ts"}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(root.join("src/index.ts"), "export const used = 1;\n")
+            .expect("index should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+
+        let explicit_config = root.join(".fallowrc.json");
+        fs::write(&explicit_config, r#"{"rules":{"unused-files":"error"}}"#)
+            .expect("new config should be written");
+        fs::write(root.join("src/index.ts"), "export const used = 2;\n")
+            .expect("index should be modified");
+
+        let config_path = Some(explicit_config);
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute with a new explicit config");
+        assert!(
+            result.base_snapshot.is_some(),
+            "base snapshot should use the current explicit config even when the base commit lacks it"
+        );
+    }
+
+    #[test]
+    fn audit_base_uses_current_discovered_config_for_attribution() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-current-config","main":"src/index.ts","dependencies":{"left-pad":"1.3.0"}}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"off"}}"#,
+        )
+        .expect("base config should be written");
+        fs::write(root.join("src/index.ts"), "export const used = 1;\n")
+            .expect("index should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"error"}}"#,
+        )
+        .expect("current config should be written");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-current-config","main":"src/index.ts","dependencies":{"left-pad":"1.3.1"}}"#,
+        )
+        .expect("package.json should be touched");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        assert_eq!(
+            result.attribution.dead_code_introduced, 0,
+            "enabling a rule should not make pre-existing changed-file findings look introduced: {:?}",
+            result.attribution
+        );
+        assert!(
+            result.attribution.dead_code_inherited > 0,
+            "pre-existing changed-file findings should be classified as inherited: {:?}",
+            result.attribution
+        );
+    }
+
+    #[test]
+    fn audit_base_current_config_attribution_survives_cache_hit() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-current-config-cache","main":"src/index.ts","dependencies":{"left-pad":"1.3.0"}}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"off"}}"#,
+        )
+        .expect("base config should be written");
+        fs::write(root.join("src/index.ts"), "export const used = 1;\n")
+            .expect("index should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"error"}}"#,
+        )
+        .expect("current config should be written");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-current-config-cache","main":"src/index.ts","dependencies":{"left-pad":"1.3.1"}}"#,
+        )
+        .expect("package.json should be touched");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: false,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let first = execute_audit(&opts).expect("first audit should execute");
+        assert_eq!(
+            first.attribution.dead_code_introduced, 0,
+            "first audit should classify pre-existing findings as inherited: {:?}",
+            first.attribution
+        );
+
+        let changed_files =
+            crate::check::get_changed_files(root, "HEAD").expect("changed files should resolve");
+        let key = audit_base_snapshot_cache_key(&opts, "HEAD", &changed_files)
+            .expect("cache key should compute")
+            .expect("cache key should exist");
+        assert!(
+            load_cached_base_snapshot(&opts, &key).is_some(),
+            "first audit should store a reusable base snapshot"
+        );
+
+        let second = execute_audit(&opts).expect("second audit should execute");
+        assert_eq!(
+            second.attribution.dead_code_introduced, 0,
+            "cache hit should keep current-config attribution stable: {:?}",
+            second.attribution
+        );
+        assert!(
+            second.attribution.dead_code_inherited > 0,
+            "cache hit should preserve inherited base findings: {:?}",
+            second.attribution
         );
     }
 

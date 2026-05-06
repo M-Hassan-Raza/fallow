@@ -227,7 +227,1270 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
     );
     assert!(
         unresolved_specifiers.contains(&"@gen/foo"),
-        "@gen/foo should remain unresolved when the tsconfig chain is broken: {unresolved_specifiers:?}"
+        "@gen/foo points outside the analysis root and should remain unresolved when the tsconfig chain is broken: {unresolved_specifiers:?}"
+    );
+}
+
+#[test]
+fn missing_react_native_extends_keeps_local_tsconfig_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/components")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "react-native-missing-extends",
+            "private": true,
+            "main": "src/index.ts",
+            "dependencies": {
+                "react-native": "0.80.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@react-native/typescript-config/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["src/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { Button } from "@/components/Button";
+export const app = Button;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/components/Button.web.ts"),
+        "export const Button = 'button';\n",
+    )
+    .expect("button");
+    std::fs::write(
+        root.join("src/components/Button.ts"),
+        "export const Button = 'generic';\n",
+    )
+    .expect("generic button");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"@/components/Button"),
+        "local tsconfig paths should survive a missing React Native base config: {unresolved_specifiers:?}"
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "src/components/Button.web.ts"),
+        "React Native platform alias target should stay reachable: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("src/components/Button.ts")),
+        "React Native platform target should win over the generic target: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_react_native_extends_resolves_explicit_js_alias_to_platform_source() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/components")).expect("components dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "react-native-explicit-js-alias",
+            "private": true,
+            "main": "src/index.ts",
+            "dependencies": {
+                "react-native": "0.80.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@react-native/typescript-config/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["src/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { Button } from "@/components/Button.js";
+export const app = Button;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/components/Button.ios.ts"),
+        "export const Button = 'ios';\n",
+    )
+    .expect("ios button");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "explicit .js aliases should probe React Native platform source files: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("src/components/Button.ios.ts")),
+        "platform source target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_expo_extends_keeps_local_tsconfig_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("app/screens")).expect("app dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "expo-missing-extends",
+            "private": true,
+            "main": "app/index.tsx",
+            "dependencies": {
+                "expo": "53.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/expo/tsconfig.base",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@app/*": ["app/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("app/index.tsx"),
+        r#"import { Screen } from "@app/screens/Screen";
+export const app = Screen;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("app/screens/Screen.native.tsx"),
+        "export const Screen = 'native';\n",
+    )
+    .expect("native screen");
+    std::fs::write(
+        root.join("app/screens/Screen.tsx"),
+        "export const Screen = 'generic';\n",
+    )
+    .expect("generic screen");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "Expo projects should get the same broken-extends path alias fallback as React Native: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "app/screens/Screen.native.tsx"),
+        "Expo platform alias target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn tsconfig_alias_fallback_does_not_probe_platform_files_without_mobile_plugins() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/components")).expect("components dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "web-missing-extends",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["src/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { Button } from "@/components/Button";
+export const app = Button;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/components/Button.web.ts"),
+        "export const Button = 'web';\n",
+    )
+    .expect("web button");
+    std::fs::write(
+        root.join("src/components/Button.ts"),
+        "export const Button = 'generic';\n",
+    )
+    .expect("generic button");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "plain TS projects should still resolve the alias: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "src/components/Button.ts"),
+        "generic target should stay reachable without mobile plugins: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("src/components/Button.web.ts")),
+        "platform-specific files should not shadow generic files without React Native or Expo: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_keeps_local_tsconfig_paths_without_base_url() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/features/nested")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-local-paths",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r##"{
+            // missing inherited config should not hide local compilerOptions
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "paths": {
+                    "$env": ["src/env.ts"],
+                    "@features/*": ["src/features/*"],
+                    "#theme": ["missing/theme.ts", "src/theme.ts"],
+                    "$api": ["src/api.js"],
+                    "*": ["src/catchall/*"],
+                },
+            },
+        }"##,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r##"import { env } from "$env";
+import { feature } from "@features/home";
+import { nested } from "@features/nested";
+import { theme } from "#theme";
+import { api } from "$api";
+import { shared } from "shared";
+
+export const app = [env, feature, nested, theme, api, shared].join("-");
+"##,
+    )
+    .expect("index");
+    std::fs::write(root.join("src/env.ts"), "export const env = 'env';\n").expect("env");
+    std::fs::write(root.join("src/api.ts"), "export const api = 'api';\n").expect("api");
+    std::fs::write(
+        root.join("src/features/home.ts"),
+        "export const feature = 'home';\n",
+    )
+    .expect("home");
+    std::fs::write(
+        root.join("src/features/nested/index.ts"),
+        "export const nested = 'nested';\n",
+    )
+    .expect("nested index");
+    std::fs::create_dir_all(root.join("src/catchall")).expect("catchall dir");
+    std::fs::write(
+        root.join("src/catchall/shared.ts"),
+        "export const shared = 'shared';\n",
+    )
+    .expect("shared");
+    std::fs::write(root.join("src/theme.ts"), "export const theme = 'theme';\n").expect("theme");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "exact aliases, wildcard aliases, fallback targets, and directory indexes should resolve: {:?}",
+        results.unresolved_imports
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    for expected_used in [
+        "src/env.ts",
+        "src/features/home.ts",
+        "src/features/nested/index.ts",
+        "src/theme.ts",
+        "src/api.ts",
+        "src/catchall/shared.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path == expected_used),
+            "{expected_used} should stay reachable through local tsconfig paths: {unused_files:?}"
+        );
+    }
+}
+
+#[test]
+fn missing_extends_resolves_aliases_for_all_import_edge_shapes() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/lib")).expect("lib dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-alias-edge-shapes",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@lib/*": ["src/lib/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { staticValue } from "@lib/static";
+export { namedValue } from "@lib/named";
+export * from "@lib/star";
+
+const { requiredValue } = require("@lib/required");
+void import("@lib/dynamic");
+
+export const app = [staticValue, requiredValue].join("-");
+"#,
+    )
+    .expect("index");
+    for (name, source) in [
+        ("static.ts", "export const staticValue = 'static';\n"),
+        ("named.ts", "export const namedValue = 'named';\n"),
+        ("star.ts", "export const starValue = 'star';\n"),
+        ("required.ts", "export const requiredValue = 'required';\n"),
+        ("dynamic.ts", "export const dynamicValue = 'dynamic';\n"),
+    ] {
+        std::fs::write(root.join("src/lib").join(name), source).expect("lib file");
+    }
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "all alias edge shapes should resolve under a broken extends chain: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    for expected_used in [
+        "src/lib/static.ts",
+        "src/lib/named.ts",
+        "src/lib/star.ts",
+        "src/lib/required.ts",
+        "src/lib/dynamic.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path == expected_used),
+            "{expected_used} should stay reachable through alias fallback: {unused_files:?}"
+        );
+    }
+}
+
+#[test]
+fn missing_extends_prefers_local_alias_over_node_modules_fallback() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/shared")).expect("shared src dir");
+    std::fs::create_dir_all(root.join("node_modules/shared")).expect("shared package dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-alias-over-package",
+            "private": true,
+            "main": "src/index.ts",
+            "dependencies": {
+                "shared": "1.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "shared/*": ["src/shared/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { value } from "shared/value";
+export const app = value;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/shared/value.ts"),
+        "export const value = 'local';\n",
+    )
+    .expect("local shared value");
+    std::fs::write(
+        root.join("node_modules/shared/value.js"),
+        "exports.value = 'package';\n",
+    )
+    .expect("package shared value");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "local tsconfig alias should resolve before resolver-less node_modules fallback: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("src/shared/value.ts")),
+        "local alias target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_keeps_local_base_url_without_paths() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/utils")).expect("utils dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-base-url",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": "src"
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { date } from "utils/date";
+export const app = date;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/utils/date.ts"),
+        "export const date = 'date';\n",
+    )
+    .expect("date");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted_names.contains(&"utils"),
+        "local baseUrl imports should not become unlisted dependencies: {unlisted_names:?}"
+    );
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "local baseUrl imports should resolve under a broken extends chain: {:?}",
+        results.unresolved_imports
+    );
+}
+
+#[test]
+fn missing_extends_prefers_specific_tsconfig_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/components")).expect("components dir");
+    std::fs::create_dir_all(root.join("src/wild/components")).expect("wild dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-specific-paths",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["src/wild/*"],
+                    "@/components/*": ["src/components/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { Button } from "@/components/Button";
+export const app = Button;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/components/Button.ts"),
+        "export const Button = 'specific';\n",
+    )
+    .expect("specific");
+    std::fs::write(
+        root.join("src/wild/components/Button.ts"),
+        "export const Button = 'wild';\n",
+    )
+    .expect("wild");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "src/components/Button.ts"),
+        "specific alias target should be reachable: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("src/wild/components/Button.ts")),
+        "broad alias target should not shadow the specific alias: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_keeps_parent_tsconfig_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("apps/mobile/src")).expect("app dir");
+    std::fs::create_dir_all(root.join("shared")).expect("shared dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-parent-paths",
+            "private": true,
+            "main": "apps/mobile/src/App.tsx",
+            "dependencies": {
+                "react-native": "0.80.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.base.json"),
+        r#"{
+            "extends": "./node_modules/@react-native/typescript-config/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@shared/*": ["shared/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("base tsconfig");
+    std::fs::write(
+        root.join("apps/mobile/tsconfig.json"),
+        r#"{
+            "extends": "../../tsconfig.base.json"
+        }"#,
+    )
+    .expect("app tsconfig");
+    std::fs::write(
+        root.join("apps/mobile/src/App.tsx"),
+        r#"import { theme } from "@shared/theme";
+export const app = theme;
+"#,
+    )
+    .expect("app");
+    std::fs::write(
+        root.join("shared/theme.ts"),
+        "export const theme = 'theme';\n",
+    )
+    .expect("theme");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "parent tsconfig path aliases should resolve under a broken extends chain: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files.iter().any(|path| path == "shared/theme.ts"),
+        "parent alias target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_keeps_referenced_tsconfig_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/utils")).expect("utils dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-referenced-paths",
+            "private": true,
+            "main": "src/main.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "files": [],
+            "references": [
+                { "path": "./tsconfig.app.json" },
+                { "path": "./tsconfig.spec.json" }
+            ]
+        }"#,
+    )
+    .expect("solution tsconfig");
+    std::fs::write(
+        root.join("tsconfig.app.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["src/*"]
+                }
+            },
+            "include": ["src/**/*.ts"]
+        }"#,
+    )
+    .expect("app tsconfig");
+    std::fs::write(
+        root.join("tsconfig.spec.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["spec/*"]
+                }
+            },
+            "include": ["src/**/*.spec.ts"]
+        }"#,
+    )
+    .expect("spec tsconfig");
+    std::fs::write(
+        root.join("src/main.ts"),
+        r#"import { message } from "@/utils/message";
+export const app = message;
+"#,
+    )
+    .expect("main");
+    std::fs::write(
+        root.join("src/utils/message.ts"),
+        "export const message = 'hello';\n",
+    )
+    .expect("message");
+    std::fs::create_dir_all(root.join("spec/utils")).expect("spec utils dir");
+    std::fs::write(
+        root.join("spec/utils/message.ts"),
+        "export const message = 'spec';\n",
+    )
+    .expect("spec message");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "referenced tsconfig path aliases should survive a broken extends chain: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "src/utils/message.ts"),
+        "app reference alias target should stay reachable: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("spec/utils/message.ts")),
+        "non-matching referenced tsconfig should not shadow the app alias: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_honors_child_path_alias_overrides() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/child")).expect("child dir");
+    std::fs::create_dir_all(root.join("src/base")).expect("base dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-child-paths",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.base.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@base/*": ["src/base/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("base tsconfig");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./tsconfig.base.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@child/*": ["src/child/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { child } from "@child/value";
+import { base } from "@base/value";
+
+export const app = child + base;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/child/value.ts"),
+        "export const child = 'child';\n",
+    )
+    .expect("child value");
+    std::fs::write(
+        root.join("src/base/value.ts"),
+        "export const base = 'base';\n",
+    )
+    .expect("base value");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"@child/value"),
+        "child paths should resolve: {unresolved_specifiers:?}"
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("src/child/value.ts")),
+        "child alias target should stay reachable: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("src/base/value.ts")),
+        "parent alias target should not be marked used by an overridden paths map: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_keeps_inherited_root_dirs_resolution() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/features")).expect("src dir");
+    std::fs::create_dir_all(root.join("generated/features")).expect("generated dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-inherited-root-dirs",
+            "private": true,
+            "main": "src/features/view.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.base.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "rootDirs": ["src", "generated"]
+            }
+        }"#,
+    )
+    .expect("base tsconfig");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./tsconfig.base.json",
+            "compilerOptions": {
+                "strict": true
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/features/view.ts"),
+        r#"import { generated } from "./view.generated";
+export const view = generated;
+"#,
+    )
+    .expect("view");
+    std::fs::write(
+        root.join("generated/features/view.generated.ts"),
+        "export const generated = 'generated';\n",
+    )
+    .expect("generated");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "inherited rootDirs should resolve under a broken extends chain: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("generated/features/view.generated.ts")),
+        "inherited rootDirs target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_package_extends_keeps_inherited_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("node_modules/@repo/tsconfig"))
+        .expect("package tsconfig dir");
+    std::fs::create_dir_all(root.join("shared")).expect("shared dir");
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-package-extends",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("node_modules/@repo/tsconfig/base.json"),
+        r#"{
+            "extends": "./missing.json",
+            "compilerOptions": {
+                "baseUrl": "../../..",
+                "paths": {
+                    "@shared/*": ["shared/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("package base tsconfig");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "@repo/tsconfig/base"
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { value } from "@shared/value";
+export const app = value;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("shared/value.ts"),
+        "export const value = 'shared';\n",
+    )
+    .expect("shared value");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "package-style tsconfig extends should be followed for local fallback: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files.iter().any(|path| path == "shared/value.ts"),
+        "package-extended alias target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_array_keeps_local_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/lib")).expect("lib dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-array",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.paths.json"),
+        r#"{
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@lib/*": ["src/lib/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("paths tsconfig");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": [
+                "./tsconfig.paths.json",
+                "./node_modules/@scope/missing/tsconfig.json"
+            ]
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { value } from "@lib/value";
+export const app = value;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/lib/value.ts"),
+        "export const value = 'lib';\n",
+    )
+    .expect("lib value");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "extends arrays should preserve local path aliases when another base is missing: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files.iter().any(|path| path == "src/lib/value.ts"),
+        "extends-array alias target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_resolves_path_alias_package_directory_targets() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("packages/pkg/src")).expect("pkg dir");
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-package-dir-target",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@pkg": ["packages/pkg"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { pkg } from "@pkg";
+export const app = pkg;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("packages/pkg/package.json"),
+        r#"{
+            "name": "@local/pkg",
+            "module": "src/index.ts"
+        }"#,
+    )
+    .expect("pkg package json");
+    std::fs::write(
+        root.join("packages/pkg/src/index.ts"),
+        "export const pkg = 'pkg';\n",
+    )
+    .expect("pkg index");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "path alias directory package targets should resolve: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("packages/pkg/src/index.ts")),
+        "package directory alias target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn missing_extends_keeps_local_root_dirs_resolution() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/features")).expect("src dir");
+    std::fs::create_dir_all(root.join("generated/features")).expect("generated dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-root-dirs",
+            "private": true,
+            "main": "src/features/view.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "rootDirs": ["src", "generated"]
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/features/view.ts"),
+        r#"import { generated } from "./view.generated";
+export const view = generated;
+"#,
+    )
+    .expect("view");
+    std::fs::write(
+        root.join("generated/features/view.generated.ts"),
+        "export const generated = 'generated';\n",
+    )
+    .expect("generated");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "rootDirs relative imports should resolve under a broken extends chain: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path.ends_with("generated/features/view.generated.ts")),
+        "rootDirs target should stay reachable: {unused_files:?}"
     );
 }
 
