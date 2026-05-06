@@ -596,11 +596,11 @@ fn compute_base_snapshot(
         ));
     };
     let base_root = base_analysis_root(opts.root, worktree.path());
+    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
     let base_config_path = opts
         .config_path
         .as_ref()
-        .filter(|path| path.is_relative())
-        .map(|path| base_root.join(path));
+        .map(|path| base_config_path(opts.root, &current_dir, worktree.path(), path));
     let config_path = if base_config_path.is_some() {
         &base_config_path
     } else {
@@ -679,6 +679,27 @@ fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf
         .unwrap_or_else(|_| current_root.to_path_buf());
     current_root.strip_prefix(git_root).map_or_else(
         |_| base_worktree_root.to_path_buf(),
+        |relative| base_worktree_root.join(relative),
+    )
+}
+
+fn base_config_path(
+    current_root: &Path,
+    current_dir: &Path,
+    base_worktree_root: &Path,
+    config_path: &Path,
+) -> PathBuf {
+    let Some(git_root) = git_toplevel(current_root) else {
+        return config_path.to_path_buf();
+    };
+    let absolute = if config_path.is_absolute() {
+        config_path.to_path_buf()
+    } else {
+        current_dir.join(config_path)
+    };
+    let absolute = absolute.canonicalize().unwrap_or(absolute);
+    absolute.strip_prefix(git_root).map_or_else(
+        |_| config_path.to_path_buf(),
         |relative| base_worktree_root.join(relative),
     )
 }
@@ -2690,6 +2711,64 @@ mod tests {
         assert_eq!(
             base_analysis_root(&app_root, &base_worktree),
             base_worktree.join("apps/mobile")
+        );
+    }
+
+    #[test]
+    fn base_config_path_maps_repo_config_from_current_cwd() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = tmp.path().join("repo");
+        let app_root = repo.join("apps/mobile");
+        let base_worktree = tmp.path().join("base-worktree");
+        fs::create_dir_all(&app_root).expect("app root should be created");
+        fs::create_dir_all(&base_worktree).expect("base worktree should be created");
+        fs::write(repo.join(".fallowrc.json"), "{}").expect("config should be written");
+        git(&repo, &["init", "-b", "main"]);
+
+        assert_eq!(
+            base_config_path(
+                &app_root,
+                &repo,
+                &base_worktree,
+                Path::new(".fallowrc.json")
+            ),
+            base_worktree.join(".fallowrc.json")
+        );
+    }
+
+    #[test]
+    fn base_config_path_maps_absolute_repo_config() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = tmp.path().join("repo");
+        let app_root = repo.join("apps/mobile");
+        let base_worktree = tmp.path().join("base-worktree");
+        fs::create_dir_all(&app_root).expect("app root should be created");
+        fs::create_dir_all(&base_worktree).expect("base worktree should be created");
+        let config = repo.join(".fallowrc.json");
+        fs::write(&config, "{}").expect("config should be written");
+        git(&repo, &["init", "-b", "main"]);
+
+        assert_eq!(
+            base_config_path(&app_root, &repo, &base_worktree, &config),
+            base_worktree.join(".fallowrc.json")
+        );
+    }
+
+    #[test]
+    fn base_config_path_preserves_external_config() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = tmp.path().join("repo");
+        let app_root = repo.join("apps/mobile");
+        let base_worktree = tmp.path().join("base-worktree");
+        let external = tmp.path().join("external.json");
+        fs::create_dir_all(&app_root).expect("app root should be created");
+        fs::create_dir_all(&base_worktree).expect("base worktree should be created");
+        fs::write(&external, "{}").expect("external config should be written");
+        git(&repo, &["init", "-b", "main"]);
+
+        assert_eq!(
+            base_config_path(&app_root, &repo, &base_worktree, &external),
+            external
         );
     }
 
