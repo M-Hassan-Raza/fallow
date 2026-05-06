@@ -1,10 +1,10 @@
 //! Main resolution engine: creates the oxc_resolver instance and resolves individual specifiers.
 
-use std::fs::File;
-use std::io::BufReader;
+use std::ffi::OsString;
+use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use json_comments::StripComments;
 use oxc_resolver::{Resolution, ResolveError, ResolveOptions, Resolver};
 use serde_json::Value;
 
@@ -163,7 +163,128 @@ fn nearest_tsconfig_path(root: &Path, from_file: &Path) -> Option<PathBuf> {
     }
 }
 
+fn local_tsconfig_chain(root: &Path, from_file: &Path) -> Vec<PathBuf> {
+    let Some(first) = nearest_tsconfig_path(root, from_file) else {
+        return Vec::new();
+    };
+    let mut chain = Vec::new();
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut current = first;
+    loop {
+        if !seen.insert(current.clone()) {
+            break;
+        }
+        let Some(json) = read_tsconfig_json(&current) else {
+            break;
+        };
+        chain.push(current.clone());
+        let Some(extends) = json.get("extends").and_then(Value::as_str) else {
+            break;
+        };
+        let next = resolve_tsconfig_extends_path(current.parent().unwrap_or(root), extends);
+        if !next.is_file() {
+            break;
+        }
+        current = next;
+    }
+    chain
+}
+
+fn resolve_tsconfig_extends_path(base_dir: &Path, extends: &str) -> PathBuf {
+    let path = base_dir.join(extends);
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext == "json" || ext == "jsonc")
+    {
+        path
+    } else {
+        let mut with_json = OsString::from(path.as_os_str());
+        with_json.push(".json");
+        PathBuf::from(with_json)
+    }
+}
+
+fn read_tsconfig_json(path: &Path) -> Option<Value> {
+    read_json_file(path)
+}
+
+fn read_json_file(path: &Path) -> Option<Value> {
+    let content = fs::read_to_string(path).ok()?;
+    if let Ok(json) = serde_json::from_str::<Value>(&content) {
+        return Some(json);
+    }
+    let mut stripped = String::new();
+    json_comments::StripComments::new(content.as_bytes())
+        .read_to_string(&mut stripped)
+        .ok()?;
+    serde_json::from_str(&stripped)
+        .or_else(|_| serde_json::from_str(&strip_trailing_commas(&stripped)))
+        .ok()
+}
+
+fn strip_trailing_commas(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let bytes = input.as_bytes();
+    let mut i = 0;
+    let mut last_emit = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if b == b'\\' {
+                escaped = true;
+            } else if b == b'"' {
+                in_string = false;
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'"' {
+            in_string = true;
+            i += 1;
+            continue;
+        }
+        if b == b',' {
+            let mut j = i + 1;
+            while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                j += 1;
+            }
+            if j < bytes.len()
+                && (bytes[j] == b'}' || bytes[j] == b']')
+                && comma_follows_json_value(bytes, i)
+            {
+                out.push_str(&input[last_emit..i]);
+                last_emit = i + 1;
+            }
+        }
+        i += 1;
+    }
+
+    out.push_str(&input[last_emit..]);
+    out
+}
+
+fn comma_follows_json_value(bytes: &[u8], comma_index: usize) -> bool {
+    let Some(prev) = bytes[..comma_index]
+        .iter()
+        .rev()
+        .copied()
+        .find(|b| !b.is_ascii_whitespace())
+    else {
+        return false;
+    };
+    matches!(prev, b'"' | b'}' | b']' | b'0'..=b'9' | b'e' | b'l')
+}
+
 fn path_alias_pattern_matches(pattern: &str, specifier: &str) -> bool {
+    if pattern == "*" {
+        return false;
+    }
     path_alias_capture(pattern, specifier).is_some()
 }
 
@@ -179,32 +300,28 @@ fn path_alias_capture<'a>(pattern: &str, specifier: &'a str) -> Option<&'a str> 
                 None
             }
         }
-        Some(_) => None,
+        Some(_) => Some(specifier),
         None => (specifier == pattern).then_some(""),
     }
 }
 
 fn matches_nearest_tsconfig_path_alias(root: &Path, from_file: &Path, specifier: &str) -> bool {
-    let Some(tsconfig_path) = nearest_tsconfig_path(root, from_file) else {
-        return false;
-    };
-    let Ok(file) = File::open(&tsconfig_path) else {
-        return false;
-    };
-    let reader = StripComments::new(BufReader::new(file));
-    let Ok(json) = serde_json::from_reader::<_, Value>(reader) else {
-        return false;
-    };
-    let Some(paths) = json
-        .get("compilerOptions")
-        .and_then(|compiler_options| compiler_options.get("paths"))
-        .and_then(Value::as_object)
-    else {
-        return false;
-    };
-    paths
-        .keys()
-        .any(|pattern| path_alias_pattern_matches(pattern, specifier))
+    local_tsconfig_chain(root, from_file)
+        .iter()
+        .any(|tsconfig_path| {
+            read_tsconfig_json(tsconfig_path)
+                .and_then(|json| {
+                    json.get("compilerOptions")
+                        .and_then(|compiler_options| compiler_options.get("paths"))
+                        .and_then(Value::as_object)
+                        .map(|paths| {
+                            paths
+                                .keys()
+                                .any(|pattern| path_alias_pattern_matches(pattern, specifier))
+                        })
+                })
+                .unwrap_or(false)
+        })
 }
 
 fn try_nearest_tsconfig_path_alias(
@@ -212,10 +329,30 @@ fn try_nearest_tsconfig_path_alias(
     from_file: &Path,
     specifier: &str,
 ) -> Option<ResolveResult> {
-    let tsconfig_path = nearest_tsconfig_path(ctx.root, from_file)?;
-    let file = File::open(&tsconfig_path).ok()?;
-    let reader = StripComments::new(BufReader::new(file));
-    let json = serde_json::from_reader::<_, Value>(reader).ok()?;
+    for tsconfig_path in local_tsconfig_chain(ctx.root, from_file) {
+        let json = read_tsconfig_json(&tsconfig_path)?;
+        if let Some(result) = try_tsconfig_paths_from_config(ctx, &tsconfig_path, &json, specifier)
+        {
+            return Some(result);
+        }
+    }
+    for tsconfig_path in local_tsconfig_chain(ctx.root, from_file) {
+        let json = read_tsconfig_json(&tsconfig_path)?;
+        if let Some(result) =
+            try_tsconfig_base_url_from_config(ctx, &tsconfig_path, &json, specifier)
+        {
+            return Some(result);
+        }
+    }
+    None
+}
+
+fn try_tsconfig_paths_from_config(
+    ctx: &ResolveContext<'_>,
+    tsconfig_path: &Path,
+    json: &Value,
+    specifier: &str,
+) -> Option<ResolveResult> {
     let compiler_options = json.get("compilerOptions")?;
     let paths = compiler_options.get("paths")?.as_object()?;
     let tsconfig_dir = tsconfig_path.parent().unwrap_or(ctx.root);
@@ -234,10 +371,16 @@ fn try_nearest_tsconfig_path_alias(
             },
         );
 
-    for (pattern, targets) in paths {
-        let Some(capture) = path_alias_capture(pattern, specifier) else {
-            continue;
-        };
+    let mut matches: Vec<_> = paths
+        .iter()
+        .filter_map(|(pattern, targets)| {
+            path_alias_capture(pattern, specifier)
+                .map(|capture| (pattern.as_str(), capture, targets))
+        })
+        .collect();
+    matches.sort_by_key(|(pattern, _, _)| std::cmp::Reverse(path_alias_specificity(pattern)));
+
+    for (_, capture, targets) in matches {
         let Some(targets) = targets.as_array() else {
             continue;
         };
@@ -261,6 +404,34 @@ fn try_nearest_tsconfig_path_alias(
     None
 }
 
+fn path_alias_specificity(pattern: &str) -> usize {
+    match pattern.split_once('*') {
+        Some((prefix, suffix)) => prefix.len() + suffix.len(),
+        None => usize::MAX,
+    }
+}
+
+fn try_tsconfig_base_url_from_config(
+    ctx: &ResolveContext<'_>,
+    tsconfig_path: &Path,
+    json: &Value,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if specifier.starts_with('.') || Path::new(specifier).is_absolute() {
+        return None;
+    }
+    let compiler_options = json.get("compilerOptions")?;
+    let base_url = compiler_options.get("baseUrl")?.as_str()?;
+    let tsconfig_dir = tsconfig_path.parent().unwrap_or(ctx.root);
+    let base_url = Path::new(base_url);
+    let base_dir = if base_url.is_absolute() {
+        base_url.to_path_buf()
+    } else {
+        tsconfig_dir.join(base_url)
+    };
+    try_tsconfig_alias_target(ctx, &base_dir.join(specifier))
+}
+
 fn try_tsconfig_alias_target(ctx: &ResolveContext<'_>, target: &Path) -> Option<ResolveResult> {
     if let Some(result) = resolve_tsconfig_alias_candidate(ctx, target) {
         return Some(result);
@@ -270,14 +441,21 @@ fn try_tsconfig_alias_target(ctx: &ResolveContext<'_>, target: &Path) -> Option<
         return Some(result);
     }
 
-    if target.extension().is_none() {
+    if let Some(result) = try_tsconfig_alias_directory(ctx, target) {
+        return Some(result);
+    }
+
+    if should_probe_extensions(ctx, target) {
         for ext in ctx.extensions {
-            let ext = ext.trim_start_matches('.');
-            if let Some(result) = resolve_tsconfig_alias_candidate(ctx, &target.with_extension(ext))
+            if let Some(result) =
+                resolve_tsconfig_alias_candidate(ctx, &with_appended_extension(target, ext))
             {
                 return Some(result);
             }
         }
+    }
+
+    if target.extension().is_none() {
         for ext in ctx.extensions {
             let index = target.join(format!("index{ext}"));
             if let Some(result) = resolve_tsconfig_alias_candidate(ctx, &index) {
@@ -287,6 +465,42 @@ fn try_tsconfig_alias_target(ctx: &ResolveContext<'_>, target: &Path) -> Option<
     }
 
     None
+}
+
+fn should_probe_extensions(ctx: &ResolveContext<'_>, target: &Path) -> bool {
+    target
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_none_or(|ext| {
+            !ctx.extensions
+                .iter()
+                .any(|known| known.trim_start_matches('.') == ext)
+        })
+}
+
+fn with_appended_extension(path: &Path, extension: &str) -> PathBuf {
+    let mut value = OsString::from(path.as_os_str());
+    value.push(extension);
+    PathBuf::from(value)
+}
+
+fn try_tsconfig_alias_directory(ctx: &ResolveContext<'_>, target: &Path) -> Option<ResolveResult> {
+    if !target.is_dir() {
+        return None;
+    }
+    if let Some(package_json) = read_json_file(&target.join("package.json")) {
+        for field in ["module", "main"] {
+            if let Some(entry) = package_json.get(field).and_then(Value::as_str)
+                && let Some(result) = try_tsconfig_alias_target(ctx, &target.join(entry))
+            {
+                return Some(result);
+            }
+        }
+    }
+    let parent = target.parent()?;
+    let name = target.file_name()?.to_str()?;
+    let resolved = ctx.resolver.resolve(parent, name).ok()?;
+    resolve_tsconfig_alias_candidate(ctx, resolved.path())
 }
 
 fn try_tsconfig_alias_extension_alias(
@@ -802,6 +1016,12 @@ pub(super) fn resolve_specifier(
             }
 
             if used_tsconfig_fallback
+                && let Some(result) = try_tsconfig_root_dirs(ctx, from_file, specifier)
+            {
+                return result;
+            }
+
+            if used_tsconfig_fallback
                 && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
             {
                 return result;
@@ -846,17 +1066,58 @@ pub(super) fn resolve_specifier(
     }
 }
 
+fn try_tsconfig_root_dirs(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    if !specifier.starts_with('.') {
+        return None;
+    }
+    for tsconfig_path in local_tsconfig_chain(ctx.root, from_file) {
+        let json = read_tsconfig_json(&tsconfig_path)?;
+        let compiler_options = json.get("compilerOptions")?;
+        let root_dirs = compiler_options.get("rootDirs")?.as_array()?;
+        let tsconfig_dir = tsconfig_path.parent().unwrap_or(ctx.root);
+        let roots: Vec<PathBuf> = root_dirs
+            .iter()
+            .filter_map(Value::as_str)
+            .map(|root_dir| {
+                let root_dir = Path::new(root_dir);
+                if root_dir.is_absolute() {
+                    root_dir.to_path_buf()
+                } else {
+                    tsconfig_dir.join(root_dir)
+                }
+            })
+            .collect();
+        let from_dir = from_file.parent().unwrap_or(from_file);
+        for root in &roots {
+            let Ok(relative_dir) = from_dir.strip_prefix(root) else {
+                continue;
+            };
+            for candidate_root in &roots {
+                let candidate = candidate_root.join(relative_dir).join(specifier);
+                if let Some(result) = try_tsconfig_alias_target(ctx, &candidate) {
+                    return Some(result);
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     use oxc_resolver::{JSONError, ResolveError};
     use tempfile::tempdir;
 
     use super::{
         is_tsconfig_error, matches_nearest_tsconfig_path_alias, path_alias_capture,
-        path_alias_pattern_matches,
+        path_alias_pattern_matches, resolve_tsconfig_extends_path,
     };
 
     #[test]
@@ -945,6 +1206,24 @@ mod tests {
     #[test]
     fn wildcard_only_tsconfig_path_alias_pattern_does_not_match_everything() {
         assert!(!path_alias_pattern_matches("*", "@gen/foo"));
+    }
+
+    #[test]
+    fn wildcard_only_tsconfig_path_alias_capture_can_resolve_targets() {
+        assert_eq!(path_alias_capture("*", "shared"), Some("shared"));
+    }
+
+    #[test]
+    fn tsconfig_extends_resolution_preserves_explicit_extension() {
+        let base = Path::new("/repo/apps/mobile");
+        assert_eq!(
+            resolve_tsconfig_extends_path(base, "../../tsconfig.base.jsonc"),
+            PathBuf::from("/repo/apps/mobile/../../tsconfig.base.jsonc")
+        );
+        assert_eq!(
+            resolve_tsconfig_extends_path(base, "../../tsconfig.base"),
+            PathBuf::from("/repo/apps/mobile/../../tsconfig.base.json")
+        );
     }
 
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
