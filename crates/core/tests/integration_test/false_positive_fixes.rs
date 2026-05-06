@@ -313,6 +313,149 @@ export const app = Button;
 }
 
 #[test]
+fn missing_expo_extends_keeps_local_tsconfig_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("app/screens")).expect("app dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "expo-missing-extends",
+            "private": true,
+            "main": "app/index.tsx",
+            "dependencies": {
+                "expo": "53.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/expo/tsconfig.base",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@app/*": ["app/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("app/index.tsx"),
+        r#"import { Screen } from "@app/screens/Screen";
+export const app = Screen;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("app/screens/Screen.native.tsx"),
+        "export const Screen = 'native';\n",
+    )
+    .expect("native screen");
+    std::fs::write(
+        root.join("app/screens/Screen.tsx"),
+        "export const Screen = 'generic';\n",
+    )
+    .expect("generic screen");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "Expo projects should get the same broken-extends path alias fallback as React Native: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "app/screens/Screen.native.tsx"),
+        "Expo platform alias target should stay reachable: {unused_files:?}"
+    );
+}
+
+#[test]
+fn tsconfig_alias_fallback_does_not_probe_platform_files_without_mobile_plugins() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/components")).expect("components dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "web-missing-extends",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["src/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { Button } from "@/components/Button";
+export const app = Button;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/components/Button.web.ts"),
+        "export const Button = 'web';\n",
+    )
+    .expect("web button");
+    std::fs::write(
+        root.join("src/components/Button.ts"),
+        "export const Button = 'generic';\n",
+    )
+    .expect("generic button");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "plain TS projects should still resolve the alias: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "src/components/Button.ts"),
+        "generic target should stay reachable without mobile plugins: {unused_files:?}"
+    );
+    assert!(
+        unused_files
+            .iter()
+            .any(|path| path.ends_with("src/components/Button.web.ts")),
+        "platform-specific files should not shadow generic files without React Native or Expo: {unused_files:?}"
+    );
+}
+
+#[test]
 fn missing_extends_keeps_local_tsconfig_paths_without_base_url() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();
