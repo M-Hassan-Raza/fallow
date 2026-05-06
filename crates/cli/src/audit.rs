@@ -596,19 +596,13 @@ fn compute_base_snapshot(
         ));
     };
     let base_root = base_analysis_root(opts.root, worktree.path());
-    let current_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let base_config_path = opts
+    let current_config_path = opts
         .config_path
-        .as_ref()
-        .map(|path| base_config_path(opts.root, &current_dir, worktree.path(), path));
-    let config_path = if base_config_path.is_some() {
-        &base_config_path
-    } else {
-        opts.config_path
-    };
+        .clone()
+        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
     let base_opts = AuditOptions {
         root: &base_root,
-        config_path,
+        config_path: &current_config_path,
         output: opts.output,
         no_cache: opts.no_cache,
         threads: opts.threads,
@@ -679,27 +673,6 @@ fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf
         .unwrap_or_else(|_| current_root.to_path_buf());
     current_root.strip_prefix(git_root).map_or_else(
         |_| base_worktree_root.to_path_buf(),
-        |relative| base_worktree_root.join(relative),
-    )
-}
-
-fn base_config_path(
-    current_root: &Path,
-    current_dir: &Path,
-    base_worktree_root: &Path,
-    config_path: &Path,
-) -> PathBuf {
-    let Some(git_root) = git_toplevel(current_root) else {
-        return config_path.to_path_buf();
-    };
-    let absolute = if config_path.is_absolute() {
-        config_path.to_path_buf()
-    } else {
-        current_dir.join(config_path)
-    };
-    let absolute = absolute.canonicalize().unwrap_or(absolute);
-    absolute.strip_prefix(git_root).map_or_else(
-        |_| config_path.to_path_buf(),
         |relative| base_worktree_root.join(relative),
     )
 }
@@ -2715,64 +2688,6 @@ mod tests {
     }
 
     #[test]
-    fn base_config_path_maps_repo_config_from_current_cwd() {
-        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-        let repo = tmp.path().join("repo");
-        let app_root = repo.join("apps/mobile");
-        let base_worktree = tmp.path().join("base-worktree");
-        fs::create_dir_all(&app_root).expect("app root should be created");
-        fs::create_dir_all(&base_worktree).expect("base worktree should be created");
-        fs::write(repo.join(".fallowrc.json"), "{}").expect("config should be written");
-        git(&repo, &["init", "-b", "main"]);
-
-        assert_eq!(
-            base_config_path(
-                &app_root,
-                &repo,
-                &base_worktree,
-                Path::new(".fallowrc.json")
-            ),
-            base_worktree.join(".fallowrc.json")
-        );
-    }
-
-    #[test]
-    fn base_config_path_maps_absolute_repo_config() {
-        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-        let repo = tmp.path().join("repo");
-        let app_root = repo.join("apps/mobile");
-        let base_worktree = tmp.path().join("base-worktree");
-        fs::create_dir_all(&app_root).expect("app root should be created");
-        fs::create_dir_all(&base_worktree).expect("base worktree should be created");
-        let config = repo.join(".fallowrc.json");
-        fs::write(&config, "{}").expect("config should be written");
-        git(&repo, &["init", "-b", "main"]);
-
-        assert_eq!(
-            base_config_path(&app_root, &repo, &base_worktree, &config),
-            base_worktree.join(".fallowrc.json")
-        );
-    }
-
-    #[test]
-    fn base_config_path_preserves_external_config() {
-        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
-        let repo = tmp.path().join("repo");
-        let app_root = repo.join("apps/mobile");
-        let base_worktree = tmp.path().join("base-worktree");
-        let external = tmp.path().join("external.json");
-        fs::create_dir_all(&app_root).expect("app root should be created");
-        fs::create_dir_all(&base_worktree).expect("base worktree should be created");
-        fs::write(&external, "{}").expect("external config should be written");
-        git(&repo, &["init", "-b", "main"]);
-
-        assert_eq!(
-            base_config_path(&app_root, &repo, &base_worktree, &external),
-            external
-        );
-    }
-
-    #[test]
     fn audit_base_snapshot_cache_payload_roundtrips_sets() {
         let key = AuditBaseSnapshotCacheKey {
             hash: 42,
@@ -3579,6 +3494,142 @@ export function App() {
             !base.dead_code.contains("unused-file:src/screens/Home.ts"),
             "subdirectory base audit should keep alias targets reachable: {:?}",
             base.dead_code
+        );
+    }
+
+    #[test]
+    fn audit_base_uses_new_explicit_config_without_hard_failure() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-new-config","main":"src/index.ts"}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(root.join("src/index.ts"), "export const used = 1;\n")
+            .expect("index should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+
+        let explicit_config = root.join(".fallowrc.json");
+        fs::write(&explicit_config, r#"{"rules":{"unused-files":"error"}}"#)
+            .expect("new config should be written");
+        fs::write(root.join("src/index.ts"), "export const used = 2;\n")
+            .expect("index should be modified");
+
+        let config_path = Some(explicit_config);
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute with a new explicit config");
+        assert!(
+            result.base_snapshot.is_some(),
+            "base snapshot should use the current explicit config even when the base commit lacks it"
+        );
+    }
+
+    #[test]
+    fn audit_base_uses_current_discovered_config_for_attribution() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-current-config","main":"src/index.ts","dependencies":{"left-pad":"1.3.0"}}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"off"}}"#,
+        )
+        .expect("base config should be written");
+        fs::write(root.join("src/index.ts"), "export const used = 1;\n")
+            .expect("index should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"error"}}"#,
+        )
+        .expect("current config should be written");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-current-config","main":"src/index.ts","dependencies":{"left-pad":"1.3.1"}}"#,
+        )
+        .expect("package.json should be touched");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        assert_eq!(
+            result.attribution.dead_code_introduced, 0,
+            "enabling a rule should not make pre-existing changed-file findings look introduced: {:?}",
+            result.attribution
+        );
+        assert!(
+            result.attribution.dead_code_inherited > 0,
+            "pre-existing changed-file findings should be classified as inherited: {:?}",
+            result.attribution
         );
     }
 
