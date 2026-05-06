@@ -1458,6 +1458,7 @@ mod tests {
         assert_eq!(path_alias_capture("*", "shared"), Some("shared"));
     }
 
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     #[test]
     fn bare_directory_tsconfig_include_matches_nested_files() {
         let temp = tempdir().expect("temp dir");
@@ -1473,6 +1474,7 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     #[test]
     fn bare_directory_tsconfig_include_does_not_match_sibling_files() {
         let temp = tempdir().expect("temp dir");
