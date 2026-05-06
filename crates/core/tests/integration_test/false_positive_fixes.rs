@@ -227,7 +227,77 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
     );
     assert!(
         unresolved_specifiers.contains(&"@gen/foo"),
-        "@gen/foo should remain unresolved when the tsconfig chain is broken: {unresolved_specifiers:?}"
+        "@gen/foo points outside the analysis root and should remain unresolved when the tsconfig chain is broken: {unresolved_specifiers:?}"
+    );
+}
+
+#[test]
+fn missing_react_native_extends_keeps_local_tsconfig_path_aliases() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/components")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "react-native-missing-extends",
+            "private": true,
+            "main": "src/index.ts",
+            "dependencies": {
+                "react-native": "0.80.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@react-native/typescript-config/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@/*": ["src/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { Button } from "@/components/Button";
+export const app = Button;
+"#,
+    )
+    .expect("index");
+    std::fs::write(
+        root.join("src/components/Button.ts"),
+        "export const Button = 'button';\n",
+    )
+    .expect("button");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"@/components/Button"),
+        "local tsconfig paths should survive a missing React Native base config: {unresolved_specifiers:?}"
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files
+            .iter()
+            .any(|path| path == "src/components/Button.ts"),
+        "path alias target should stay reachable: {unused_files:?}"
     );
 }
 

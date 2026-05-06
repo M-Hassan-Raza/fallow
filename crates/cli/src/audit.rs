@@ -3220,6 +3220,135 @@ mod tests {
     }
 
     #[test]
+    fn audit_base_preserves_tsconfig_paths_when_extends_is_in_untracked_node_modules() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src/screens")).expect("src dir should be created");
+        fs::create_dir_all(root.join("node_modules/@react-native/typescript-config"))
+            .expect("node_modules config dir should be created");
+        fs::write(root.join(".gitignore"), "node_modules/\n").expect("gitignore should be written");
+        fs::write(
+            root.join("package.json"),
+            r#"{
+                "name": "audit-react-native-tsconfig-base",
+                "private": true,
+                "main": "src/App.tsx",
+                "dependencies": {
+                    "react-native": "0.80.0"
+                }
+            }"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{
+                "extends": "./node_modules/@react-native/typescript-config/tsconfig.json",
+                "compilerOptions": {
+                    "baseUrl": ".",
+                    "paths": {
+                        "@/*": ["src/*"]
+                    }
+                },
+                "include": ["src/**/*"]
+            }"#,
+        )
+        .expect("tsconfig should be written");
+        fs::write(
+            root.join("node_modules/@react-native/typescript-config/tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"jsx":"react-jsx"}}"#,
+        )
+        .expect("react native tsconfig should be written");
+        fs::write(
+            root.join("src/App.tsx"),
+            r#"import { homeTitle } from "@/screens/Home";
+
+export function App() {
+  return homeTitle;
+}
+"#,
+        )
+        .expect("app should be written");
+        fs::write(
+            root.join("src/screens/Home.ts"),
+            r#"export const homeTitle = "home";
+"#,
+        )
+        .expect("home should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+        fs::write(
+            root.join("src/App.tsx"),
+            r#"import { homeTitle } from "@/screens/Home";
+
+export function App() {
+  return homeTitle.toUpperCase();
+}
+"#,
+        )
+        .expect("app should be modified");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: true,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let result = execute_audit(&opts).expect("audit should execute");
+        assert!(
+            !result.base_snapshot_skipped,
+            "source diffs should run a real base snapshot"
+        );
+        let base = result
+            .base_snapshot
+            .as_ref()
+            .expect("base snapshot should run");
+        assert!(
+            !base
+                .dead_code
+                .contains("unresolved-import:src/App.tsx:@/screens/Home"),
+            "base audit must keep local @/* tsconfig aliases when extends points into ignored node_modules: {:?}",
+            base.dead_code
+        );
+        assert!(
+            !base.dead_code.contains("unused-file:src/screens/Home.ts"),
+            "alias target should stay reachable in the base worktree: {:?}",
+            base.dead_code
+        );
+        let check = result.check.as_ref().expect("dead-code audit should run");
+        assert!(
+            check.results.unresolved_imports.is_empty(),
+            "HEAD audit should also resolve @/* aliases: {:?}",
+            check.results.unresolved_imports
+        );
+    }
+
+    #[test]
     fn audit_dupes_only_materializes_groups_touching_changed_files() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root_path = tmp
