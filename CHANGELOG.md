@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.66.0] - 2026-05-06
+
+### Added
+
+- **Prisma `generator { provider = "..." }` blocks credit custom-generator npm packages.** The prisma plugin now scans `prisma/schema.prisma`, root-level `schema.prisma`, and the multi-file `prisma/schema/*.prisma` layout for `generator <name> { provider = "<pkg>" }` blocks and credits each non-built-in provider as a referenced dependency, so packages like `prisma-json-types-generator` and `prisma-erd-generator` no longer surface as `unused-dependency`. `datasource` providers (`postgresql`, `mysql`, etc.), the shell-command form (`provider = "node ./gen.js"`), and the relative-path form (`provider = "./local-generator"`) are intentionally skipped; line and block comments are stripped before scanning so commented-out generators do not produce phantom credits. (Closes [#288](https://github.com/fallow-rs/fallow/issues/288))
+- **Custom Prisma schema paths declared in `prisma.config.ts` are honored.** The plugin now reads the static `schema` field from `prisma.config.{ts,mts,cts,js,mjs,cjs}` (or the new `.config/prisma.{ts,...}` Prisma 6 alternate location), resolves the path against the project root, marks the configured schema file or folder as always-used, and recursively scans it for generator providers. Layouts where the schema sits at e.g. `db/schema/` instead of the canonical `prisma/schema/` are now covered without needing `ignoreDependencies`. Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza) for the patch. ([#291](https://github.com/fallow-rs/fallow/pull/291))
+- **VS Code extension: client-side diagnostic mute and dynamic issue types.** Diagnostics can be muted from the editor without round-tripping through `.fallowrc.jsonc`, and the issue-type list shown in the LSP filter is now populated dynamically from the language server instead of a hardcoded enum, so newly-added issue kinds appear without an extension release.
+
+### Changed
+
+- **Plugin discovery skips the filesystem walk for source-extension config patterns.** Patterns like `webpack.config.{ts,js,mjs,cjs}` describe source files that are already in the file index, so re-stat'ing them once per plugin during `discover_config_files` was redundant. Root-anchored patterns whose extensions are all in `SOURCE_EXTENSIONS` and that have no path separator or leading dot are now wrapped with a `**/` prefix and matched against the in-memory file set instead. Production mode (which excludes `*.config.*` from the source walker) preserves the filesystem fallback for those patterns to keep correctness. Measured on a 21,033-file Next.js monorepo: bare `fallow` 9.7s to 3.3s (-66%), `fallow audit --gate all` 11.7s to 5.4s (-54%), plugins stage alone 7.4s to 1.4s (-82%). Smaller projects show no regression.
+- **`fallow audit` caches base-branch snapshots and parallelizes HEAD analyses against base-snapshot computation.** Repeat audit runs on the same base reuse cached dead-code + dupes snapshots, and the worktree analysis runs concurrently with the base snapshot rebuild via rayon, so `audit` finishes closer to the slower of the two halves rather than their sum.
+- **`fallow` (combined mode) runs check and dupes concurrently via `rayon::join`.** The two analysis trees are independent; running them on separate worker pools shaves wall-clock without changing per-stage CPU budget.
+
+### Fixed
+
+- **`fallow dupes` honors `duplicates.{minLines, minTokens, threshold, mode, skipLocal}` from `.fallowrc.jsonc` when the matching CLI flag is omitted.** Standalone `fallow dupes` previously stomped these config values with the clap defaults (`minLines=5`, `minTokens=50`, etc.) because the CLI args were typed as `usize`/`f64` with `default_value` attributes, so "flag omitted" was indistinguishable from "user passed the default". The CLI scalars are now `Option<T>`, an absent flag falls through to the toml value, and `skipLocal` adopts the OR-merge already used for `crossLanguage` / `ignoreImports`. The failure threshold for the gate now sources from the merged config too, so `--threshold` omitted no longer disables a config-declared gate. `audit`, `combined`, and the programmatic API are unaffected (they merge config themselves and pass explicit `Some(...)` values). Thanks [@ryota-murakami](https://github.com/ryota-murakami) for the patch. ([#290](https://github.com/fallow-rs/fallow/pull/290))
+- **`fallow dupes --performance` actually emits the duplication performance panel.** The flag was parsed by clap but never plumbed into `DupesOptions`, so it was silently a no-op even though combined-mode `fallow --performance` already printed a duplication stage in its panel. The standalone command now emits a `Duplication Performance` panel on stderr (human / compact / markdown only; structured formats stay clean).
+
 ## [2.65.0] - 2026-05-05
 
 ### Added
@@ -1988,7 +2007,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.65.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.66.0...HEAD
+[2.66.0]: https://github.com/fallow-rs/fallow/compare/v2.65.0...v2.66.0
 [2.65.0]: https://github.com/fallow-rs/fallow/compare/v2.64.0...v2.65.0
 [2.64.0]: https://github.com/fallow-rs/fallow/compare/v2.63.0...v2.64.0
 [2.63.0]: https://github.com/fallow-rs/fallow/compare/v2.62.0...v2.63.0
