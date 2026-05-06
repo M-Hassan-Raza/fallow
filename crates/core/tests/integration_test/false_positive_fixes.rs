@@ -615,6 +615,84 @@ export const app = [env, feature, nested, theme, api, shared].join("-");
 }
 
 #[test]
+fn missing_extends_resolves_aliases_for_all_import_edge_shapes() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/lib")).expect("lib dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-alias-edge-shapes",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "baseUrl": ".",
+                "paths": {
+                    "@lib/*": ["src/lib/*"]
+                }
+            }
+        }"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r#"import { staticValue } from "@lib/static";
+export { namedValue } from "@lib/named";
+export * from "@lib/star";
+
+const { requiredValue } = require("@lib/required");
+void import("@lib/dynamic");
+
+export const app = [staticValue, requiredValue].join("-");
+"#,
+    )
+    .expect("index");
+    for (name, source) in [
+        ("static.ts", "export const staticValue = 'static';\n"),
+        ("named.ts", "export const namedValue = 'named';\n"),
+        ("star.ts", "export const starValue = 'star';\n"),
+        ("required.ts", "export const requiredValue = 'required';\n"),
+        ("dynamic.ts", "export const dynamicValue = 'dynamic';\n"),
+    ] {
+        std::fs::write(root.join("src/lib").join(name), source).expect("lib file");
+    }
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "all alias edge shapes should resolve under a broken extends chain: {:?}",
+        results.unresolved_imports
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    for expected_used in [
+        "src/lib/static.ts",
+        "src/lib/named.ts",
+        "src/lib/star.ts",
+        "src/lib/required.ts",
+        "src/lib/dynamic.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path == expected_used),
+            "{expected_used} should stay reachable through alias fallback: {unused_files:?}"
+        );
+    }
+}
+
+#[test]
 fn missing_extends_prefers_local_alias_over_node_modules_fallback() {
     let dir = tempfile::tempdir().expect("temp dir");
     let root = dir.path();

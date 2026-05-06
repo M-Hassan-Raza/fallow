@@ -3634,6 +3634,99 @@ export function App() {
     }
 
     #[test]
+    fn audit_base_current_config_attribution_survives_cache_hit() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-current-config-cache","main":"src/index.ts","dependencies":{"left-pad":"1.3.0"}}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"off"}}"#,
+        )
+        .expect("base config should be written");
+        fs::write(root.join("src/index.ts"), "export const used = 1;\n")
+            .expect("index should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"rules":{"unused-dependencies":"error"}}"#,
+        )
+        .expect("current config should be written");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-current-config-cache","main":"src/index.ts","dependencies":{"left-pad":"1.3.1"}}"#,
+        )
+        .expect("package.json should be touched");
+
+        let config_path = None;
+        let opts = AuditOptions {
+            root,
+            config_path: &config_path,
+            output: OutputFormat::Json,
+            no_cache: false,
+            threads: 1,
+            quiet: true,
+            changed_since: Some("HEAD"),
+            production: false,
+            production_dead_code: None,
+            production_health: None,
+            production_dupes: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            explain_skipped: false,
+            performance: false,
+            group_by: None,
+            dead_code_baseline: None,
+            health_baseline: None,
+            dupes_baseline: None,
+            max_crap: None,
+            gate: AuditGate::NewOnly,
+            include_entry_exports: false,
+        };
+
+        let first = execute_audit(&opts).expect("first audit should execute");
+        assert_eq!(
+            first.attribution.dead_code_introduced, 0,
+            "first audit should classify pre-existing findings as inherited: {:?}",
+            first.attribution
+        );
+
+        let changed_files =
+            crate::check::get_changed_files(root, "HEAD").expect("changed files should resolve");
+        let key = audit_base_snapshot_cache_key(&opts, "HEAD", &changed_files)
+            .expect("cache key should compute")
+            .expect("cache key should exist");
+        assert!(
+            load_cached_base_snapshot(&opts, &key).is_some(),
+            "first audit should store a reusable base snapshot"
+        );
+
+        let second = execute_audit(&opts).expect("second audit should execute");
+        assert_eq!(
+            second.attribution.dead_code_introduced, 0,
+            "cache hit should keep current-config attribution stable: {:?}",
+            second.attribution
+        );
+        assert!(
+            second.attribution.dead_code_inherited > 0,
+            "cache hit should preserve inherited base findings: {:?}",
+            second.attribution
+        );
+    }
+
+    #[test]
     fn audit_dupes_only_materializes_groups_touching_changed_files() {
         let tmp = tempfile::TempDir::new().expect("temp dir should be created");
         let root_path = tmp
