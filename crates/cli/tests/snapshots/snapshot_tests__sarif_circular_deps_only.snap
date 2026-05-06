@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
+assertion_line: 1402
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -71,7 +72,7 @@ expression: redact_sarif_version(&json_str)
                 "text": "Dependency listed but never imported"
               },
               "fullDescription": {
-                "text": "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives — use the ignore_dependencies config to suppress."
+                "text": "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives; use the ignore_dependencies config to suppress."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-dependencies",
               "defaultConfiguration": {
@@ -97,7 +98,7 @@ expression: redact_sarif_version(&json_str)
                 "text": "Optional dependency listed but never imported"
               },
               "fullDescription": {
-                "text": "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific — verify they are not needed on any supported platform before removing."
+                "text": "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific; verify they are not needed on any supported platform before removing."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-optionaldependencies",
               "defaultConfiguration": {

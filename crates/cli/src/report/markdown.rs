@@ -579,7 +579,7 @@ fn write_runtime_coverage_section(
         for finding in &production.findings {
             let invocations = finding
                 .invocations
-                .map_or_else(|| "—".to_owned(), |hits| hits.to_string());
+                .map_or_else(|| "-".to_owned(), |hits| hits.to_string());
             let _ = writeln!(
                 out,
                 "| `{}` | `{}`:{} | `{}` | {} | {} | {} |",
@@ -908,8 +908,8 @@ fn write_coverage_gaps_section(
 
 /// Write the hotspots table to the output.
 /// Render the four ownership table cells (bus, top contributor, declared
-/// owner, notes) for the markdown hotspots table. Cells fall back to `—`
-/// (en-dash) when ownership data is missing for an entry.
+/// owner, notes) for the markdown hotspots table. Cells fall back to an
+/// en-dash (U+2013) when ownership data is missing for an entry.
 fn ownership_md_cells(
     ownership: Option<&crate::health_types::OwnershipMetrics>,
 ) -> (String, String, String, String) {
@@ -1064,29 +1064,31 @@ fn write_metric_legend(out: &mut String, report: &crate::health_types::HealthRep
     }
     out.push_str("\n---\n\n<details><summary>Metric definitions</summary>\n\n");
     if has_scores {
-        out.push_str("- **MI** — Maintainability Index (0\u{2013}100, higher is better)\n");
-        out.push_str("- **Fan-in** — files that import this file (blast radius)\n");
-        out.push_str("- **Fan-out** — files this file imports (coupling)\n");
-        out.push_str("- **Dead Code** — % of value exports with zero references\n");
-        out.push_str("- **Density** — cyclomatic complexity / lines of code\n");
+        out.push_str("- **MI**: Maintainability Index (0\u{2013}100, higher is better)\n");
+        out.push_str("- **Fan-in**: files that import this file (blast radius)\n");
+        out.push_str("- **Fan-out**: files this file imports (coupling)\n");
+        out.push_str("- **Dead Code**: % of value exports with zero references\n");
+        out.push_str("- **Density**: cyclomatic complexity / lines of code\n");
     }
     if has_coverage {
         out.push_str(
-            "- **File coverage** — runtime files also reachable from a discovered test root\n",
+            "- **File coverage**: runtime files also reachable from a discovered test root\n",
         );
-        out.push_str("- **Untested export** — export with no reference chain from any test-reachable module\n");
+        out.push_str("- **Untested export**: export with no reference chain from any test-reachable module\n");
     }
     if has_hotspots {
-        out.push_str("- **Score** — churn \u{00d7} complexity (0\u{2013}100, higher = riskier)\n");
-        out.push_str("- **Commits** — commits in the analysis window\n");
-        out.push_str("- **Churn** — total lines added + deleted\n");
-        out.push_str("- **Trend** — accelerating / stable / cooling\n");
+        out.push_str("- **Score**: churn \u{00d7} complexity (0\u{2013}100, higher = riskier)\n");
+        out.push_str("- **Commits**: commits in the analysis window\n");
+        out.push_str("- **Churn**: total lines added + deleted\n");
+        out.push_str("- **Trend**: accelerating / stable / cooling\n");
     }
     if has_targets {
-        out.push_str("- **Efficiency** — priority / effort (higher = better quick-win value, default sort)\n");
-        out.push_str("- **Category** — recommendation type (churn+complexity, high impact, dead code, complexity, coupling, circular dep)\n");
-        out.push_str("- **Effort** — estimated effort (low / medium / high) based on file size, function count, and fan-in\n");
-        out.push_str("- **Confidence** — recommendation reliability (high = deterministic analysis, medium = heuristic, low = git-dependent)\n");
+        out.push_str(
+            "- **Efficiency**: priority / effort (higher = better quick-win value, default sort)\n",
+        );
+        out.push_str("- **Category**: recommendation type (churn+complexity, high impact, dead code, complexity, coupling, circular dep)\n");
+        out.push_str("- **Effort**: estimated effort (low / medium / high) based on file size, function count, and fan-in\n");
+        out.push_str("- **Confidence**: recommendation reliability (high = deterministic analysis, medium = heuristic, low = git-dependent)\n");
     }
     out.push_str(
         "\n[Full metric reference](https://docs.fallow.tools/explanations/metrics)\n\n</details>\n",
@@ -1974,7 +1976,7 @@ mod tests {
         };
         let md = build_health_markdown(&report, &root);
         assert!(md.contains("<details><summary>Metric definitions</summary>"));
-        assert!(md.contains("**MI** \u{2014} Maintainability Index"));
+        assert!(md.contains("**MI**: Maintainability Index"));
         assert!(md.contains("**Fan-in**"));
         assert!(md.contains("Full metric reference"));
     }

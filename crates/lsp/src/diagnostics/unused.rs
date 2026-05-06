@@ -243,7 +243,7 @@ pub fn push_dep_diagnostics(
                 code: Some(NumberOrString::String("test-only-dependency".to_string())),
                 code_description: doc_link("test-only-dependencies"),
                 message: format!(
-                    "Production dependency '{}' is only imported by test files — consider moving to devDependencies",
+                    "Production dependency '{}' is only imported by test files; consider moving to devDependencies",
                     dep.package_name
                 ),
                 ..Default::default()

@@ -52,7 +52,7 @@ pub(crate) use runtime_support::{build_ownership_resolver, load_config, load_con
 #[derive(Parser)]
 #[command(
     name = "fallow",
-    about = "Codebase analyzer for TypeScript/JavaScript — unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
+    about = "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
     version,
     after_help = "When no command is given, runs dead-code + dupes + health together.\nUse --only/--skip to select specific analyses."
 )]
