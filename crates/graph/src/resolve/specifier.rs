@@ -18,7 +18,7 @@ use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };
 use super::react_native::{build_condition_names, build_extensions};
-use super::types::{ResolveContext, ResolveResult};
+use super::types::{ResolveContext, ResolveResult, SOURCE_EXTS};
 
 /// Create an `oxc_resolver` instance with standard configuration.
 ///
@@ -174,11 +174,28 @@ fn path_alias_pattern_matches(pattern: &str, specifier: &str) -> bool {
     }
 }
 
+fn path_alias_capture<'a>(pattern: &str, specifier: &'a str) -> Option<&'a str> {
+    match pattern.split_once('*') {
+        Some((prefix, suffix)) if !prefix.is_empty() || !suffix.is_empty() => {
+            if specifier.starts_with(prefix)
+                && specifier.ends_with(suffix)
+                && specifier.len() >= prefix.len() + suffix.len()
+            {
+                Some(&specifier[prefix.len()..specifier.len() - suffix.len()])
+            } else {
+                None
+            }
+        }
+        Some(_) => None,
+        None => (specifier == pattern).then_some(""),
+    }
+}
+
 fn matches_nearest_tsconfig_path_alias(root: &Path, from_file: &Path, specifier: &str) -> bool {
     let Some(tsconfig_path) = nearest_tsconfig_path(root, from_file) else {
         return false;
     };
-    let Ok(file) = File::open(tsconfig_path) else {
+    let Ok(file) = File::open(&tsconfig_path) else {
         return false;
     };
     let reader = StripComments::new(BufReader::new(file));
@@ -195,6 +212,104 @@ fn matches_nearest_tsconfig_path_alias(root: &Path, from_file: &Path, specifier:
     paths
         .keys()
         .any(|pattern| path_alias_pattern_matches(pattern, specifier))
+}
+
+fn try_nearest_tsconfig_path_alias(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<ResolveResult> {
+    let tsconfig_path = nearest_tsconfig_path(ctx.root, from_file)?;
+    let file = File::open(&tsconfig_path).ok()?;
+    let reader = StripComments::new(BufReader::new(file));
+    let json = serde_json::from_reader::<_, Value>(reader).ok()?;
+    let compiler_options = json.get("compilerOptions")?;
+    let paths = compiler_options.get("paths")?.as_object()?;
+    let base_url = compiler_options.get("baseUrl")?.as_str()?;
+    let tsconfig_dir = tsconfig_path.parent().unwrap_or(ctx.root);
+    let base_url = Path::new(base_url);
+    let base_dir = if base_url.is_absolute() {
+        base_url.to_path_buf()
+    } else {
+        tsconfig_dir.join(base_url)
+    };
+
+    for (pattern, targets) in paths {
+        let Some(capture) = path_alias_capture(pattern, specifier) else {
+            continue;
+        };
+        let Some(targets) = targets.as_array() else {
+            continue;
+        };
+        for target in targets.iter().filter_map(Value::as_str) {
+            let target = if target.contains('*') {
+                target.replacen('*', capture, 1)
+            } else {
+                target.to_string()
+            };
+            let target_path = Path::new(&target);
+            let absolute = if target_path.is_absolute() {
+                target_path.to_path_buf()
+            } else {
+                base_dir.join(target_path)
+            };
+            if let Some(result) = try_tsconfig_alias_target(ctx, &absolute) {
+                return Some(result);
+            }
+        }
+    }
+    None
+}
+
+fn try_tsconfig_alias_target(ctx: &ResolveContext<'_>, target: &Path) -> Option<ResolveResult> {
+    if let Some(result) = resolve_tsconfig_alias_candidate(ctx, target) {
+        return Some(result);
+    }
+
+    if target.extension().is_none() {
+        for ext in SOURCE_EXTS {
+            if let Some(result) = resolve_tsconfig_alias_candidate(ctx, &target.with_extension(ext))
+            {
+                return Some(result);
+            }
+        }
+        for ext in SOURCE_EXTS {
+            let index = target.join(format!("index.{ext}"));
+            if let Some(result) = resolve_tsconfig_alias_candidate(ctx, &index) {
+                return Some(result);
+            }
+        }
+    }
+
+    None
+}
+
+fn resolve_tsconfig_alias_candidate(
+    ctx: &ResolveContext<'_>,
+    candidate: &Path,
+) -> Option<ResolveResult> {
+    if let Some(&file_id) = ctx.raw_path_to_id.get(candidate) {
+        return Some(ResolveResult::InternalModule(file_id));
+    }
+    if let Ok(canonical) = dunce::canonicalize(candidate) {
+        if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
+            return Some(ResolveResult::InternalModule(file_id));
+        }
+        if let Some(fallback) = ctx.canonical_fallback
+            && let Some(file_id) = fallback.get(&canonical)
+        {
+            return Some(ResolveResult::InternalModule(file_id));
+        }
+        if let Some(file_id) = try_source_fallback(&canonical, ctx.path_to_id) {
+            return Some(ResolveResult::InternalModule(file_id));
+        }
+        if let Some(file_id) =
+            try_pnpm_workspace_fallback(&canonical, ctx.path_to_id, ctx.workspace_roots)
+        {
+            return Some(ResolveResult::InternalModule(file_id));
+        }
+    }
+    None
 }
 
 /// Try the SCSS-specific resolution fallbacks in order: local partial,
@@ -663,6 +778,12 @@ pub(super) fn resolve_specifier(
             }
 
             if used_tsconfig_fallback
+                && let Some(result) = try_nearest_tsconfig_path_alias(ctx, from_file, specifier)
+            {
+                return result;
+            }
+
+            if used_tsconfig_fallback
                 && matches_nearest_tsconfig_path_alias(ctx.root, from_file, specifier)
             {
                 // The tsconfig chain was broken, so alias-aware resolution is unavailable.
@@ -710,7 +831,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        is_tsconfig_error, matches_nearest_tsconfig_path_alias, path_alias_pattern_matches,
+        is_tsconfig_error, matches_nearest_tsconfig_path_alias, path_alias_capture,
+        path_alias_pattern_matches,
     };
 
     #[test]
@@ -781,6 +903,19 @@ mod tests {
     fn exact_tsconfig_path_alias_pattern_matches() {
         assert!(path_alias_pattern_matches("$lib", "$lib"));
         assert!(!path_alias_pattern_matches("$lib", "$lib/utils"));
+    }
+
+    #[test]
+    fn wildcard_tsconfig_path_alias_capture_matches_middle() {
+        assert_eq!(
+            path_alias_capture("@/*", "@/components/Button"),
+            Some("components/Button")
+        );
+        assert_eq!(
+            path_alias_capture("@app/*/test", "@app/foo/bar/test"),
+            Some("foo/bar")
+        );
+        assert_eq!(path_alias_capture("@/*", "@"), None);
     }
 
     #[test]
