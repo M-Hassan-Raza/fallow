@@ -43,6 +43,7 @@ use fallow_types::extract::ModuleInfo;
 
 use dynamic_imports::{resolve_dynamic_imports, resolve_dynamic_patterns};
 use re_exports::resolve_re_exports;
+use react_native::build_extensions;
 use require_imports::resolve_require_imports;
 use specifier::create_resolver;
 use static_imports::resolve_static_imports;
@@ -117,6 +118,7 @@ pub fn resolve_all_imports(
     let file_paths: Vec<&Path> = files.iter().map(|f| f.path.as_path()).collect();
 
     // Create resolvers ONCE and share across threads (oxc_resolver::Resolver is Send + Sync).
+    let extensions = build_extensions(active_plugins);
     let resolver = create_resolver(active_plugins, extra_conditions);
     let mut style_conditions = extra_conditions.to_vec();
     style_conditions.push("style".to_string());
@@ -137,6 +139,7 @@ pub fn resolve_all_imports(
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
+        extensions: &extensions,
         path_to_id: &path_to_id,
         raw_path_to_id: &raw_path_to_id,
         workspace_roots: &workspace_roots,

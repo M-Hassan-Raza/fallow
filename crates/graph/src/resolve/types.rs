@@ -101,6 +101,8 @@ pub(super) struct ResolveContext<'a> {
     /// Used only for stylesheet package subpaths so JS/TS imports do not
     /// accidentally prefer CSS export branches.
     pub style_resolver: &'a Resolver,
+    /// Ordered extension list used by the resolver.
+    pub extensions: &'a [String],
     /// Canonical path → FileId lookup (raw paths when root is canonical).
     pub path_to_id: &'a FxHashMap<&'a Path, FileId>,
     /// Raw (non-canonical) path → FileId lookup.

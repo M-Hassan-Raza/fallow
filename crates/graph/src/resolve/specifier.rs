@@ -18,7 +18,7 @@ use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
 };
 use super::react_native::{build_condition_names, build_extensions};
-use super::types::{ResolveContext, ResolveResult, SOURCE_EXTS};
+use super::types::{ResolveContext, ResolveResult};
 
 /// Create an `oxc_resolver` instance with standard configuration.
 ///
@@ -266,21 +266,45 @@ fn try_tsconfig_alias_target(ctx: &ResolveContext<'_>, target: &Path) -> Option<
         return Some(result);
     }
 
+    if let Some(result) = try_tsconfig_alias_extension_alias(ctx, target) {
+        return Some(result);
+    }
+
     if target.extension().is_none() {
-        for ext in SOURCE_EXTS {
+        for ext in ctx.extensions {
+            let ext = ext.trim_start_matches('.');
             if let Some(result) = resolve_tsconfig_alias_candidate(ctx, &target.with_extension(ext))
             {
                 return Some(result);
             }
         }
-        for ext in SOURCE_EXTS {
-            let index = target.join(format!("index.{ext}"));
+        for ext in ctx.extensions {
+            let index = target.join(format!("index{ext}"));
             if let Some(result) = resolve_tsconfig_alias_candidate(ctx, &index) {
                 return Some(result);
             }
         }
     }
 
+    None
+}
+
+fn try_tsconfig_alias_extension_alias(
+    ctx: &ResolveContext<'_>,
+    target: &Path,
+) -> Option<ResolveResult> {
+    let aliases: &[&str] = match target.extension().and_then(|ext| ext.to_str()) {
+        Some("js") => &["ts", "tsx", "js"],
+        Some("jsx") => &["tsx", "jsx"],
+        Some("mjs") => &["mts", "mjs"],
+        Some("cjs") => &["cts", "cjs"],
+        _ => return None,
+    };
+    for ext in aliases {
+        if let Some(result) = resolve_tsconfig_alias_candidate(ctx, &target.with_extension(ext)) {
+            return Some(result);
+        }
+    }
     None
 }
 

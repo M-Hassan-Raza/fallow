@@ -270,7 +270,7 @@ export const app = Button;
     )
     .expect("index");
     std::fs::write(
-        root.join("src/components/Button.ts"),
+        root.join("src/components/Button.web.ts"),
         "export const Button = 'button';\n",
     )
     .expect("button");
@@ -296,8 +296,8 @@ export const app = Button;
     assert!(
         !unused_files
             .iter()
-            .any(|path| path == "src/components/Button.ts"),
-        "path alias target should stay reachable: {unused_files:?}"
+            .any(|path| path == "src/components/Button.web.ts"),
+        "React Native platform alias target should stay reachable: {unused_files:?}"
     );
 }
 
@@ -324,7 +324,8 @@ fn missing_extends_keeps_local_tsconfig_paths_without_base_url() {
                 "paths": {
                     "$env": ["src/env.ts"],
                     "@features/*": ["src/features/*"],
-                    "#theme": ["missing/theme.ts", "src/theme.ts"]
+                    "#theme": ["missing/theme.ts", "src/theme.ts"],
+                    "$api": ["src/api.js"]
                 }
             }
         }"##,
@@ -336,12 +337,14 @@ fn missing_extends_keeps_local_tsconfig_paths_without_base_url() {
 import { feature } from "@features/home";
 import { nested } from "@features/nested";
 import { theme } from "#theme";
+import { api } from "$api";
 
-export const app = [env, feature, nested, theme].join("-");
+export const app = [env, feature, nested, theme, api].join("-");
 "##,
     )
     .expect("index");
     std::fs::write(root.join("src/env.ts"), "export const env = 'env';\n").expect("env");
+    std::fs::write(root.join("src/api.ts"), "export const api = 'api';\n").expect("api");
     std::fs::write(
         root.join("src/features/home.ts"),
         "export const feature = 'home';\n",
@@ -373,6 +376,7 @@ export const app = [env, feature, nested, theme].join("-");
         "src/features/home.ts",
         "src/features/nested/index.ts",
         "src/theme.ts",
+        "src/api.ts",
     ] {
         assert!(
             !unused_files.iter().any(|path| path == expected_used),

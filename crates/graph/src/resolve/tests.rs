@@ -13,6 +13,7 @@ use super::dynamic_imports::{
     resolve_dynamic_imports, resolve_dynamic_patterns, resolve_single_dynamic_import,
 };
 use super::re_exports::resolve_re_exports;
+use super::react_native;
 use super::require_imports::{resolve_require_imports, resolve_single_require};
 use super::specifier;
 use super::static_imports::resolve_static_imports;
@@ -39,6 +40,7 @@ fn dummy_span() -> Span {
 fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
     let resolver = specifier::create_resolver(&[], &[]);
     let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
@@ -47,6 +49,7 @@ fn with_empty_ctx<F: FnOnce(&ResolveContext)>(f: F) {
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
+        extensions: &extensions,
         path_to_id: &path_to_id,
         raw_path_to_id: &raw_path_to_id,
         workspace_roots: &workspace_roots,
@@ -1442,6 +1445,7 @@ fn specifier_plugin_alias_match_returns_unresolvable() {
     // Plugin-provided path aliases that fail resolution should also be Unresolvable
     let resolver = specifier::create_resolver(&[], &[]);
     let style_resolver = specifier::create_resolver(&[], &["style".to_string()]);
+    let extensions = react_native::build_extensions(&[]);
     let path_to_id = FxHashMap::default();
     let raw_path_to_id = FxHashMap::default();
     let workspace_roots = FxHashMap::default();
@@ -1451,6 +1455,7 @@ fn specifier_plugin_alias_match_returns_unresolvable() {
     let ctx = ResolveContext {
         resolver: &resolver,
         style_resolver: &style_resolver,
+        extensions: &extensions,
         path_to_id: &path_to_id,
         raw_path_to_id: &raw_path_to_id,
         workspace_roots: &workspace_roots,
