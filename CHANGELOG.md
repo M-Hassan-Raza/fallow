@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Combined-mode `--format json` outside a git repository is now exactly one JSON document.** When the project root sat outside any git checkout, the hotspot pipeline emitted a structured `{"error": true, "message": "hotspot analysis requires a git repository", ...}` blob to stdout and then combined mode appended its normal report on top, so `fallow --format json | jq .` and any agent / CI parser failed with `trailing characters at line 6 column 1`. Missing git history is now treated as unavailable hotspot data: stdout stays a single document with empty hotspots, a non-fatal `note: hotspot analysis skipped: no git repository found at project root` goes to stderr (suppressed by `--quiet`). Standalone `fallow health --hotspots --format json` outside a git repo now exits 0 with empty hotspot fields instead of exiting 2 with a JSON error; CI scripts that depended on the old exit-2 signal need to inspect the (now omitted) `hotspot_summary` field instead. Thanks [@ChrisJr404](https://github.com/ChrisJr404) for the patch. (Closes [#294](https://github.com/fallow-rs/fallow/issues/294))
+
 ## [2.66.0] - 2026-05-06
 
 ### Added
