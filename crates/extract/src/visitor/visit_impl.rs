@@ -618,6 +618,11 @@ impl ModuleInfoExtractor {
         })
     }
 
+    fn is_node_module_register_import(&self, local_name: &str) -> bool {
+        self.is_named_import_from(local_name, "node:module", "register")
+            || self.is_named_import_from(local_name, "module", "register")
+    }
+
     fn extract_angular_inject_target(&self, call: &CallExpression<'_>) -> Option<String> {
         let Expression::Identifier(callee) = &call.callee else {
             return None;
@@ -1403,6 +1408,23 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             && ident.name == "require"
             && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
             && !self.handled_require_spans.contains(&expr.span)
+        {
+            self.require_calls.push(RequireCallInfo {
+                source: lit.value.to_string(),
+                span: expr.span,
+                destructured_names: Vec::new(),
+                local_name: None,
+            });
+        }
+
+        // Detect node:module `register('specifier', ...)` Module Customization Hook calls.
+        // The first string argument is a module specifier loaded at runtime; treat it
+        // like a side-effect require so the package is credited as used. Gated by an
+        // import check against the Node `module` builtin so same-named app helpers are
+        // ignored.
+        if let Expression::Identifier(ident) = &expr.callee
+            && self.is_node_module_register_import(ident.name.as_str())
+            && let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
         {
             self.require_calls.push(RequireCallInfo {
                 source: lit.value.to_string(),
