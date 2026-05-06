@@ -19,7 +19,7 @@ use crate::report::plural;
 
 // ── Types ────────────────────────────────────────────────────────
 
-const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 1;
+const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 2;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Verdict for the audit command.
@@ -895,21 +895,25 @@ impl BaseWorktree {
             let _ = std::fs::remove_dir_all(&path);
             return None;
         }
-        Some(Self {
+        let worktree = Self {
             repo_root: repo_root.to_path_buf(),
             path,
             persistent: false,
-        })
+        };
+        materialize_base_dependency_context(repo_root, worktree.path());
+        Some(worktree)
     }
 
     fn reuse_or_create(repo_root: &Path, base_sha: &str) -> Option<Self> {
         let path = reusable_audit_worktree_path(repo_root, base_sha);
         if reusable_audit_worktree_is_ready(repo_root, &path, base_sha) {
-            return Some(Self {
+            let worktree = Self {
                 repo_root: repo_root.to_path_buf(),
                 path,
                 persistent: true,
-            });
+            };
+            materialize_base_dependency_context(repo_root, worktree.path());
+            return Some(worktree);
         }
 
         remove_audit_worktree(repo_root, &path);
@@ -933,11 +937,13 @@ impl BaseWorktree {
             return None;
         }
 
-        Some(Self {
+        let worktree = Self {
             repo_root: repo_root.to_path_buf(),
             path,
             persistent: true,
-        })
+        };
+        materialize_base_dependency_context(repo_root, worktree.path());
+        Some(worktree)
     }
 
     fn path(&self) -> &Path {
@@ -977,6 +983,36 @@ fn paths_equal(left: &Path, right: &Path) -> bool {
         (Ok(left), Ok(right)) => left == right,
         _ => false,
     }
+}
+
+fn materialize_base_dependency_context(repo_root: &Path, worktree_path: &Path) {
+    let source = repo_root.join("node_modules");
+    if !source.is_dir() {
+        return;
+    }
+
+    let destination = worktree_path.join("node_modules");
+    if destination.is_dir() {
+        return;
+    }
+    if let Ok(metadata) = std::fs::symlink_metadata(&destination) {
+        if !metadata.file_type().is_symlink() {
+            return;
+        }
+        let _ = std::fs::remove_file(&destination);
+    }
+
+    let _ = symlink_dependency_dir(&source, &destination);
+}
+
+#[cfg(unix)]
+fn symlink_dependency_dir(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(source, destination)
+}
+
+#[cfg(windows)]
+fn symlink_dependency_dir(source: &Path, destination: &Path) -> std::io::Result<()> {
+    std::os::windows::fs::symlink_dir(source, destination)
 }
 
 fn remove_audit_worktree(repo_root: &Path, path: &Path) {
@@ -2661,6 +2697,124 @@ mod tests {
             None
         );
         assert_eq!(audit_worktree_pid("not-fallow-audit-base-123"), None);
+    }
+
+    #[test]
+    fn audit_base_worktree_reuses_current_node_modules_context() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir should be created");
+        fs::write(root.join(".gitignore"), "node_modules\n.fallow\n")
+            .expect("gitignore should be written");
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"audit-rn-alias","main":"src/index.ts","dependencies":{"@react-native/typescript-config":"1.0.0"}}"#,
+        )
+        .expect("package.json should be written");
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"extends":"./node_modules/@react-native/typescript-config/tsconfig.json","compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}},"include":["src"]}"#,
+        )
+        .expect("tsconfig should be written");
+        fs::write(
+            root.join("src/index.ts"),
+            "import { used } from '@/feature';\nconsole.log(used);\n",
+        )
+        .expect("index should be written");
+        fs::write(root.join("src/feature.ts"), "export const used = 1;\n")
+            .expect("feature should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+
+        let rn_config = root.join("node_modules/@react-native/typescript-config");
+        fs::create_dir_all(&rn_config).expect("node_modules config dir should be created");
+        fs::write(
+            rn_config.join("tsconfig.json"),
+            r#"{"compilerOptions":{"jsx":"react-native","moduleResolution":"bundler"}}"#,
+        )
+        .expect("node_modules tsconfig should be written");
+
+        let worktree =
+            BaseWorktree::create(root, "HEAD", None).expect("base worktree should be created");
+        assert!(
+            worktree.path().join("node_modules").is_dir(),
+            "base worktree should reuse ignored node_modules from the current checkout"
+        );
+        assert!(
+            worktree
+                .path()
+                .join("node_modules/@react-native/typescript-config/tsconfig.json")
+                .is_file(),
+            "base worktree should preserve tsconfig extends targets installed in node_modules"
+        );
+    }
+
+    #[test]
+    fn audit_reusable_base_worktree_refreshes_current_node_modules_context() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let root = tmp.path();
+        fs::write(root.join(".gitignore"), "node_modules\n.fallow\n")
+            .expect("gitignore should be written");
+        fs::write(root.join("package.json"), r#"{"name":"audit-reusable"}"#)
+            .expect("package.json should be written");
+
+        git(root, &["init", "-b", "main"]);
+        git(root, &["add", "."]);
+        git(
+            root,
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
+
+        let rn_config = root.join("node_modules/@react-native/typescript-config");
+        fs::create_dir_all(&rn_config).expect("node_modules config dir should be created");
+        fs::write(rn_config.join("tsconfig.json"), "{}")
+            .expect("node_modules tsconfig should be written");
+
+        let base_sha = git_rev_parse(root, "HEAD").expect("HEAD should resolve");
+        let first = BaseWorktree::create(root, "HEAD", Some(&base_sha))
+            .expect("persistent base worktree should be created");
+        let worktree_path = first.path().to_path_buf();
+        assert!(
+            worktree_path.join("node_modules").is_dir(),
+            "initial persistent worktree should receive node_modules context"
+        );
+        remove_node_modules_context(&worktree_path);
+        assert!(
+            !worktree_path.join("node_modules").exists(),
+            "test setup should remove the dependency context from the reusable worktree"
+        );
+        drop(first);
+
+        let reused = BaseWorktree::create(root, "HEAD", Some(&base_sha))
+            .expect("ready persistent base worktree should be reused");
+        assert_eq!(reused.path(), worktree_path.as_path());
+        assert!(
+            reused.path().join("node_modules").is_dir(),
+            "ready persistent worktree should refresh missing node_modules context"
+        );
+
+        remove_audit_worktree(root, reused.path());
+        let _ = fs::remove_dir_all(reused.path());
+    }
+
+    fn remove_node_modules_context(worktree_path: &Path) {
+        let path = worktree_path.join("node_modules");
+        let Ok(metadata) = fs::symlink_metadata(&path) else {
+            return;
+        };
+        if metadata.file_type().is_symlink() {
+            #[cfg(unix)]
+            let _ = fs::remove_file(path);
+            #[cfg(windows)]
+            let _ = fs::remove_dir(&path).or_else(|_| fs::remove_file(&path));
+        } else {
+            let _ = fs::remove_dir_all(path);
+        }
     }
 
     #[test]
