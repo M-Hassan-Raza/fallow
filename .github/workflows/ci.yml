@@ -351,8 +351,10 @@ jobs:
   miri:
     name: Miri
     needs: changes
-    # Temporarily disabled to conserve CI minutes; run `cargo +nightly miri test` locally.
-    if: false && (needs.changes.outputs.miri == 'true' || github.event_name == 'push')
+    # PR-only and path-filtered to crates/{graph,extract,types}: catches contributor PRs that
+    # add tempdir / fs-IO tests without inheriting #[cfg_attr(miri, ignore)] from sibling tests.
+    # The pre-push hook still runs miri locally on push to main, so main is doubly protected.
+    if: needs.changes.outputs.miri == 'true' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
