@@ -1368,7 +1368,7 @@ fn discover_config_files_skips_resolved_plugins() {
         resolved.insert(plugin.name());
     }
 
-    let json_configs = discover_config_files(&matchers, &resolved, &[Path::new("/project")]);
+    let json_configs = discover_config_files(&matchers, &resolved, &[Path::new("/project")], false);
     assert!(
         json_configs.is_empty(),
         "discover_config_files should skip all resolved plugins"
@@ -1385,6 +1385,7 @@ fn discover_config_files_returns_empty_for_nonexistent_root() {
         &matchers,
         &resolved,
         &[Path::new("/nonexistent-root-xyz-abc")],
+        false,
     );
     assert!(
         json_configs.is_empty(),
@@ -1563,6 +1564,7 @@ fn run_workspace_fast_returns_empty_for_no_active_plugins() {
         &matchers,
         &relative_files,
         &FxHashSet::default(),
+        false,
     );
     assert!(result.active_plugins.is_empty());
     assert!(result.entry_patterns.is_empty());
@@ -1643,6 +1645,7 @@ fn run_workspace_fast_eslint_config_parsed_when_eslint_active_at_root() {
         &matchers,
         &workspace_relative,
         &skip_config_plugins,
+        false,
     );
 
     assert!(
@@ -1668,6 +1671,7 @@ fn run_workspace_fast_detects_active_plugins() {
         &matchers,
         &relative_files,
         &FxHashSet::default(),
+        false,
     );
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
     assert!(!result.entry_patterns.is_empty());
@@ -1689,6 +1693,7 @@ fn run_workspace_fast_filters_matchers_to_active_plugins() {
         &matchers,
         &relative_files,
         &FxHashSet::default(),
+        false,
     );
     // Only nextjs should be active
     assert!(result.active_plugins.contains(&"nextjs".to_string()));
@@ -1737,6 +1742,7 @@ fn run_workspace_fast_resolves_config_from_workspace_relative_paths() {
         &matchers,
         &workspace_relative,
         &FxHashSet::default(),
+        false,
     );
 
     let entry_patterns: Vec<String> = result
@@ -2083,7 +2089,8 @@ fn discover_config_files_finds_in_subdirectory() {
     let matchers = registry.precompile_config_matchers();
     let resolved: FxHashSet<&str> = FxHashSet::default();
 
-    let json_configs = discover_config_files(&matchers, &resolved, &[root, subdir.as_path()]);
+    let json_configs =
+        discover_config_files(&matchers, &resolved, &[root, subdir.as_path()], false);
     // Check if any nx project.json was discovered
     let found_project_json = json_configs
         .iter()
@@ -2095,7 +2102,36 @@ fn discover_config_files_finds_in_subdirectory() {
 }
 
 #[test]
-fn discover_config_files_expands_root_brace_patterns() {
+fn discover_config_files_expands_root_brace_patterns_for_dotfile_configs() {
+    // Source-extension patterns are intentionally skipped by `discover_config_files`
+    // (they are matched in-memory via Phase 3a's `**/`-prefixed matchers). This
+    // test exercises the brace expansion path for dotfile patterns, which still
+    // require the filesystem fallback because the file walker excludes
+    // `**/.*.{js,ts,...}` in production mode.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".babelrc.json"), "{}").unwrap();
+
+    let registry = PluginRegistry::default();
+    let matchers = registry.precompile_config_matchers();
+    let resolved: FxHashSet<&str> = FxHashSet::default();
+
+    let configs = discover_config_files(&matchers, &resolved, &[root], false);
+    let found_babelrc = configs
+        .iter()
+        .any(|(path, plugin)| plugin.name() == "babel" && path.ends_with(".babelrc.json"));
+    assert!(
+        found_babelrc,
+        "discover_config_files should expand `.babelrc.{{js,cjs,mjs,json}}` at the root"
+    );
+}
+
+#[test]
+fn discover_config_files_skips_source_ext_root_patterns() {
+    // Patterns like `vite.config.{ts,js,mts,mjs}` describe source files that
+    // Phase 3a's in-memory matcher (with `**/` prefix) handles. The filesystem
+    // fallback must skip them to avoid an O(plugins x patterns x roots) stat
+    // storm on large monorepos.
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     std::fs::write(root.join("vite.config.ts"), "export default {};").unwrap();
@@ -2104,13 +2140,13 @@ fn discover_config_files_expands_root_brace_patterns() {
     let matchers = registry.precompile_config_matchers();
     let resolved: FxHashSet<&str> = FxHashSet::default();
 
-    let configs = discover_config_files(&matchers, &resolved, &[root]);
+    let configs = discover_config_files(&matchers, &resolved, &[root], false);
     let found_vite_config = configs
         .iter()
         .any(|(path, plugin)| plugin.name() == "vite" && path.ends_with("vite.config.ts"));
     assert!(
-        found_vite_config,
-        "discover_config_files should expand vite.config.{{ts,js,mts,mjs}} at the root"
+        !found_vite_config,
+        "discover_config_files should skip source-ext root patterns; Phase 3a handles them"
     );
 }
 
@@ -2619,6 +2655,37 @@ fn precompile_config_matchers_all_have_non_empty_matchers() {
             plugin.name()
         );
     }
+}
+
+#[test]
+fn precompile_config_matchers_match_nested_source_ext_configs() {
+    // Source-extension config patterns are wrapped with `**/` so the in-memory
+    // matcher catches nested configs (where Phase 3b's FS walk used to). This
+    // is the correctness contract that lets `discover_config_files` skip the
+    // source-ext fast path.
+    let registry = PluginRegistry::default();
+    let matchers = registry.precompile_config_matchers();
+
+    let webpack_matchers = matchers
+        .iter()
+        .find(|(p, _)| p.name() == "webpack")
+        .map(|(_, m)| m)
+        .expect("webpack plugin should have precompiled matchers");
+
+    let nested = "apps/web/webpack.config.ts";
+    let nested_matched = webpack_matchers.iter().any(|m| m.is_match(nested));
+    assert!(
+        nested_matched,
+        "webpack matcher should match nested {nested}; \
+         expected `**/webpack.config.{{ts,...}}` semantics"
+    );
+
+    let root = "webpack.config.js";
+    let root_matched = webpack_matchers.iter().any(|m| m.is_match(root));
+    assert!(
+        root_matched,
+        "webpack matcher should still match {root} at the project root"
+    );
 }
 
 // ── Config file resolution with Jest config ──────────────────

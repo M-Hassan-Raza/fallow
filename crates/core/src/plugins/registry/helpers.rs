@@ -3,14 +3,59 @@
 //! Contains pattern aggregation, external plugin processing, config file discovery,
 //! config result merging, and plugin detection logic.
 
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashSet;
 
 use fallow_config::{ExternalPluginDef, PluginDetection, UsedClassMemberRule};
 
+use crate::discover::SOURCE_EXTENSIONS;
+
 use super::super::{PathRule, Plugin, PluginResult, PluginUsedExportRule, UsedExportRule};
 use super::AggregatedPluginResult;
+
+/// True when a config pattern names a source-extension config file living
+/// directly in some directory (no path separator, no leading dot, all expanded
+/// extensions are in `SOURCE_EXTENSIONS`).
+///
+/// Such patterns describe files that are already in the discovered file set, so
+/// Phase 3a's in-memory matchers can find them after a `**/` prefix is added.
+/// Callers use this to skip the corresponding filesystem fallback walk in
+/// `discover_config_files`, which is the dominant cost on large monorepos.
+#[must_use]
+pub fn is_source_ext_root_pattern(pat: &str) -> bool {
+    if pat.is_empty() || pat.contains('/') {
+        return false;
+    }
+    for expanded in expand_brace_pattern(pat) {
+        if expanded.starts_with('.') {
+            return false;
+        }
+        let Some(ext) = std::path::Path::new(&expanded).extension() else {
+            return false;
+        };
+        let Some(ext_str) = ext.to_str() else {
+            return false;
+        };
+        if !SOURCE_EXTENSIONS.contains(&ext_str) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Prepare a config pattern for `globset::Glob`. Source-extension root-anchored
+/// patterns get a `**/` prefix so they match nested files (where Phase 3b's FS
+/// walk previously caught them); other patterns pass through unchanged.
+#[must_use]
+pub fn prepare_config_pattern(pat: &str) -> Cow<'_, str> {
+    if is_source_ext_root_pattern(pat) {
+        Cow::Owned(format!("**/{pat}"))
+    } else {
+        Cow::Borrowed(pat)
+    }
+}
 
 /// Collect static patterns from a single plugin into the aggregated result.
 pub fn process_static_patterns(
@@ -136,10 +181,17 @@ pub fn process_external_plugins(
 /// `node_modules` directories, and a full `**/project.json` walk becomes
 /// pathological there. Callers should therefore pass a focused root list such
 /// as the repo root, workspace roots, and ancestors of discovered source files.
+///
+/// When `production_mode` is `false`, source-extension root-anchored patterns
+/// (e.g., `webpack.config.{ts,js,mjs,cjs}`) are skipped because Phase 3a's
+/// `**/`-prefixed matcher already finds them in the discovered source file
+/// set. In production mode, the file walker excludes `*.config.*` and dotfile
+/// configs, so the FS walk is still required to keep the discovery correct.
 pub fn discover_config_files<'a>(
     config_matchers: &[(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
     resolved_plugins: &FxHashSet<&str>,
     roots: &[&Path],
+    production_mode: bool,
 ) -> Vec<(PathBuf, &'a dyn Plugin)> {
     let mut config_files: Vec<(PathBuf, &'a dyn Plugin)> = Vec::new();
     let mut seen: FxHashSet<(PathBuf, &'a str)> = FxHashSet::default();
@@ -151,6 +203,9 @@ pub fn discover_config_files<'a>(
 
         for root in roots {
             for pat in plugin.config_patterns() {
+                if !production_mode && is_source_ext_root_pattern(pat) {
+                    continue;
+                }
                 for expanded in expand_brace_pattern(pat) {
                     for path in discover_pattern_matches(root, &expanded) {
                         if seen.insert((path.clone(), plugin.name())) {

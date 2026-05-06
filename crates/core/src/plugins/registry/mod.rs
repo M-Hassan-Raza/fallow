@@ -11,8 +11,8 @@ pub(crate) mod builtin;
 mod helpers;
 
 use helpers::{
-    check_has_config_file, discover_config_files, process_config_result, process_external_plugins,
-    process_static_patterns,
+    check_has_config_file, discover_config_files, prepare_config_pattern, process_config_result,
+    process_external_plugins, process_static_patterns,
 };
 
 // ESLint is included because each workspace owns its own eslint.config.{mjs,js,...}
@@ -102,7 +102,7 @@ impl PluginRegistry {
         root: &Path,
         discovered_files: &[PathBuf],
     ) -> AggregatedPluginResult {
-        self.run_with_search_roots(pkg, root, discovered_files, &[root])
+        self.run_with_search_roots(pkg, root, discovered_files, &[root], false)
     }
 
     /// Run all plugins against a project with explicit config-file search roots.
@@ -111,12 +111,18 @@ impl PluginRegistry {
     /// already known to matter for this project. Broad recursive scans are
     /// intentionally avoided because they become prohibitively expensive on
     /// large monorepos with populated `node_modules` trees.
+    ///
+    /// `production_mode` controls the FS fallback for source-extension config
+    /// patterns. In production mode the source walker excludes `*.config.*` so
+    /// the FS walk is required; otherwise Phase 3a's in-memory matcher covers
+    /// them and the walk is skipped.
     pub fn run_with_search_roots(
         &self,
         pkg: &PackageJson,
         root: &Path,
         discovered_files: &[PathBuf],
         config_search_roots: &[&Path],
+        production_mode: bool,
     ) -> AggregatedPluginResult {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
@@ -159,7 +165,10 @@ impl PluginRegistry {
         );
 
         // Phase 3: Find and parse config files for dynamic resolution
-        // Pre-compile all config patterns
+        // Pre-compile all config patterns. Source-extension root-anchored
+        // patterns are wrapped with `**/` so they match nested files via the
+        // discovered file set (Phase 3a), letting Phase 3b skip those plugins
+        // and avoid a per-directory stat storm on large monorepos.
         let config_matchers: Vec<(&dyn Plugin, Vec<globset::GlobMatcher>)> = active
             .iter()
             .filter(|p| !p.config_patterns().is_empty())
@@ -167,7 +176,12 @@ impl PluginRegistry {
                 let matchers: Vec<globset::GlobMatcher> = p
                     .config_patterns()
                     .iter()
-                    .filter_map(|pat| globset::Glob::new(pat).ok().map(|g| g.compile_matcher()))
+                    .filter_map(|pat| {
+                        let prepared = prepare_config_pattern(pat);
+                        globset::Glob::new(&prepared)
+                            .ok()
+                            .map(|g| g.compile_matcher())
+                    })
                     .collect();
                 (*p, matchers)
             })
@@ -222,9 +236,15 @@ impl PluginRegistry {
 
             // Phase 3b: Filesystem fallback for JSON config files.
             // JSON files (angular.json, project.json) are not in the discovered file set
-            // because fallow only discovers JS/TS/CSS/Vue/etc. files.
-            let json_configs =
-                discover_config_files(&config_matchers, &resolved_plugins, config_search_roots);
+            // because fallow only discovers JS/TS/CSS/Vue/etc. files. In production
+            // mode, source-extension configs (`*.config.*`, dotfiles) are also
+            // excluded from the walker, so the FS walk runs for those patterns too.
+            let json_configs = discover_config_files(
+                &config_matchers,
+                &resolved_plugins,
+                config_search_roots,
+                production_mode,
+            );
             for (abs_path, plugin) in &json_configs {
                 if let Ok(source) = std::fs::read_to_string(abs_path) {
                     let plugin_result = plugin.resolve_config(abs_path, &source, root);
@@ -282,6 +302,11 @@ impl PluginRegistry {
     /// Reuses pre-compiled config matchers and pre-computed relative files from the root
     /// project run, avoiding repeated glob compilation and path computation per workspace.
     /// Skips package.json inline config (workspace packages rarely have inline configs).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Each parameter is a distinct, small value with no natural grouping; \
+                  bundling them into a struct hurts call-site readability."
+    )]
     pub fn run_workspace_fast(
         &self,
         pkg: &PackageJson,
@@ -290,6 +315,7 @@ impl PluginRegistry {
         precompiled_config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
         relative_files: &[(PathBuf, String)],
         skip_config_plugins: &FxHashSet<&str>,
+        production_mode: bool,
     ) -> AggregatedPluginResult {
         let _span = tracing::info_span!("run_plugins").entered();
         let mut result = AggregatedPluginResult::default();
@@ -377,12 +403,18 @@ impl PluginRegistry {
         // only active in workspace packages. Check the project root for unresolved
         // config patterns.
         let ws_json_configs = if root == project_root {
-            discover_config_files(&workspace_matchers, &resolved_ws_plugins, &[root])
+            discover_config_files(
+                &workspace_matchers,
+                &resolved_ws_plugins,
+                &[root],
+                production_mode,
+            )
         } else {
             discover_config_files(
                 &workspace_matchers,
                 &resolved_ws_plugins,
                 &[root, project_root],
+                production_mode,
             )
         };
         // Parse discovered JSON config files
@@ -420,7 +452,12 @@ impl PluginRegistry {
                 let matchers: Vec<globset::GlobMatcher> = p
                     .config_patterns()
                     .iter()
-                    .filter_map(|pat| globset::Glob::new(pat).ok().map(|g| g.compile_matcher()))
+                    .filter_map(|pat| {
+                        let prepared = prepare_config_pattern(pat);
+                        globset::Glob::new(&prepared)
+                            .ok()
+                            .map(|g| g.compile_matcher())
+                    })
                     .collect();
                 (p.as_ref(), matchers)
             })

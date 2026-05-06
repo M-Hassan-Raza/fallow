@@ -1014,6 +1014,7 @@ fn run_plugins(
             &config.root,
             &file_paths,
             &root_config_search_root_refs,
+            config.production,
         )
     });
 
@@ -1042,6 +1043,7 @@ fn run_plugins(
                 &precompiled_matchers,
                 relative_files,
                 &root_active_plugins,
+                config.production,
             );
             if ws_result.active_plugins.is_empty() {
                 return None;
