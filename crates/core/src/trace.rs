@@ -233,7 +233,7 @@ pub fn trace_export(
             re_export_chains.len()
         )
     } else {
-        "No references found — export is unused".to_string()
+        "No references found, export is unused".to_string()
     };
 
     Some(ExportTrace {

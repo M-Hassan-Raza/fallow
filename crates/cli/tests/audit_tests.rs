@@ -510,6 +510,85 @@ fn audit_help_documents_gate() {
 }
 
 #[test]
+fn audit_base_preserves_node_modules_tsconfig_extends_context() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join(".gitignore"), "node_modules\n.fallow\n").unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-rn-alias","main":"src/index.ts","dependencies":{"@react-native/typescript-config":"1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("tsconfig.json"),
+        r#"{"extends":"./node_modules/@react-native/typescript-config/tsconfig.json","compilerOptions":{"baseUrl":".","paths":{"@/*":["src/*"]}},"include":["src"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from '@/feature';\nconsole.log(used);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/feature.ts"),
+        "export const used = 1;\nexport const legacyUnused = 2;\n",
+    )
+    .unwrap();
+
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    let rn_config = dir.join("node_modules/@react-native/typescript-config");
+    fs::create_dir_all(&rn_config).unwrap();
+    fs::write(
+        rn_config.join("tsconfig.json"),
+        r#"{"compilerOptions":{"jsx":"react-native","moduleResolution":"bundler"}}"#,
+    )
+    .unwrap();
+
+    // Add a real new export so the diff is not token-equivalent. A comment-only
+    // change would trip the `can_reuse_current_as_base` fast path and skip
+    // `BaseWorktree::create` entirely, defeating the point of this test.
+    fs::write(
+        dir.join("src/feature.ts"),
+        "export const used = 1;\nexport const legacyUnused = 2;\nexport const introduced = 3;\n",
+    )
+    .unwrap();
+    commit_all(dir, "introduce new export");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    assert!(
+        !output.stderr.contains("Broken tsconfig chain")
+            && !output.stderr.contains("node_modules directory not found"),
+        "audit base worktree should retain installed tsconfig context. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["dead_code"]["summary"]["unresolved_imports"].as_u64(),
+        Some(0),
+        "tsconfig alias should resolve in the current analysis"
+    );
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(1),
+        "only the genuinely new export should be attributed to the changeset"
+    );
+}
+
+#[test]
 fn audit_new_unlisted_dependency_import_site_is_introduced() {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();

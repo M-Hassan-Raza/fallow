@@ -1981,3 +1981,53 @@ model User {
          reportable as unused. unused_dev={unused_dev:?}"
     );
 }
+
+// ── node:module register() loader hook (issue #293) ──────────────
+
+#[test]
+fn node_module_register_loader_is_credited_as_used_dependency() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::create_dir_all(root.join("resources/loaders")).expect("loaders dir");
+
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "register-loader-fixture",
+            "private": true,
+            "devDependencies": {
+                "@swc-node/register": "1.11.1"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"module":"esnext","moduleResolution":"bundler"},"include":["src/**/*","resources/**/*"]}"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("resources/loaders/ts.js"),
+        "import { register } from 'node:module';\n\
+         import { pathToFileURL } from 'node:url';\n\
+         register('@swc-node/register/esm', pathToFileURL('./'));\n",
+    )
+    .expect("loader file");
+    std::fs::write(root.join("src/index.ts"), "export const hello = 'world';\n").expect("entry");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dev.contains(&"@swc-node/register"),
+        "@swc-node/register is loaded via `register('@swc-node/register/esm', ...)` and should \
+         not be flagged as unused. unused_dev={unused_dev:?}"
+    );
+}

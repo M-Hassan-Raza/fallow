@@ -1231,7 +1231,7 @@ fn build_clone_family_actions(item: &serde_json::Value) -> serde_json::Value {
             "Extract {group_count} duplicated code block{} ({total_lines} lines) into a shared module",
             if group_count == 1 { "" } else { "s" }
         ),
-        "note": "These clone groups share the same files, indicating a structural relationship — refactor together",
+        "note": "These clone groups share the same files, indicating a structural relationship; refactor together",
     })];
 
     // Include any refactoring suggestions from the family

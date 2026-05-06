@@ -91,3 +91,81 @@ export { default as Layout } from '../layouts/Layout.astro';
     );
     assert_eq!(info.re_exports.len(), 1);
 }
+
+#[test]
+fn astro_template_script_src_followed() {
+    // Issue #295: <script src="..."> in the template body should produce
+    // an import edge so the referenced file stays reachable.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r#"---
+const title = "Hello";
+---
+<html>
+  <body>
+    <h1>{title}</h1>
+    <script src="../scripts/foo.ts"></script>
+  </body>
+</html>
+"#,
+        0,
+        false,
+    );
+    let sources: Vec<&str> = info.imports.iter().map(|i| i.source.as_str()).collect();
+    assert!(
+        sources.contains(&"../scripts/foo.ts"),
+        "expected ../scripts/foo.ts in {sources:?}"
+    );
+}
+
+#[test]
+fn astro_template_inline_script_imports_followed() {
+    // Issue #295: ESM imports inside inline <script> blocks should be
+    // followed so their targets stay reachable.
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r"---
+---
+<html>
+  <body>
+    <script>
+      import '../scripts/bar';
+    </script>
+  </body>
+</html>
+",
+        0,
+        false,
+    );
+    let sources: Vec<&str> = info.imports.iter().map(|i| i.source.as_str()).collect();
+    assert!(
+        sources.contains(&"../scripts/bar"),
+        "expected ../scripts/bar in {sources:?}"
+    );
+}
+
+#[test]
+fn astro_template_combines_frontmatter_and_template_imports() {
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("Page.astro"),
+        r#"---
+import Layout from '../layouts/Layout.astro';
+---
+<Layout>
+  <script src="../scripts/foo.ts"></script>
+  <script>
+    import '../scripts/bar';
+  </script>
+</Layout>
+"#,
+        0,
+        false,
+    );
+    let sources: Vec<&str> = info.imports.iter().map(|i| i.source.as_str()).collect();
+    assert!(sources.contains(&"../layouts/Layout.astro"));
+    assert!(sources.contains(&"../scripts/foo.ts"));
+    assert!(sources.contains(&"../scripts/bar"));
+}

@@ -73,7 +73,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         id: "fallow/unused-dependency",
         name: "Unused Dependencies",
         short: "Dependency listed but never imported",
-        full: "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives — use the ignore_dependencies config to suppress.",
+        full: "Packages listed in dependencies that are never imported or required by any source file. Framework plugins and CLI tools may be false positives; use the ignore_dependencies config to suppress.",
         docs_path: "explanations/dead-code#unused-dependencies",
     },
     RuleDef {
@@ -87,7 +87,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         id: "fallow/unused-optional-dependency",
         name: "Unused Optional Dependencies",
         short: "Optional dependency listed but never imported",
-        full: "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific — verify they are not needed on any supported platform before removing.",
+        full: "Packages listed in optionalDependencies that are never imported. Optional dependencies are typically platform-specific; verify they are not needed on any supported platform before removing.",
         docs_path: "explanations/dead-code#unused-optionaldependencies",
     },
     RuleDef {
@@ -511,7 +511,7 @@ pub const HEALTH_RULES: &[RuleDef] = &[
         id: "fallow/runtime-review-required",
         name: "Production Review Required",
         short: "Statically used but never invoked in production",
-        full: "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look — may be seasonal, error-path only, or legitimately unused.",
+        full: "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look: may be seasonal, error-path only, or legitimately unused.",
         docs_path: "explanations/health#runtime-coverage",
     },
     RuleDef {
@@ -541,7 +541,7 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     id: "fallow/code-duplication",
     name: "Code Duplication",
     short: "Duplicated code block",
-    full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison — identifier names and literals are abstracted away in non-strict modes.",
+    full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison: identifier names and literals are abstracted away in non-strict modes.",
     docs_path: "explanations/duplication#clone-groups",
 }];
 

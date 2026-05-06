@@ -1,6 +1,6 @@
 ---
 source: crates/cli/tests/snapshot_tests.rs
-assertion_line: 1978
+assertion_line: 2009
 expression: redact_health_sarif_version(&json_str)
 ---
 {
@@ -124,7 +124,7 @@ expression: redact_health_sarif_version(&json_str)
                 "text": "Statically used but never invoked in production"
               },
               "fullDescription": {
-                "text": "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look — may be seasonal, error-path only, or legitimately unused."
+                "text": "The function is reachable in the module graph (or exercised by tests / untracked call sites) but was not invoked during the observed runtime coverage window. Needs a human look: may be seasonal, error-path only, or legitimately unused."
               },
               "helpUri": "https://docs.fallow.tools/explanations/health#runtime-coverage",
               "defaultConfiguration": {

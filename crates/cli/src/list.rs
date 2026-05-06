@@ -400,7 +400,7 @@ fn print_boundary_data_human(bd: &BoundaryData) {
     eprintln!("\nRules:");
     for rule in &bd.rules {
         if rule.allow.is_empty() {
-            eprintln!("  {:<20} (isolated — no imports allowed)", rule.from);
+            eprintln!("  {:<20} (isolated, no imports allowed)", rule.from);
         } else {
             eprintln!("  {:<20} → {}", rule.from, rule.allow.join(", "));
         }

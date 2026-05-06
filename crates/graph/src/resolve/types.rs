@@ -146,7 +146,7 @@ impl<'a> CanonicalFallback<'a> {
     pub fn get(&self, canonical: &Path) -> Option<FileId> {
         let map = self.map.get_or_init(|| {
             tracing::debug!(
-                "intra-project symlinks detected — building canonical path index ({} files)",
+                "intra-project symlinks detected, building canonical path index ({} files)",
                 self.files.len()
             );
             self.files
