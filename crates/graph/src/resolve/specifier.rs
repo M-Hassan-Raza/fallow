@@ -286,7 +286,10 @@ fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
     let mut builder = GlobSetBuilder::new();
     let mut has_patterns = false;
     for value in values.iter().filter_map(Value::as_str) {
-        let pattern = resolve_tsconfig_relative_path(base_dir, value);
+        let mut pattern = resolve_tsconfig_relative_path(base_dir, value);
+        if !has_glob_meta(value) && pattern.is_dir() {
+            pattern = pattern.join("**/*");
+        }
         let Some(pattern) = pattern.to_str() else {
             continue;
         };
@@ -297,6 +300,12 @@ fn glob_values_match(base_dir: &Path, values: &[Value], path: &Path) -> bool {
         has_patterns = true;
     }
     has_patterns && builder.build().is_ok_and(|set| set.is_match(path))
+}
+
+fn has_glob_meta(value: &str) -> bool {
+    value
+        .bytes()
+        .any(|byte| matches!(byte, b'*' | b'?' | b'[' | b']' | b'{'))
 }
 
 fn resolve_tsconfig_relative_path(base_dir: &Path, path: &str) -> PathBuf {
@@ -493,7 +502,9 @@ fn try_nearest_tsconfig_path_alias(
 ) -> Option<ResolveResult> {
     let chain = local_tsconfig_chain(ctx.root, from_file);
     for tsconfig_path in &chain {
-        let json = read_tsconfig_json(tsconfig_path)?;
+        let Some(json) = read_tsconfig_json(tsconfig_path) else {
+            continue;
+        };
         let has_paths = json
             .get("compilerOptions")
             .and_then(|compiler_options| compiler_options.get("paths"))
@@ -506,7 +517,9 @@ fn try_nearest_tsconfig_path_alias(
         }
     }
     for tsconfig_path in &chain {
-        let json = read_tsconfig_json(tsconfig_path)?;
+        let Some(json) = read_tsconfig_json(tsconfig_path) else {
+            continue;
+        };
         let has_base_url = json
             .get("compilerOptions")
             .and_then(|compiler_options| compiler_options.get("baseUrl"))
@@ -1297,7 +1310,9 @@ fn try_tsconfig_root_dirs(
         return None;
     }
     for tsconfig_path in local_tsconfig_chain(ctx.root, from_file) {
-        let json = read_tsconfig_json(&tsconfig_path)?;
+        let Some(json) = read_tsconfig_json(&tsconfig_path) else {
+            continue;
+        };
         let Some(compiler_options) = json.get("compilerOptions") else {
             continue;
         };
@@ -1346,8 +1361,8 @@ mod tests {
     use tempfile::tempdir;
 
     use super::{
-        is_tsconfig_error, matches_nearest_tsconfig_path_alias, path_alias_capture,
-        path_alias_pattern_matches, resolve_tsconfig_extends_path,
+        glob_values_match, is_tsconfig_error, matches_nearest_tsconfig_path_alias,
+        path_alias_capture, path_alias_pattern_matches, resolve_tsconfig_extends_path,
     };
 
     #[test]
@@ -1441,6 +1456,37 @@ mod tests {
     #[test]
     fn wildcard_only_tsconfig_path_alias_capture_can_resolve_targets() {
         assert_eq!(path_alias_capture("*", "shared"), Some("shared"));
+    }
+
+    #[test]
+    fn bare_directory_tsconfig_include_matches_nested_files() {
+        let temp = tempdir().expect("temp dir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("src/features")).expect("src dir");
+        let source = root.join("src/features/button.ts");
+        fs::write(&source, "export const button = true;\n").expect("source");
+
+        assert!(glob_values_match(
+            root,
+            &[serde_json::json!("src")],
+            &source
+        ));
+    }
+
+    #[test]
+    fn bare_directory_tsconfig_include_does_not_match_sibling_files() {
+        let temp = tempdir().expect("temp dir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("src")).expect("src dir");
+        fs::create_dir_all(root.join("test")).expect("test dir");
+        let source = root.join("test/button.ts");
+        fs::write(&source, "export const button = true;\n").expect("source");
+
+        assert!(!glob_values_match(
+            root,
+            &[serde_json::json!("src")],
+            &source
+        ));
     }
 
     #[test]

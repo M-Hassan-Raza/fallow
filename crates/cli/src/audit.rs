@@ -671,10 +671,18 @@ fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf
     let current_root = current_root
         .canonicalize()
         .unwrap_or_else(|_| current_root.to_path_buf());
-    current_root.strip_prefix(git_root).map_or_else(
-        |_| base_worktree_root.to_path_buf(),
-        |relative| base_worktree_root.join(relative),
-    )
+    match current_root.strip_prefix(&git_root) {
+        Ok(relative) => base_worktree_root.join(relative),
+        Err(err) => {
+            tracing::warn!(
+                current_root = %current_root.display(),
+                git_root = %git_root.display(),
+                error = %err,
+                "Could not remap audit base root into the base worktree; falling back to worktree root"
+            );
+            base_worktree_root.to_path_buf()
+        }
+    }
 }
 
 fn current_keys_as_base_keys(
