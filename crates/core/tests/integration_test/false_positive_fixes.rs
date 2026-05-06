@@ -302,6 +302,86 @@ export const app = Button;
 }
 
 #[test]
+fn missing_extends_keeps_local_tsconfig_paths_without_base_url() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/features/nested")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "missing-extends-local-paths",
+            "private": true,
+            "main": "src/index.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r##"{
+            "extends": "./node_modules/@scope/missing/tsconfig.json",
+            "compilerOptions": {
+                "paths": {
+                    "$env": ["src/env.ts"],
+                    "@features/*": ["src/features/*"],
+                    "#theme": ["missing/theme.ts", "src/theme.ts"]
+                }
+            }
+        }"##,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/index.ts"),
+        r##"import { env } from "$env";
+import { feature } from "@features/home";
+import { nested } from "@features/nested";
+import { theme } from "#theme";
+
+export const app = [env, feature, nested, theme].join("-");
+"##,
+    )
+    .expect("index");
+    std::fs::write(root.join("src/env.ts"), "export const env = 'env';\n").expect("env");
+    std::fs::write(
+        root.join("src/features/home.ts"),
+        "export const feature = 'home';\n",
+    )
+    .expect("home");
+    std::fs::write(
+        root.join("src/features/nested/index.ts"),
+        "export const nested = 'nested';\n",
+    )
+    .expect("nested index");
+    std::fs::write(root.join("src/theme.ts"), "export const theme = 'theme';\n").expect("theme");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.unresolved_imports.is_empty(),
+        "exact aliases, wildcard aliases, fallback targets, and directory indexes should resolve: {:?}",
+        results.unresolved_imports
+    );
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    for expected_used in [
+        "src/env.ts",
+        "src/features/home.ts",
+        "src/features/nested/index.ts",
+        "src/theme.ts",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path == expected_used),
+            "{expected_used} should stay reachable through local tsconfig paths: {unused_files:?}"
+        );
+    }
+}
+
+#[test]
 fn glimmer_typescript_imports_use_tsconfig_path_aliases() {
     let root = fixture_path("glimmer-path-aliases");
     let config = create_config(root);

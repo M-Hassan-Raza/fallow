@@ -140,7 +140,8 @@ fn warn_once_tsconfig(ctx: &ResolveContext<'_>, err: &ResolveError) {
         tracing::warn!(
             "Broken tsconfig chain: {message}. Falling back to resolver-less resolution for \
              affected files. Relative and bare imports still work, but tsconfig path aliases \
-             (e.g., `@/...`) will not. Fix the extends/references chain to restore alias support."
+             from missing inherited configs will not. Fix the extends/references chain to restore \
+             full alias support."
         );
     }
 }
@@ -163,15 +164,7 @@ fn nearest_tsconfig_path(root: &Path, from_file: &Path) -> Option<PathBuf> {
 }
 
 fn path_alias_pattern_matches(pattern: &str, specifier: &str) -> bool {
-    match pattern.split_once('*') {
-        Some((prefix, suffix)) if !prefix.is_empty() || !suffix.is_empty() => {
-            specifier.starts_with(prefix)
-                && specifier.ends_with(suffix)
-                && specifier.len() >= prefix.len() + suffix.len()
-        }
-        Some(_) => false,
-        None => specifier == pattern,
-    }
+    path_alias_capture(pattern, specifier).is_some()
 }
 
 fn path_alias_capture<'a>(pattern: &str, specifier: &'a str) -> Option<&'a str> {
@@ -225,14 +218,21 @@ fn try_nearest_tsconfig_path_alias(
     let json = serde_json::from_reader::<_, Value>(reader).ok()?;
     let compiler_options = json.get("compilerOptions")?;
     let paths = compiler_options.get("paths")?.as_object()?;
-    let base_url = compiler_options.get("baseUrl")?.as_str()?;
     let tsconfig_dir = tsconfig_path.parent().unwrap_or(ctx.root);
-    let base_url = Path::new(base_url);
-    let base_dir = if base_url.is_absolute() {
-        base_url.to_path_buf()
-    } else {
-        tsconfig_dir.join(base_url)
-    };
+    let base_dir = compiler_options
+        .get("baseUrl")
+        .and_then(Value::as_str)
+        .map_or_else(
+            || tsconfig_dir.to_path_buf(),
+            |base_url| {
+                let base_url = Path::new(base_url);
+                if base_url.is_absolute() {
+                    base_url.to_path_buf()
+                } else {
+                    tsconfig_dir.join(base_url)
+                }
+            },
+        );
 
     for (pattern, targets) in paths {
         let Some(capture) = path_alias_capture(pattern, specifier) else {
