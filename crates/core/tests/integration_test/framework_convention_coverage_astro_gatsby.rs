@@ -18,6 +18,10 @@ fn astro_template_script_src_and_inline_imports_are_followed() {
             "{expected_used_file} should be reachable via Astro <script>, unused files: {unused_files:?}"
         );
     }
+    assert!(
+        unused_files.iter().any(|path| path == "src/scripts/raw.ts"),
+        "is:inline script imports should not create reachability edges, unused files: {unused_files:?}"
+    );
 
     // The Astro page itself, the foo() call inside foo.ts, and the inline
     // import of bar should not suppress legitimate unused-export detection.

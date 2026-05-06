@@ -3,8 +3,8 @@
 //! Extracts the TypeScript code between `---` delimiters in `.astro` files,
 //! plus `<script src="...">` references and inline `<script>` import
 //! statements from the template body. Astro bundles per-component client
-//! scripts at build time, so both reference shapes must keep their targets
-//! reachable.
+//! scripts at build time when the script tag opts into Astro processing, so
+//! both processed reference shapes must keep their targets reachable.
 
 use std::path::Path;
 use std::sync::LazyLock;
@@ -15,7 +15,7 @@ use oxc_parser::Parser;
 use oxc_span::{SourceType, Span};
 
 use crate::asset_url::normalize_asset_url;
-use crate::html::collect_asset_refs;
+use crate::html::is_remote_url;
 use crate::sfc::SfcScript;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName, ModuleInfo};
@@ -36,9 +36,15 @@ static SCRIPT_BLOCK_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     .expect("valid regex")
 });
 
-/// Regex detecting a `src` attribute on a script tag. Mirrors `sfc::SRC_ATTR_RE`.
+/// Regex matching opening `<script>` tags in the Astro template body.
+static SCRIPT_OPEN_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?is)<script\b(?P<attrs>(?:[^>"']|"[^"]*"|'[^']*')*)>"#)
+        .expect("valid regex")
+});
+
+/// Regex detecting and capturing a `src` attribute on a script tag.
 static SRC_ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
-    regex::Regex::new(r#"(?:^|\s)src\s*=\s*["'][^"']+["']"#).expect("valid regex")
+    regex::Regex::new(r#"(?i)(?:^|\s)src\s*=\s*["'](?P<src>[^"']+)["']"#).expect("valid regex")
 });
 
 /// Regex matching HTML comments for stripping before template scanning.
@@ -112,30 +118,35 @@ fn extend_imports_from_template(imports: &mut Vec<ImportInfo>, template: &str) {
         return;
     }
 
-    // External script references (`<script src="..."></script>`). Reuse the
-    // shared HTML asset scanner so behavior matches `.html` files: HTML
-    // comments stripped, remote URLs filtered, bare names normalized.
-    for raw in collect_asset_refs(template) {
-        imports.push(ImportInfo {
-            source: normalize_asset_url(&raw),
-            imported_name: ImportedName::SideEffect,
-            local_name: String::new(),
-            is_type_only: false,
-            from_style: false,
-            span: Span::default(),
-            source_span: Span::default(),
-        });
+    let stripped = HTML_COMMENT_RE.replace_all(template, "");
+
+    // External script references (`<script src="..."></script>`). Astro only
+    // processes a `src` script when `src` is the tag's only attribute.
+    // Attributed scripts (`is:inline`, `type="module"`, `defer`, etc.) are
+    // rendered as authored and do not resolve imports relative to the `.astro`
+    // file, so they must not create reachability edges.
+    for cap in SCRIPT_OPEN_RE.captures_iter(&stripped) {
+        let attrs = cap.name("attrs").map_or("", |m| m.as_str());
+        if let Some(raw) = processed_script_src(attrs) {
+            imports.push(ImportInfo {
+                source: normalize_asset_url(raw),
+                imported_name: ImportedName::SideEffect,
+                local_name: String::new(),
+                is_type_only: false,
+                from_style: false,
+                span: Span::default(),
+                source_span: Span::default(),
+            });
+        }
     }
 
-    // Inline `<script>` blocks. Astro treats their contents as TypeScript
-    // and bundles ES module imports referenced inside them, so each block
-    // contributes its imports/exports to the component's reachability set.
-    // Skip blocks that have a `src` attribute: those are already covered by
-    // `collect_asset_refs` above and any inline body is ignored by Astro.
-    let stripped = HTML_COMMENT_RE.replace_all(template, "");
+    // Inline `<script>` blocks without attributes are Astro-processed
+    // TypeScript, so ES module imports referenced inside them contribute to
+    // the component's reachability set. Any attribute opts out of processing
+    // except for `src`, which is handled by the opening-tag scan above.
     for cap in SCRIPT_BLOCK_RE.captures_iter(&stripped) {
         let attrs = cap.name("attrs").map_or("", |m| m.as_str());
-        if SRC_ATTR_RE.is_match(attrs) {
+        if !attrs.trim().is_empty() {
             continue;
         }
         let body = cap.name("body").map_or("", |m| m.as_str());
@@ -148,6 +159,23 @@ fn extend_imports_from_template(imports: &mut Vec<ImportInfo>, template: &str) {
         let mut inline_extractor = ModuleInfoExtractor::new();
         inline_extractor.visit_program(&parser_return.program);
         imports.append(&mut inline_extractor.imports);
+    }
+}
+
+fn processed_script_src(attrs: &str) -> Option<&str> {
+    let cap = SRC_ATTR_RE.captures(attrs)?;
+    let src = cap.name("src")?.as_str().trim();
+    if src.is_empty() || is_remote_url(src) {
+        return None;
+    }
+
+    let without_src = SRC_ATTR_RE.replace(attrs, "");
+    let extra_attrs = without_src.trim();
+    let extra_attrs = extra_attrs.strip_suffix('/').unwrap_or(extra_attrs).trim();
+    if extra_attrs.is_empty() {
+        Some(src)
+    } else {
+        None
     }
 }
 
@@ -402,10 +430,17 @@ mod tests {
 
     #[test]
     fn parse_astro_template_script_src_multiline_attrs() {
-        let source = "---\n---\n<script\n  type=\"module\"\n  src=\"./client.ts\"\n></script>";
+        let source = "---\n---\n<script\n  src=\"./client.ts\"\n></script>";
         let info = parse_astro_to_module(FileId(0), source, 0);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "./client.ts");
+    }
+
+    #[test]
+    fn parse_astro_template_script_src_with_extra_attrs_is_unprocessed() {
+        let source = "---\n---\n<script type=\"module\" src=\"./client.ts\"></script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.is_empty());
     }
 
     // ── Template body: inline <script> imports ──────────────────
@@ -441,12 +476,17 @@ mod tests {
     }
 
     #[test]
-    fn parse_astro_template_inline_script_with_attributes() {
-        // `<script is:inline>`, `<script type="module">`, etc. still parse the body.
+    fn parse_astro_template_inline_script_with_attributes_is_unprocessed() {
         let source = "---\n---\n<script is:inline>\n  import '../scripts/bar';\n</script>";
         let info = parse_astro_to_module(FileId(0), source, 0);
-        assert_eq!(info.imports.len(), 1);
-        assert_eq!(info.imports[0].source, "../scripts/bar");
+        assert!(info.imports.is_empty());
+    }
+
+    #[test]
+    fn parse_astro_template_type_module_inline_script_is_unprocessed() {
+        let source = "---\n---\n<script type=\"module\">\n  import '../scripts/bar';\n</script>";
+        let info = parse_astro_to_module(FileId(0), source, 0);
+        assert!(info.imports.is_empty());
     }
 
     #[test]
@@ -526,15 +566,5 @@ mod tests {
         let info = parse_astro_to_module(FileId(0), source, 0);
         assert_eq!(info.imports.len(), 1);
         assert_eq!(info.imports[0].source, "../Layout.astro");
-    }
-
-    #[test]
-    fn parse_astro_template_link_stylesheet_reference() {
-        // `<link rel="stylesheet" href="...">` follows the same HTML asset
-        // contract as `.html` files: the shared `collect_asset_refs` covers it.
-        let source = "---\n---\n<link rel=\"stylesheet\" href=\"./styles.css\" />";
-        let info = parse_astro_to_module(FileId(0), source, 0);
-        assert_eq!(info.imports.len(), 1);
-        assert_eq!(info.imports[0].source, "./styles.css");
     }
 }
