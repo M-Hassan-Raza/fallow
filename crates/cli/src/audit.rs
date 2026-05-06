@@ -19,7 +19,7 @@ use crate::report::plural;
 
 // ── Types ────────────────────────────────────────────────────────
 
-const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 1;
+const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 2;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 
 /// Verdict for the audit command.
@@ -595,18 +595,19 @@ fn compute_base_snapshot(
             opts.output,
         ));
     };
+    let base_root = base_analysis_root(opts.root, worktree.path());
     let base_config_path = opts
         .config_path
         .as_ref()
         .filter(|path| path.is_relative())
-        .map(|path| worktree.path().join(path));
+        .map(|path| base_root.join(path));
     let config_path = if base_config_path.is_some() {
         &base_config_path
     } else {
         opts.config_path
     };
     let base_opts = AuditOptions {
-        root: worktree.path(),
+        root: &base_root,
         config_path,
         output: opts.output,
         no_cache: opts.no_cache,
@@ -631,7 +632,7 @@ fn compute_base_snapshot(
         include_entry_exports: opts.include_entry_exports,
     };
 
-    let base_changed_files = remap_focus_files(changed_files, opts.root, worktree.path());
+    let base_changed_files = remap_focus_files(changed_files, opts.root, &base_root);
     let check_production = opts.production_dead_code.unwrap_or(opts.production);
     let health_production = opts.production_health.unwrap_or(opts.production);
     let share_dead_code_parse_with_health = check_production == health_production;
@@ -667,6 +668,19 @@ fn compute_base_snapshot(
             dupes_keys(&r.report, &r.config.root)
         }),
     })
+}
+
+fn base_analysis_root(current_root: &Path, base_worktree_root: &Path) -> PathBuf {
+    let Some(git_root) = git_toplevel(current_root) else {
+        return base_worktree_root.to_path_buf();
+    };
+    let current_root = current_root
+        .canonicalize()
+        .unwrap_or_else(|_| current_root.to_path_buf());
+    current_root.strip_prefix(git_root).map_or_else(
+        |_| base_worktree_root.to_path_buf(),
+        |relative| base_worktree_root.join(relative),
+    )
 }
 
 fn current_keys_as_base_keys(
@@ -2661,6 +2675,22 @@ mod tests {
             None
         );
         assert_eq!(audit_worktree_pid("not-fallow-audit-base-123"), None);
+    }
+
+    #[test]
+    fn base_analysis_root_preserves_repo_subdirectory_roots() {
+        let tmp = tempfile::TempDir::new().expect("temp dir should be created");
+        let repo = tmp.path().join("repo");
+        let app_root = repo.join("apps/mobile");
+        let base_worktree = tmp.path().join("base-worktree");
+        fs::create_dir_all(&app_root).expect("app root should be created");
+        fs::create_dir_all(&base_worktree).expect("base worktree should be created");
+        git(&repo, &["init", "-b", "main"]);
+
+        assert_eq!(
+            base_analysis_root(&app_root, &base_worktree),
+            base_worktree.join("apps/mobile")
+        );
     }
 
     #[test]
