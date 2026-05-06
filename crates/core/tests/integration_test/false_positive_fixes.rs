@@ -349,6 +349,94 @@ export default defineConfig({
     );
 }
 
+#[test]
+fn prisma_dot_config_schema_folder_credits_configured_generators_only() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join(".config")).expect(".config dir");
+    std::fs::create_dir_all(root.join("db/schema/nested")).expect("schema dir");
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "prisma-dot-config-schema-folder",
+            "private": true,
+            "dependencies": {
+                "@prisma/client": "6.0.0"
+            },
+            "devDependencies": {
+                "prisma": "6.0.0",
+                "prisma-json-types-generator": "3.0.0",
+                "prisma-erd-generator": "2.0.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join(".config/prisma.ts"),
+        r#"export default {
+    schema: "../db/schema",
+};
+"#,
+    )
+    .expect("prisma config");
+    std::fs::write(
+        root.join("db/schema/generator.prisma"),
+        r#"generator client {
+  provider = "prisma-client-js"
+}
+
+generator json {
+  provider = "prisma-json-types-generator"
+}
+"#,
+    )
+    .expect("generator schema");
+    std::fs::write(
+        root.join("db/schema/nested/model.prisma"),
+        "model User {\n  id Int @id\n}\n",
+    )
+    .expect("nested model schema");
+    std::fs::write(
+        root.join("db/other.prisma"),
+        r#"generator erd {
+  provider = "prisma-erd-generator"
+}
+"#,
+    )
+    .expect("unconfigured schema");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { PrismaClient } from '@prisma/client';\nexport const db = new PrismaClient();\n",
+    )
+    .expect("entry");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"module":"esnext","moduleResolution":"bundler"},"include":["src/**/*"]}"#,
+    )
+    .expect("tsconfig");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_dev: Vec<String> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|d| d.package_name.clone())
+        .collect();
+    assert!(
+        !unused_dev.contains(&"prisma-json-types-generator".to_owned()),
+        "generator provider from schema configured by .config/prisma.ts should be credited. \
+         unused_dev={unused_dev:?}"
+    );
+    assert!(
+        unused_dev.contains(&"prisma-erd-generator".to_owned()),
+        "generator provider outside the configured schema folder should not be credited. \
+         unused_dev={unused_dev:?}"
+    );
+}
+
 // ── Prisma custom generator providers (issue #288) ──────────────
 
 #[test]
