@@ -351,9 +351,10 @@ jobs:
   miri:
     name: Miri
     needs: changes
-    # PR-only and path-filtered to crates/{graph,extract,types}: catches contributor PRs that
-    # add tempdir / fs-IO tests without inheriting #[cfg_attr(miri, ignore)] from sibling tests.
-    # The pre-push hook still runs miri locally on push to main, so main is doubly protected.
+    # PR-only and path-filtered to crates/{graph,extract,types,config}: catches contributor PRs
+    # that add tempdir / fs-IO tests without inheriting #[cfg_attr(miri, ignore)] from sibling
+    # tests. Does not run on push events (the .githooks/pre-push hook covers that locally for
+    # maintainers who opt in via `git config core.hooksPath .githooks`).
     if: needs.changes.outputs.miri == 'true' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 45
