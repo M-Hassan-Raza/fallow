@@ -40,7 +40,7 @@ pub(super) fn fetch_churn_data(
 
     if !churn::is_git_repo(opts.root) {
         if !opts.quiet {
-            eprintln!("note: hotspot analysis skipped — no git repository found at project root");
+            eprintln!("note: hotspot analysis skipped: no git repository found at project root");
         }
         return None;
     }
@@ -160,7 +160,7 @@ pub(super) fn compute_hotspots(
         );
         if opts.ownership {
             eprintln!(
-                "Warning: shallow clones inflate single-author dominance — \
+                "Warning: shallow clones inflate single-author dominance, so \
                  ownership signals will be skewed."
             );
         }

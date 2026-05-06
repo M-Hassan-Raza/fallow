@@ -485,7 +485,7 @@ fn combined_json_outside_git_repo_emits_single_document() {
 
     // The bug in #294 was that stdout contained an inline `{"error": true,
     // "message": "hotspot analysis requires a git repository", ...}` followed
-    // by the combined report — two top-level JSON values. Parsing as a single
+    // by the combined report (two top-level JSON values). Parsing as a single
     // value catches that exactly: serde_json rejects trailing input.
     serde_json::from_str::<serde_json::Value>(&stdout).unwrap_or_else(|e| {
         panic!(
@@ -494,7 +494,7 @@ fn combined_json_outside_git_repo_emits_single_document() {
         )
     });
 
-    // And the parsed envelope should be the combined report — schema_version is
+    // And the parsed envelope should be the combined report; schema_version is
     // the canonical marker.
     let json: serde_json::Value = serde_json::from_str(&stdout).expect("already parsed");
     assert!(
