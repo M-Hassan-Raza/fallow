@@ -5,10 +5,12 @@
 //! `generator` providers inside `schema.prisma` so they are not reported as
 //! `unused-dependency`.
 
+use std::path::Path;
 use std::sync::LazyLock;
 
 use regex::Regex;
 
+use super::config_parser;
 use super::{Plugin, PluginResult};
 
 const ENABLERS: &[&str] = &["prisma", "@prisma/client"];
@@ -26,6 +28,7 @@ const ENTRY_PATTERNS: &[&str] = &["prisma/seed.{ts,js}"];
 // credited as referenced dependencies.
 const CONFIG_PATTERNS: &[&str] = &[
     "prisma.config.{ts,mts,cts,js,mjs,cjs}",
+    ".config/prisma.{ts,mts,cts,js,mjs,cjs}",
     "prisma/schema.prisma",
     "schema.prisma",
     "prisma/schema/*.prisma",
@@ -36,6 +39,7 @@ const ALWAYS_USED: &[&str] = &[
     "schema.prisma",
     "prisma/schema/*.prisma",
     "prisma.config.{ts,mts,cts,js,mjs,cjs}",
+    ".config/prisma.{ts,mts,cts,js,mjs,cjs}",
 ];
 
 const TOOLING_DEPENDENCIES: &[&str] = &["prisma", "@prisma/client"];
@@ -47,14 +51,78 @@ define_plugin! {
     config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
-    resolve_config(config_path, source, _root) {
+    resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
         if config_path.extension().is_some_and(|ext| ext == "prisma") {
             result
                 .referenced_dependencies
                 .extend(parse_generator_providers(source));
+        } else if is_prisma_config_path(config_path)
+            && let Some(schema) = config_parser::extract_config_string(source, config_path, &["schema"])
+        {
+            add_configured_schema(&mut result, config_path, root, &schema);
         }
         result
+    }
+}
+
+fn is_prisma_config_path(path: &Path) -> bool {
+    path.file_stem()
+        .and_then(|stem| stem.to_str())
+        .is_some_and(|stem| stem == "prisma.config" || stem == "prisma")
+}
+
+fn add_configured_schema(result: &mut PluginResult, config_path: &Path, root: &Path, schema: &str) {
+    let Some(normalized) = config_parser::normalize_config_path(schema, config_path, root) else {
+        return;
+    };
+    let absolute = root.join(&normalized);
+
+    if is_schema_file_path(&absolute) {
+        result.always_used_files.push(normalized);
+        result
+            .referenced_dependencies
+            .extend(read_schema_provider_dependencies(&absolute));
+        return;
+    }
+
+    result
+        .always_used_files
+        .push(format!("{}/**/*.prisma", normalized.trim_end_matches('/')));
+    result
+        .referenced_dependencies
+        .extend(read_schema_folder_provider_dependencies(&absolute));
+}
+
+fn is_schema_file_path(path: &Path) -> bool {
+    path.extension().is_some_and(|ext| ext == "prisma") || path.is_file()
+}
+
+fn read_schema_provider_dependencies(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .map(|source| parse_generator_providers(&source))
+        .unwrap_or_default()
+}
+
+fn read_schema_folder_provider_dependencies(path: &Path) -> Vec<String> {
+    let mut providers = Vec::new();
+    collect_schema_folder_provider_dependencies(path, &mut providers);
+    providers.sort();
+    providers.dedup();
+    providers
+}
+
+fn collect_schema_folder_provider_dependencies(path: &Path, providers: &mut Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return;
+    };
+    for entry in entries.filter_map(Result::ok) {
+        let child = entry.path();
+        if child.is_dir() {
+            collect_schema_folder_provider_dependencies(&child, providers);
+        } else if child.extension().is_some_and(|ext| ext == "prisma") {
+            providers.extend(read_schema_provider_dependencies(&child));
+        }
     }
 }
 
@@ -318,11 +386,90 @@ generator x {
     fn non_prisma_path_returns_empty() {
         let plugin = PrismaPlugin;
         let result = plugin.resolve_config(
-            Path::new("prisma.config.ts"),
+            Path::new("other.config.ts"),
             r#"generator x { provider = "should-not-fire" }"#,
             Path::new("/project"),
         );
         assert!(result.referenced_dependencies.is_empty());
+    }
+
+    #[test]
+    fn config_patterns_include_dot_config_location() {
+        let plugin = PrismaPlugin;
+        assert!(
+            plugin
+                .config_patterns()
+                .contains(&".config/prisma.{ts,mts,cts,js,mjs,cjs}")
+        );
+        assert!(
+            plugin
+                .always_used()
+                .contains(&".config/prisma.{ts,mts,cts,js,mjs,cjs}")
+        );
+    }
+
+    #[test]
+    fn resolve_config_schema_file_marks_schema_and_reads_generator() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("db")).expect("db dir");
+        std::fs::write(
+            root.join("db/schema.prisma"),
+            r#"generator json {
+  provider = "prisma-json-types-generator"
+}
+"#,
+        )
+        .expect("schema");
+
+        let plugin = PrismaPlugin;
+        let result = plugin.resolve_config(
+            &root.join(".config/prisma.ts"),
+            r#"export default { schema: "../db/schema.prisma" }"#,
+            root,
+        );
+
+        assert_eq!(result.always_used_files, vec!["db/schema.prisma"]);
+        assert_eq!(
+            result.referenced_dependencies,
+            vec!["prisma-json-types-generator"]
+        );
+    }
+
+    #[test]
+    fn resolve_config_schema_folder_marks_recursive_glob_and_reads_generators() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("db/schema/nested")).expect("schema dir");
+        std::fs::write(
+            root.join("db/schema/generator.prisma"),
+            r#"generator json {
+  provider = "prisma-json-types-generator"
+}
+"#,
+        )
+        .expect("generator schema");
+        std::fs::write(
+            root.join("db/schema/nested/erd.prisma"),
+            r#"generator erd {
+  provider = "prisma-erd-generator"
+}
+"#,
+        )
+        .expect("nested schema");
+
+        let plugin = PrismaPlugin;
+        let result = plugin.resolve_config(
+            &root.join(".config/prisma.ts"),
+            r#"export default { schema: "../db/schema" }"#,
+            root,
+        );
+
+        assert_eq!(result.always_used_files, vec!["db/schema/**/*.prisma"]);
+        assert_eq!(
+            result.referenced_dependencies,
+            vec!["prisma-erd-generator", "prisma-json-types-generator"]
+        );
     }
 
     #[test]
