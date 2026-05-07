@@ -76,6 +76,7 @@ fn unresolved_dynamic_import_detected_with_real_location() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));
@@ -356,6 +357,7 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
 
     let config = test_config(PathBuf::from("/project"));

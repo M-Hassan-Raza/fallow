@@ -447,6 +447,7 @@ fn dynamic_import_unlisted_dep_has_import_site() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
