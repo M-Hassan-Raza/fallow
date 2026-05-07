@@ -1,8 +1,9 @@
 #[path = "common/mod.rs"]
 mod common;
 
-use common::{parse_json, run_fallow_raw};
+use common::{fallow_bin, parse_json, run_fallow_raw};
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 use tempfile::TempDir;
 
@@ -928,4 +929,76 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
         Some("fail"),
         "verdict should be fail when CRAP threshold is crossed"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #301: ambient git repo-state env vars must not break audit
+// ---------------------------------------------------------------------------
+
+fn audit_with_env(root: &Path, env: &[(&str, &str)]) -> common::CommandOutput {
+    let bin = fallow_bin();
+    let mut cmd = Command::new(&bin);
+    cmd.args([
+        "audit",
+        "--root",
+        root.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ])
+    .env("RUST_LOG", "")
+    .env("NO_COLOR", "1");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let output = cmd.output().expect("failed to run fallow binary");
+    common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+/// Regression test for issue #301. When git invokes hooks (`pre-commit`,
+/// `pre-push`), it sets `GIT_INDEX_FILE=.git/index` (relative path) plus
+/// related repo-state vars. Before the fix in #301, fallow inherited these
+/// into its own git invocations and `git worktree add` failed because the
+/// relative index path no longer resolved from the temporary worktree dir.
+///
+/// The test runs `fallow audit` under each of the ambient repo-state vars
+/// individually and asserts the audit succeeds, mirroring the leak shapes a
+/// hook subprocess actually sees.
+#[test]
+fn audit_succeeds_when_ambient_git_env_vars_leak_from_a_hook() {
+    let dir = create_audit_fixture("hook_env_leak");
+    let root = dir.path();
+
+    // `GIT_INDEX_FILE=.git/index` is the exact leak shape `git commit`
+    // produces; absolute form must also remain a no-op since fallow strips it.
+    let abs_index = root.join(".git/index").to_string_lossy().to_string();
+    let cases: &[(&str, &str)] = &[
+        ("GIT_INDEX_FILE", ".git/index"),
+        ("GIT_INDEX_FILE", abs_index.as_str()),
+        ("GIT_DIR", ".git"),
+        ("GIT_WORK_TREE", "."),
+        ("GIT_OBJECT_DIRECTORY", ".git/objects"),
+        ("GIT_COMMON_DIR", ".git"),
+        ("GIT_PREFIX", ""),
+    ];
+
+    for (key, value) in cases {
+        let output = audit_with_env(root, &[(key, value)]);
+        assert_eq!(
+            output.code, 0,
+            "audit must exit 0 with {key}={value:?} set; stderr: {}",
+            output.stderr
+        );
+        let json = parse_json(&output);
+        assert!(
+            json["verdict"].is_string(),
+            "audit JSON should still include a verdict with {key}={value:?} set"
+        );
+    }
 }

@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::{ExternalPluginDef, FallowConfig, PackageJson};
+use fallow_core::git_env::clear_ambient_git_env;
 
 use crate::validate;
 
@@ -434,11 +435,12 @@ fn ensure_gitignore(root: &Path) {
 /// Detect the default branch name by querying git.
 fn detect_default_branch(root: &Path) -> Option<String> {
     // Try `git symbolic-ref refs/remotes/origin/HEAD` first (most reliable).
-    let output = std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    command
         .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
-        .current_dir(root)
-        .output()
-        .ok()?;
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     if output.status.success() {
         let full_ref = String::from_utf8(output.stdout).ok()?;
         return full_ref

@@ -18,6 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 use fallow_config::{OutputFormat, PackageJson, WorkspaceInfo, discover_workspaces};
+use fallow_core::git_env::clear_ambient_git_env;
 use fallow_license::{DEFAULT_HARD_FAIL_DAYS, LicenseStatus};
 
 use crate::health::coverage as runtime_coverage;
@@ -814,10 +815,10 @@ fn default_trial_email() -> Option<String> {
 }
 
 fn git_config_email() -> Option<String> {
-    let output = Command::new("git")
-        .args(["config", "user.email"])
-        .output()
-        .ok()?;
+    let mut command = Command::new("git");
+    command.args(["config", "user.email"]);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }

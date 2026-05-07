@@ -173,11 +173,8 @@ fn collect_git_paths(
 
 fn git_command(cwd: &Path, args: &[&str]) -> std::process::Command {
     let mut command = std::process::Command::new("git");
-    command
-        .args(args)
-        .current_dir(cwd)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE");
+    command.args(args).current_dir(cwd);
+    crate::git_env::clear_ambient_git_env(&mut command);
     command
 }
 
@@ -524,18 +521,14 @@ mod tests {
         let command = git_command(Path::new("."), &["status", "--short"]);
         let overrides: Vec<_> = command.get_envs().collect();
 
-        assert!(
-            overrides
-                .iter()
-                .any(|(key, value)| *key == "GIT_DIR" && value.is_none()),
-            "git helper must clear inherited GIT_DIR"
-        );
-        assert!(
-            overrides
-                .iter()
-                .any(|(key, value)| *key == "GIT_WORK_TREE" && value.is_none()),
-            "git helper must clear inherited GIT_WORK_TREE"
-        );
+        for var in crate::git_env::AMBIENT_GIT_ENV_VARS {
+            assert!(
+                overrides
+                    .iter()
+                    .any(|(key, value)| key.to_str() == Some(*var) && value.is_none()),
+                "git helper must clear inherited {var}",
+            );
+        }
     }
 
     #[test]

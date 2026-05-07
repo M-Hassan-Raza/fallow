@@ -538,9 +538,12 @@ pub fn build_counts(input: &VitalSignsInput<'_>) -> VitalSignsCounts {
 
 /// Get the current git SHA (short form).
 fn git_sha(root: &Path) -> Option<String> {
-    std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    command
         .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(root)
+        .current_dir(root);
+    fallow_core::git_env::clear_ambient_git_env(&mut command);
+    command
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -549,9 +552,12 @@ fn git_sha(root: &Path) -> Option<String> {
 
 /// Get the current git branch name.
 fn git_branch(root: &Path) -> Option<String> {
-    std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    command
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
-        .current_dir(root)
+        .current_dir(root);
+    fallow_core::git_env::clear_ambient_git_env(&mut command);
+    command
         .output()
         .ok()
         .filter(|o| o.status.success())

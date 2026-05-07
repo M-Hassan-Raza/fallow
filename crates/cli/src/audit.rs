@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use colored::Colorize;
 use fallow_config::{AuditGate, OutputFormat};
+use fallow_core::git_env::clear_ambient_git_env;
 use rustc_hash::FxHashSet;
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -113,10 +114,12 @@ pub struct AuditOptions<'a> {
 /// Returns `None` if none of these exist.
 fn auto_detect_base_branch(root: &std::path::Path) -> Option<String> {
     // Try symbolic-ref first (works when origin HEAD is set)
-    if let Ok(output) = std::process::Command::new("git")
+    let mut symbolic_ref = std::process::Command::new("git");
+    symbolic_ref
         .args(["symbolic-ref", "refs/remotes/origin/HEAD"])
-        .current_dir(root)
-        .output()
+        .current_dir(root);
+    clear_ambient_git_env(&mut symbolic_ref);
+    if let Ok(output) = symbolic_ref.output()
         && output.status.success()
     {
         let full_ref = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -126,20 +129,24 @@ fn auto_detect_base_branch(root: &std::path::Path) -> Option<String> {
     }
 
     // Try main
-    if let Ok(output) = std::process::Command::new("git")
+    let mut verify_main = std::process::Command::new("git");
+    verify_main
         .args(["rev-parse", "--verify", "main"])
-        .current_dir(root)
-        .output()
+        .current_dir(root);
+    clear_ambient_git_env(&mut verify_main);
+    if let Ok(output) = verify_main.output()
         && output.status.success()
     {
         return Some("main".to_string());
     }
 
     // Try master
-    if let Ok(output) = std::process::Command::new("git")
+    let mut verify_master = std::process::Command::new("git");
+    verify_master
         .args(["rev-parse", "--verify", "master"])
-        .current_dir(root)
-        .output()
+        .current_dir(root);
+    clear_ambient_git_env(&mut verify_master);
+    if let Ok(output) = verify_master.output()
         && output.status.success()
     {
         return Some("master".to_string());
@@ -150,11 +157,12 @@ fn auto_detect_base_branch(root: &std::path::Path) -> Option<String> {
 
 /// Get the short SHA of HEAD for the scope display line.
 fn get_head_sha(root: &std::path::Path) -> Option<String> {
-    let output = std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    command
         .args(["rev-parse", "--short", "HEAD"])
-        .current_dir(root)
-        .output()
-        .ok()?;
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     if output.status.success() {
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
@@ -474,17 +482,34 @@ fn save_cached_base_snapshot(
 }
 
 fn git_rev_parse(root: &Path, rev: &str) -> Option<String> {
-    let output = Command::new("git")
-        .args(["rev-parse", rev])
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .output()
-        .ok()?;
+    let mut command = Command::new("git");
+    command.args(["rev-parse", rev]).current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
     Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// If fallow's process inherited any ambient git repo-state env vars (typical
+/// when invoked from a `pre-commit` / `pre-push` hook or a tool wrapping git),
+/// surface the most likely culprit so a user hitting an unexpected worktree
+/// failure can short-circuit the diagnosis. Returns `None` otherwise.
+fn ambient_git_env_hint() -> Option<String> {
+    use fallow_core::git_env::AMBIENT_GIT_ENV_VARS;
+    for var in AMBIENT_GIT_ENV_VARS {
+        if let Ok(value) = std::env::var(var)
+            && !value.is_empty()
+        {
+            return Some(format!(
+                "{var}={value} is set in the environment; if fallow is being \
+invoked from a git hook this can interfere with worktree operations. Re-run \
+with `env -u {var} fallow audit` to confirm."
+            ));
+        }
+    }
+    None
 }
 
 fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> Vec<String> {
@@ -589,11 +614,13 @@ fn compute_base_snapshot(
     base_sha: Option<&str>,
 ) -> Result<AuditKeySnapshot, ExitCode> {
     let Some(worktree) = BaseWorktree::create(opts.root, base_ref, base_sha) else {
-        return Err(emit_error(
-            &format!("could not create a temporary worktree for base ref '{base_ref}'"),
-            2,
-            opts.output,
-        ));
+        use std::fmt::Write as _;
+        let mut message =
+            format!("could not create a temporary worktree for base ref '{base_ref}'");
+        if let Some(hint) = ambient_git_env_hint() {
+            let _ = write!(message, "\n  hint: {hint}");
+        }
+        return Err(emit_error(&message, 2, opts.output));
     };
     let base_root = base_analysis_root(opts.root, worktree.path());
     let current_config_path = opts
@@ -757,13 +784,12 @@ fn is_fallow_cache_artifact(
 }
 
 fn git_toplevel(root: &Path) -> Option<PathBuf> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["rev-parse", "--show-toplevel"])
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .output()
-        .ok()?;
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -777,13 +803,12 @@ fn git_show_file(root: &Path, base_ref: &str, relative: &Path) -> Option<String>
         base_ref,
         relative.to_string_lossy().replace('\\', "/")
     );
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["show", "--end-of-options", &spec])
-        .current_dir(root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .output()
-        .ok()?;
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     output
         .status
         .success()
@@ -893,7 +918,8 @@ impl BaseWorktree {
                 .ok()?
                 .as_nanos()
         ));
-        let output = Command::new("git")
+        let mut command = Command::new("git");
+        command
             .args([
                 "worktree",
                 "add",
@@ -902,11 +928,9 @@ impl BaseWorktree {
                 path.to_str()?,
                 base_ref,
             ])
-            .current_dir(repo_root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .output()
-            .ok()?;
+            .current_dir(repo_root);
+        clear_ambient_git_env(&mut command);
+        let output = command.output().ok()?;
         if !output.status.success() {
             let _ = std::fs::remove_dir_all(&path);
             return None;
@@ -934,7 +958,8 @@ impl BaseWorktree {
 
         remove_audit_worktree(repo_root, &path);
         let _ = std::fs::remove_dir_all(&path);
-        let output = Command::new("git")
+        let mut command = Command::new("git");
+        command
             .args([
                 "worktree",
                 "add",
@@ -943,11 +968,9 @@ impl BaseWorktree {
                 path.to_string_lossy().as_ref(),
                 base_sha,
             ])
-            .current_dir(repo_root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .output()
-            .ok()?;
+            .current_dir(repo_root);
+        clear_ambient_git_env(&mut command);
+        let output = command.output().ok()?;
         if !output.status.success() {
             let _ = std::fs::remove_dir_all(&path);
             return None;
@@ -1032,17 +1055,17 @@ fn symlink_dependency_dir(source: &Path, destination: &Path) -> std::io::Result<
 }
 
 fn remove_audit_worktree(repo_root: &Path, path: &Path) {
-    let _ = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args([
             "worktree",
             "remove",
             "--force",
             path.to_string_lossy().as_ref(),
         ])
-        .current_dir(repo_root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .output();
+        .current_dir(repo_root);
+    clear_ambient_git_env(&mut command);
+    let _ = command.output();
 }
 
 fn sweep_orphan_audit_worktrees(repo_root: &Path) {
@@ -1062,23 +1085,22 @@ fn sweep_orphan_audit_worktrees(repo_root: &Path) {
         removed_any = true;
     }
     if removed_any {
-        let _ = Command::new("git")
+        let mut command = Command::new("git");
+        command
             .args(["worktree", "prune", "--expire=now"])
-            .current_dir(repo_root)
-            .env_remove("GIT_DIR")
-            .env_remove("GIT_WORK_TREE")
-            .output();
+            .current_dir(repo_root);
+        clear_ambient_git_env(&mut command);
+        let _ = command.output();
     }
 }
 
 fn list_audit_worktrees(repo_root: &Path) -> Option<Vec<PathBuf>> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["worktree", "list", "--porcelain"])
-        .current_dir(repo_root)
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .output()
-        .ok()?;
+        .current_dir(repo_root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }

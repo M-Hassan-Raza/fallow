@@ -8,6 +8,7 @@ pub mod duplicates;
 pub(crate) mod errors;
 mod external_style_usage;
 pub mod extract;
+pub mod git_env;
 pub mod plugins;
 pub(crate) mod progress;
 pub mod results;

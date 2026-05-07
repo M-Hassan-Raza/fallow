@@ -9,6 +9,8 @@ use std::process::Command;
 
 use serde::Serialize;
 
+use crate::git_env::clear_ambient_git_env;
+
 /// Number of seconds in one day.
 const SECS_PER_DAY: f64 = 86_400.0;
 
@@ -170,27 +172,29 @@ pub fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> 
 /// Check if the repository is a shallow clone.
 #[must_use]
 pub fn is_shallow_clone(root: &Path) -> bool {
-    Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["rev-parse", "--is-shallow-repository"])
-        .current_dir(root)
-        .output()
-        .is_ok_and(|o| {
-            String::from_utf8_lossy(&o.stdout)
-                .trim()
-                .eq_ignore_ascii_case("true")
-        })
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    command.output().is_ok_and(|o| {
+        String::from_utf8_lossy(&o.stdout)
+            .trim()
+            .eq_ignore_ascii_case("true")
+    })
 }
 
 /// Check if the directory is inside a git repository.
 #[must_use]
 pub fn is_git_repo(root: &Path) -> bool {
-    Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["rev-parse", "--git-dir"])
         .current_dir(root)
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|s| s.success())
+        .stderr(std::process::Stdio::null());
+    clear_ambient_git_env(&mut command);
+    command.status().is_ok_and(|s| s.success())
 }
 
 // ── Churn cache ──────────────────────────────────────────────────
@@ -247,9 +251,10 @@ struct ChurnEventState {
 
 /// Get the full HEAD SHA for cache keying.
 fn get_head_sha(root: &Path) -> Option<String> {
-    Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(root)
+    let mut command = Command::new("git");
+    command.args(["rev-parse", "HEAD"]).current_dir(root);
+    clear_ambient_git_env(&mut command);
+    command
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -258,11 +263,12 @@ fn get_head_sha(root: &Path) -> Option<String> {
 
 /// Check whether `ancestor` is still reachable from `descendant`.
 fn is_ancestor(root: &Path, ancestor: &str, descendant: &str) -> bool {
-    Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["merge-base", "--is-ancestor", ancestor, descendant])
-        .current_dir(root)
-        .status()
-        .is_ok_and(|s| s.success())
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    command.status().is_ok_and(|s| s.success())
 }
 
 /// Try to load churn data from disk cache. Returns `None` on cache miss
@@ -413,6 +419,7 @@ fn analyze_churn_events(
             &format!("--after={}", since.git_after),
         ])
         .current_dir(root);
+    clear_ambient_git_env(&mut command);
 
     let output = match command.output() {
         Ok(o) => o,

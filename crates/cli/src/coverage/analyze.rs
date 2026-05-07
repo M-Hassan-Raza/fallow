@@ -5,6 +5,7 @@ use std::process::{Command, ExitCode};
 use std::time::Instant;
 
 use fallow_config::OutputFormat;
+use fallow_core::git_env::clear_ambient_git_env;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::coverage::RunContext;
@@ -231,11 +232,12 @@ fn resolve_repo(explicit: Option<&str>, root: &Path) -> Result<String, CloudErro
 }
 
 fn git_origin_project_id(root: &Path) -> Option<String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["remote", "get-url", "origin"])
-        .current_dir(root)
-        .output()
-        .ok()?;
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }

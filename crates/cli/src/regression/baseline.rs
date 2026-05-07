@@ -2,6 +2,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
+use fallow_core::git_env::clear_ambient_git_env;
 use fallow_core::results::AnalysisResults;
 
 use super::counts::{CheckCounts, DupesCounts, REGRESSION_SCHEMA_VERSION, RegressionBaseline};
@@ -43,20 +44,21 @@ pub struct RegressionOpts<'a> {
 /// Check whether a path is likely gitignored by running `git check-ignore`.
 /// Returns `false` if git is unavailable or the check fails (conservative).
 fn is_likely_gitignored(path: &Path, root: &Path) -> bool {
-    std::process::Command::new("git")
+    let mut command = std::process::Command::new("git");
+    command
         .args(["check-ignore", "-q"])
         .arg(path)
-        .current_dir(root)
-        .output()
-        .ok()
-        .is_some_and(|o| o.status.success())
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    command.output().ok().is_some_and(|o| o.status.success())
 }
 
 /// Get the current git SHA, if available.
 fn current_git_sha(root: &Path) -> Option<String> {
-    std::process::Command::new("git")
-        .args(["rev-parse", "HEAD"])
-        .current_dir(root)
+    let mut command = std::process::Command::new("git");
+    command.args(["rev-parse", "HEAD"]).current_dir(root);
+    clear_ambient_git_env(&mut command);
+    command
         .output()
         .ok()
         .filter(|o| o.status.success())

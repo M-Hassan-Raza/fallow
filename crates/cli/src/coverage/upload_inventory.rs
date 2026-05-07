@@ -21,6 +21,7 @@ use std::process::{Command, ExitCode};
 
 use fallow_config::{FallowConfig, ResolvedConfig};
 use fallow_core::extract::inventory::{InventoryEntry, walk_source};
+use fallow_core::git_env::clear_ambient_git_env;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
@@ -253,11 +254,12 @@ fn validate_project_id(id: &str) -> Result<&str, UploadError> {
 }
 
 fn git_origin_project_id(root: &Path) -> Option<String> {
-    let output = Command::new("git")
+    let mut command = Command::new("git");
+    command
         .args(["remote", "get-url", "origin"])
-        .current_dir(root)
-        .output()
-        .ok()?;
+        .current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let output = command.output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -302,15 +304,14 @@ fn resolve_git_sha(args: &UploadInventoryArgs, root: &Path) -> Result<String, Up
     let sha = if let Some(explicit) = args.git_sha.as_deref() {
         explicit.trim().to_owned()
     } else {
-        let output = Command::new("git")
-            .args(["rev-parse", "HEAD"])
-            .current_dir(root)
-            .output()
-            .map_err(|err| {
-                UploadError::Validation(format!(
-                    "could not resolve git SHA: {err}. Pass --git-sha <sha> explicitly."
-                ))
-            })?;
+        let mut command = Command::new("git");
+        command.args(["rev-parse", "HEAD"]).current_dir(root);
+        clear_ambient_git_env(&mut command);
+        let output = command.output().map_err(|err| {
+            UploadError::Validation(format!(
+                "could not resolve git SHA: {err}. Pass --git-sha <sha> explicitly."
+            ))
+        })?;
         if !output.status.success() {
             return Err(UploadError::Validation(
                 "`git rev-parse HEAD` failed. Pass --git-sha <sha> explicitly.".to_owned(),
@@ -358,11 +359,10 @@ fn enforce_clean_worktree(args: &UploadInventoryArgs, root: &Path) -> Result<(),
 }
 
 fn dirty_worktree(root: &Path) -> bool {
-    let Ok(output) = Command::new("git")
-        .args(["status", "--porcelain"])
-        .current_dir(root)
-        .output()
-    else {
+    let mut command = Command::new("git");
+    command.args(["status", "--porcelain"]).current_dir(root);
+    clear_ambient_git_env(&mut command);
+    let Ok(output) = command.output() else {
         return false;
     };
     if !output.status.success() {
