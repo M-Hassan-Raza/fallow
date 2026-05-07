@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.66.2] - 2026-05-07
+
+### Fixed
+
+- **`fallow audit` no longer fails when invoked from a `pre-commit` / `pre-push` hook.** When git runs hooks it exports ambient repo-state environment variables into the hook subprocess (`GIT_INDEX_FILE=.git/index` as a relative path, plus `GIT_PREFIX` and friends). Audit's `git worktree add` was inheriting those, and the relative `GIT_INDEX_FILE` failed to resolve from the temporary worktree directory, so worktree creation aborted with `could not create a temporary worktree for base ref 'main'` (workaround was `env -u GIT_INDEX_FILE fallow audit`). Every production `git` invocation in fallow now strips the documented set of ambient repo-state vars (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_COMMON_DIR`, `GIT_PREFIX`) via a shared helper, so lint-staged, husky, lefthook, and the `pre-commit` framework all work transparently. The same robustness applies to churn / hotspot, regression baselines, coverage uploads, init's branch detection, and vital signs. The worktree-creation error also surfaces a hint when an ambient repo-state var is detected so users on older fallow versions can self-rescue. Thanks [@videvian](https://github.com/videvian) for the report. (Closes [#301](https://github.com/fallow-rs/fallow/issues/301))
+
 ## [2.66.1] - 2026-05-06
 
 ### Changed
@@ -2021,7 +2027,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.66.1...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.66.2...HEAD
+[2.66.2]: https://github.com/fallow-rs/fallow/compare/v2.66.1...v2.66.2
 [2.66.1]: https://github.com/fallow-rs/fallow/compare/v2.66.0...v2.66.1
 [2.66.0]: https://github.com/fallow-rs/fallow/compare/v2.65.0...v2.66.0
 [2.65.0]: https://github.com/fallow-rs/fallow/compare/v2.64.0...v2.65.0
