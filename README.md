@@ -315,11 +315,14 @@ fallow audit                              # Auto-detects base branch
 fallow audit --base main                  # Explicit base ref
 fallow audit --base HEAD~3               # Audit last 3 commits
 fallow audit --production-health          # Production health, full dead-code/dupes
+fallow audit --coverage artifacts/coverage-final.json --coverage-root /home/runner/work/myapp
 fallow audit --gate all                   # Fail on inherited findings too
 fallow audit --format json                # Structured output with verdict
 ```
 
 Returns a verdict: **pass** (exit 0), **warn** (exit 0, warn-severity only), or **fail** (exit 1). By default, audit compares the current tree with the base ref and gates only findings introduced by the changeset; inherited findings are counted in JSON `attribution`, individual issue objects get `introduced: true|false`, and inherited findings are shown as context. Set `--gate all` or `audit.gate: "all"` to fail on every finding in changed files without running the extra base-snapshot attribution pass.
+
+`audit` forwards `--coverage` and `--coverage-root` to its health sub-analysis for exact Istanbul-backed CRAP scoring. `FALLOW_COVERAGE` is used as the fallback when `--coverage` is omitted.
 
 Audit caches base snapshots under `.fallow/cache/` and may keep a SHA-scoped temporary git worktree for reuse across runs against the same base ref. When the current checkout has `node_modules`, audit links it into the base worktree so tsconfig `extends` chains into installed packages and path aliases resolve like the working tree. Transient worktrees are removed on normal exit. Use `--no-cache` to disable snapshot and reusable-worktree caching; if a process is force-killed, run `git worktree prune` to clean up stale `.git/worktrees/fallow-audit-base-*` entries.
 
@@ -345,12 +348,22 @@ Keep committed baselines outside `.fallow/`; that directory is for cache and loc
 ```yaml
 # GitHub Action
 - uses: fallow-rs/fallow@v2
+  with:
+    command: audit
+    max-crap: 30
+    coverage: artifacts/coverage-final.json
+    coverage-root: /home/runner/work/myapp
 
 # GitLab CI -- remote include
 include:
   - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/vX.Y.Z/ci/gitlab-ci.yml'
 fallow:
   extends: .fallow
+  variables:
+    FALLOW_COMMAND: "audit"
+    FALLOW_MAX_CRAP: "30"
+    FALLOW_COVERAGE: "artifacts/coverage-final.json"
+    FALLOW_COVERAGE_ROOT: "/home/runner/work/myapp"
 ```
 
 ```yaml

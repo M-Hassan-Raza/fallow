@@ -2,7 +2,11 @@ pub mod coverage;
 mod grouping;
 mod hotspots;
 pub mod ownership;
-mod scoring;
+// `mod health` is itself private at the lib root, so `pub mod` here is
+// effectively `pub(crate)`; clippy's `redundant_pub_crate` rejects literal
+// `pub(crate)` when the parent is non-pub. The same reasoning applies to
+// `pub fn` items inside this module.
+pub mod scoring;
 mod targets;
 
 use std::path::PathBuf;

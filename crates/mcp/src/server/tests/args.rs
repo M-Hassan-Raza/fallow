@@ -93,6 +93,31 @@ fn analyze_args_minimal_produces_base_args() {
 }
 
 #[test]
+fn shared_helpers_drop_empty_string_paths() {
+    let args = build_analyze_args(&AnalyzeParams {
+        root: Some(String::new()),
+        config: Some(String::new()),
+        workspace: Some(String::new()),
+        baseline: Some(String::new()),
+        save_baseline: Some(String::new()),
+        ..Default::default()
+    })
+    .unwrap();
+    for forbidden in [
+        "--root",
+        "--config",
+        "--workspace",
+        "--baseline",
+        "--save-baseline",
+    ] {
+        assert!(
+            !args.iter().any(|a| a == forbidden),
+            "expected empty-string {forbidden} to be dropped, got {args:?}"
+        );
+    }
+}
+
+#[test]
 fn analyze_args_with_all_options() {
     let params = AnalyzeParams {
         root: Some("/my/project".to_string()),
@@ -1593,6 +1618,8 @@ fn audit_args_with_all_options() {
         dupes_baseline: None,
         explain_skipped: Some(true),
         max_crap: Some(30.0),
+        coverage: Some("coverage/coverage-final.json".to_string()),
+        coverage_root: Some("/ci/build".to_string()),
         include_entry_exports: None,
     })
     .expect("all options are valid");
@@ -1611,6 +1638,14 @@ fn audit_args_with_all_options() {
     assert!(args.contains(&"4".to_string()));
     assert!(args.windows(2).any(|w| w == ["--gate", "all"]));
     assert!(args.contains(&"--explain-skipped".to_string()));
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--coverage", "coverage/coverage-final.json"])
+    );
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--coverage-root", "/ci/build"])
+    );
 }
 
 #[test]
@@ -1636,6 +1671,44 @@ fn audit_args_max_crap_forwards_to_cli() {
     assert!(
         args.windows(2).any(|w| w == ["--max-crap", "42.5"]),
         "expected --max-crap 42.5, got {args:?}"
+    );
+}
+
+#[test]
+fn audit_args_coverage_forwards_to_cli() {
+    let args = build_audit_args(&AuditParams {
+        coverage: Some("coverage/coverage-final.json".to_string()),
+        coverage_root: Some("/home/runner/work/myapp".to_string()),
+        ..Default::default()
+    })
+    .expect("coverage paths are valid");
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--coverage", "coverage/coverage-final.json"]),
+        "expected --coverage path, got {args:?}"
+    );
+    assert!(
+        args.windows(2)
+            .any(|w| w == ["--coverage-root", "/home/runner/work/myapp"]),
+        "expected --coverage-root path, got {args:?}"
+    );
+}
+
+#[test]
+fn audit_args_empty_coverage_strings_are_dropped() {
+    let args = build_audit_args(&AuditParams {
+        coverage: Some(String::new()),
+        coverage_root: Some(String::new()),
+        ..Default::default()
+    })
+    .expect("empty strings should not be a validation error");
+    assert!(
+        !args.iter().any(|a| a == "--coverage"),
+        "expected empty coverage to be dropped, got {args:?}"
+    );
+    assert!(
+        !args.iter().any(|a| a == "--coverage-root"),
+        "expected empty coverage_root to be dropped, got {args:?}"
     );
 }
 

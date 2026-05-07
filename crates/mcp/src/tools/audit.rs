@@ -1,6 +1,6 @@
 use crate::params::AuditParams;
 
-use super::{VALID_AUDIT_GATES, push_global, push_scope, validation_error_body};
+use super::{VALID_AUDIT_GATES, push_global, push_scope, push_str_flag, validation_error_body};
 
 /// Build CLI arguments for the `audit` tool.
 pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
@@ -27,9 +27,7 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
         params.no_cache,
         params.threads,
     );
-    if let Some(ref base) = params.base {
-        args.extend(["--base".to_string(), base.clone()]);
-    }
+    push_str_flag(&mut args, "--base", params.base.as_deref());
     push_scope(&mut args, params.production, params.workspace.as_deref());
     if params.production_dead_code == Some(true) {
         args.push("--production-dead-code".to_string());
@@ -40,27 +38,35 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
     if params.production_dupes == Some(true) {
         args.push("--production-dupes".to_string());
     }
-    if let Some(ref gb) = params.group_by {
-        args.extend(["--group-by".to_string(), gb.clone()]);
-    }
-    if let Some(ref gate) = params.gate {
-        args.extend(["--gate".to_string(), gate.clone()]);
-    }
-    if let Some(ref path) = params.dead_code_baseline {
-        args.extend(["--dead-code-baseline".to_string(), path.clone()]);
-    }
-    if let Some(ref path) = params.health_baseline {
-        args.extend(["--health-baseline".to_string(), path.clone()]);
-    }
-    if let Some(ref path) = params.dupes_baseline {
-        args.extend(["--dupes-baseline".to_string(), path.clone()]);
-    }
+    push_str_flag(&mut args, "--group-by", params.group_by.as_deref());
+    push_str_flag(&mut args, "--gate", params.gate.as_deref());
+    push_str_flag(
+        &mut args,
+        "--dead-code-baseline",
+        params.dead_code_baseline.as_deref(),
+    );
+    push_str_flag(
+        &mut args,
+        "--health-baseline",
+        params.health_baseline.as_deref(),
+    );
+    push_str_flag(
+        &mut args,
+        "--dupes-baseline",
+        params.dupes_baseline.as_deref(),
+    );
     if params.explain_skipped == Some(true) {
         args.push("--explain-skipped".to_string());
     }
     if let Some(max_crap) = params.max_crap {
         args.extend(["--max-crap".to_string(), format!("{max_crap}")]);
     }
+    push_str_flag(&mut args, "--coverage", params.coverage.as_deref());
+    push_str_flag(
+        &mut args,
+        "--coverage-root",
+        params.coverage_root.as_deref(),
+    );
     if params.include_entry_exports == Some(true) {
         args.push("--include-entry-exports".to_string());
     }

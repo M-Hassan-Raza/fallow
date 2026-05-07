@@ -656,7 +656,9 @@ fn audit_params_with_all_fields() {
         "production_dupes": true,
         "workspace": "@app/core",
         "no_cache": true,
-        "threads": 8
+        "threads": 8,
+        "coverage": "coverage/coverage-final.json",
+        "coverage_root": "/ci/build"
     }"#;
     let params: AuditParams = serde_json::from_str(json).unwrap();
     assert_eq!(params.root.as_deref(), Some("/project"));
@@ -669,6 +671,11 @@ fn audit_params_with_all_fields() {
     assert_eq!(params.workspace.as_deref(), Some("@app/core"));
     assert_eq!(params.no_cache, Some(true));
     assert_eq!(params.threads, Some(8));
+    assert_eq!(
+        params.coverage.as_deref(),
+        Some("coverage/coverage-final.json")
+    );
+    assert_eq!(params.coverage_root.as_deref(), Some("/ci/build"));
 }
 
 // ── ListBoundariesParams ────────────────────────────────────────

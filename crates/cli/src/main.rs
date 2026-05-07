@@ -699,6 +699,17 @@ enum Command {
         #[arg(long)]
         max_crap: Option<f64>,
 
+        /// Path to Istanbul-format coverage data (coverage-final.json) for
+        /// accurate per-function CRAP scores in the health sub-analysis. Also
+        /// configurable via FALLOW_COVERAGE.
+        #[arg(long, value_name = "PATH")]
+        coverage: Option<PathBuf>,
+
+        /// Rebase file paths in coverage data before CRAP matching. Use when
+        /// coverage was generated under a different checkout root in CI or Docker.
+        #[arg(long, value_name = "PATH")]
+        coverage_root: Option<PathBuf>,
+
         /// Which findings affect the audit verdict.
         ///
         /// new-only (default): fail only on findings introduced by the current
@@ -2076,6 +2087,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             health_baseline,
             dupes_baseline,
             max_crap,
+            coverage,
+            coverage_root,
             gate,
         } => {
             if cli.baseline.is_some() || cli.save_baseline.is_some() {
@@ -2123,6 +2136,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 dupes_baseline.as_deref(),
                 audit_cfg.dupes_baseline.as_deref(),
             );
+            let coverage =
+                coverage.or_else(|| std::env::var("FALLOW_COVERAGE").ok().map(PathBuf::from));
             audit::run_audit(&audit::AuditOptions {
                 root,
                 config_path: &cli.config,
@@ -2145,6 +2160,8 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                 health_baseline: resolved_health_baseline.as_deref(),
                 dupes_baseline: resolved_dupes_baseline.as_deref(),
                 max_crap,
+                coverage: coverage.as_deref(),
+                coverage_root: coverage_root.as_deref(),
                 gate: gate.map_or(audit_cfg.gate, Into::into),
                 include_entry_exports: cli.include_entry_exports,
             })

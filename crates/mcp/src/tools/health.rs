@@ -1,6 +1,6 @@
 use crate::params::HealthParams;
 
-use super::{push_baseline, push_global, push_scope};
+use super::{push_baseline, push_global, push_scope, push_str_flag};
 
 /// Build CLI arguments for the `check_health` tool.
 pub fn build_health_args(params: &HealthParams) -> Vec<String> {
@@ -33,12 +33,12 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if let Some(top) = params.top {
         args.extend(["--top".to_string(), top.to_string()]);
     }
-    if let Some(ref sort) = params.sort {
-        args.extend(["--sort".to_string(), sort.clone()]);
-    }
-    if let Some(ref changed_since) = params.changed_since {
-        args.extend(["--changed-since".to_string(), changed_since.clone()]);
-    }
+    push_str_flag(&mut args, "--sort", params.sort.as_deref());
+    push_str_flag(
+        &mut args,
+        "--changed-since",
+        params.changed_since.as_deref(),
+    );
     if params.complexity == Some(true) {
         args.push("--complexity".to_string());
     }
@@ -70,12 +70,8 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if let Some(min_score) = params.min_score {
         args.extend(["--min-score".to_string(), min_score.to_string()]);
     }
-    if let Some(ref min_severity) = params.min_severity {
-        args.extend(["--min-severity".to_string(), min_severity.clone()]);
-    }
-    if let Some(ref since) = params.since {
-        args.extend(["--since".to_string(), since.clone()]);
-    }
+    push_str_flag(&mut args, "--min-severity", params.min_severity.as_deref());
+    push_str_flag(&mut args, "--since", params.since.as_deref());
     if let Some(min_commits) = params.min_commits {
         args.extend(["--min-commits".to_string(), min_commits.to_string()]);
     }
@@ -94,21 +90,21 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
     if params.trend == Some(true) {
         args.push("--trend".to_string());
     }
-    if let Some(ref effort) = params.effort {
-        args.extend(["--effort".to_string(), effort.clone()]);
-    }
+    push_str_flag(&mut args, "--effort", params.effort.as_deref());
     if params.summary == Some(true) {
         args.push("--summary".to_string());
     }
-    if let Some(ref coverage) = params.coverage {
-        args.extend(["--coverage".to_string(), coverage.clone()]);
-    }
-    if let Some(ref coverage_root) = params.coverage_root {
-        args.extend(["--coverage-root".to_string(), coverage_root.clone()]);
-    }
-    if let Some(ref runtime_coverage) = params.runtime_coverage {
-        args.extend(["--runtime-coverage".to_string(), runtime_coverage.clone()]);
-    }
+    push_str_flag(&mut args, "--coverage", params.coverage.as_deref());
+    push_str_flag(
+        &mut args,
+        "--coverage-root",
+        params.coverage_root.as_deref(),
+    );
+    push_str_flag(
+        &mut args,
+        "--runtime-coverage",
+        params.runtime_coverage.as_deref(),
+    );
     if let Some(min_invocations_hot) = params.min_invocations_hot {
         args.extend([
             "--min-invocations-hot".to_string(),
@@ -127,9 +123,7 @@ pub fn build_health_args(params: &HealthParams) -> Vec<String> {
             format!("{low_traffic_threshold}"),
         ]);
     }
-    if let Some(ref gb) = params.group_by {
-        args.extend(["--group-by".to_string(), gb.clone()]);
-    }
+    push_str_flag(&mut args, "--group-by", params.group_by.as_deref());
 
     args
 }

@@ -92,6 +92,77 @@ fn create_audit_fixture(_suffix: &str) -> TempDir {
     tmp
 }
 
+fn write_branchy_change(dir: &std::path::Path) {
+    fs::write(
+        dir.join("src/index.ts"),
+        "import { used } from './utils';\n\
+         used();\n\
+         function branchy(n: number): number {\n\
+           if (n < 0) return -1;\n\
+           if (n === 0) return 0;\n\
+           if (n < 10) return 1;\n\
+           if (n < 100) return 2;\n\
+           if (n < 1000) return 3;\n\
+           if (n < 10000) return 4;\n\
+           return 5;\n\
+         }\n\
+         branchy(used());\n",
+    )
+    .unwrap();
+    commit_all(dir, "add branchy");
+}
+
+fn write_branchy_istanbul_coverage(coverage_path: &std::path::Path, coverage_source_path: &str) {
+    fs::create_dir_all(coverage_path.parent().unwrap()).unwrap();
+    let mut coverage = serde_json::Map::new();
+    coverage.insert(
+        coverage_source_path.to_string(),
+        serde_json::json!({
+            "path": coverage_source_path,
+            "statementMap": {},
+            "fnMap": {
+                "0": {
+                    "name": "branchy",
+                    "line": 3,
+                    "decl": {
+                        "start": { "line": 3, "column": 9 },
+                        "end": { "line": 3, "column": 16 }
+                    },
+                    "loc": {
+                        "start": { "line": 3, "column": 35 },
+                        "end": { "line": 11, "column": 10 }
+                    }
+                }
+            },
+            "branchMap": {},
+            "s": {},
+            "f": { "0": 1 },
+            "b": {}
+        }),
+    );
+    fs::write(coverage_path, serde_json::to_string(&coverage).unwrap()).unwrap();
+}
+
+fn run_fallow_raw_with_env(
+    args: &[&str],
+    env: &[(&str, &std::path::Path)],
+) -> common::CommandOutput {
+    let mut cmd = Command::new(fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    for arg in args {
+        cmd.arg(arg);
+    }
+    let output = cmd.output().expect("failed to run fallow binary");
+    common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Audit JSON output structure
 // ---------------------------------------------------------------------------
@@ -877,34 +948,7 @@ fn audit_max_crap_flag_fails_when_threshold_crossed() {
     // Introduce a file with a branchy, untested function. Combined with the
     // low `--max-crap 1`, any non-trivial cyclomatic count is guaranteed to
     // exceed the threshold.
-    fs::write(
-        dir.path().join("src/branchy.ts"),
-        "export function branchy(n: number): number {\n\
-           if (n < 0) return -1;\n\
-           if (n === 0) return 0;\n\
-           if (n < 10) return 1;\n\
-           if (n < 100) return 2;\n\
-           if (n < 1000) return 3;\n\
-           if (n < 10000) return 4;\n\
-           return 5;\n\
-         }\n\
-         import { used } from './legacy';\nbranchy(used);\n",
-    )
-    .unwrap();
-    Command::new("git")
-        .args(["add", "."])
-        .current_dir(dir.path())
-        .output()
-        .unwrap();
-    Command::new("git")
-        .args(["-c", "commit.gpgsign=false", "commit", "-m", "add branchy"])
-        .current_dir(dir.path())
-        .env("GIT_AUTHOR_NAME", "test")
-        .env("GIT_AUTHOR_EMAIL", "test@test.com")
-        .env("GIT_COMMITTER_NAME", "test")
-        .env("GIT_COMMITTER_EMAIL", "test@test.com")
-        .output()
-        .unwrap();
+    write_branchy_change(dir.path());
 
     let output = run_fallow_raw(&[
         "audit",
@@ -1001,4 +1045,148 @@ fn audit_succeeds_when_ambient_git_env_vars_leak_from_a_hook() {
             "audit JSON should still include a verdict with {key}={value:?} set"
         );
     }
+}
+
+#[test]
+fn audit_coverage_and_coverage_root_feed_crap_scoring() {
+    let dir = create_audit_fixture("coverage-root");
+    write_branchy_change(dir.path());
+
+    let without_coverage = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        without_coverage.code, 1,
+        "static CRAP estimate should fail before Istanbul coverage is supplied. stderr: {}",
+        without_coverage.stderr
+    );
+
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    write_branchy_istanbul_coverage(&coverage_path, "/ci/workspace/src/index.ts");
+
+    let with_coverage = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--coverage",
+        coverage_path.to_str().unwrap(),
+        "--coverage-root",
+        "/ci/workspace",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        with_coverage.code, 0,
+        "Istanbul coverage should lower CRAP below the audit threshold. stderr: {}",
+        with_coverage.stderr
+    );
+    let json = parse_json(&with_coverage);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+}
+
+#[test]
+fn audit_coverage_relative_path_resolves_against_root_through_base_snapshot() {
+    // Regression: audit.rs::compute_base_snapshot recursively invokes the
+    // health analysis with --root rebound to a temporary base worktree. A
+    // relative --coverage path that worked on the HEAD pass must NOT be
+    // re-resolved against the worktree on the base pass; the coverage file
+    // only exists inside the user's project root. This test exercises the
+    // full audit pipeline (HEAD pass + base-worktree recursion) with a
+    // relative coverage path while the working directory is OUTSIDE the
+    // project, so the resolution against process cwd would silently fail.
+    let dir = create_audit_fixture("coverage-relative");
+    write_branchy_change(dir.path());
+
+    let coverage_path = dir.path().join("artifacts/coverage-final.json");
+    let branchy_source = dir.path().join("src/index.ts");
+    write_branchy_istanbul_coverage(&coverage_path, &branchy_source.to_string_lossy());
+
+    // Pass --coverage as a relative path; --root is the project. Resolution
+    // must happen against --root, not against the binary's process cwd.
+    let with_relative = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--coverage",
+        "artifacts/coverage-final.json",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        with_relative.code, 0,
+        "relative --coverage must resolve against --root through both the HEAD pass and the base-snapshot recursion. stderr: {}",
+        with_relative.stderr
+    );
+    let json = parse_json(&with_relative);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
+}
+
+#[test]
+fn audit_coverage_env_fallback_feeds_crap_scoring() {
+    let dir = create_audit_fixture("coverage-env");
+    write_branchy_change(dir.path());
+
+    let coverage_path = dir.path().join("artifacts/env-coverage.json");
+    let branchy_source = dir.path().join("src/index.ts");
+    write_branchy_istanbul_coverage(&coverage_path, &branchy_source.to_string_lossy());
+
+    let without_env = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--max-crap",
+        "10",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        without_env.code, 1,
+        "static CRAP estimate should fail before FALLOW_COVERAGE is supplied. stderr: {}",
+        without_env.stderr
+    );
+
+    let output = run_fallow_raw_with_env(
+        &[
+            "audit",
+            "--root",
+            dir.path().to_str().unwrap(),
+            "--base",
+            "HEAD~1",
+            "--max-crap",
+            "10",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+        &[("FALLOW_COVERAGE", coverage_path.as_path())],
+    );
+    assert_eq!(
+        output.code, 0,
+        "FALLOW_COVERAGE should feed audit's health sub-analysis. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("pass"));
 }

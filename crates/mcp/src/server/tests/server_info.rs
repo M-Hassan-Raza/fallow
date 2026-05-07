@@ -607,6 +607,8 @@ fn audit_schema_contains_expected_properties() {
         "threads",
         "gate",
         "max_crap",
+        "coverage",
+        "coverage_root",
     ] {
         assert!(
             schema.contains(prop),

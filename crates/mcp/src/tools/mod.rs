@@ -40,6 +40,20 @@ use tokio::process::Command;
 /// Default subprocess timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 
+/// Push a `--flag VALUE` pair onto `args` only when `value` is `Some(s)` and
+/// `s` is non-empty. MCP clients (especially LLM-driven ones) sometimes send
+/// `""` for unset path or string params instead of omitting the field; an
+/// empty string forwarded as `--flag ""` would either be rejected by clap or
+/// silently mean "current directory" depending on the flag, both of which are
+/// confusing failure modes.
+fn push_str_flag(args: &mut Vec<String>, flag: &str, value: Option<&str>) {
+    if let Some(s) = value
+        && !s.is_empty()
+    {
+        args.extend([flag.to_string(), s.to_string()]);
+    }
+}
+
 /// Push root directory and config file flags (shared by all tools).
 fn push_global(
     args: &mut Vec<String>,
@@ -48,12 +62,8 @@ fn push_global(
     no_cache: Option<bool>,
     threads: Option<usize>,
 ) {
-    if let Some(root) = root {
-        args.extend(["--root".to_string(), root.to_string()]);
-    }
-    if let Some(config) = config {
-        args.extend(["--config".to_string(), config.to_string()]);
-    }
+    push_str_flag(args, "--root", root);
+    push_str_flag(args, "--config", config);
     if no_cache == Some(true) {
         args.push("--no-cache".to_string());
     }
@@ -67,19 +77,13 @@ fn push_scope(args: &mut Vec<String>, production: Option<bool>, workspace: Optio
     if production == Some(true) {
         args.push("--production".to_string());
     }
-    if let Some(workspace) = workspace {
-        args.extend(["--workspace".to_string(), workspace.to_string()]);
-    }
+    push_str_flag(args, "--workspace", workspace);
 }
 
 /// Push baseline comparison flags.
 fn push_baseline(args: &mut Vec<String>, baseline: Option<&str>, save_baseline: Option<&str>) {
-    if let Some(baseline) = baseline {
-        args.extend(["--baseline".to_string(), baseline.to_string()]);
-    }
-    if let Some(save_baseline) = save_baseline {
-        args.extend(["--save-baseline".to_string(), save_baseline.to_string()]);
-    }
+    push_str_flag(args, "--baseline", baseline);
+    push_str_flag(args, "--save-baseline", save_baseline);
 }
 
 /// Push regression comparison flags.
@@ -93,15 +97,9 @@ fn push_regression(
     if fail == Some(true) {
         args.push("--fail-on-regression".to_string());
     }
-    if let Some(t) = tolerance {
-        args.extend(["--tolerance".to_string(), t.to_string()]);
-    }
-    if let Some(b) = baseline {
-        args.extend(["--regression-baseline".to_string(), b.to_string()]);
-    }
-    if let Some(s) = save {
-        args.extend(["--save-regression-baseline".to_string(), s.to_string()]);
-    }
+    push_str_flag(args, "--tolerance", tolerance);
+    push_str_flag(args, "--regression-baseline", baseline);
+    push_str_flag(args, "--save-regression-baseline", save);
 }
 
 /// Issue type flag names mapped to their CLI flags.

@@ -102,6 +102,10 @@ pub struct AuditOptions<'a> {
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
     pub max_crap: Option<f64>,
+    /// Istanbul coverage input for accurate CRAP scoring in the health sub-pass.
+    pub coverage: Option<&'a std::path::Path>,
+    /// Prefix to strip from Istanbul source paths before rebasing to `root`.
+    pub coverage_root: Option<&'a std::path::Path>,
     pub gate: AuditGate,
     /// Report unused exports in entry files (forwarded to the dead-code sub-pass).
     pub include_entry_exports: bool,
@@ -563,6 +567,28 @@ fn config_file_fingerprint(opts: &AuditOptions<'_>) -> Result<serde_json::Value,
     }))
 }
 
+fn coverage_file_fingerprint(path: &Path, project_root: &Path) -> serde_json::Value {
+    let resolved = crate::health::scoring::resolve_relative_to_root(path, Some(project_root));
+    let file_path = if resolved.is_dir() {
+        resolved.join("coverage-final.json")
+    } else {
+        resolved
+    };
+    match std::fs::read(&file_path) {
+        Ok(bytes) => serde_json::json!({
+            "path": path.to_string_lossy(),
+            "resolved_path": file_path.to_string_lossy(),
+            "content_hash": format!("{:016x}", xxh3_64(&bytes)),
+            "len": bytes.len(),
+        }),
+        Err(err) => serde_json::json!({
+            "path": path.to_string_lossy(),
+            "resolved_path": file_path.to_string_lossy(),
+            "error": err.kind().to_string(),
+        }),
+    }
+}
+
 fn audit_base_snapshot_cache_key(
     opts: &AuditOptions<'_>,
     base_ref: &str,
@@ -575,6 +601,9 @@ fn audit_base_snapshot_cache_key(
         return Ok(None);
     };
     let config_file = config_file_fingerprint(opts)?;
+    let coverage_file = opts
+        .coverage
+        .map(|p| coverage_file_fingerprint(p, opts.root));
     let payload = serde_json::json!({
         "cache_version": AUDIT_BASE_SNAPSHOT_CACHE_VERSION,
         "cli_version": env!("CARGO_PKG_VERSION"),
@@ -590,6 +619,8 @@ fn audit_base_snapshot_cache_key(
         "group_by": opts.group_by.map(|g| format!("{g:?}")),
         "include_entry_exports": opts.include_entry_exports,
         "max_crap": opts.max_crap,
+        "coverage": coverage_file,
+        "coverage_root": opts.coverage_root.map(|p| p.to_string_lossy().to_string()),
         "dead_code_baseline": opts.dead_code_baseline.map(|p| p.to_string_lossy().to_string()),
         "health_baseline": opts.health_baseline.map(|p| p.to_string_lossy().to_string()),
         "dupes_baseline": opts.dupes_baseline.map(|p| p.to_string_lossy().to_string()),
@@ -649,6 +680,8 @@ fn compute_base_snapshot(
         health_baseline: None,
         dupes_baseline: None,
         max_crap: opts.max_crap,
+        coverage: opts.coverage,
+        coverage_root: opts.coverage_root,
         gate: AuditGate::All,
         include_entry_exports: opts.include_entry_exports,
     };
@@ -2220,8 +2253,8 @@ fn run_audit_health<'a>(
         save_snapshot: None,
         trend: false,
         group_by: opts.group_by,
-        coverage: None,
-        coverage_root: None,
+        coverage: opts.coverage,
+        coverage_root: opts.coverage_root,
         performance: opts.performance,
         min_severity: None,
         runtime_coverage: None,
@@ -2672,7 +2705,25 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
 
 /// Run the full audit command: execute analyses, print results, return exit code.
 pub fn run_audit(opts: &AuditOptions<'_>) -> ExitCode {
-    match execute_audit(opts) {
+    // Resolve coverage paths to absolute UP FRONT, against the user's
+    // original `--root`. The base-snapshot recursion in `compute_base_snapshot`
+    // swaps `--root` to a temp worktree directory, so a relative path that
+    // worked at the entry would re-resolve against the worktree (which doesn't
+    // contain the coverage file) on the recursive pass. Resolving once at the
+    // top means downstream `resolve_relative_to_root` calls become no-ops on
+    // an already-absolute path, regardless of which `--root` is in effect.
+    let coverage_resolved = opts
+        .coverage
+        .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
+    let coverage_root_resolved = opts
+        .coverage_root
+        .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
+    let resolved_opts = AuditOptions {
+        coverage: coverage_resolved.as_deref(),
+        coverage_root: coverage_root_resolved.as_deref(),
+        ..*opts
+    };
+    match execute_audit(&resolved_opts) {
         Ok(result) => print_audit_result(&result, opts.quiet, opts.explain),
         Err(code) => code,
     }
@@ -2937,6 +2988,8 @@ mod tests {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3003,6 +3056,8 @@ mod tests {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::All,
             include_entry_exports: false,
         };
@@ -3074,6 +3129,8 @@ mod tests {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3161,6 +3218,8 @@ mod tests {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3238,6 +3297,8 @@ mod tests {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3399,6 +3460,8 @@ mod tests {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3523,6 +3586,8 @@ export function App() {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3654,6 +3719,8 @@ export function App() {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3730,6 +3797,8 @@ export function App() {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3800,6 +3869,8 @@ export function App() {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3876,6 +3947,8 @@ export function App() {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::NewOnly,
             include_entry_exports: false,
         };
@@ -3975,6 +4048,8 @@ export function App() {
             health_baseline: None,
             dupes_baseline: None,
             max_crap: None,
+            coverage: None,
+            coverage_root: None,
             gate: AuditGate::All,
             include_entry_exports: false,
         };

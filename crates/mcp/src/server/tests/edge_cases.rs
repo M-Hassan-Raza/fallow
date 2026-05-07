@@ -469,25 +469,31 @@ fn analyze_args_unicode_in_paths() {
 // ── Empty strings in optional string params ───────────────────────
 
 #[test]
-fn analyze_args_empty_root_still_passes_flag() {
+fn analyze_args_empty_root_is_dropped() {
     let params = AnalyzeParams {
         root: Some(String::new()),
         ..Default::default()
     };
     let args = build_analyze_args(&params).unwrap();
-    // Even an empty string is passed through — the CLI will handle validation
-    assert!(args.contains(&"--root".to_string()));
-    assert!(args.contains(&String::new()));
+    // Empty strings are dropped at the MCP layer so we never invoke the CLI
+    // with `--root ""` (which would either trip clap or silently mean cwd).
+    assert!(
+        !args.iter().any(|a| a == "--root"),
+        "expected empty --root to be dropped, got {args:?}"
+    );
 }
 
 #[test]
-fn health_args_empty_sort_still_passes_flag() {
+fn health_args_empty_sort_is_dropped() {
     let params = HealthParams {
         sort: Some(String::new()),
         ..Default::default()
     };
     let args = build_health_args(&params);
-    assert!(args.contains(&"--sort".to_string()));
+    assert!(
+        !args.iter().any(|a| a == "--sort"),
+        "expected empty --sort to be dropped, got {args:?}"
+    );
 }
 
 // ── find_dupes: min_lines in isolation ────────────────────────────
@@ -801,7 +807,7 @@ fn project_info_args_unicode_in_paths() {
 // ── Empty strings in optional params across tools ─────────────────
 
 #[test]
-fn check_changed_args_empty_config_still_passes_flag() {
+fn check_changed_args_empty_config_is_dropped() {
     let params = CheckChangedParams {
         since: "main".to_string(),
         config: Some(String::new()),
@@ -819,31 +825,42 @@ fn check_changed_args_empty_config_still_passes_flag() {
         threads: None,
     };
     let args = build_check_changed_args(params);
-    assert!(args.contains(&"--config".to_string()));
+    assert!(
+        !args.iter().any(|a| a == "--config"),
+        "expected empty --config to be dropped, got {args:?}"
+    );
 }
 
 #[test]
-fn find_dupes_args_empty_root_still_passes_flag() {
+fn find_dupes_args_empty_root_is_dropped() {
     let params = FindDupesParams {
         root: Some(String::new()),
         ..Default::default()
     };
     let args = build_find_dupes_args(&params).unwrap();
-    assert!(args.contains(&"--root".to_string()));
-    assert!(args.contains(&String::new()));
+    assert!(
+        !args.iter().any(|a| a == "--root"),
+        "expected empty --root to be dropped, got {args:?}"
+    );
 }
 
 #[test]
-fn fix_args_empty_config_still_passes_flag() {
+fn fix_args_empty_config_is_dropped() {
     let params = FixParams {
         config: Some(String::new()),
         ..Default::default()
     };
     let preview = build_fix_preview_args(&params);
-    assert!(preview.contains(&"--config".to_string()));
+    assert!(
+        !preview.iter().any(|a| a == "--config"),
+        "expected empty --config to be dropped from fix_preview, got {preview:?}"
+    );
 
     let apply = build_fix_apply_args(&params);
-    assert!(apply.contains(&"--config".to_string()));
+    assert!(
+        !apply.iter().any(|a| a == "--config"),
+        "expected empty --config to be dropped from fix_apply, got {apply:?}"
+    );
 }
 
 // ── Threads boundary values across tools ──────────────────────────
@@ -1148,11 +1165,17 @@ fn find_dupes_args_uppercase_mode_returns_error() {
 }
 
 #[test]
-fn find_dupes_args_empty_mode_returns_error() {
+fn find_dupes_args_empty_mode_is_dropped() {
+    // Empty strings are dropped at the MCP layer before validation, so an
+    // agent passing `mode: ""` for "no mode" succeeds and the CLI runs with
+    // its default detection mode instead of being rejected as Invalid.
     let params = FindDupesParams {
         mode: Some(String::new()),
         ..Default::default()
     };
-    let err = build_find_dupes_args(&params).unwrap_err();
-    assert!(err.contains("Invalid mode ''"));
+    let args = build_find_dupes_args(&params).unwrap();
+    assert!(
+        !args.iter().any(|a| a == "--mode"),
+        "expected empty --mode to be dropped, got {args:?}"
+    );
 }

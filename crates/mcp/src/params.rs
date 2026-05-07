@@ -704,6 +704,16 @@ pub struct AuditParams {
     /// the CLI's `--max-crap` flag.
     pub max_crap: Option<f64>,
 
+    /// Path to Istanbul-format coverage data (coverage-final.json) for
+    /// accurate per-function CRAP scores in audit's health sub-analysis.
+    /// Passed through to the CLI's `--coverage` flag.
+    pub coverage: Option<String>,
+
+    /// Rebase file paths in coverage data before CRAP matching. Use when
+    /// coverage was generated in a different checkout root in CI or Docker.
+    /// Passed through to the CLI's `--coverage-root` flag.
+    pub coverage_root: Option<String>,
+
     /// Report unused exports in entry files instead of auto-marking them as
     /// used. Catches typos in framework exports (e.g. `meatdata` instead of
     /// `metadata`). Also configurable persistently via

@@ -571,6 +571,24 @@ pub(super) fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::
     candidates.into_iter().find(|p| p.is_file())
 }
 
+/// Resolve a relative path against the fallow project root. Returns `path`
+/// unchanged when it is absolute or `project_root` is `None`. Matches the
+/// convention every other path-shaped CLI input uses, so a monorepo CI run
+/// invoked from the workspace root with `--root sub-project` finds
+/// `sub-project/relative/path.json` instead of `cwd/relative/path.json`.
+pub fn resolve_relative_to_root(
+    path: &std::path::Path,
+    project_root: Option<&std::path::Path>,
+) -> std::path::PathBuf {
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    match project_root {
+        Some(root) => root.join(path),
+        None => path.to_path_buf(),
+    }
+}
+
 /// If `path` is a directory, looks for `coverage-final.json` inside it.
 /// Parses the Istanbul JSON format and pre-computes per-function statement
 /// coverage percentages for efficient lookup during CRAP scoring.
@@ -578,23 +596,28 @@ pub(super) fn auto_detect_coverage(root: &std::path::Path) -> Option<std::path::
 /// When `coverage_root` is provided, file paths in the Istanbul data are rebased:
 /// the `coverage_root` prefix is stripped and `project_root` is prepended, enabling
 /// cross-environment matching (e.g., coverage from CI used on a local checkout).
+///
+/// `path` itself is resolved against `project_root` when relative, so callers
+/// can pass `--coverage coverage/foo.json` from a parent directory and have it
+/// land under the `--root` they configured.
 pub(super) fn load_istanbul_coverage(
     path: &std::path::Path,
     coverage_root: Option<&std::path::Path>,
     project_root: Option<&std::path::Path>,
 ) -> Result<IstanbulCoverage, String> {
-    let file_path = if path.is_dir() {
-        let candidate = path.join("coverage-final.json");
+    let resolved = resolve_relative_to_root(path, project_root);
+    let file_path = if resolved.is_dir() {
+        let candidate = resolved.join("coverage-final.json");
         if candidate.is_file() {
             candidate
         } else {
             return Err(format!(
                 "no coverage-final.json found in {}",
-                path.display()
+                resolved.display()
             ));
         }
     } else {
-        path.to_path_buf()
+        resolved
     };
 
     let json = std::fs::read_to_string(&file_path)
@@ -3234,7 +3257,78 @@ mod tests {
         std::fs::write(coverage_path, serde_json::to_string(&root).unwrap()).unwrap();
     }
 
+    // --- resolve_relative_to_root ---
+
+    #[test]
+    fn resolve_relative_to_root_joins_relative_with_project_root() {
+        let resolved = resolve_relative_to_root(
+            std::path::Path::new("coverage/coverage-final.json"),
+            Some(std::path::Path::new("/work/my-app")),
+        );
+        assert_eq!(
+            resolved,
+            std::path::PathBuf::from("/work/my-app/coverage/coverage-final.json")
+        );
+    }
+
+    #[test]
+    fn resolve_relative_to_root_returns_absolute_unchanged() {
+        let resolved = resolve_relative_to_root(
+            std::path::Path::new("/tmp/coverage-final.json"),
+            Some(std::path::Path::new("/work/my-app")),
+        );
+        assert_eq!(
+            resolved,
+            std::path::PathBuf::from("/tmp/coverage-final.json")
+        );
+    }
+
+    #[test]
+    fn resolve_relative_to_root_without_project_root_returns_relative_unchanged() {
+        let resolved =
+            resolve_relative_to_root(std::path::Path::new("coverage/coverage-final.json"), None);
+        assert_eq!(
+            resolved,
+            std::path::PathBuf::from("coverage/coverage-final.json")
+        );
+    }
+
     // --- load_istanbul_coverage ---
+
+    #[test]
+    fn load_istanbul_coverage_resolves_relative_path_against_project_root() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/index.ts");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(&source_path, "export function f(){}").unwrap();
+
+        let coverage_path = temp.path().join("coverage/coverage-final.json");
+        std::fs::create_dir_all(coverage_path.parent().unwrap()).unwrap();
+        write_single_file_istanbul_fixture(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "f",
+                    "decl": { "start": { "line": 1, "column": 0 }, "end": { "line": 1, "column": 21 } },
+                    "loc":  { "start": { "line": 1, "column": 0 }, "end": { "line": 1, "column": 21 } }
+                }
+            }),
+            &serde_json::json!({ "0": 1 }),
+        );
+
+        let coverage = load_istanbul_coverage(
+            std::path::Path::new("coverage/coverage-final.json"),
+            None,
+            Some(temp.path()),
+        )
+        .expect("relative path must resolve against project_root");
+        assert!(
+            !coverage.files.is_empty(),
+            "expected coverage to load via project_root resolution, got {} files",
+            coverage.files.len()
+        );
+    }
 
     #[test]
     fn load_istanbul_coverage_falls_back_to_decl_line_for_missing_fn_line() {
