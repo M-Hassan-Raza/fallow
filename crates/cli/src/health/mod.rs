@@ -152,6 +152,8 @@ pub fn execute_health_with_shared_parse(
     opts: &HealthOptions<'_>,
     shared: SharedParseData,
 ) -> Result<HealthResult, ExitCode> {
+    scoring::validate_coverage_root_absolute(opts.coverage_root)
+        .map_err(|e| emit_error(&e, 2, opts.output))?;
     let config = crate::load_config_for_analysis(
         opts.root,
         opts.config_path,
@@ -180,6 +182,8 @@ pub fn execute_health_with_shared_parse(
 }
 
 pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode> {
+    scoring::validate_coverage_root_absolute(opts.coverage_root)
+        .map_err(|e| emit_error(&e, 2, opts.output))?;
     let t = Instant::now();
     let config = crate::load_config_for_analysis(
         opts.root,

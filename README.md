@@ -298,7 +298,7 @@ Setup details:
 - The sidecar can be installed globally or as a project devDependency; fallow resolves `FALLOW_COV_BIN`, project-local shims, package-manager bin lookups, `~/.fallow/bin/fallow-cov`, and `PATH`
 - `fallow health --runtime-coverage <path>` accepts a V8 directory, a single V8 JSON file, or a single Istanbul coverage map JSON file (commonly `coverage-final.json`)
 - `fallow health --coverage <path>` accepts a single Istanbul coverage map JSON file or a directory containing `coverage-final.json`
-- `--coverage-root <path>` rebases Istanbul file paths before CRAP matching. Use it when coverage was generated in CI or Docker with a different checkout root, for example `fallow health --coverage artifacts/coverage-final.json --coverage-root /home/runner/work/myapp`
+- `--coverage-root <path>` must be an absolute prefix from the Istanbul file paths. Use it when coverage was generated in CI or Docker with a different checkout root, for example `fallow health --coverage artifacts/coverage-final.json --coverage-root /home/runner/work/myapp`
 - V8 dumps that include Node's `source-map-cache` are remapped through supported source-map paths before analysis, including file paths, relative paths, `webpack://...`, and `vite://...`; unsupported virtual schemes safely fall back to raw V8 handling
 - `fallow health --changed-since <ref> --runtime-coverage <path>` promotes touched hot paths to a `hot-path-changes-needed` verdict during change review
 
@@ -322,7 +322,7 @@ fallow audit --format json                # Structured output with verdict
 
 Returns a verdict: **pass** (exit 0), **warn** (exit 0, warn-severity only), or **fail** (exit 1). By default, audit compares the current tree with the base ref and gates only findings introduced by the changeset; inherited findings are counted in JSON `attribution`, individual issue objects get `introduced: true|false`, and inherited findings are shown as context. Set `--gate all` or `audit.gate: "all"` to fail on every finding in changed files without running the extra base-snapshot attribution pass.
 
-`audit` forwards `--coverage` and `--coverage-root` to its health sub-analysis for exact Istanbul-backed CRAP scoring. `FALLOW_COVERAGE` is used as the fallback when `--coverage` is omitted.
+`audit` forwards `--coverage` and `--coverage-root` to its health sub-analysis for exact Istanbul-backed CRAP scoring. Relative `--coverage` paths resolve against `--root`; `--coverage-root` must be an absolute prefix from the coverage data. `FALLOW_COVERAGE` is used as the fallback when `--coverage` is omitted.
 
 Audit caches base snapshots under `.fallow/cache/` and may keep a SHA-scoped temporary git worktree for reuse across runs against the same base ref. When the current checkout has `node_modules`, audit links it into the base worktree so tsconfig `extends` chains into installed packages and path aliases resolve like the working tree. Transient worktrees are removed on normal exit. Use `--no-cache` to disable snapshot and reusable-worktree caching; if a process is force-killed, run `git worktree prune` to clean up stale `.git/worktrees/fallow-audit-base-*` entries.
 

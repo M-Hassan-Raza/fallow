@@ -510,7 +510,7 @@ pub struct HealthParams {
     /// Accepts a file path or a directory containing coverage-final.json.
     pub coverage: Option<String>,
 
-    /// Rebase file paths in coverage data by stripping this prefix and prepending the project root.
+    /// Absolute prefix to strip from coverage data paths before prepending the project root.
     /// Use when coverage was generated in a different environment (CI runner, Docker).
     pub coverage_root: Option<String>,
 
@@ -709,8 +709,8 @@ pub struct AuditParams {
     /// Passed through to the CLI's `--coverage` flag.
     pub coverage: Option<String>,
 
-    /// Rebase file paths in coverage data before CRAP matching. Use when
-    /// coverage was generated in a different checkout root in CI or Docker.
+    /// Absolute prefix to strip from coverage data paths before CRAP matching.
+    /// Use when coverage was generated in a different checkout root in CI or Docker.
     /// Passed through to the CLI's `--coverage-root` flag.
     pub coverage_root: Option<String>,
 

@@ -589,6 +589,20 @@ pub fn resolve_relative_to_root(
     }
 }
 
+pub fn validate_coverage_root_absolute(
+    coverage_root: Option<&std::path::Path>,
+) -> Result<(), String> {
+    if let Some(path) = coverage_root
+        && !path.is_absolute()
+    {
+        return Err(format!(
+            "--coverage-root expects an absolute path prefix from the coverage data, got '{}'. Use the checkout prefix from the machine that generated coverage, for example '/home/runner/work/myapp'.",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
 /// If `path` is a directory, looks for `coverage-final.json` inside it.
 /// Parses the Istanbul JSON format and pre-computes per-function statement
 /// coverage percentages for efficient lookup during CRAP scoring.
@@ -605,6 +619,7 @@ pub(super) fn load_istanbul_coverage(
     coverage_root: Option<&std::path::Path>,
     project_root: Option<&std::path::Path>,
 ) -> Result<IstanbulCoverage, String> {
+    validate_coverage_root_absolute(coverage_root)?;
     let resolved = resolve_relative_to_root(path, project_root);
     let file_path = if resolved.is_dir() {
         let candidate = resolved.join("coverage-final.json");

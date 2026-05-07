@@ -62,6 +62,28 @@ fn health_json_output_is_valid() {
 }
 
 #[test]
+fn health_rejects_relative_coverage_root() {
+    let output = run_fallow(
+        "health",
+        "complexity-project",
+        &["--coverage-root", "src", "--format", "json", "--quiet"],
+    );
+    assert_eq!(
+        output.code, 2,
+        "relative --coverage-root should be rejected before health runs. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::json!(true));
+    let message = json["message"].as_str().expect("message should be present");
+    assert!(
+        message.contains("--coverage-root expects an absolute path")
+            && message.contains("got 'src'"),
+        "unexpected error message: {message}"
+    );
+}
+
+#[test]
 fn health_json_has_findings() {
     let output = run_fallow(
         "health",

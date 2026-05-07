@@ -1099,6 +1099,37 @@ fn audit_coverage_and_coverage_root_feed_crap_scoring() {
 }
 
 #[test]
+fn audit_rejects_relative_coverage_root() {
+    let dir = create_audit_fixture("coverage-root-relative-rejected");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--coverage-root",
+        "src",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 2,
+        "relative --coverage-root should be rejected before audit runs. stderr: {}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["error"], serde_json::json!(true));
+    let message = json["message"].as_str().expect("message should be present");
+    assert!(
+        message.contains("--coverage-root expects an absolute path")
+            && message.contains("got 'src'"),
+        "unexpected error message: {message}"
+    );
+}
+
+#[test]
 fn audit_coverage_relative_path_resolves_against_root_through_base_snapshot() {
     // Regression: audit.rs::compute_base_snapshot recursively invokes the
     // health analysis with --root rebound to a temporary base worktree. A

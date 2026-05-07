@@ -700,6 +700,13 @@ pub fn compute_complexity(options: &ComplexityOptions) -> ProgrammaticResult<ser
         .with_code("FALLOW_INVALID_COVERAGE_PATH")
         .with_context("health.coverage"));
     }
+    if let Err(message) =
+        crate::health::scoring::validate_coverage_root_absolute(options.coverage_root.as_deref())
+    {
+        return Err(ProgrammaticError::new(message, 2)
+            .with_code("FALLOW_INVALID_COVERAGE_ROOT")
+            .with_context("health.coverage_root"));
+    }
 
     let health_options = build_complexity_options(&resolved, options);
     let result = crate::health::execute_health(&health_options)

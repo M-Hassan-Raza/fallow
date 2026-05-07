@@ -593,7 +593,7 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         coverage: Option<PathBuf>,
 
-        /// Rebase file paths in coverage data by stripping this prefix and
+        /// Absolute prefix to strip from file paths in coverage data before
         /// prepending the project root. Use when coverage was generated in a
         /// different environment (CI runner, Docker). Example: if coverage paths
         /// start with /home/runner/work/myapp and the project root is ./,
@@ -705,8 +705,8 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         coverage: Option<PathBuf>,
 
-        /// Rebase file paths in coverage data before CRAP matching. Use when
-        /// coverage was generated under a different checkout root in CI or Docker.
+        /// Absolute prefix to strip from coverage data paths before CRAP matching.
+        /// Use when coverage was generated under a different checkout root in CI or Docker.
         #[arg(long, value_name = "PATH")]
         coverage_root: Option<PathBuf>,
 

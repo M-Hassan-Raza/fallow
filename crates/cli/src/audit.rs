@@ -2705,7 +2705,10 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
 
 /// Run the full audit command: execute analyses, print results, return exit code.
 pub fn run_audit(opts: &AuditOptions<'_>) -> ExitCode {
-    // Resolve coverage paths to absolute UP FRONT, against the user's
+    if let Err(e) = crate::health::scoring::validate_coverage_root_absolute(opts.coverage_root) {
+        return emit_error(&e, 2, opts.output);
+    }
+    // Resolve the coverage input path to absolute UP FRONT, against the user's
     // original `--root`. The base-snapshot recursion in `compute_base_snapshot`
     // swaps `--root` to a temp worktree directory, so a relative path that
     // worked at the entry would re-resolve against the worktree (which doesn't
@@ -2715,12 +2718,8 @@ pub fn run_audit(opts: &AuditOptions<'_>) -> ExitCode {
     let coverage_resolved = opts
         .coverage
         .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
-    let coverage_root_resolved = opts
-        .coverage_root
-        .map(|p| crate::health::scoring::resolve_relative_to_root(p, Some(opts.root)));
     let resolved_opts = AuditOptions {
         coverage: coverage_resolved.as_deref(),
-        coverage_root: coverage_root_resolved.as_deref(),
         ..*opts
     };
     match execute_audit(&resolved_opts) {
