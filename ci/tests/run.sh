@@ -221,6 +221,58 @@ assert_parity "rejects backtick command sub" "$INSTALL_TMP/empty" '2.0.0`touch /
 assert_parity "unsupported package.json spec falls back" "$INSTALL_TMP/unsafe" ""
 
 # =========================================================================
+# Wrapper trap parity (action vs gitlab)
+# =========================================================================
+#
+# Two trap blocks landed in both action/scripts/analyze.sh and
+# ci/gitlab-ci.yml at the same time and must stay in lockstep. If a future
+# edit lands in one wrapper but not the other, the two CI providers diverge
+# on whether they:
+#   1. Reject `--baseline` / `--save-baseline` when command=audit.
+#   2. Treat fallow's structured-error JSON envelope as fatal before the
+#      issue counter sees null fields and emits issues=0.
+# Asserting symmetric presence catches single-side edits without locking
+# down indentation or provider-specific env-var prefix differences.
+
+echo ""
+echo "=== Wrapper trap parity (action vs gitlab) ==="
+
+ACTION_ANALYZE_SH="$DIR/../../action/scripts/analyze.sh"
+CI_TEMPLATE_YAML="$DIR/../gitlab-ci.yml"
+
+# Audit baseline rejection: both must check command=audit AND a non-empty
+# generic baseline / save-baseline before invoking fallow.
+ACTION_HAS_AUDIT_BASELINE_TRAP=$(grep -cE 'INPUT_COMMAND.*=.*"audit".*INPUT_(SAVE_)?BASELINE' "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
+CI_HAS_AUDIT_BASELINE_TRAP=$(grep -cE 'FALLOW_COMMAND.*=.*"audit".*FALLOW_(SAVE_)?BASELINE' "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
+if [ "$ACTION_HAS_AUDIT_BASELINE_TRAP" != "0" ] && [ "$CI_HAS_AUDIT_BASELINE_TRAP" != "0" ]; then
+  pass "parity: both wrappers reject generic baseline on audit"
+elif [ "$ACTION_HAS_AUDIT_BASELINE_TRAP" = "0" ] && [ "$CI_HAS_AUDIT_BASELINE_TRAP" = "0" ]; then
+  pass "parity: neither wrapper has audit baseline trap (consistent)"
+else
+  fail "parity: audit baseline trap" \
+    "asymmetric: action=$ACTION_HAS_AUDIT_BASELINE_TRAP, gitlab=$CI_HAS_AUDIT_BASELINE_TRAP"
+fi
+
+# Both must point users at the audit-specific baseline inputs by name.
+assert_contains "$(cat "$ACTION_ANALYZE_SH")" "dead-code-baseline" \
+  "parity: action error message names dead-code-baseline"
+assert_contains "$(cat "$CI_TEMPLATE_YAML")" "FALLOW_AUDIT_DEAD_CODE_BASELINE" \
+  "parity: gitlab error message names FALLOW_AUDIT_DEAD_CODE_BASELINE"
+
+# Structured-error trap: both must inspect `.error == true` in
+# fallow-results.json BEFORE any `// 0`-defaulted issue extraction.
+ACTION_HAS_ERROR_TRAP=$(grep -cE "jq -e.*\.error == true.*fallow-results\.json" "$ACTION_ANALYZE_SH" 2>/dev/null || echo 0)
+CI_HAS_ERROR_TRAP=$(grep -cE "jq -e.*\.error == true.*fallow-results\.json" "$CI_TEMPLATE_YAML" 2>/dev/null || echo 0)
+if [ "$ACTION_HAS_ERROR_TRAP" != "0" ] && [ "$CI_HAS_ERROR_TRAP" != "0" ]; then
+  pass "parity: both wrappers trap structured fallow errors before issue extraction"
+elif [ "$ACTION_HAS_ERROR_TRAP" = "0" ] && [ "$CI_HAS_ERROR_TRAP" = "0" ]; then
+  pass "parity: neither wrapper has structured-error trap (consistent)"
+else
+  fail "parity: structured-error trap" \
+    "asymmetric: action=$ACTION_HAS_ERROR_TRAP, gitlab=$CI_HAS_ERROR_TRAP"
+fi
+
+# =========================================================================
 # GitLab-specific summary jq tests
 # =========================================================================
 
@@ -690,6 +742,8 @@ assert_contains "$(cat "$CI_YAML")" "comment.sh" "references comment.sh"
 assert_contains "$(cat "$CI_YAML")" "review.sh" "references review.sh"
 assert_contains "$(cat "$CI_YAML")" "gl-code-quality-report" "generates Code Quality report"
 assert_contains "$(cat "$CI_YAML")" 'type == "array"' "preserves valid Code Quality reports from nonzero audit exits"
+assert_contains "$(cat "$CI_YAML")" '.error == true' "fails on structured fallow error JSON"
+assert_contains "$(cat "$CI_YAML")" "does not support FALLOW_BASELINE/FALLOW_SAVE_BASELINE" "audit rejects generic baseline variables"
 assert_contains "$(cat "$CI_YAML")" "suggestion" "mentions suggestion blocks in docs"
 
 # =========================================================================

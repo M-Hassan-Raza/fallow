@@ -159,6 +159,11 @@ case "$INPUT_COMMAND" in
   *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, fix, or empty (runs all)."; exit 2 ;;
 esac
 
+if [ "$INPUT_COMMAND" = "audit" ] && { [ -n "${INPUT_BASELINE:-}" ] || [ -n "${INPUT_SAVE_BASELINE:-}" ]; }; then
+  echo "::error::The audit command does not support the generic baseline/save-baseline inputs. Use dead-code-baseline, health-baseline, or dupes-baseline instead."
+  exit 2
+fi
+
 if [ -n "${INPUT_GATE:-}" ] && [ "$INPUT_GATE" != "new-only" ] && [ "$INPUT_GATE" != "all" ]; then
   echo "::error::gate must be 'new-only' or 'all', got: ${INPUT_GATE}"; exit 2
 fi
@@ -275,6 +280,12 @@ if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results-raw.json 2> fallow-
 fi
 jq -s 'last' fallow-results-raw.json > fallow-results.json
 rm -f fallow-results-raw.json
+if jq -e '.error == true' fallow-results.json > /dev/null 2>&1; then
+  MESSAGE=$(jq -r '.message // "Fallow failed"' fallow-results.json)
+  EXIT_CODE=$(jq -r '.exit_code // 2' fallow-results.json)
+  echo "::error::${MESSAGE}"
+  exit "$EXIT_CODE"
+fi
 
 # --- Fallback SARIF generation ---
 

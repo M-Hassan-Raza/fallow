@@ -131,6 +131,37 @@ else
   fail "install: rejects dash-prefixed extra args in spec" "expected non-zero exit"
 fi
 
+echo ""
+echo "=== Analyze script failure handling ==="
+
+ANALYZE_TMP=$(mktemp -d)
+trap 'rm -rf "$INSTALL_TMP" "$ANALYZE_TMP"' EXIT
+mkdir -p "$ANALYZE_TMP/bin" "$ANALYZE_TMP/work"
+cat > "$ANALYZE_TMP/bin/fallow" <<'SH'
+#!/usr/bin/env bash
+printf '%s\n' '{"error":true,"message":"bad audit config","exit_code":2}'
+exit 2
+SH
+chmod +x "$ANALYZE_TMP/bin/fallow"
+
+OUT=$(cd "$ANALYZE_TMP/work" && PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" INPUT_ROOT="." INPUT_COMMAND="audit" INPUT_FORMAT="json" bash "$DIR/../scripts/analyze.sh" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: structured fallow errors fail"
+else
+  fail "analyze: structured fallow errors fail" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "bad audit config" "analyze: surfaces structured error message"
+
+OUT=$(cd "$ANALYZE_TMP/work" && PATH="$ANALYZE_TMP/bin:$PATH" GITHUB_OUTPUT="$ANALYZE_TMP/output" INPUT_ROOT="." INPUT_COMMAND="audit" INPUT_FORMAT="json" INPUT_BASELINE="baseline.json" bash "$DIR/../scripts/analyze.sh" 2>&1)
+cmd_status=$?
+if [ "$cmd_status" -eq 2 ]; then
+  pass "analyze: audit rejects generic baseline input"
+else
+  fail "analyze: audit rejects generic baseline input" "expected exit 2, got $cmd_status"
+fi
+assert_contains "$OUT" "dead-code-baseline" "analyze: baseline error points to audit baselines"
+
 # --- Summary jq tests ---
 
 echo ""

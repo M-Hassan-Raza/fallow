@@ -380,6 +380,10 @@ variables:
         ""|dead-code|check|dupes|health|audit|fix) ;;
         *) echo "ERROR: Invalid command: ${FALLOW_COMMAND}"; exit 2 ;;
       esac
+      if [ "$FALLOW_COMMAND" = "audit" ] && { [ -n "$FALLOW_BASELINE" ] || [ -n "$FALLOW_SAVE_BASELINE" ]; }; then
+        echo "ERROR: The audit command does not support FALLOW_BASELINE/FALLOW_SAVE_BASELINE. Use FALLOW_AUDIT_DEAD_CODE_BASELINE, FALLOW_AUDIT_HEALTH_BASELINE, or FALLOW_AUDIT_DUPES_BASELINE instead."
+        exit 2
+      fi
       if [ -n "$FALLOW_AUDIT_GATE" ] && [ "$FALLOW_AUDIT_GATE" != "new-only" ] && [ "$FALLOW_AUDIT_GATE" != "all" ]; then
         echo "ERROR: FALLOW_AUDIT_GATE must be 'new-only' or 'all', got: ${FALLOW_AUDIT_GATE}"; exit 2
       fi
@@ -535,6 +539,12 @@ variables:
           [ -s fallow-results.json ] && cat fallow-results.json
           exit 2
         fi
+      fi
+      if jq -e '.error == true' fallow-results.json > /dev/null 2>&1; then
+        MESSAGE=$(jq -r '.message // "Fallow failed"' fallow-results.json)
+        EXIT_CODE=$(jq -r '.exit_code // 2' fallow-results.json)
+        echo "ERROR: ${MESSAGE}"
+        exit "$EXIT_CODE"
       fi
 
       if [ -s fallow-stderr.log ]; then
