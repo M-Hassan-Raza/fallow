@@ -16,12 +16,15 @@
 use rustc_hash::FxHashMap;
 
 use fallow_types::discover::FileId;
-use fallow_types::extract::{ExportName, ImportedName, NamespaceObjectAlias};
+use fallow_types::extract::{ImportedName, NamespaceObjectAlias};
 
 use crate::resolve::{ResolveResult, ResolvedModule};
 
 use super::ModuleGraph;
-use super::types::{ReferenceKind, SymbolReference};
+use super::narrowing::{
+    create_synthetic_exports_for_star_re_exports, mark_member_exports_referenced,
+};
+use super::types::ReferenceKind;
 
 /// One credit operation collected during the scan and applied after the loop
 /// to keep mutable borrows of `ModuleGraph::modules` localised.
@@ -153,29 +156,45 @@ fn collect_credits_for_alias(
     }
 }
 
+/// Apply collected credits, grouping by `(target_module_idx, consumer, import_span)`
+/// so each (consumer file, namespace target) pair runs through the same
+/// `mark_member_exports_referenced` plus `create_synthetic_exports_for_star_re_exports`
+/// pipeline that `narrow_namespace_references` uses for direct namespace
+/// imports. The synthetic-export step is what handles the case where the
+/// namespace target is a star barrel (`export * from './bar'`): missing
+/// member exports are stubbed so Phase 4 chain resolution can propagate the
+/// reference to the real defining file.
 fn apply_pending_credits(graph: &mut ModuleGraph, pending: &[PendingCredit]) {
+    type GroupKey = (usize, FileId, oxc_span::Span);
+
+    let mut groups: FxHashMap<GroupKey, Vec<String>> = FxHashMap::default();
     for credit in pending {
-        let module = &mut graph.modules[credit.target_module_idx];
-        for export in &mut module.exports {
-            let name_str = match &export.name {
-                ExportName::Named(n) => n.as_str(),
-                ExportName::Default => "default",
-            };
-            if name_str != credit.member {
-                continue;
-            }
-            if export
-                .references
-                .iter()
-                .any(|r| r.from_file == credit.consumer_file_id)
-            {
-                continue;
-            }
-            export.references.push(SymbolReference {
-                from_file: credit.consumer_file_id,
-                kind: ReferenceKind::NamespaceImport,
-                import_span: credit.import_span,
-            });
-        }
+        groups
+            .entry((
+                credit.target_module_idx,
+                credit.consumer_file_id,
+                credit.import_span,
+            ))
+            .or_default()
+            .push(credit.member.clone());
+    }
+
+    for ((target_module_idx, consumer_file_id, import_span), members) in groups {
+        let module = &mut graph.modules[target_module_idx];
+        let found_members = mark_member_exports_referenced(
+            &mut module.exports,
+            consumer_file_id,
+            &members,
+            import_span,
+            ReferenceKind::NamespaceImport,
+        );
+        create_synthetic_exports_for_star_re_exports(
+            &mut module.exports,
+            &module.re_exports,
+            consumer_file_id,
+            &members,
+            &found_members,
+            import_span,
+        );
     }
 }

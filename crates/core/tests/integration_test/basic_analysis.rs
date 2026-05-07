@@ -204,6 +204,34 @@ fn namespace_import_used_through_object_alias_across_workspace_packages() {
     );
 }
 
+#[test]
+fn namespace_import_used_through_object_alias_across_packages_via_star_barrel() {
+    // Issue #303 follow-up: when the namespace target is a star barrel
+    // (`./foo/index.ts` doing `export * from './bar'`), the cross-package
+    // alias propagation must synthesize a stub export on the barrel for the
+    // accessed member so Phase 4 chain resolution can carry the reference
+    // through to the real defining file. Without that, the barrel has no
+    // `bar` export symbol and the credit lands nowhere.
+    let root = fixture_path("issue-303-namespace-object-alias-star-barrel");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_export_names.contains(&"bar"),
+        "bar should be credited through API.foo.bar even when ./foo is a star barrel, found: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"unusedBar"),
+        "unusedBar must still be flagged as unused via the star barrel; the synthesis path should not credit every export, found: {unused_export_names:?}"
+    );
+}
+
 // ── Namespace exports (issue #52) ────────────────────────────
 
 #[test]
