@@ -111,6 +111,7 @@ fn builtin_modules_not_reported_as_unlisted() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -169,6 +170,7 @@ fn virtual_modules_not_reported_as_unlisted() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
     let pkg = make_pkg(&[], &[], &[]);
@@ -355,6 +357,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -381,6 +384,7 @@ fn unlisted_dep_detected_across_multiple_files() {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         },
     ];
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

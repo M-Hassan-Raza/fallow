@@ -5,6 +5,7 @@
 
 mod build;
 mod cycles;
+mod namespace_aliases;
 mod narrowing;
 mod re_exports;
 mod reachability;
@@ -155,6 +156,12 @@ impl ModuleGraph {
 
         // Phase 2: Record which files reference which exports (namespace + CSS module narrowing)
         graph.populate_references(&module_by_id, &entry_point_ids);
+
+        // Phase 2b: Cross-package namespace-object alias propagation. Credits
+        // members reached through `import { API } from '@scope/lib'; API.foo.bar`
+        // when the source module exposes `foo` as a namespace alias inside an
+        // exported object literal. See issue #303.
+        namespace_aliases::propagate_cross_package_aliases(&mut graph, &module_by_id);
 
         // Phase 3: BFS from entry points to mark overall/runtime/test reachability
         graph.mark_reachable(

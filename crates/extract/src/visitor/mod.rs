@@ -415,6 +415,49 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Derive `NamespaceObjectAlias` entries from `binding_target_names`.
+    ///
+    /// For each `binding_path -> target_name` where the target is a namespace
+    /// import and the binding's root identifier is an exported local name,
+    /// produce one alias keyed by the canonical export name + the dotted
+    /// suffix. The graph layer reads these to credit cross-package consumer
+    /// accesses (`API.foo.bar` should mark `bar` as used on `./bar.ts` even
+    /// though the namespace `foo` is only ever destructured into the object
+    /// literal `export const API = { foo }`). See issue #303.
+    fn collect_namespace_object_aliases(&self) -> Vec<fallow_types::extract::NamespaceObjectAlias> {
+        if self.binding_target_names.is_empty() || self.namespace_binding_names.is_empty() {
+            return Vec::new();
+        }
+        let mut aliases = Vec::new();
+        for (binding_path, target_name) in &self.binding_target_names {
+            if !self
+                .namespace_binding_names
+                .iter()
+                .any(|name| name == target_name)
+            {
+                continue;
+            }
+            let Some((root_local, suffix)) = binding_path.split_once('.') else {
+                continue;
+            };
+            for export in &self.exports {
+                if export.local_name.as_deref() != Some(root_local) {
+                    continue;
+                }
+                let canonical_name = match &export.name {
+                    ExportName::Named(name) => name.clone(),
+                    ExportName::Default => "default".to_string(),
+                };
+                aliases.push(fallow_types::extract::NamespaceObjectAlias {
+                    via_export_name: canonical_name,
+                    suffix: suffix.to_string(),
+                    namespace_local: target_name.clone(),
+                });
+            }
+        }
+        aliases
+    }
+
     /// Push a type-only export (type alias or interface).
     fn push_type_export(&mut self, name: &str, span: Span) {
         self.exports.push(ExportInfo {
@@ -442,6 +485,7 @@ impl ModuleInfoExtractor {
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
+        let namespace_object_aliases = self.collect_namespace_object_aliases();
         ModuleInfo {
             file_id,
             exports: self.exports,
@@ -464,6 +508,7 @@ impl ModuleInfoExtractor {
             class_heritage: self.class_heritage,
             local_type_declarations: self.local_type_declarations,
             public_signature_type_references: self.public_signature_type_references,
+            namespace_object_aliases,
         }
     }
 
@@ -492,6 +537,7 @@ impl ModuleInfoExtractor {
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
+        let namespace_object_aliases = self.collect_namespace_object_aliases();
         info.imports.extend(self.imports);
         info.exports.extend(self.exports);
         info.re_exports.extend(self.re_exports);
@@ -507,6 +553,8 @@ impl ModuleInfoExtractor {
             .extend(self.local_type_declarations);
         info.public_signature_type_references
             .extend(self.public_signature_type_references);
+        info.namespace_object_aliases
+            .extend(namespace_object_aliases);
     }
 }
 

@@ -692,6 +692,7 @@ mod tests {
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
+                namespace_object_aliases: vec![],
             }];
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
 
@@ -766,6 +767,7 @@ mod tests {
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
+                namespace_object_aliases: vec![],
             }];
             let mut graph = ModuleGraph::build(&resolved, &entry_points, &files);
             graph.modules[0].exports = vec![ExportSymbol {
@@ -846,6 +848,7 @@ mod tests {
                 unused_import_bindings: FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
+                namespace_object_aliases: vec![],
             }];
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
             let config = make_config_with_rules(RulesConfig::default());
@@ -897,6 +900,7 @@ mod tests {
                     unused_import_bindings: FxHashSet::default(),
                     type_referenced_import_bindings: vec![],
                     value_referenced_import_bindings: vec![],
+                    namespace_object_aliases: vec![],
                 })
                 .collect::<Vec<_>>();
             let graph = ModuleGraph::build(&resolved, &entry_points, &files);
@@ -928,6 +932,7 @@ mod tests {
                 class_heritage: vec![],
                 local_type_declarations: Vec::new(),
                 public_signature_type_references: Vec::new(),
+                namespace_object_aliases: Vec::new(),
             }];
 
             let rules = RulesConfig {

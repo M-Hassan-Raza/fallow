@@ -178,6 +178,32 @@ fn namespace_import_used_through_object_alias_and_star_barrel() {
     );
 }
 
+#[test]
+fn namespace_import_used_through_object_alias_across_workspace_packages() {
+    // Issue #303: `import * as foo from './bar'; export const API = { foo }`
+    // in workspace package `@foo/bar`, then `import { API } from '@foo/bar';
+    // API.foo.bar` in a different package, must credit `bar` on `./bar.ts`
+    // without crediting unrelated exports of the same file.
+    let root = fixture_path("issue-303-namespace-object-alias-cross-package");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_export_names.contains(&"bar"),
+        "bar should be credited through API.foo.bar across the @foo/bar package boundary, found: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"unusedBar"),
+        "unusedBar must still be flagged as unused; the precise fix should not credit every export of the namespace target, found: {unused_export_names:?}"
+    );
+}
+
 // ── Namespace exports (issue #52) ────────────────────────────
 
 #[test]

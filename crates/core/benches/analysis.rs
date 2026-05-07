@@ -256,6 +256,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     });
 
     // --- Barrel files ---
@@ -332,6 +333,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         });
     }
 
@@ -385,6 +387,7 @@ fn bench_resolve_re_export_chains(c: &mut Criterion) {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         });
     }
 
@@ -619,6 +622,7 @@ fn bench_cache_round_trip(c: &mut Criterion) {
         class_heritage: vec![],
         local_type_declarations: Vec::new(),
         public_signature_type_references: Vec::new(),
+        namespace_object_aliases: Vec::new(),
     };
 
     c.bench_function("cache_round_trip", |b| {

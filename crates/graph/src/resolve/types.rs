@@ -68,6 +68,9 @@ pub struct ResolvedModule {
     pub type_referenced_import_bindings: Vec<String>,
     /// Local import bindings referenced from runtime/value positions.
     pub value_referenced_import_bindings: Vec<String>,
+    /// Namespace-import aliases re-exported through an object literal.
+    /// See `fallow_types::extract::NamespaceObjectAlias` for the shape.
+    pub namespace_object_aliases: Vec<fallow_types::extract::NamespaceObjectAlias>,
 }
 
 impl Default for ResolvedModule {
@@ -86,6 +89,7 @@ impl Default for ResolvedModule {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         }
     }
 }

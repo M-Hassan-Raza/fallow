@@ -10,17 +10,21 @@
 use oxc_span::Span;
 
 use crate::ExportName;
-use fallow_types::extract::VisibilityTag;
+use fallow_types::extract::{NamespaceObjectAlias, VisibilityTag};
 
 use super::types::{
     CachedDynamicImport, CachedDynamicImportPattern, CachedExport, CachedImport,
-    CachedLocalTypeDeclaration, CachedMember, CachedModule, CachedPublicSignatureTypeReference,
-    CachedReExport, CachedRequireCall, CachedSuppression, IMPORT_KIND_DEFAULT, IMPORT_KIND_NAMED,
-    IMPORT_KIND_NAMESPACE, IMPORT_KIND_SIDE_EFFECT,
+    CachedLocalTypeDeclaration, CachedMember, CachedModule, CachedNamespaceObjectAlias,
+    CachedPublicSignatureTypeReference, CachedReExport, CachedRequireCall, CachedSuppression,
+    IMPORT_KIND_DEFAULT, IMPORT_KIND_NAMED, IMPORT_KIND_NAMESPACE, IMPORT_KIND_SIDE_EFFECT,
 };
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`].
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "single flat field-by-field deserialization; splitting it harms readability"
+)]
 pub fn cached_to_module(
     cached: &CachedModule,
     file_id: fallow_types::discover::FileId,
@@ -180,6 +184,15 @@ pub fn cached_to_module(
                 span: Span::new(reference.span_start, reference.span_end),
             })
             .collect(),
+        namespace_object_aliases: cached
+            .namespace_object_aliases
+            .iter()
+            .map(|alias| NamespaceObjectAlias {
+                via_export_name: alias.via_export_name.clone(),
+                suffix: alias.suffix.clone(),
+                namespace_local: alias.namespace_local.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -189,6 +202,10 @@ pub fn cached_to_module(
 /// and enable fast cache validation on subsequent runs (skip file read when
 /// mtime+size match).
 #[must_use]
+#[expect(
+    clippy::too_many_lines,
+    reason = "single flat field-by-field serialization; splitting it harms readability"
+)]
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
     mtime_secs: u64,
@@ -333,6 +350,15 @@ pub fn module_to_cached(
                 type_name: reference.type_name.clone(),
                 span_start: reference.span.start,
                 span_end: reference.span.end,
+            })
+            .collect(),
+        namespace_object_aliases: module
+            .namespace_object_aliases
+            .iter()
+            .map(|alias| CachedNamespaceObjectAlias {
+                via_export_name: alias.via_export_name.clone(),
+                suffix: alias.suffix.clone(),
+                namespace_local: alias.namespace_local.clone(),
             })
             .collect(),
     }

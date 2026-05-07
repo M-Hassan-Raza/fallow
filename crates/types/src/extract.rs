@@ -65,6 +65,35 @@ pub struct ModuleInfo {
     /// Type references that appear in exported symbols' public signatures.
     /// The analysis layer checks these against `local_type_declarations`.
     pub public_signature_type_references: Vec<PublicSignatureTypeReference>,
+    /// Aliases of namespace imports re-exported through an object literal
+    /// (`import * as foo from './bar'; export const API = { foo }`).
+    ///
+    /// Each entry says: "downstream consumer accessing `<my-export>.<suffix>.<X>`
+    /// is really accessing `<X>` on the namespace whose local name is
+    /// `namespace_local`". The graph layer uses these to propagate references
+    /// from cross-package consumers to the namespace's source module so that
+    /// `<X>` is not falsely reported as `unused-export`. See issue #303.
+    pub namespace_object_aliases: Vec<NamespaceObjectAlias>,
+}
+
+/// One alias entry tying an exported object's dotted property path to a
+/// namespace import on the same module.
+///
+/// Produced when the visitor sees `export const API = { foo }` (or any deeper
+/// nesting) and detects that the property's source identifier is a namespace
+/// import (`import * as foo from './bar'`). The graph layer reads these to
+/// resolve cross-package consumer accesses like `API.foo.bar` so that `bar`
+/// is credited as referenced on `./bar.ts`.
+#[derive(Debug, Clone)]
+pub struct NamespaceObjectAlias {
+    /// Canonical export name on this module (the `API` in `export const API = { foo }`).
+    pub via_export_name: String,
+    /// Dotted suffix of the property path relative to the export
+    /// (e.g. `"foo"` for `API.foo`, `"motionNet.adEngine"` for `API.motionNet.adEngine`).
+    pub suffix: String,
+    /// Local name of the namespace import on this module
+    /// (the `foo` in `import * as foo from './bar'`).
+    pub namespace_local: String,
 }
 
 /// Compute a table of line-start byte offsets from source text.
@@ -505,9 +534,9 @@ const _: () = assert!(std::mem::size_of::<ExportName>() == 24);
 const _: () = assert!(std::mem::size_of::<ImportedName>() == 24);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
-// `ModuleInfo` is the per-file extraction result — stored in a Vec during parallel parsing.
+// `ModuleInfo` is the per-file extraction result, stored in a Vec during parallel parsing.
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 448);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 472);
 
 /// A re-export declaration.
 #[derive(Debug, Clone)]

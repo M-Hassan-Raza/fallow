@@ -69,6 +69,7 @@ fn type_only_dep_not_detected_when_runtime_import_exists() {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -95,6 +96,7 @@ fn type_only_dep_not_detected_when_runtime_import_exists() {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         },
     ];
 

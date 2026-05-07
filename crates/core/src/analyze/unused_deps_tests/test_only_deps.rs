@@ -41,6 +41,7 @@ fn test_only_dep_from_root_test_file() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -94,6 +95,7 @@ fn test_only_dep_from_root_config_file() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -149,6 +151,7 @@ fn test_only_dep_from_workspace_config_file() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -203,6 +206,7 @@ fn not_test_only_when_imported_from_app_config() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
@@ -270,6 +274,7 @@ fn not_test_only_when_also_imported_from_source() {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         },
         ResolvedModule {
             file_id: FileId(1),
@@ -296,6 +301,7 @@ fn not_test_only_when_also_imported_from_source() {
             unused_import_bindings: FxHashSet::default(),
             type_referenced_import_bindings: vec![],
             value_referenced_import_bindings: vec![],
+            namespace_object_aliases: vec![],
         },
     ];
 
@@ -350,6 +356,7 @@ fn test_only_dep_from_workspace_jest_config() {
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

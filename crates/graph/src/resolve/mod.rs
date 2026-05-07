@@ -205,6 +205,7 @@ pub fn resolve_all_imports(
                 unused_import_bindings: module.unused_import_bindings.iter().cloned().collect(),
                 type_referenced_import_bindings: module.type_referenced_import_bindings.clone(),
                 value_referenced_import_bindings: module.value_referenced_import_bindings.clone(),
+                namespace_object_aliases: module.namespace_object_aliases.clone(),
             })
         })
         .collect();

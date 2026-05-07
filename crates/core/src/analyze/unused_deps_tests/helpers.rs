@@ -123,6 +123,7 @@ pub(super) fn build_graph_with_npm_imports(
         unused_import_bindings: FxHashSet::default(),
         type_referenced_import_bindings: vec![],
         value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
     }];
 
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);

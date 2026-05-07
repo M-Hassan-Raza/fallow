@@ -433,6 +433,7 @@ mod tests {
                 unused_import_bindings: rustc_hash::FxHashSet::default(),
                 type_referenced_import_bindings: vec![],
                 value_referenced_import_bindings: vec![],
+                namespace_object_aliases: vec![],
             })
             .collect();
 

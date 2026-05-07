@@ -6,8 +6,8 @@ use bitcode::{Decode, Encode};
 
 use crate::MemberKind;
 
-/// Cache version — bump when the cache format or cached extraction semantics change.
-pub(super) const CACHE_VERSION: u32 = 70;
+/// Cache version, bump when the cache format or cached extraction semantics change.
+pub(super) const CACHE_VERSION: u32 = 71;
 
 /// Duplication token cache version — bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
@@ -71,6 +71,20 @@ pub struct CachedModule {
     pub local_type_declarations: Vec<CachedLocalTypeDeclaration>,
     /// Type references from exported public signatures.
     pub public_signature_type_references: Vec<CachedPublicSignatureTypeReference>,
+    /// Namespace-import aliases re-exported through an object literal
+    /// (`export const API = { foo }` where `foo` is `import * as foo from './bar'`).
+    pub namespace_object_aliases: Vec<CachedNamespaceObjectAlias>,
+}
+
+/// Cached namespace-object alias.
+#[derive(Debug, Clone, Encode, Decode)]
+pub struct CachedNamespaceObjectAlias {
+    /// Canonical export name on this module.
+    pub via_export_name: String,
+    /// Dotted suffix of the property path relative to the export.
+    pub suffix: String,
+    /// Local name of the namespace import on this module.
+    pub namespace_local: String,
 }
 
 /// Cached local type declaration.
