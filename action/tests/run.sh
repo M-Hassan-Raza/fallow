@@ -193,6 +193,67 @@ assert_contains "$OUT_PROD" "review_required" "prod: shows production verdict"
 assert_contains "$OUT_PROD" "Hot Paths" "prod: has hot paths section"
 assert_contains "$OUT_PROD" "hotPath" "prod: shows hot path function"
 
+echo "  summary-audit.jq:"
+OUT_AUDIT=$(jq -n --slurpfile h "$FIXTURES/health.json" --slurpfile c "$FIXTURES/check.json" --slurpfile d "$FIXTURES/dupes.json" '{
+  schema_version: 3,
+  command: "audit",
+  verdict: "fail",
+  changed_files_count: 2,
+  elapsed_ms: 42,
+  summary: {dead_code_issues: 1, complexity_findings: 3, duplication_clone_groups: 1},
+  attribution: {gate: "new-only", dead_code_introduced: 1, dead_code_inherited: 0, complexity_introduced: 2, complexity_inherited: 1, duplication_introduced: 0, duplication_inherited: 1},
+  dead_code: ($c[0] | .unused_exports |= map(. + {introduced: true}) | .unused_dependencies |= map(. + {introduced: false})),
+  complexity: ($h[0]
+    | .findings |= [.[0] + {coverage_tier: "partial"}, .[1] + {coverage_tier: "high"}, .[2]]
+    | .summary.coverage_model = "istanbul"
+    | .summary.istanbul_matched = 8
+    | .summary.istanbul_total = 10),
+  duplication: ($d[0] | .clone_groups |= map(. + {introduced: false}))
+}' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
+assert_valid_markdown "$OUT_AUDIT" "produces audit output"
+assert_contains "$OUT_AUDIT" "Fallow Audit" "audit: has title"
+assert_contains "$OUT_AUDIT" "Audit failed" "audit: shows failed verdict"
+assert_contains "$OUT_AUDIT" "Dead Code" "audit: has dead-code details"
+assert_contains "$OUT_AUDIT" "fetchFromApi" "audit: lists dead-code findings"
+assert_contains "$OUT_AUDIT" "parseContentBlocks" "audit: lists complexity findings"
+assert_contains "$OUT_AUDIT" "Duplication" "audit: has duplication details"
+assert_contains "$OUT_AUDIT" "24 lines / 125 tokens" "audit: lists clone group size"
+assert_contains "$OUT_AUDIT" "Inherited" "audit: has inherited column"
+assert_contains "$OUT_AUDIT" "Coverage |" "audit: has coverage column header"
+assert_contains "$OUT_AUDIT" "| partial |" "audit: shows coverage tier value"
+assert_contains "$OUT_AUDIT" "| high |" "audit: shows alt coverage tier"
+assert_contains "$OUT_AUDIT" "| - |" "audit: missing coverage_tier renders as dash"
+assert_contains "$OUT_AUDIT" "Coverage model: istanbul" "audit: shows istanbul coverage model footer"
+assert_contains "$OUT_AUDIT" "Matched 8/10" "audit: shows istanbul match rate"
+
+# Low match-rate variant: footer should warn about --coverage-root
+OUT_AUDIT_LOWMATCH=$(jq -n --slurpfile h "$FIXTURES/health.json" '{
+  schema_version: 3, command: "audit", verdict: "fail", changed_files_count: 2, elapsed_ms: 42,
+  summary: {dead_code_issues: 0, complexity_findings: 3, duplication_clone_groups: 0},
+  attribution: {gate: "new-only", dead_code_introduced: 0, dead_code_inherited: 0, complexity_introduced: 3, complexity_inherited: 0, duplication_introduced: 0, duplication_inherited: 0},
+  complexity: ($h[0] | .summary.coverage_model = "istanbul" | .summary.istanbul_matched = 1 | .summary.istanbul_total = 10)
+}' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
+assert_contains "$OUT_AUDIT_LOWMATCH" "Low match rate" "audit: low match rate flags --coverage-root"
+
+# Static-estimate variant: footer should suggest --coverage
+OUT_AUDIT_STATIC=$(jq -n --slurpfile h "$FIXTURES/health.json" --slurpfile c "$FIXTURES/check.json" --slurpfile d "$FIXTURES/dupes.json" '{
+  schema_version: 3, command: "audit", verdict: "fail", changed_files_count: 2, elapsed_ms: 42,
+  summary: {dead_code_issues: 0, complexity_findings: 3, duplication_clone_groups: 0},
+  attribution: {gate: "new-only", dead_code_introduced: 0, dead_code_inherited: 0, complexity_introduced: 3, complexity_inherited: 0, duplication_introduced: 0, duplication_inherited: 0},
+  complexity: ($h[0] | .summary.coverage_model = "static_estimated")
+}' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
+assert_contains "$OUT_AUDIT_STATIC" "Coverage model: static (estimated)" "audit: static-estimate footer suggests --coverage"
+assert_contains "$OUT_AUDIT_STATIC" "for measured coverage" "audit: static branch reworded"
+
+# Absent-model variant: footer should not be present at all
+OUT_AUDIT_NOMODEL=$(jq -n --slurpfile h "$FIXTURES/health.json" '{
+  schema_version: 3, command: "audit", verdict: "fail", changed_files_count: 2, elapsed_ms: 42,
+  summary: {dead_code_issues: 0, complexity_findings: 3, duplication_clone_groups: 0},
+  attribution: {gate: "new-only", dead_code_introduced: 0, dead_code_inherited: 0, complexity_introduced: 3, complexity_inherited: 0, duplication_introduced: 0, duplication_inherited: 0},
+  complexity: ($h[0] | del(.summary.coverage_model))
+}' | jq -r -f "$JQ_DIR/summary-audit.jq" 2>&1)
+assert_not_contains "$OUT_AUDIT_NOMODEL" "Coverage model:" "audit: absent coverage_model omits footer"
+
 echo "  summary-combined.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"

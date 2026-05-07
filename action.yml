@@ -8,7 +8,7 @@ branding:
 
 inputs:
   command:
-    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code.'
+    description: 'Command to run: dead-code (unused code), dupes (code duplication), health (complexity), audit (changed-file quality gate), fix (auto-remove unused code). Default runs all analyses. Legacy alias: check = dead-code.'
     required: false
     default: ''
   root:
@@ -126,11 +126,14 @@ inputs:
   max-crap:
     description: 'Maximum CRAP score threshold (health and audit commands, default: 30.0). Functions meeting or exceeding this score are reported alongside complexity findings. Pair with coverage data for accurate per-function scoring.'
     required: false
+  coverage:
+    description: 'Path to Istanbul coverage-final.json data for accurate CRAP scoring (health and audit commands).'
+    required: false
   runtime-coverage:
     description: 'Path to paid runtime coverage input for the health command: a V8 coverage directory, V8 JSON file, or Istanbul coverage-final.json'
     required: false
   coverage-root:
-    description: 'Rebase Istanbul file paths before matching health coverage or runtime coverage input'
+    description: 'Rebase Istanbul file paths before matching coverage or runtime coverage input (health and audit commands)'
     required: false
   min-invocations-hot:
     description: 'Hot-path threshold for runtime coverage findings (health command, default: 100)'
@@ -190,6 +193,19 @@ inputs:
     description: 'Report unused exports in entry files instead of auto-marking them as used. Catches framework export typos. Applied to dead-code analysis; also configurable persistently via includeEntryExports in your fallow config.'
     required: false
     default: 'false'
+  # Audit-specific inputs
+  gate:
+    description: 'Audit verdict gate: new-only (default) fails only introduced findings, all fails on every finding in changed files.'
+    required: false
+  dead-code-baseline:
+    description: 'Path to a dead-code baseline for the audit command.'
+    required: false
+  health-baseline:
+    description: 'Path to a health baseline for the audit command.'
+    required: false
+  dupes-baseline:
+    description: 'Path to a duplication baseline for the audit command.'
+    required: false
   # Regression detection
   fail-on-regression:
     description: 'Exit with code 1 if issue counts regressed compared to baseline (dead-code command)'
@@ -234,7 +250,7 @@ outputs:
     description: 'Path to SARIF results file'
     value: ${{ steps.analyze.outputs.sarif }}
   issues:
-    description: 'Number of issues (dead-code), clone groups (dupes), or fixes proposed/applied (fix)'
+    description: 'Number of issues (dead-code), clone groups (dupes), introduced findings counted by the audit verdict (audit), or fixes proposed/applied (fix). Audit count is gate-aware: with `gate: new-only` (default) it sums attribution.*_introduced; with `gate: all` it sums summary.* totals.'
     value: ${{ steps.analyze.outputs.issues }}
 
 runs:
@@ -290,6 +306,7 @@ runs:
         INPUT_MAX_CYCLOMATIC: ${{ inputs.max-cyclomatic }}
         INPUT_MAX_COGNITIVE: ${{ inputs.max-cognitive }}
         INPUT_MAX_CRAP: ${{ inputs.max-crap }}
+        INPUT_COVERAGE: ${{ inputs.coverage }}
         INPUT_PRODUCTION_COVERAGE: ${{ inputs.runtime-coverage }}
         INPUT_COVERAGE_ROOT: ${{ inputs.coverage-root }}
         INPUT_MIN_INVOCATIONS_HOT: ${{ inputs.min-invocations-hot }}
@@ -308,6 +325,11 @@ runs:
         INPUT_SAVE_SNAPSHOT: ${{ inputs.save-snapshot }}
         INPUT_TREND: ${{ inputs.trend }}
         INPUT_ISSUE_TYPES: ${{ inputs.issue-types }}
+        INPUT_INCLUDE_ENTRY_EXPORTS: ${{ inputs.include-entry-exports }}
+        INPUT_GATE: ${{ inputs.gate }}
+        INPUT_DEAD_CODE_BASELINE: ${{ inputs.dead-code-baseline }}
+        INPUT_HEALTH_BASELINE: ${{ inputs.health-baseline }}
+        INPUT_DUPES_BASELINE: ${{ inputs.dupes-baseline }}
         INPUT_FAIL_ON_REGRESSION: ${{ inputs.fail-on-regression }}
         INPUT_TOLERANCE: ${{ inputs.tolerance }}
         INPUT_REGRESSION_BASELINE: ${{ inputs.regression-baseline }}
@@ -428,6 +450,7 @@ runs:
             dead-code|check) echo "::error::Fallow found ${ISSUES} unused code issues" ;;
             dupes)           echo "::error::Fallow found ${ISSUES} clone groups" ;;
             health)          echo "::error::Fallow found ${ISSUES} health findings" ;;
+            audit)           echo "::error::Fallow audit found ${ISSUES} introduced issues in changed files" ;;
             fix)             echo "::error::Fallow found ${ISSUES} fixable issues" ;;
             "")              echo "::error::Fallow found ${ISSUES} issues" ;;
           esac

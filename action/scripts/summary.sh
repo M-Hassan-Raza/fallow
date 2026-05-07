@@ -10,6 +10,7 @@ select_summary_script() {
     dead-code|check) echo "${ACTION_JQ_DIR}/summary-check.jq" ;;
     dupes)           echo "${ACTION_JQ_DIR}/summary-dupes.jq" ;;
     health)          echo "${ACTION_JQ_DIR}/summary-health.jq" ;;
+    audit)           echo "${ACTION_JQ_DIR}/summary-audit.jq" ;;
     fix)             echo "${ACTION_JQ_DIR}/summary-fix.jq" ;;
     "")              echo "${ACTION_JQ_DIR}/summary-combined.jq" ;;
     *)               echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;

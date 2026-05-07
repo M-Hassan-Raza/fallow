@@ -33,6 +33,11 @@ const GITLAB_FILES: &[VendoredFile] = &[
         executable: false,
     },
     VendoredFile {
+        path: "ci/jq/summary-audit.jq",
+        content: include_str!("../templates/ci/jq/summary-audit.jq"),
+        executable: false,
+    },
+    VendoredFile {
         path: "ci/jq/summary-combined.jq",
         content: include_str!("../templates/ci/jq/summary-combined.jq"),
         executable: false,
@@ -60,6 +65,11 @@ const GITLAB_FILES: &[VendoredFile] = &[
     VendoredFile {
         path: "action/jq/summary-fix.jq",
         content: include_str!("../templates/action/jq/summary-fix.jq"),
+        executable: false,
+    },
+    VendoredFile {
+        path: "action/jq/summary-audit.jq",
+        content: include_str!("../templates/action/jq/summary-audit.jq"),
         executable: false,
     },
     VendoredFile {

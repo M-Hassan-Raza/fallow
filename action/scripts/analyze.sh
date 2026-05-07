@@ -15,8 +15,9 @@ set +e -o pipefail
 #   INPUT_MAX_CYCLOMATIC,
 #   INPUT_MAX_COGNITIVE, INPUT_TOP, INPUT_SORT, INPUT_FILE_SCORES, INPUT_HOTSPOTS,
 #   INPUT_TARGETS, INPUT_COMPLEXITY, INPUT_SINCE, INPUT_MIN_COMMITS,
-#   INPUT_PRODUCTION_COVERAGE, INPUT_COVERAGE_ROOT, INPUT_MIN_INVOCATIONS_HOT,
+#   INPUT_COVERAGE, INPUT_PRODUCTION_COVERAGE, INPUT_COVERAGE_ROOT, INPUT_MIN_INVOCATIONS_HOT,
 #   INPUT_MIN_OBSERVATION_VOLUME, INPUT_LOW_TRAFFIC_THRESHOLD,
+#   INPUT_GATE, INPUT_DEAD_CODE_BASELINE, INPUT_HEALTH_BASELINE, INPUT_DUPES_BASELINE,
 #   INPUT_SCORE, INPUT_SAVE_SNAPSHOT, INPUT_TREND, INPUT_ISSUE_TYPES, INPUT_NO_CACHE, INPUT_THREADS,
 #   INPUT_ONLY, INPUT_SKIP
 
@@ -85,6 +86,7 @@ build_command_args() {
       [ -n "${INPUT_MAX_CYCLOMATIC:-}" ] && ARGS+=(--max-cyclomatic "$INPUT_MAX_CYCLOMATIC")
       [ -n "${INPUT_MAX_COGNITIVE:-}" ] && ARGS+=(--max-cognitive "$INPUT_MAX_COGNITIVE")
       [ -n "${INPUT_MAX_CRAP:-}" ] && ARGS+=(--max-crap "$INPUT_MAX_CRAP")
+      [ -n "${INPUT_COVERAGE:-}" ] && ARGS+=(--coverage "$INPUT_COVERAGE")
       [ -n "${INPUT_PRODUCTION_COVERAGE:-}" ] && ARGS+=(--runtime-coverage "$INPUT_PRODUCTION_COVERAGE")
       [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
       [ -n "${INPUT_MIN_INVOCATIONS_HOT:-}" ] && ARGS+=(--min-invocations-hot "$INPUT_MIN_INVOCATIONS_HOT")
@@ -108,6 +110,19 @@ build_command_args() {
         fi
       fi
       [ "${INPUT_TREND:-}" = "true" ] && ARGS+=(--trend)
+      ;;
+    audit)
+      [ "${INPUT_PRODUCTION_DEAD_CODE:-}" = "true" ] && ARGS+=(--production-dead-code)
+      [ "${INPUT_PRODUCTION_HEALTH:-}" = "true" ] && ARGS+=(--production-health)
+      [ "${INPUT_PRODUCTION_DUPES:-}" = "true" ] && ARGS+=(--production-dupes)
+      [ -n "${INPUT_DEAD_CODE_BASELINE:-}" ] && ARGS+=(--dead-code-baseline "$INPUT_DEAD_CODE_BASELINE")
+      [ -n "${INPUT_HEALTH_BASELINE:-}" ] && ARGS+=(--health-baseline "$INPUT_HEALTH_BASELINE")
+      [ -n "${INPUT_DUPES_BASELINE:-}" ] && ARGS+=(--dupes-baseline "$INPUT_DUPES_BASELINE")
+      [ -n "${INPUT_MAX_CRAP:-}" ] && ARGS+=(--max-crap "$INPUT_MAX_CRAP")
+      [ -n "${INPUT_COVERAGE:-}" ] && ARGS+=(--coverage "$INPUT_COVERAGE")
+      [ -n "${INPUT_COVERAGE_ROOT:-}" ] && ARGS+=(--coverage-root "$INPUT_COVERAGE_ROOT")
+      [ -n "${INPUT_GATE:-}" ] && ARGS+=(--gate "$INPUT_GATE")
+      [ "${INPUT_INCLUDE_ENTRY_EXPORTS:-}" = "true" ] && ARGS+=(--include-entry-exports)
       ;;
     fix)
       if [ "${INPUT_DRY_RUN:-}" = "true" ]; then
@@ -140,9 +155,13 @@ build_command_args() {
 # --- Validation ---
 
 case "$INPUT_COMMAND" in
-  ""|dead-code|check|dupes|health|fix) ;;
-  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, fix, or empty (runs all)."; exit 2 ;;
+  ""|dead-code|check|dupes|health|audit|fix) ;;
+  *) echo "::error::Invalid command: ${INPUT_COMMAND}. Must be dead-code, dupes, health, audit, fix, or empty (runs all)."; exit 2 ;;
 esac
+
+if [ -n "${INPUT_GATE:-}" ] && [ "$INPUT_GATE" != "new-only" ] && [ "$INPUT_GATE" != "all" ]; then
+  echo "::error::gate must be 'new-only' or 'all', got: ${INPUT_GATE}"; exit 2
+fi
 
 for name_val in "min-tokens:${INPUT_MIN_TOKENS:-}" "min-lines:${INPUT_MIN_LINES:-}" \
                "max-cyclomatic:${INPUT_MAX_CYCLOMATIC:-}" "max-cognitive:${INPUT_MAX_COGNITIVE:-}" \
@@ -284,6 +303,7 @@ case "$INPUT_COMMAND" in
   dead-code|check) ISSUES=$(jq -r '.total_issues' fallow-results.json) ;;
   dupes)           ISSUES=$(jq -r '.stats.clone_groups' fallow-results.json) ;;
   health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
+  audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' fallow-results.json) ;;
   fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
   "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
 esac
@@ -306,6 +326,7 @@ if [ "$ISSUES" -gt 0 ]; then
     dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
     dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
     health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
+    audit)           echo "::warning::Fallow audit found ${ISSUES} introduced issues in changed files" ;;
     fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
     "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
   esac

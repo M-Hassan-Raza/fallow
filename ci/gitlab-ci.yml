@@ -74,13 +74,13 @@ variables:
 
   # Core
   FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest
-  FALLOW_COMMAND: ""            # dead-code, dupes, health, fix, or empty (runs all)
+  FALLOW_COMMAND: ""            # dead-code, dupes, health, audit, fix, or empty (runs all)
   FALLOW_ROOT: "."
   FALLOW_CONFIG: ""             # Path to .fallowrc.json, .fallowrc.jsonc, or fallow.toml
   FALLOW_PRODUCTION: ""                # "true"/"false" enables production for every analysis. Empty defers to config.
-  FALLOW_PRODUCTION_DEAD_CODE: ""      # Combined mode only: "true"/"false" overrides FALLOW_PRODUCTION for dead-code. Empty defers to it.
-  FALLOW_PRODUCTION_HEALTH: ""         # Combined mode only: "true"/"false" overrides FALLOW_PRODUCTION for health. Empty defers to it.
-  FALLOW_PRODUCTION_DUPES: ""          # Combined mode only: "true"/"false" overrides FALLOW_PRODUCTION for duplication. Empty defers to it.
+  FALLOW_PRODUCTION_DEAD_CODE: ""      # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for dead-code. Empty defers to it.
+  FALLOW_PRODUCTION_HEALTH: ""         # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for health. Empty defers to it.
+  FALLOW_PRODUCTION_DUPES: ""          # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for duplication. Empty defers to it.
   FALLOW_FAIL_ON_ISSUES: "true"
   FALLOW_ARGS: ""               # Extra CLI arguments (space-separated)
   FALLOW_COMMENT: "false"       # Post results as MR summary comment
@@ -123,8 +123,9 @@ variables:
   FALLOW_MAX_CYCLOMATIC: ""
   FALLOW_MAX_COGNITIVE: ""
   FALLOW_MAX_CRAP: ""             # Maximum CRAP score (default 30.0); pair with coverage data for accurate per-function scoring
+  FALLOW_COVERAGE: ""             # Istanbul coverage-final.json for accurate CRAP scoring (health/audit)
   FALLOW_PRODUCTION_COVERAGE: ""  # Path to paid runtime coverage input (V8 dir/file or Istanbul coverage-final.json)
-  FALLOW_COVERAGE_ROOT: ""        # Rebase Istanbul file paths before matching health or runtime coverage input
+  FALLOW_COVERAGE_ROOT: ""        # Rebase Istanbul file paths before matching coverage or runtime coverage input
   FALLOW_MIN_INVOCATIONS_HOT: ""  # Hot-path threshold for runtime coverage findings (default 100)
   FALLOW_MIN_OBSERVATION_VOLUME: "" # Minimum observation volume required for high-confidence runtime coverage verdicts
   FALLOW_LOW_TRAFFIC_THRESHOLD: "" # Fraction of total trace volume below which an invoked function is classified as low_traffic
@@ -139,6 +140,12 @@ variables:
   FALLOW_MIN_COMMITS: ""
   FALLOW_SAVE_SNAPSHOT: ""       # save snapshot to .fallow/snapshots/ for trend tracking; cache this path across pipelines
   FALLOW_TREND: "false"          # compare against most recent snapshot; requires FALLOW_SAVE_SNAPSHOT on a prior run
+
+  # Audit specific
+  FALLOW_AUDIT_GATE: ""                 # new-only or all
+  FALLOW_AUDIT_DEAD_CODE_BASELINE: ""   # Baseline from fallow dead-code --save-baseline
+  FALLOW_AUDIT_HEALTH_BASELINE: ""      # Baseline from fallow health --save-baseline
+  FALLOW_AUDIT_DUPES_BASELINE: ""       # Baseline from fallow dupes --save-baseline
 
   # Fix specific
   FALLOW_DRY_RUN: "true"
@@ -292,14 +299,14 @@ variables:
         if [ -d "ci/jq" ] && [ -d "action/jq" ] && [ -d "ci/scripts" ]; then
           echo "Using vendored MR integration scripts from the repository checkout..."
 
-          for f in summary-check.jq summary-health.jq summary-combined.jq review-comments-dupes.jq; do
+          for f in summary-check.jq summary-health.jq summary-audit.jq summary-combined.jq review-comments-dupes.jq; do
             cp "ci/jq/${f}" "${FALLOW_JQ_DIR}/${f}" 2>/dev/null || {
               echo "  WARNING: Failed to copy ci/jq/${f}"
               DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
             }
           done
 
-          for f in summary-dupes.jq summary-fix.jq review-comments-check.jq review-comments-health.jq review-body.jq merge-comments.jq filter-changed.jq; do
+          for f in summary-dupes.jq summary-fix.jq summary-audit.jq review-comments-check.jq review-comments-health.jq review-body.jq merge-comments.jq filter-changed.jq; do
             cp "action/jq/${f}" "${FALLOW_SHARED_JQ_DIR}/${f}" 2>/dev/null || {
               echo "  WARNING: Failed to copy action/jq/${f}"
               DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
@@ -332,14 +339,14 @@ variables:
           FALLOW_SCRIPTS_BASE="https://raw.githubusercontent.com/fallow-rs/fallow/${FALLOW_SCRIPTS_REF}"
           echo "Downloading MR integration scripts pinned to ${FALLOW_SCRIPTS_REF}..."
 
-          for f in summary-check.jq summary-health.jq summary-combined.jq review-comments-dupes.jq; do
+          for f in summary-check.jq summary-health.jq summary-audit.jq summary-combined.jq review-comments-dupes.jq; do
             curl -sf "${FALLOW_SCRIPTS_BASE}/ci/jq/${f}" -o "${FALLOW_JQ_DIR}/${f}" 2>/dev/null || {
               echo "  WARNING: Failed to download ci/jq/${f}"
               DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
             }
           done
 
-          for f in summary-dupes.jq summary-fix.jq review-comments-check.jq review-comments-health.jq review-body.jq merge-comments.jq filter-changed.jq; do
+          for f in summary-dupes.jq summary-fix.jq summary-audit.jq review-comments-check.jq review-comments-health.jq review-body.jq merge-comments.jq filter-changed.jq; do
             curl -sf "${FALLOW_SCRIPTS_BASE}/action/jq/${f}" -o "${FALLOW_SHARED_JQ_DIR}/${f}" 2>/dev/null || {
               echo "  WARNING: Failed to download action/jq/${f}"
               DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
@@ -370,9 +377,12 @@ variables:
 
       # ── Validate inputs ──────────────────────────────────────────────
       case "$FALLOW_COMMAND" in
-        ""|dead-code|check|dupes|health|fix) ;;
+        ""|dead-code|check|dupes|health|audit|fix) ;;
         *) echo "ERROR: Invalid command: ${FALLOW_COMMAND}"; exit 2 ;;
       esac
+      if [ -n "$FALLOW_AUDIT_GATE" ] && [ "$FALLOW_AUDIT_GATE" != "new-only" ] && [ "$FALLOW_AUDIT_GATE" != "all" ]; then
+        echo "ERROR: FALLOW_AUDIT_GATE must be 'new-only' or 'all', got: ${FALLOW_AUDIT_GATE}"; exit 2
+      fi
 
       for name_val in "min-tokens:$FALLOW_MIN_TOKENS" "min-lines:$FALLOW_MIN_LINES" \
                       "max-cyclomatic:$FALLOW_MAX_CYCLOMATIC" "max-cognitive:$FALLOW_MAX_COGNITIVE" \
@@ -457,6 +467,7 @@ variables:
           [ -n "$FALLOW_MAX_CYCLOMATIC" ]     && ARGS+=(--max-cyclomatic "$FALLOW_MAX_CYCLOMATIC")
           [ -n "$FALLOW_MAX_COGNITIVE" ]      && ARGS+=(--max-cognitive "$FALLOW_MAX_COGNITIVE")
           [ -n "$FALLOW_MAX_CRAP" ]           && ARGS+=(--max-crap "$FALLOW_MAX_CRAP")
+          [ -n "$FALLOW_COVERAGE" ]           && ARGS+=(--coverage "$FALLOW_COVERAGE")
           [ -n "$FALLOW_PRODUCTION_COVERAGE" ] && ARGS+=(--runtime-coverage "$FALLOW_PRODUCTION_COVERAGE")
           [ -n "$FALLOW_COVERAGE_ROOT" ]      && ARGS+=(--coverage-root "$FALLOW_COVERAGE_ROOT")
           [ -n "$FALLOW_MIN_INVOCATIONS_HOT" ] && ARGS+=(--min-invocations-hot "$FALLOW_MIN_INVOCATIONS_HOT")
@@ -479,6 +490,18 @@ variables:
             fi
           fi
           [ "$FALLOW_TREND" = "true" ]        && ARGS+=(--trend)
+          ;;
+        audit)
+          [ "$FALLOW_PRODUCTION_DEAD_CODE" = "true" ] && ARGS+=(--production-dead-code)
+          [ "$FALLOW_PRODUCTION_HEALTH" = "true" ] && ARGS+=(--production-health)
+          [ "$FALLOW_PRODUCTION_DUPES" = "true" ] && ARGS+=(--production-dupes)
+          [ -n "$FALLOW_AUDIT_DEAD_CODE_BASELINE" ] && ARGS+=(--dead-code-baseline "$FALLOW_AUDIT_DEAD_CODE_BASELINE")
+          [ -n "$FALLOW_AUDIT_HEALTH_BASELINE" ] && ARGS+=(--health-baseline "$FALLOW_AUDIT_HEALTH_BASELINE")
+          [ -n "$FALLOW_AUDIT_DUPES_BASELINE" ] && ARGS+=(--dupes-baseline "$FALLOW_AUDIT_DUPES_BASELINE")
+          [ -n "$FALLOW_MAX_CRAP" ]           && ARGS+=(--max-crap "$FALLOW_MAX_CRAP")
+          [ -n "$FALLOW_COVERAGE" ]           && ARGS+=(--coverage "$FALLOW_COVERAGE")
+          [ -n "$FALLOW_COVERAGE_ROOT" ]      && ARGS+=(--coverage-root "$FALLOW_COVERAGE_ROOT")
+          [ -n "$FALLOW_AUDIT_GATE" ]         && ARGS+=(--gate "$FALLOW_AUDIT_GATE")
           ;;
         fix)
           [ "$FALLOW_DRY_RUN" = "true" ] && ARGS+=(--dry-run) || ARGS+=(--yes)
@@ -525,6 +548,7 @@ variables:
         dead-code|check) ISSUES=$(jq -r '.total_issues // 0' fallow-results.json) ;;
         dupes)           ISSUES=$(jq -r '.stats.clone_groups // 0' fallow-results.json) ;;
         health)          ISSUES=$(jq -r '((.summary.functions_above_threshold // 0) + ((.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
+        audit)           ISSUES=$(jq -r 'if (.attribution.gate // "new-only") == "all" then ((.summary.dead_code_issues // 0) + (.summary.complexity_findings // 0) + (.summary.duplication_clone_groups // 0)) else ((.attribution.dead_code_introduced // 0) + (.attribution.complexity_introduced // 0) + (.attribution.duplication_introduced // 0)) end' fallow-results.json) ;;
         fix)             ISSUES=$(jq -r '(.fixes | length)' fallow-results.json) ;;
         "")              ISSUES=$(jq -r '((.check.total_issues // 0) + (.dupes.stats.clone_groups // 0) + (.health.summary.functions_above_threshold // 0) + ((.health.runtime_coverage.findings // []) | map(select(.verdict == "safe_to_delete" or .verdict == "review_required" or .verdict == "low_traffic")) | length))' fallow-results.json) ;;
       esac
@@ -548,8 +572,10 @@ variables:
           fi
           prev_arg="$arg"
         done
-        if ! fallow "${CQ_ARGS[@]}" "${EXTRA_ARGS[@]}" > gl-code-quality-report.json 2>/dev/null; then
-          # Fallback: empty report on failure
+        # A findings exit code is still a valid CodeClimate report. Fall back
+        # only when the report file is empty, malformed, or not a JSON array.
+        fallow "${CQ_ARGS[@]}" "${EXTRA_ARGS[@]}" > gl-code-quality-report.json 2>/dev/null || true
+        if [ ! -s gl-code-quality-report.json ] || ! jq -e 'type == "array"' gl-code-quality-report.json > /dev/null 2>&1; then
           echo "[]" > gl-code-quality-report.json
         fi
         CQ_COUNT=$(jq '. | length' gl-code-quality-report.json 2>/dev/null || echo 0)
@@ -592,6 +618,7 @@ variables:
           dead-code|check) echo "ERROR: Fallow found ${ISSUES} unused code issues" ;;
           dupes)           echo "ERROR: Fallow found ${ISSUES} clone groups" ;;
           health)          echo "ERROR: Fallow found ${ISSUES} health findings" ;;
+          audit)           echo "ERROR: Fallow audit found ${ISSUES} introduced issues in changed files" ;;
           fix)             echo "ERROR: Fallow found ${ISSUES} fixable issues" ;;
           "")              echo "ERROR: Fallow found ${ISSUES} issues" ;;
         esac

@@ -10,6 +10,7 @@ case "$FALLOW_COMMAND" in
   dead-code|check) JQ_FILE="${ACTION_JQ_DIR}/summary-check.jq" ;;
   dupes)           JQ_FILE="${ACTION_JQ_DIR}/summary-dupes.jq" ;;
   health)          JQ_FILE="${ACTION_JQ_DIR}/summary-health.jq" ;;
+  audit)           JQ_FILE="${ACTION_JQ_DIR}/summary-audit.jq" ;;
   fix)             JQ_FILE="${ACTION_JQ_DIR}/summary-fix.jq" ;;
   "")              JQ_FILE="${ACTION_JQ_DIR}/summary-combined.jq" ;;
   *)               echo "::error::Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;

@@ -89,6 +89,19 @@ case "$FALLOW_COMMAND" in
     COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-dupes.jq" "$RESULTS_FILE" 2>&1) || { echo "jq dupes error: $COMMENTS"; COMMENTS="[]"; } ;;
   health)
     COMMENTS=$(jq -f "${ACTION_JQ_DIR}/review-comments-health.jq" "$RESULTS_FILE" 2>&1) || { echo "jq health error: $COMMENTS"; COMMENTS="[]"; } ;;
+  audit)
+    WORK_DIR=$(mktemp -d)
+    jq '.dead_code // {}' "$RESULTS_FILE" > "$WORK_DIR/check.json" 2>/dev/null
+    jq '.duplication // {}' "$RESULTS_FILE" > "$WORK_DIR/dupes.json" 2>/dev/null
+    jq '.complexity // {}' "$RESULTS_FILE" > "$WORK_DIR/health.json" 2>/dev/null
+    CHECK=$(jq -f "${ACTION_JQ_DIR}/review-comments-check.jq" "$WORK_DIR/check.json" 2>/dev/null || echo "[]")
+    DUPES=$(jq -f "${ACTION_JQ_DIR}/review-comments-dupes.jq" "$WORK_DIR/dupes.json" 2>/dev/null || echo "[]")
+    HEALTH=$(jq -f "${ACTION_JQ_DIR}/review-comments-health.jq" "$WORK_DIR/health.json" 2>/dev/null || echo "[]")
+    COMMENTS=$(jq -n \
+      --argjson a "$CHECK" --argjson b "$DUPES" --argjson c "$HEALTH" \
+      --argjson max "$MAX" \
+      '$a + $b + $c | .[:$max]')
+    rm -rf "$WORK_DIR" ;;
   "")
     # Combined: extract each section and run through its jq script
     WORK_DIR=$(mktemp -d)
@@ -174,7 +187,9 @@ fi
 
 # Generate rich review body from the analysis results
 REVIEW_BODY=""
-if [ -f "${ACTION_JQ_DIR}/review-body.jq" ]; then
+if [ "$FALLOW_COMMAND" = "audit" ] && [ -f "${ACTION_JQ_DIR}/summary-audit.jq" ]; then
+  REVIEW_BODY=$(jq -r -f "${ACTION_JQ_DIR}/summary-audit.jq" "$RESULTS_FILE" 2>&1) || true
+elif [ -f "${ACTION_JQ_DIR}/review-body.jq" ]; then
   REVIEW_BODY=$(jq -r -f "${ACTION_JQ_DIR}/review-body.jq" "$RESULTS_FILE" 2>&1) || true
 fi
 # Fallback if jq failed or produced empty output

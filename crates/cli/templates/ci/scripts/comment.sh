@@ -31,6 +31,7 @@ case "$FALLOW_COMMAND" in
   dead-code|check) JQ_FILE=$(pick_jq "summary-check.jq") ;;
   dupes)           JQ_FILE=$(pick_jq "summary-dupes.jq") ;;
   health)          JQ_FILE=$(pick_jq "summary-health.jq") ;;
+  audit)           JQ_FILE=$(pick_jq "summary-audit.jq") ;;
   fix)             JQ_FILE=$(pick_jq "summary-fix.jq") ;;
   "")              JQ_FILE=$(pick_jq "summary-combined.jq") ;;
   *)               echo "ERROR: Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
