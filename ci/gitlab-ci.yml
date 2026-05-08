@@ -82,11 +82,21 @@ variables:
   FALLOW_PRODUCTION_HEALTH: ""         # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for health. Empty defers to it.
   FALLOW_PRODUCTION_DUPES: ""          # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for duplication. Empty defers to it.
   FALLOW_FAIL_ON_ISSUES: "true"
+  FALLOW_MIN_SEVERITY: ""       # Only fail at or above this complexity severity ('moderate'|'high'|'critical'); empty applies all severities
+  FALLOW_INCLUDE_ENTRY_EXPORTS: "false"  # Report unused exports in entry files instead of auto-marking them as used; mirrors --include-entry-exports
   FALLOW_ARGS: ""               # Extra CLI arguments (space-separated)
   FALLOW_COMMENT: "false"       # Post results as MR summary comment
   FALLOW_REVIEW: "false"        # Post inline MR discussions with rich comments and suggestions
   FALLOW_CODEQUALITY: "true"    # Generate GitLab Code Quality report (inline MR annotations)
-  FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments
+  FALLOW_MAX_COMMENTS: "50"     # Maximum number of inline review comments + items in the sticky details table
+  FALLOW_COMMENT_ID: ""         # Sticky-comment marker id; auto-suffixed with the workspace name when scoped to one workspace and unset
+  FALLOW_DIFF_FILTER: "added"   # Diff-aware filter: 'added' | 'diff_context' | 'file' | 'nofilter'
+  FALLOW_DIFF_FILE: ""          # Path to a unified-diff file; when unset and CI_MERGE_REQUEST_DIFF_BASE_SHA is set, the comment / review scripts derive it via git diff
+  FALLOW_API_RETRIES: "3"       # Maximum HTTP retry attempts for the binary's reconcile-review and the curl/gh wrappers
+  FALLOW_API_RETRY_DELAY: "2"   # Floor delay in seconds between rate-limited retries; server-supplied Retry-After overrides
+  FALLOW_GITLAB_BASE_SHA: ""    # Override for the MR base SHA in the review-gitlab position object; falls back to CI_MERGE_REQUEST_DIFF_BASE_SHA
+  FALLOW_GITLAB_START_SHA: ""   # Override for the MR start SHA; falls back to base
+  FALLOW_GITLAB_HEAD_SHA: ""    # Override for the MR head SHA; falls back to CI_COMMIT_SHA
 
   # MR integration auth.
   # GITLAB_TOKEN (PAT/project access token with api scope) is required for
@@ -287,31 +297,15 @@ variables:
           echo "WARNING: Installed fallow ${installed_semver}, but ${root}/package.json pins ${project_spec}. Set FALLOW_VERSION or align package.json to keep local and CI results comparable."
         fi
       fi
-    # Prepare jq scripts and bash scripts for MR integration
+    # Prepare bash scripts for MR integration
     - |
-      export FALLOW_JQ_DIR="/tmp/fallow-jq"
-      export FALLOW_SHARED_JQ_DIR="/tmp/fallow-shared-jq"
       FALLOW_SCRIPTS_DIR="/tmp/fallow-scripts"
-      mkdir -p "$FALLOW_JQ_DIR" "$FALLOW_SHARED_JQ_DIR" "$FALLOW_SCRIPTS_DIR"
+      mkdir -p "$FALLOW_SCRIPTS_DIR"
 
       if [ "$FALLOW_COMMENT" = "true" ] || [ "$FALLOW_REVIEW" = "true" ]; then
         DOWNLOAD_FAILURES=0
-        if [ -d "ci/jq" ] && [ -d "action/jq" ] && [ -d "ci/scripts" ]; then
+        if [ -d "ci/scripts" ]; then
           echo "Using vendored MR integration scripts from the repository checkout..."
-
-          for f in summary-check.jq summary-health.jq summary-audit.jq summary-combined.jq review-comments-dupes.jq; do
-            cp "ci/jq/${f}" "${FALLOW_JQ_DIR}/${f}" 2>/dev/null || {
-              echo "  WARNING: Failed to copy ci/jq/${f}"
-              DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
-            }
-          done
-
-          for f in summary-dupes.jq summary-fix.jq summary-audit.jq review-comments-check.jq review-comments-health.jq review-body.jq merge-comments.jq filter-changed.jq; do
-            cp "action/jq/${f}" "${FALLOW_SHARED_JQ_DIR}/${f}" 2>/dev/null || {
-              echo "  WARNING: Failed to copy action/jq/${f}"
-              DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
-            }
-          done
 
           for f in comment.sh review.sh; do
             if cp "ci/scripts/${f}" "${FALLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
@@ -338,20 +332,6 @@ variables:
 
           FALLOW_SCRIPTS_BASE="https://raw.githubusercontent.com/fallow-rs/fallow/${FALLOW_SCRIPTS_REF}"
           echo "Downloading MR integration scripts pinned to ${FALLOW_SCRIPTS_REF}..."
-
-          for f in summary-check.jq summary-health.jq summary-audit.jq summary-combined.jq review-comments-dupes.jq; do
-            curl -sf "${FALLOW_SCRIPTS_BASE}/ci/jq/${f}" -o "${FALLOW_JQ_DIR}/${f}" 2>/dev/null || {
-              echo "  WARNING: Failed to download ci/jq/${f}"
-              DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
-            }
-          done
-
-          for f in summary-dupes.jq summary-fix.jq summary-audit.jq review-comments-check.jq review-comments-health.jq review-body.jq merge-comments.jq filter-changed.jq; do
-            curl -sf "${FALLOW_SCRIPTS_BASE}/action/jq/${f}" -o "${FALLOW_SHARED_JQ_DIR}/${f}" 2>/dev/null || {
-              echo "  WARNING: Failed to download action/jq/${f}"
-              DOWNLOAD_FAILURES=$((DOWNLOAD_FAILURES + 1))
-            }
-          done
 
           for f in comment.sh review.sh; do
             if curl -sf "${FALLOW_SCRIPTS_BASE}/ci/scripts/${f}" -o "${FALLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
@@ -452,6 +432,7 @@ variables:
               ARGS+=("--${t}")
             done
           fi
+          [ "$FALLOW_INCLUDE_ENTRY_EXPORTS" = "true" ] && ARGS+=(--include-entry-exports)
           [ "$FALLOW_FAIL_ON_REGRESSION" = "true" ] && ARGS+=(--fail-on-regression)
           [ -n "$FALLOW_TOLERANCE" ] && [ "$FALLOW_TOLERANCE" != "0" ] && ARGS+=(--tolerance "$FALLOW_TOLERANCE")
           [ -n "$FALLOW_REGRESSION_BASELINE" ] && ARGS+=(--regression-baseline "$FALLOW_REGRESSION_BASELINE")
@@ -486,6 +467,7 @@ variables:
           [ "$FALLOW_COMPLEXITY" = "true" ]   && ARGS+=(--complexity)
           [ -n "$FALLOW_SINCE" ]              && ARGS+=(--since "$FALLOW_SINCE")
           [ -n "$FALLOW_MIN_COMMITS" ]        && ARGS+=(--min-commits "$FALLOW_MIN_COMMITS")
+          [ -n "$FALLOW_MIN_SEVERITY" ]       && ARGS+=(--min-severity "$FALLOW_MIN_SEVERITY")
           if [ -n "$FALLOW_SAVE_SNAPSHOT" ]; then
             if [ "$FALLOW_SAVE_SNAPSHOT" = "true" ]; then
               ARGS+=(--save-snapshot)
@@ -506,6 +488,7 @@ variables:
           [ -n "$FALLOW_COVERAGE" ]           && ARGS+=(--coverage "$FALLOW_COVERAGE")
           [ -n "$FALLOW_COVERAGE_ROOT" ]      && ARGS+=(--coverage-root "$FALLOW_COVERAGE_ROOT")
           [ -n "$FALLOW_AUDIT_GATE" ]         && ARGS+=(--gate "$FALLOW_AUDIT_GATE")
+          [ "$FALLOW_INCLUDE_ENTRY_EXPORTS" = "true" ] && ARGS+=(--include-entry-exports)
           ;;
         fix)
           [ "$FALLOW_DRY_RUN" = "true" ] && ARGS+=(--dry-run) || ARGS+=(--yes)
@@ -531,6 +514,12 @@ variables:
       fi
 
       # ── Run analysis ─────────────────────────────────────────────────
+      {
+        printf 'FALLOW_ANALYSIS_ARGS=('
+        printf '%q ' "${ARGS[@]}" "${EXTRA_ARGS[@]}"
+        printf ')\n'
+      } > fallow-analysis-args.sh
+
       echo "Running: fallow ${ARGS[*]} ${EXTRA_ARGS[*]}"
       if ! fallow "${ARGS[@]}" "${EXTRA_ARGS[@]}" > fallow-results.json 2> fallow-stderr.log; then
         if [ ! -s fallow-results.json ] || ! jq -e '.' fallow-results.json > /dev/null 2>&1; then
@@ -608,8 +597,6 @@ variables:
       if [ "$FALLOW_COMMENT" = "true" ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ]; then
         if [ -x "/tmp/fallow-scripts/comment.sh" ]; then
           echo "Posting MR summary comment..."
-          export FALLOW_JQ_DIR="${FALLOW_JQ_DIR:-/tmp/fallow-jq}"
-          export FALLOW_SHARED_JQ_DIR="${FALLOW_SHARED_JQ_DIR:-/tmp/fallow-shared-jq}"
           export CHANGED_SINCE="$FALLOW_CHANGED_SINCE"
           export INPUT_ROOT="${FALLOW_ROOT:-.}"
           bash /tmp/fallow-scripts/comment.sh || echo "WARNING: MR comment failed"
@@ -622,8 +609,6 @@ variables:
       if [ "$FALLOW_REVIEW" = "true" ] && [ -n "${CI_MERGE_REQUEST_IID:-}" ] && [ "$FALLOW_COMMAND" != "fix" ]; then
         if [ -x "/tmp/fallow-scripts/review.sh" ]; then
           echo "Posting inline MR review..."
-          export FALLOW_JQ_DIR="${FALLOW_JQ_DIR:-/tmp/fallow-jq}"
-          export FALLOW_SHARED_JQ_DIR="${FALLOW_SHARED_JQ_DIR:-/tmp/fallow-shared-jq}"
           export MAX_COMMENTS="$FALLOW_MAX_COMMENTS"
           export CHANGED_SINCE="$FALLOW_CHANGED_SINCE"
           bash /tmp/fallow-scripts/review.sh || echo "WARNING: MR review failed"

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-set -eo pipefail
+set -euo pipefail
 
 # Post or update an MR comment with analysis results
 # Required env: GITLAB_TOKEN, CI_API_V4_URL, CI_PROJECT_ID,
-#   CI_MERGE_REQUEST_IID, FALLOW_COMMAND, FALLOW_JQ_DIR
+#   CI_MERGE_REQUEST_IID, FALLOW_COMMAND
 # Optional env: CHANGED_SINCE, INPUT_ROOT (for scoping results to changed files)
 
 # Auth header
@@ -11,96 +11,144 @@ if [ -z "${GITLAB_TOKEN:-}" ]; then
   echo "WARNING: GITLAB_TOKEN is required to create or update MR comments; CI_JOB_TOKEN is read-only for MR notes in the official GitLab API. Skipping MR summary comment."
   exit 0
 fi
+: "${CI_API_V4_URL:?CI_API_V4_URL is required}"
+: "${CI_PROJECT_ID:?CI_PROJECT_ID is required}"
+: "${CI_MERGE_REQUEST_IID:?CI_MERGE_REQUEST_IID is required}"
 AUTH_HEADER="PRIVATE-TOKEN: ${GITLAB_TOKEN}"
 
 API_URL="${CI_API_V4_URL}/projects/${CI_PROJECT_ID}/merge_requests/${CI_MERGE_REQUEST_IID}/notes"
 
-# Select jq script — prefer GitLab-specific variants, fall back to shared
-pick_jq() {
-  local name="$1"
-  if [ -f "${FALLOW_JQ_DIR}/${name}" ]; then
-    echo "${FALLOW_JQ_DIR}/${name}"
-  elif [ -f "${FALLOW_SHARED_JQ_DIR:-}/${name}" ]; then
-    echo "${FALLOW_SHARED_JQ_DIR}/${name}"
-  else
-    echo "${FALLOW_JQ_DIR}/${name}"
-  fi
+curl_retry() {
+  local attempts="${FALLOW_API_RETRIES:-3}"
+  local delay="${FALLOW_API_RETRY_DELAY:-2}"
+  local attempt=1
+  local err out
+  err=$(mktemp)
+  out=$(mktemp)
+  while true; do
+    if curl -sf "$@" >"$out" 2>"$err"; then
+      cat "$out"
+      rm -f "$err" "$out"
+      return 0
+    fi
+    # Match the Rust `with_rate_limit_retry` decision: 429 + 502/503/504 are
+    # transient and worth retrying; persistent 5xx (500, 501, 505) and all
+    # other 4xx surface immediately. curl -sf emits stderr like
+    # `curl: (22) The requested URL returned error: 502 Bad Gateway`, so we
+    # match either the explicit code or the rate-limit / Retry-After hints.
+    if [ "$attempt" -ge "$attempts" ] \
+        || ! grep -Eqi 'error: (429|502|503|504)|rate limit|Retry-After' "$err"; then
+      cat "$err" >&2
+      rm -f "$err" "$out"
+      return 1
+    fi
+    echo "WARNING: GitLab API rate limit response; retrying (${attempt}/${attempts})" >&2
+    sleep "$delay"
+    attempt=$((attempt + 1))
+  done
 }
 
-case "$FALLOW_COMMAND" in
-  dead-code|check) JQ_FILE=$(pick_jq "summary-check.jq") ;;
-  dupes)           JQ_FILE=$(pick_jq "summary-dupes.jq") ;;
-  health)          JQ_FILE=$(pick_jq "summary-health.jq") ;;
-  audit)           JQ_FILE=$(pick_jq "summary-audit.jq") ;;
-  fix)             JQ_FILE=$(pick_jq "summary-fix.jq") ;;
-  "")              JQ_FILE=$(pick_jq "summary-combined.jq") ;;
-  *)               echo "ERROR: Unexpected command: ${FALLOW_COMMAND}"; exit 2 ;;
-esac
+# Walk the GitLab REST API's Link-header pagination, concatenating every page
+# of a JSON array into a single combined array on stdout. Last positional arg
+# is the initial URL; preceding args are passed to curl_retry verbatim (auth
+# headers etc.). Without this, a >100-comment MR would silently lose stale
+# fallow notes outside the first page and re-post duplicates on every run.
+curl_paginate() {
+  local args=("$@")
+  local last=$(( ${#args[@]} - 1 ))
+  local url="${args[$last]}"
+  unset 'args[last]'
+  local headers body
+  headers=$(mktemp)
+  body=$(mktemp)
+  local combined='[]'
+  while [ -n "$url" ]; do
+    if ! curl_retry -D "$headers" "${args[@]}" "$url" > "$body"; then
+      rm -f "$headers" "$body"
+      return 1
+    fi
+    # Defensively skip non-array pages (e.g. an error envelope) so the
+    # caller degrades to "no existing notes seen" instead of crashing on
+    # `array + object` jq errors. The call sites mask exit non-zero, but
+    # surfacing a successful empty-array beats a silent re-post-of-duplicates.
+    combined=$(jq -s 'map(arrays) | add // []' <(printf '%s' "$combined") "$body")
+    url=$(grep -i '^link:' "$headers" \
+      | tr ',' '\n' \
+      | sed -n 's/.*<\([^>]*\)>.*rel="next".*/\1/p' \
+      | head -1)
+  done
+  rm -f "$headers" "$body"
+  printf '%s' "$combined"
+}
 
-# Scope results to changed files when --changed-since is active
-RESULTS_BASE="fallow-results.json"
-if [ -n "${CHANGED_SINCE:-}" ]; then
-  ROOT="${INPUT_ROOT:-.}"
-  FILTER_JQ=$(pick_jq "filter-changed.jq")
-  if [ -f "$FILTER_JQ" ]; then
-    CHANGED_FILES=$(cd "$ROOT" && git diff --name-only --relative "${CHANGED_SINCE}...HEAD" -- . 2>/dev/null || true)
-    if [ -n "$CHANGED_FILES" ]; then
-      CHANGED_JSON=$(echo "$CHANGED_FILES" | jq -R -s 'split("\n") | map(select(length > 0))')
-      if jq --argjson changed "$CHANGED_JSON" -f "$FILTER_JQ" fallow-results.json > fallow-results-scoped.json 2>/dev/null; then
-        RESULTS_BASE="fallow-results-scoped.json"
-      fi
+render_with_fallow() {
+  local format=$1
+  local output=$2
+  [ -f fallow-analysis-args.sh ] || return 1
+  # shellcheck disable=SC1091
+  source fallow-analysis-args.sh
+  local args=("${FALLOW_ANALYSIS_ARGS[@]}")
+  local replaced=false
+  for i in "${!args[@]}"; do
+    if [ "${args[$i]}" = "--format" ] && [ $((i + 1)) -lt "${#args[@]}" ]; then
+      args[$((i + 1))]="$format"
+      replaced=true
+      break
+    fi
+  done
+  if [ "$replaced" != "true" ]; then
+    args+=(--format "$format")
+  fi
+  if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
+    if git diff "${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD" > fallow-mr.diff 2>fallow-mr-diff-stderr.log; then
+      export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"
+    else
+      echo "WARNING: Failed to fetch MR diff; diff filter disabled, reporting all findings"
+      rm -f fallow-mr.diff
     fi
   fi
-fi
-
-# For combined mode, pass the full JSON; for specific commands, extract section
-INPUT_FILE="$RESULTS_BASE"
-if [ -z "$FALLOW_COMMAND" ]; then
-  INPUT_FILE="$RESULTS_BASE"
-elif [ "$FALLOW_COMMAND" = "dead-code" ] || [ "$FALLOW_COMMAND" = "check" ]; then
-  # If running in combined mode but requesting check summary
-  if jq -e '.check' "$RESULTS_BASE" > /dev/null 2>&1; then
-    jq '.check' "$RESULTS_BASE" > /tmp/fallow-comment-input.json
-    INPUT_FILE="/tmp/fallow-comment-input.json"
+  export FALLOW_DIFF_FILTER="${FALLOW_DIFF_FILTER:-added}"
+  FALLOW_COMMENT_ID="${FALLOW_COMMENT_ID:-fallow-results}" fallow "${args[@]}" > "$output" 2> fallow-comment-stderr.log || true
+  # Surface fallow's structured-error envelope before the marker check so the
+  # CLI message lands in the GitLab job log rather than a generic warning.
+  if jq -e '.error == true' "$output" > /dev/null 2>&1; then
+    echo "WARNING: fallow render failed: $(jq -r '.message // "unknown error"' "$output")"
+    return 1
   fi
-fi
+  grep -q "^<!-- fallow-id: ${FALLOW_COMMENT_ID:-fallow-results} -->" "$output" \
+    && grep -q "Generated by fallow\\." "$output"
+}
 
-# Generate comment body
-BODY=$(jq -r -f "$JQ_FILE" "$INPUT_FILE") || { echo "WARNING: Failed to generate MR comment body"; exit 0; }
-
-# Add scoping indicator when results were filtered to changed files
-if [ "$RESULTS_BASE" != "fallow-results.json" ]; then
-  COMMIT_URL="${CI_PROJECT_URL:-}/-/commit/${CHANGED_SINCE}"
-  BODY="${BODY}"$'\n\n'"*Issue counts scoped to files changed since [\`${CHANGED_SINCE:0:7}\`](${COMMIT_URL}) · health metrics reflect the full codebase*"
-fi
-
-COMMENT_BODY="${BODY}
-
-<!-- fallow-results -->"
-
-# Find existing fallow comment to update (avoids spam on busy MRs)
-EXISTING_NOTE_ID=$(curl -sf \
-  --header "${AUTH_HEADER}" \
-  "${API_URL}?per_page=100" \
-  | jq -r '.[] | select(.body | contains("<!-- fallow-results -->")) | .id' \
-  | head -1) || true
-
-if [ -n "$EXISTING_NOTE_ID" ]; then
-  curl -sf \
+if render_with_fallow pr-comment-gitlab fallow-mr-comment.md; then
+  COMMENT_BODY=$(cat fallow-mr-comment.md)
+  MARKER="<!-- fallow-id: ${FALLOW_COMMENT_ID:-fallow-results} -->"
+  EXISTING_NOTE_ID=$(curl_paginate \
     --header "${AUTH_HEADER}" \
-    --header "Content-Type: application/json" \
-    --request PUT \
-    --data "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')" \
-    "${API_URL}/${EXISTING_NOTE_ID}" > /dev/null \
-    && echo "Updated existing MR comment" \
-    || echo "WARNING: Failed to update MR comment (check token permissions)"
-else
-  curl -sf \
-    --header "${AUTH_HEADER}" \
-    --header "Content-Type: application/json" \
-    --request POST \
-    --data "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')" \
-    "${API_URL}" > /dev/null \
-    && echo "Created new MR comment" \
-    || echo "WARNING: Failed to create MR comment (check token permissions)"
+    "${API_URL}?per_page=100" \
+    | MARKER="$MARKER" jq -r '.[] | select(.body | contains(env.MARKER)) | .id' \
+    | head -1) || true
+
+  if [ -n "$EXISTING_NOTE_ID" ]; then
+    curl_retry \
+      --header "${AUTH_HEADER}" \
+      --header "Content-Type: application/json" \
+      --request PUT \
+      --data "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')" \
+      "${API_URL}/${EXISTING_NOTE_ID}" > /dev/null \
+      && echo "Updated existing MR comment" \
+      || echo "WARNING: Failed to update MR comment (check token permissions)"
+  else
+    curl_retry \
+      --header "${AUTH_HEADER}" \
+      --header "Content-Type: application/json" \
+      --request POST \
+      --data "$(jq -n --arg body "$COMMENT_BODY" '{body: $body}')" \
+      "${API_URL}" > /dev/null \
+      && echo "Created new MR comment" \
+      || echo "WARNING: Failed to create MR comment (check token permissions)"
+  fi
+  exit 0
 fi
+
+echo "WARNING: Failed to render typed MR comment"
+exit 0
