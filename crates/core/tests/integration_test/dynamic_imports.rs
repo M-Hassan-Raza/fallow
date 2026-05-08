@@ -140,6 +140,10 @@ fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
     //      the factory case, since synthesizing would surface as a
     //      spurious `unresolved-import` whenever the sibling does not
     //      exist (the user did not write that path).
+    // The target is credited as side-effect reachability only: vi.mock needs
+    // the module path to exist, but the factory does not consume the original
+    // module exports. Unused exports in the target should therefore stay
+    // visible.
     let root = fixture_path("issue-311-vi-mock-factory-target");
     let config = create_config(root.clone());
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
@@ -173,10 +177,27 @@ fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
         "factory-form vi.mock must NOT synthesize a `__mocks__/<file>` import; \
          found unresolved_imports: {unresolved_specifiers:?}"
     );
+
+    let unused_exports: Vec<String> = results
+        .unused_exports
+        .iter()
+        .filter_map(|export| {
+            let path = export
+                .path
+                .strip_prefix(&root)
+                .unwrap_or(&export.path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            (path == "src/bar/foo.ts").then(|| export.export_name.clone())
+        })
+        .collect();
     assert_eq!(
-        results.total_issues(),
-        0,
-        "the regression-fixture should produce zero issues end-to-end"
+        unused_exports,
+        vec![
+            "useRegenerateSlotTextMutation".to_string(),
+            "stillUnused".to_string(),
+        ],
+        "factory-form vi.mock should keep the target file reachable without blanket-crediting its exports"
     );
 }
 

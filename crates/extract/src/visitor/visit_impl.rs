@@ -125,20 +125,27 @@ fn vitest_auto_mock_source(source: &str) -> Option<String> {
 /// expression in the second-argument position; an object literal in that
 /// position is treated as `vi.mock(spec, options)` (rare auto-mock options
 /// form), where vitest still consults `__mocks__/<file>`. Oxc parses with
-/// `preserve_parens: true` by default, so a parenthesized factory
-/// (`vi.mock('x', (() => ({})))`) is a `ParenthesizedExpression` wrapping the
-/// callable; unwrap one level so the parens form is recognised too.
+/// `preserve_parens: true` by default, so parenthesized factories
+/// (`vi.mock('x', (((() => ({})))))`) arrive wrapped in one or more
+/// `ParenthesizedExpression` nodes; unwrap through those so the callable is
+/// recognised.
 fn vi_mock_has_factory(call: &CallExpression<'_>) -> bool {
-    fn is_factory_arg(arg: &Argument<'_>) -> bool {
-        match arg {
-            Argument::ArrowFunctionExpression(_) | Argument::FunctionExpression(_) => true,
-            Argument::ParenthesizedExpression(paren) => matches!(
-                &paren.expression,
-                Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
-            ),
+    fn is_factory_expression(expr: &Expression<'_>) -> bool {
+        match expr {
+            Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => true,
+            Expression::ParenthesizedExpression(paren) => is_factory_expression(&paren.expression),
             _ => false,
         }
     }
+
+    fn is_factory_arg(arg: &Argument<'_>) -> bool {
+        match arg {
+            Argument::ArrowFunctionExpression(_) | Argument::FunctionExpression(_) => true,
+            Argument::ParenthesizedExpression(paren) => is_factory_expression(&paren.expression),
+            _ => false,
+        }
+    }
+
     call.arguments.get(1).is_some_and(is_factory_arg)
 }
 
@@ -1474,7 +1481,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 source: target_source.clone(),
                 span: expr.span,
                 destructured_names: Vec::new(),
-                local_name: Some(String::new()),
+                local_name: None,
             });
 
             // Synthesize the `__mocks__/<file>` sibling only when vitest will

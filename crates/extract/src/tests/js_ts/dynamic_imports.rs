@@ -115,9 +115,18 @@ fn vitest_mock_records_target_and_auto_mock_sibling() {
         sources.contains(&"./services/__mocks__/api"),
         "auto-mock sibling must still be synthesized when no factory is provided, got {sources:?}"
     );
-    for imp in &info.dynamic_imports {
-        assert_eq!(imp.local_name, Some(String::new()));
-    }
+    let target = info
+        .dynamic_imports
+        .iter()
+        .find(|imp| imp.source == "./services/api")
+        .expect("target import should be recorded");
+    assert_eq!(target.local_name, None);
+    let auto_mock = info
+        .dynamic_imports
+        .iter()
+        .find(|imp| imp.source == "./services/__mocks__/api")
+        .expect("auto-mock import should be recorded");
+    assert_eq!(auto_mock.local_name, Some(String::new()));
 }
 
 #[test]
@@ -136,6 +145,18 @@ fn vitest_mock_records_target_and_auto_mock_sibling_from_import_argument() {
         sources.contains(&"./services/__mocks__/api"),
         "auto-mock sibling must still be synthesized for `vi.mock(import(...))` without a factory, got {sources:?}"
     );
+    let target = info
+        .dynamic_imports
+        .iter()
+        .find(|imp| imp.source == "./services/api")
+        .expect("target import should be recorded");
+    assert_eq!(target.local_name, None);
+    let auto_mock = info
+        .dynamic_imports
+        .iter()
+        .find(|imp| imp.source == "./services/__mocks__/api")
+        .expect("auto-mock import should be recorded");
+    assert_eq!(auto_mock.local_name, Some(String::new()));
 }
 
 #[test]
@@ -152,7 +173,7 @@ fn vitest_mock_with_factory_credits_target_only() {
         "factory form should emit one import (the target), not two"
     );
     assert_eq!(info.dynamic_imports[0].source, "../../bar/foo");
-    assert_eq!(info.dynamic_imports[0].local_name, Some(String::new()));
+    assert_eq!(info.dynamic_imports[0].local_name, None);
 }
 
 #[test]
@@ -168,17 +189,17 @@ fn vitest_mock_with_function_expression_factory_credits_target_only() {
         vec!["./pkg"],
         "function-expression factory should suppress auto-mock synthesis just like arrow factory, got {sources:?}"
     );
+    assert_eq!(info.dynamic_imports[0].local_name, None);
 }
 
 #[test]
-fn vitest_mock_with_parenthesized_factory_credits_target_only() {
-    // Oxc preserves parens at parse time, so `vi.mock('x', (() => ({})))`
-    // arrives as a `ParenthesizedExpression` wrapping the arrow. The factory
-    // detector must unwrap one level to recognise the parens form, otherwise
+fn vitest_mock_with_nested_parenthesized_factory_credits_target_only() {
+    // Oxc preserves parens at parse time, so `vi.mock('x', (((() => ({})))))`
+    // arrives as nested `ParenthesizedExpression` nodes wrapping the arrow.
+    // The factory detector must unwrap through them to recognise the factory, otherwise
     // a `__mocks__/x` import is synthesized and surfaces as a spurious
-    // `unresolved-import`. Caught 2026-05-08 by rust-reviewer on the
-    // initial #311 implementation.
-    let info = parse_source("vi.mock('./pkg', (() => ({ x: 1 })));");
+    // `unresolved-import`.
+    let info = parse_source("vi.mock('./pkg', (((() => ({ x: 1 })))));");
     let sources: Vec<&str> = info
         .dynamic_imports
         .iter()
@@ -187,8 +208,9 @@ fn vitest_mock_with_parenthesized_factory_credits_target_only() {
     assert_eq!(
         sources,
         vec!["./pkg"],
-        "parenthesized arrow factory must suppress auto-mock synthesis, got {sources:?}"
+        "nested parenthesized arrow factory must suppress auto-mock synthesis, got {sources:?}"
     );
+    assert_eq!(info.dynamic_imports[0].local_name, None);
 }
 
 #[test]
@@ -206,6 +228,18 @@ fn vitest_mock_with_options_object_still_synthesizes_auto_mock() {
         sources.contains(&"./services/__mocks__/api"),
         "auto-mock options form should still synthesize the __mocks__ sibling, got {sources:?}"
     );
+    let target = info
+        .dynamic_imports
+        .iter()
+        .find(|imp| imp.source == "./services/api")
+        .expect("target import should be recorded");
+    assert_eq!(target.local_name, None);
+    let auto_mock = info
+        .dynamic_imports
+        .iter()
+        .find(|imp| imp.source == "./services/__mocks__/api")
+        .expect("auto-mock import should be recorded");
+    assert_eq!(auto_mock.local_name, Some(String::new()));
 }
 
 // -- Dynamic import namespace tracking --
