@@ -21,7 +21,7 @@ pub struct SdkPattern {
 /// Feature flag detection configuration.
 ///
 /// Controls which patterns fallow uses to detect feature flags in source code.
-/// Configured via the `flags` section in `.fallowrc.json` or `fallow.toml`.
+/// Configured via the `flags` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.
 ///
 /// # Examples
 ///

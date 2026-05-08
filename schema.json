@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "FallowConfig",
-  "description": "User-facing configuration loaded from `.fallowrc.json` or `fallow.toml`.\n\n# Examples\n\n```\nuse fallow_config::FallowConfig;\n\n// Default config has sensible defaults\nlet config = FallowConfig::default();\nassert!(config.entry.is_empty());\nassert!(!config.production);\n\n// Deserialize from JSON\nlet config: FallowConfig = serde_json::from_str(r#\"{\n    \"entry\": [\"src/main.ts\"],\n    \"production\": true\n}\"#).unwrap();\nassert_eq!(config.entry, vec![\"src/main.ts\"]);\nassert!(config.production);\n```",
+  "description": "User-facing configuration loaded from `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```\nuse fallow_config::FallowConfig;\n\n// Default config has sensible defaults\nlet config = FallowConfig::default();\nassert!(config.entry.is_empty());\nassert!(!config.production);\n\n// Deserialize from JSON\nlet config: FallowConfig = serde_json::from_str(r#\"{\n    \"entry\": [\"src/main.ts\"],\n    \"production\": true\n}\"#).unwrap();\nassert_eq!(config.entry, vec![\"src/main.ts\"]);\nassert!(config.production);\n```",
   "type": "object",
   "properties": {
     "$schema": {
@@ -1004,7 +1004,7 @@
       ]
     },
     "FlagsConfig": {
-      "description": "Feature flag detection configuration.\n\nControls which patterns fallow uses to detect feature flags in source code.\nConfigured via the `flags` section in `.fallowrc.json` or `fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"flags\": {\n    \"sdkPatterns\": [\n      { \"function\": \"useFlag\", \"nameArg\": 0, \"provider\": \"LaunchDarkly\" }\n    ],\n    \"envPrefixes\": [\"FEATURE_\", \"NEXT_PUBLIC_ENABLE_\"],\n    \"configObjectHeuristics\": false\n  }\n}\n```",
+      "description": "Feature flag detection configuration.\n\nControls which patterns fallow uses to detect feature flags in source code.\nConfigured via the `flags` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"flags\": {\n    \"sdkPatterns\": [\n      { \"function\": \"useFlag\", \"nameArg\": 0, \"provider\": \"LaunchDarkly\" }\n    ],\n    \"envPrefixes\": [\"FEATURE_\", \"NEXT_PUBLIC_ENABLE_\"],\n    \"configObjectHeuristics\": false\n  }\n}\n```",
       "type": "object",
       "properties": {
         "sdkPatterns": {
@@ -1056,7 +1056,7 @@
       ]
     },
     "ResolveConfig": {
-      "description": "Module resolver configuration.\n\nControls how fallow resolves import specifiers against package.json\n`exports` / `imports` fields and tsconfig paths. Configured via the\n`resolve` section in `.fallowrc.json` or `fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"resolve\": {\n    \"conditions\": [\"development\", \"worker\"]\n  }\n}\n```",
+      "description": "Module resolver configuration.\n\nControls how fallow resolves import specifiers against package.json\n`exports` / `imports` fields and tsconfig paths. Configured via the\n`resolve` section in `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.\n\n# Examples\n\n```json\n{\n  \"resolve\": {\n    \"conditions\": [\"development\", \"worker\"]\n  }\n}\n```",
       "type": "object",
       "properties": {
         "conditions": {

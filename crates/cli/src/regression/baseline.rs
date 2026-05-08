@@ -459,7 +459,7 @@ pub fn compare_check_regression(
         };
         counts
     } else if let Some(config_baseline) = config_baseline {
-        // Config-embedded baseline: read from .fallowrc.json / fallow.toml
+        // Config-embedded baseline: read from .fallowrc.json / .fallowrc.jsonc / fallow.toml / .fallow.toml
         CheckCounts::from_config_baseline(config_baseline)
     } else {
         eprintln!(
