@@ -7,9 +7,10 @@ def project_url: $ENV.CI_PROJECT_URL // "";
 def sha: $ENV.CI_COMMIT_SHA // "";
 def rel_path: if startswith("/") then (. as $p | root as $r | if ($p | test("/\($r)/")) then ($p | capture("/\($r)/(?<rest>.*)") | .rest) else ($p | split("/") | .[-3:] | join("/")) end) else . end;
 def file_link(path; start; end_line):
+  (path | rel_path) as $display |
   if (project_url | length) > 0 and (sha | length) > 0 then
-    "[`\(path):\(start)-\(end_line)`](\(project_url)/-/blob/\(sha)/\(prefix)\(path)#L\(start)-\(end_line))"
-  else "`\(path):\(start)-\(end_line)`" end;
+    "[`\($display):\(start)-\(end_line)`](\(project_url)/-/blob/\(sha)/\(prefix)\(path)#L\(start)-\(end_line))"
+  else "`\($display):\(start)-\(end_line)`" end;
 def footer: "\n\n---\n<sub><a href=\"https://docs.fallow.tools/explanations/duplication\">Docs</a> \u00b7 Disagree? <a href=\"https://docs.fallow.tools/configuration/suppression\">Configure or suppress</a></sub>";
 [
   (.clone_families // [])[] | . as $family |
@@ -19,7 +20,7 @@ def footer: "\n\n---\n<sub><a href=\"https://docs.fallow.tools/explanations/dupl
     .instances[]? | . as $inst |
       ($inst.file | rel_path) as $this_path |
       ($group.instances | map(select(. != $inst)) |
-        map((.file | rel_path) as $p | "- " + file_link($p; .start_line; .end_line)) | join("\n")) as $others |
+        map("- " + file_link(.file; .start_line; .end_line)) | join("\n")) as $others |
       {
         type: "duplication",
         group_id: "\($this_path):\($group.token_count):\($group.line_count)",

@@ -387,6 +387,10 @@ assert_contains "$OUT_SINGULAR" "**1** clone group " "status-bar: singular clone
 assert_not_contains "$OUT_SINGULAR" "**1** clone groups" "status-bar: no '1 clone groups' grammar"
 assert_not_contains "$OUT_SINGULAR" "**1** health findings" "status-bar: no '1 health findings' grammar"
 
+# Complexity <details> summary pluralizes when functions_above_threshold == 1
+assert_contains "$OUT_SINGULAR" "(1 function above threshold)" "complexity dropdown: singular function"
+assert_not_contains "$OUT_SINGULAR" "(1 functions above threshold)" "complexity dropdown: no '1 functions' grammar"
+
 # Worst-case truncation: 50 groups synthesized (paths differentiated per-group via `. as $g |`),
 # top-5 displayed + "and N more" line, total under 65k chars.
 # line_count is ASCENDING in input order (group_0 has line_count=1, group_49 has line_count=50)
@@ -551,6 +555,16 @@ assert_valid_json "$OUT" "produces valid JSON"
 assert_contains "$OUT" "duplication" "mentions duplication"
 assert_contains "$OUT" "github.com" "has GitHub links"
 assert_contains "$OUT" "View duplicated code" "includes code fragment"
+
+# Deep paths in "Also found in:" cross-refs: display rel_path-truncated, URL keeps full path
+DEEP_FIXTURE=$(mktemp)
+cat > "$DEEP_FIXTURE" <<'JSON'
+{"clone_families":[{"files":["apps/web/src/services/billing/calculator.ts","apps/api/src/services/billing/calculator.ts"],"total_duplicated_lines":10,"total_duplicated_tokens":50,"suggestions":[],"groups":[{"token_count":50,"line_count":10,"instances":[{"file":"apps/web/src/services/billing/calculator.ts","start_line":5,"end_line":15,"start_col":0,"end_col":0,"fragment":"stub"},{"file":"apps/api/src/services/billing/calculator.ts","start_line":8,"end_line":18,"start_col":0,"end_col":0,"fragment":"stub"}]}]}],"clone_groups":[],"stats":{"clone_groups":1,"clone_instances":2,"files_with_clones":2}}
+JSON
+OUT_DEEP_REVIEW=$(PREFIX="" FALLOW_ROOT="" GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="deadbeef" MAX=10 jq -f "$JQ_DIR/review-comments-dupes.jq" "$DEEP_FIXTURE" 2>&1)
+rm -f "$DEEP_FIXTURE"
+assert_contains "$OUT_DEEP_REVIEW" "/blob/deadbeef/apps/web/src/services/billing/calculator.ts#L5-L15" "review deep-path: URL keeps full path (web)"
+assert_contains "$OUT_DEEP_REVIEW" "/blob/deadbeef/apps/api/src/services/billing/calculator.ts#L8-L18" "review deep-path: URL keeps full path (api)"
 
 echo "  review-comments-health.jq:"
 OUT=$(jq -f "$JQ_DIR/review-comments-health.jq" "$FIXTURES/health.json" 2>&1)

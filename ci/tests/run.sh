@@ -455,6 +455,10 @@ assert_contains "$OUT_SINGULAR_GL" "**1** clone group " "status-bar: singular cl
 assert_not_contains "$OUT_SINGULAR_GL" "**1** clone groups" "status-bar: no '1 clone groups' grammar"
 assert_not_contains "$OUT_SINGULAR_GL" "**1** health findings" "status-bar: no '1 health findings' grammar"
 
+# Complexity <details> summary pluralizes when functions_above_threshold == 1
+assert_contains "$OUT_SINGULAR_GL" "(1 function above threshold)" "complexity dropdown: singular function"
+assert_not_contains "$OUT_SINGULAR_GL" "(1 functions above threshold)" "complexity dropdown: no '1 functions' grammar"
+
 # Worst-case truncation: 50 groups (paths differentiated per-group via `. as $g |`),
 # top-5 + overflow line, output stays under 65k chars.
 # line_count is ASCENDING in input order so the sort_by in summary-combined.jq must do work.
@@ -592,6 +596,16 @@ assert_contains "$OUT" "duplication" "mentions duplication"
 assert_contains "$OUT" "gitlab.com" "has GitLab links (not GitHub)"
 assert_not_contains "$OUT" "github.com" "no GitHub links"
 assert_contains "$OUT" "View duplicated code" "includes code fragment"
+
+# Deep paths in "Also found in:" cross-refs: display rel_path-truncated, URL keeps full path
+DEEP_FIXTURE_GL=$(mktemp)
+cat > "$DEEP_FIXTURE_GL" <<'JSON'
+{"clone_families":[{"files":["apps/web/src/services/billing/calculator.ts","apps/api/src/services/billing/calculator.ts"],"total_duplicated_lines":10,"total_duplicated_tokens":50,"suggestions":[],"groups":[{"token_count":50,"line_count":10,"instances":[{"file":"apps/web/src/services/billing/calculator.ts","start_line":5,"end_line":15,"start_col":0,"end_col":0,"fragment":"stub"},{"file":"apps/api/src/services/billing/calculator.ts","start_line":8,"end_line":18,"start_col":0,"end_col":0,"fragment":"stub"}]}]}],"clone_groups":[],"stats":{"clone_groups":1,"clone_instances":2,"files_with_clones":2}}
+JSON
+OUT_DEEP_REVIEW_GL=$(PREFIX="" FALLOW_ROOT="" jq -f "$CI_JQ_DIR/review-comments-dupes.jq" "$DEEP_FIXTURE_GL" 2>&1)
+rm -f "$DEEP_FIXTURE_GL"
+assert_contains "$OUT_DEEP_REVIEW_GL" "/-/blob/abc123/apps/web/src/services/billing/calculator.ts#L5-15" "review deep-path: URL keeps full path (web)"
+assert_contains "$OUT_DEEP_REVIEW_GL" "/-/blob/abc123/apps/api/src/services/billing/calculator.ts#L8-18" "review deep-path: URL keeps full path (api)"
 
 # =========================================================================
 # Shared review comment scripts (from action/jq/)

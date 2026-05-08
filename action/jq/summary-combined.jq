@@ -153,7 +153,7 @@ else
     ($summary.max_cyclomatic_threshold // "default") as $cyc_t |
     ($summary.max_cognitive_threshold // "default") as $cog_t |
     ($summary.max_crap_threshold // "default") as $crap_t |
-    "<details>\n<summary><strong><a href=\"\(health_docs)#complexity-metrics\">Complexity</a> (\($complex) functions above threshold)</strong></summary>\n\n" +
+    "<details>\n<summary><strong><a href=\"\(health_docs)#complexity-metrics\">Complexity</a> (\($complex) \(if $complex == 1 then "function" else "functions" end) above threshold)</strong></summary>\n\n" +
     "| File | Function | Severity | [Cyclomatic](\(health_docs)#cyclomatic-complexity) | [Cognitive](\(health_docs)#cognitive-complexity)\(if $show_crap then " | [CRAP](\(health_docs)#crap-score)" else "" end) | Lines |\n|:-----|:---------|:---------|----------:|---------:\(if $show_crap then "|-----:" else "" end)|------:|\n" +
     ([$findings[:5][] |
       "| `\(.path | rel_path):\(.line)` | `\(.name)` | \(.severity // "moderate") | \(.cyclomatic)\(if (.exceeded // "") | test("cyclomatic|both|all") then " **!**" else "" end) | \(.cognitive)\(if (.exceeded // "") | test("cognitive|both|all") then " **!**" else "" end)\(if $show_crap then " | \(if .crap == null then "-" else (.crap | tostring) + (if (.exceeded // "") | test("crap|all") then " **!**" else "" end) end)" else "" end) | \(.line_count) |"
