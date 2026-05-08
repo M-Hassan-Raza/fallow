@@ -563,6 +563,9 @@ cat > "$DEEP_FIXTURE" <<'JSON'
 JSON
 OUT_DEEP_REVIEW=$(PREFIX="" FALLOW_ROOT="" GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="deadbeef" MAX=10 jq -f "$JQ_DIR/review-comments-dupes.jq" "$DEEP_FIXTURE" 2>&1)
 rm -f "$DEEP_FIXTURE"
+# URL keeps full path including 'apps/web/' prefix; assertion fails if rel_path was applied to URL too.
+# The complex rel_path def in this file is identity for relative paths, so no display-truncation
+# assertion is meaningful here without an absolute-path fixture.
 assert_contains "$OUT_DEEP_REVIEW" "/blob/deadbeef/apps/web/src/services/billing/calculator.ts#L5-L15" "review deep-path: URL keeps full path (web)"
 assert_contains "$OUT_DEEP_REVIEW" "/blob/deadbeef/apps/api/src/services/billing/calculator.ts#L8-L18" "review deep-path: URL keeps full path (api)"
 

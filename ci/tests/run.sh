@@ -604,6 +604,7 @@ cat > "$DEEP_FIXTURE_GL" <<'JSON'
 JSON
 OUT_DEEP_REVIEW_GL=$(PREFIX="" FALLOW_ROOT="" jq -f "$CI_JQ_DIR/review-comments-dupes.jq" "$DEEP_FIXTURE_GL" 2>&1)
 rm -f "$DEEP_FIXTURE_GL"
+# URL keeps full path; rel_path here is identity for relative paths so no display assertion is meaningful
 assert_contains "$OUT_DEEP_REVIEW_GL" "/-/blob/abc123/apps/web/src/services/billing/calculator.ts#L5-15" "review deep-path: URL keeps full path (web)"
 assert_contains "$OUT_DEEP_REVIEW_GL" "/-/blob/abc123/apps/api/src/services/billing/calculator.ts#L8-18" "review deep-path: URL keeps full path (api)"
 
