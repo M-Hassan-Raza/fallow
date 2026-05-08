@@ -425,6 +425,54 @@ assert_contains "$OUT" "CRAP" "combined: shows CRAP column"
 assert_contains "$OUT" "thresholds: cyclomatic" "combined: shows complexity threshold line"
 assert_not_contains "$OUT" "Dead exports" "no dead_export_pct in PR comment"
 
+# Duplication block: locations table replaces metric-only table
+assert_contains "$OUT" "Locations | Lines | Tokens" "dupes: locations table header"
+assert_contains "$OUT" "content-parser.ts:27-50" "dupes: shows first clone instance line range"
+assert_contains "$OUT" "Across 2 files" "dupes: footer reports file count"
+assert_contains "$OUT" "2 groups · 66 lines" "dupes: header carries group count and total lines"
+assert_not_contains "$OUT" "| [Duplicated lines]" "dupes: old metric table is gone"
+
+# Linkified cells engage when CI_PROJECT_URL + CI_COMMIT_SHA are set; GitLab fragment is #L<start>-<end> (single L)
+OUT_LINKED_GL=$(CI_PROJECT_URL="https://gitlab.com/foo/bar" CI_COMMIT_SHA="deadbeef" jq -r -f "$CI_JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
+assert_contains "$OUT_LINKED_GL" "https://gitlab.com/foo/bar/-/blob/deadbeef/src/helpers/content-parser.ts#L27-50" "dupes: file_link engages with GitLab env vars"
+
+# Singular-group header
+OUT_ONE_GL=$(jq '.dupes.stats.clone_groups = 1 | .dupes.clone_groups = [.dupes.clone_groups[0]]' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_ONE_GL" "(1 group ·" "dupes: singular group header"
+assert_not_contains "$OUT_ONE_GL" "(1 groups ·" "dupes: no '1 groups' grammar"
+
+# Worst-case truncation: 50 groups (paths differentiated per-group via `. as $g |`),
+# top-5 + overflow line, output stays under 65k chars.
+# line_count is ASCENDING in input order so the sort_by in summary-combined.jq must do work.
+OUT_LARGE_GL=$(jq -n '
+  {
+    schema_version: 3,
+    check: {total_issues: 0, unused_files: [], unused_exports: [], unused_types: [], unused_dependencies: [], unused_dev_dependencies: [], unused_optional_dependencies: [], unused_enum_members: [], unused_class_members: [], unresolved_imports: [], unlisted_dependencies: [], duplicate_exports: [], circular_dependencies: [], boundary_violations: [], type_only_dependencies: [], test_only_dependencies: [], stale_suppressions: [], private_type_leaks: []},
+    dupes: {
+      stats: {clone_groups: 50, clone_instances: 200, files_with_clones: 50, duplicated_lines: 5000, total_lines: 100000, duplication_percentage: 5.0},
+      clone_groups: ([range(0;50)] | map(. as $g | {line_count: ($g + 1), token_count: ($g * 5 + 50), instances: ([range(0;4)] | map(. as $i | {file: ("src/group_\($g)/file_\($i).ts"), start_line: ($i * 10 + 1), end_line: ($i * 10 + 9)}))}))
+    },
+    health: {summary: {functions_above_threshold: 0}, vital_signs: {}, file_scores: [], findings: []}
+  }
+' | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_LARGE_GL" "and 45 more groups" "dupes: large input truncates with overflow line"
+assert_contains "$OUT_LARGE_GL" "Across 50 files" "dupes: large input footer count is correct"
+LARGE_LEN_GL=${#OUT_LARGE_GL}
+if [ "$LARGE_LEN_GL" -lt 65000 ]; then
+  pass "dupes: large input stays under PR comment cap (got $LARGE_LEN_GL chars)"
+else
+  fail "dupes: large input over PR comment cap" "got $LARGE_LEN_GL chars (cap 65000)"
+fi
+assert_contains "$OUT_LARGE_GL" "src/group_49/file_0.ts:1-9" "dupes: largest group (49) ranks first after sort"
+assert_contains "$OUT_LARGE_GL" "src/group_45/file_0.ts" "dupes: top-5 contains group_45 (5th largest)"
+assert_not_contains "$OUT_LARGE_GL" "src/group_44/file_0.ts" "dupes: group_44 (6th largest) is truncated"
+assert_not_contains "$OUT_LARGE_GL" "src/group_0/file_0.ts" "dupes: smallest group is truncated"
+
+# Null duplication_percentage must not crash pct(); render as 0%
+OUT_NULL_PCT_GL=$(jq 'del(.dupes.stats.duplication_percentage)' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_NULL_PCT_GL" "66 lines · 0%" "dupes: missing duplication_percentage renders as 0%"
+assert_not_contains "$OUT_NULL_PCT_GL" "cannot be multiplied" "dupes: pct(null) does not crash"
+
 OUT_CRAP_ONLY=$(jq '.health.summary.functions_above_threshold = 1 | .health.findings = [{"path":"src/ui/pagination.tsx","name":"buildPageItems","line":42,"col":0,"cyclomatic":17,"cognitive":8,"crap":30,"line_count":13,"severity":"moderate","exceeded":"crap"}]' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_CRAP_ONLY" "buildPageItems" "combined: renders CRAP-only finding"
 assert_contains "$OUT_CRAP_ONLY" "CRAP >= 30" "combined: explains CRAP threshold"
@@ -503,6 +551,7 @@ OUT=$(jq -r -f "$SHARED_JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"
 assert_contains "$OUT" "clone groups" "mentions clone groups"
 assert_contains "$OUT" "Duplicated lines" "shows duplication stats"
+assert_contains "$OUT" "content-parser.ts:27-50" "shows clone instance line range"
 
 OUT_CLEAN=$(jq -r -f "$SHARED_JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No code duplication" "clean: no duplication"

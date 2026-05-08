@@ -2,6 +2,13 @@ def count(obj; key): obj | if . then .[key] // 0 else 0 end;
 def pct(n): n | . * 10 | round / 10;
 def signed(n): if n > 0 then "+\(pct(n))" elif n < 0 then "\(pct(n))" else "0.0" end;
 def rel_path: split("/") | if length > 3 then .[-3:] | join("/") else join("/") end;
+def prefix: $ENV.PREFIX // "";
+def repo: $ENV.GH_REPO // "";
+def sha: $ENV.PR_HEAD_SHA // "";
+def file_link(path; start; end_line):
+  if (repo | length) > 0 and (sha | length) > 0 then
+    "[`\(path):\(start)-\(end_line)`](https://github.com/\(repo)/blob/\(sha)/\(prefix)\(path)#L\(start)-L\(end_line))"
+  else "`\(path):\(start)-\(end_line)`" end;
 def dead_code_docs: "https://docs.fallow.tools/explanations/dead-code";
 def docs(anchor): dead_code_docs + "#" + anchor;
 def health_docs: "https://docs.fallow.tools/explanations/health";
@@ -86,7 +93,7 @@ else
   # One-line status
   (if $check > 0 then ":warning: **\($check)** code issues" else ":white_check_mark: No code issues" end) +
   " \u00b7 " +
-  (if $dupes > 0 then ":warning: **\($dupes)** clone groups" else ":white_check_mark: No duplication" end) +
+  (if $dupes > 0 then ":warning: **\($dupes)** clone \(if $dupes == 1 then "group" else "groups" end)" else ":white_check_mark: No duplication" end) +
   " \u00b7 " +
   (if $health > 0 then ":warning: **\($health)** health findings" else ":white_check_mark: No blocking health findings" end) +
   (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
@@ -126,12 +133,16 @@ else
 
   # Duplication breakdown
   (if $dupes > 0 then
-    "<details>\n<summary><strong><a href=\"\(dupes_docs)\">Duplication</a> (\($dupes) clone groups, \(pct($dupes_stats.duplication_percentage))%)</strong></summary>\n\n" +
-    "| Metric | Value |\n|:-------|------:|\n" +
-    "| [Duplicated lines](\(dupes_docs)#duplication-percentage) | \($dupes_stats.duplicated_lines) |\n" +
-    "| [Clone instances](\(dupes_docs)#instance-count) | \($dupes_stats.clone_instances) |\n" +
-    "| Files with clones | \($dupes_stats.files_with_clones) |\n" +
-    "\n</details>\n\n"
+    ((.dupes.clone_groups // []) | sort_by([(.line_count // 0), (.token_count // 0)]) | reverse) as $groups |
+    ($dupes_stats.files_with_clones // 0) as $files_with_clones |
+    "<details>\n<summary><strong><a href=\"\(dupes_docs)\">Duplication</a> (\($dupes) \(if $dupes == 1 then "group" else "groups" end) · \($dupes_stats.duplicated_lines // 0) lines · \(pct($dupes_stats.duplication_percentage // 0))%)</strong></summary>\n\n" +
+    "| Locations | Lines | Tokens |\n|:----------|------:|-------:|\n" +
+    ([$groups[:5][] |
+      ([(.instances // [])[] | file_link((.file | rel_path); .start_line; .end_line)] | join("<br>")) as $locs |
+      "| \($locs) | \(.line_count) | \(.token_count) |"
+    ] | join("\n")) +
+    (if $dupes > 5 then "\n\n*… and \($dupes - 5) more groups.*" else "" end) +
+    "\n\nAcross \($files_with_clones) \(if $files_with_clones == 1 then "file" else "files" end).\n\n</details>\n\n"
   else "" end) +
 
   # Complexity breakdown
