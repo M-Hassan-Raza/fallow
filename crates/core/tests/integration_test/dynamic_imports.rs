@@ -129,6 +129,57 @@ fn vitest_vi_mock_makes_auto_mock_reachable() {
     );
 }
 
+#[test]
+fn vitest_vi_mock_factory_credits_target_and_skips_auto_mock_synthesis() {
+    // Issue #311: when vi.mock is called with a factory function, vitest
+    // does NOT consult the `__mocks__/<file>` sibling. Two failures must
+    // not happen:
+    //   1. The target file (`src/bar/foo.ts`) must NOT be flagged as
+    //      unused-file even though no other file imports it directly.
+    //   2. fallow must NOT synthesize the `__mocks__/<file>` import in
+    //      the factory case, since synthesizing would surface as a
+    //      spurious `unresolved-import` whenever the sibling does not
+    //      exist (the user did not write that path).
+    let root = fixture_path("issue-311-vi-mock-factory-target");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| {
+            f.path
+                .strip_prefix(&root)
+                .unwrap_or(&f.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert!(
+        !unused_files.contains(&"src/bar/foo.ts".to_string()),
+        "vi.mock target must be credited as referenced even when paired with a factory; \
+         found unused_files: {unused_files:?}"
+    );
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|imp| imp.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers
+            .iter()
+            .any(|s| s.contains("__mocks__")),
+        "factory-form vi.mock must NOT synthesize a `__mocks__/<file>` import; \
+         found unresolved_imports: {unresolved_specifiers:?}"
+    );
+    assert_eq!(
+        results.total_issues(),
+        0,
+        "the regression-fixture should produce zero issues end-to-end"
+    );
+}
+
 // ── Dynamic import pattern resolution ──────────────────────────
 
 #[test]

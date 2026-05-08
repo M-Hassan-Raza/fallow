@@ -113,6 +113,35 @@ fn vitest_auto_mock_source(source: &str) -> Option<String> {
     Some(format!("{dir}/__mocks__/{file_name}"))
 }
 
+/// Detect whether a `vi.mock(specifier, factory, ...)` call provides a factory
+/// function as the second argument.
+///
+/// Vitest only consults the `__mocks__/<file>` sibling convention when the
+/// caller does NOT pass a factory; with a factory, vitest uses the factory
+/// directly and the `__mocks__/<file>` sibling is irrelevant. Synthesizing
+/// the auto-mock import in the factory case produces a spurious
+/// `unresolved-import` finding when no `__mocks__/<file>` exists. See issue
+/// #311. The factory is detected as either an arrow function or a function
+/// expression in the second-argument position; an object literal in that
+/// position is treated as `vi.mock(spec, options)` (rare auto-mock options
+/// form), where vitest still consults `__mocks__/<file>`. Oxc parses with
+/// `preserve_parens: true` by default, so a parenthesized factory
+/// (`vi.mock('x', (() => ({})))`) is a `ParenthesizedExpression` wrapping the
+/// callable; unwrap one level so the parens form is recognised too.
+fn vi_mock_has_factory(call: &CallExpression<'_>) -> bool {
+    fn is_factory_arg(arg: &Argument<'_>) -> bool {
+        match arg {
+            Argument::ArrowFunctionExpression(_) | Argument::FunctionExpression(_) => true,
+            Argument::ParenthesizedExpression(paren) => matches!(
+                &paren.expression,
+                Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_)
+            ),
+            _ => false,
+        }
+    }
+    call.arguments.get(1).is_some_and(is_factory_arg)
+}
+
 /// Specifier source string from the first argument of a `register(...)` call.
 ///
 /// `node:module`'s `register` hook (issue #293) loads a loader module by
@@ -1434,15 +1463,37 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         // resolves through `binding_target_names`.
         self.bind_iterable_callback_parameter(expr);
 
-        if let Some(mock_source) =
-            vitest_mock_source(expr).and_then(|source| vitest_auto_mock_source(&source))
-        {
+        if let Some(target_source) = vitest_mock_source(expr) {
+            // Always credit the vi.mock target itself as a referenced module.
+            // Whether vitest auto-mocks (no factory) or runs a factory in place
+            // of the original module, the target's path must resolve at test
+            // time, so the file is conceptually used. Without this, the target
+            // surfaces as `unused-file` whenever the factory replaces every
+            // export and no other test file imports it directly. See issue #311.
             self.dynamic_imports.push(DynamicImportInfo {
-                source: mock_source,
+                source: target_source.clone(),
                 span: expr.span,
                 destructured_names: Vec::new(),
                 local_name: Some(String::new()),
             });
+
+            // Synthesize the `__mocks__/<file>` sibling only when vitest will
+            // actually consult it: vi.mock without a factory falls through to
+            // the auto-mock convention; vi.mock WITH a factory uses the
+            // factory directly and the `__mocks__/<file>` sibling is ignored.
+            // Synthesizing in the factory case produces a spurious
+            // `unresolved-import` finding when no `__mocks__/<file>` exists.
+            // See issue #311.
+            if !vi_mock_has_factory(expr)
+                && let Some(mock_source) = vitest_auto_mock_source(&target_source)
+            {
+                self.dynamic_imports.push(DynamicImportInfo {
+                    source: mock_source,
+                    span: expr.span,
+                    destructured_names: Vec::new(),
+                    local_name: Some(String::new()),
+                });
+            }
         }
 
         self.try_record_node_module_register(expr);

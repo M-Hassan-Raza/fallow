@@ -96,22 +96,116 @@ fn extracts_require_context_recursive() {
 }
 
 #[test]
-fn vitest_mock_records_auto_mock_sibling() {
+fn vitest_mock_records_target_and_auto_mock_sibling() {
+    // vi.mock without a factory: the target is credited as referenced AND
+    // the `__mocks__/<file>` sibling is synthesized for vitest's auto-mock
+    // convention.
     let info = parse_source("vi.mock('./services/api');");
-    assert_eq!(info.dynamic_imports.len(), 1);
-    assert_eq!(info.dynamic_imports[0].source, "./services/__mocks__/api");
+    assert_eq!(info.dynamic_imports.len(), 2);
+    let sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    assert!(
+        sources.contains(&"./services/api"),
+        "target itself must be credited so vi.mock-only consumers do not flag it as unused-file, got {sources:?}"
+    );
+    assert!(
+        sources.contains(&"./services/__mocks__/api"),
+        "auto-mock sibling must still be synthesized when no factory is provided, got {sources:?}"
+    );
+    for imp in &info.dynamic_imports {
+        assert_eq!(imp.local_name, Some(String::new()));
+    }
+}
+
+#[test]
+fn vitest_mock_records_target_and_auto_mock_sibling_from_import_argument() {
+    let info = parse_source("vi.mock(import('./services/api'));");
+    let sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    assert!(
+        sources.contains(&"./services/api"),
+        "target itself must be credited even when wrapped in `import(...)`, got {sources:?}"
+    );
+    assert!(
+        sources.contains(&"./services/__mocks__/api"),
+        "auto-mock sibling must still be synthesized for `vi.mock(import(...))` without a factory, got {sources:?}"
+    );
+}
+
+#[test]
+fn vitest_mock_with_factory_credits_target_only() {
+    // Issue #311: vi.mock with a factory function does NOT consult the
+    // `__mocks__/<file>` sibling at runtime, so synthesizing the auto-mock
+    // import would surface as a spurious `unresolved-import` whenever the
+    // sibling does not exist. The target itself is still credited so the
+    // file is not flagged as unused.
+    let info = parse_source("vi.mock('../../bar/foo', () => ({ x: 1 }));");
+    assert_eq!(
+        info.dynamic_imports.len(),
+        1,
+        "factory form should emit one import (the target), not two"
+    );
+    assert_eq!(info.dynamic_imports[0].source, "../../bar/foo");
     assert_eq!(info.dynamic_imports[0].local_name, Some(String::new()));
 }
 
 #[test]
-fn vitest_mock_records_auto_mock_sibling_from_import_argument() {
-    let info = parse_source("vi.mock(import('./services/api'));");
-    let auto_mock = info
+fn vitest_mock_with_function_expression_factory_credits_target_only() {
+    let info = parse_source("vi.mock('./pkg', function () { return { x: 1 }; });");
+    let sources: Vec<&str> = info
         .dynamic_imports
         .iter()
-        .find(|imp| imp.source == "./services/__mocks__/api")
-        .expect("vi.mock(import(...)) should record the auto-mock sibling");
-    assert_eq!(auto_mock.local_name, Some(String::new()));
+        .map(|imp| imp.source.as_str())
+        .collect();
+    assert_eq!(
+        sources,
+        vec!["./pkg"],
+        "function-expression factory should suppress auto-mock synthesis just like arrow factory, got {sources:?}"
+    );
+}
+
+#[test]
+fn vitest_mock_with_parenthesized_factory_credits_target_only() {
+    // Oxc preserves parens at parse time, so `vi.mock('x', (() => ({})))`
+    // arrives as a `ParenthesizedExpression` wrapping the arrow. The factory
+    // detector must unwrap one level to recognise the parens form, otherwise
+    // a `__mocks__/x` import is synthesized and surfaces as a spurious
+    // `unresolved-import`. Caught 2026-05-08 by rust-reviewer on the
+    // initial #311 implementation.
+    let info = parse_source("vi.mock('./pkg', (() => ({ x: 1 })));");
+    let sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    assert_eq!(
+        sources,
+        vec!["./pkg"],
+        "parenthesized arrow factory must suppress auto-mock synthesis, got {sources:?}"
+    );
+}
+
+#[test]
+fn vitest_mock_with_options_object_still_synthesizes_auto_mock() {
+    // `vi.mock(spec, { spy: true })` is auto-mock with options, NOT a factory
+    // form, so vitest still consults `__mocks__/<file>`. The synthesis must
+    // still happen.
+    let info = parse_source("vi.mock('./services/api', { spy: true });");
+    let sources: Vec<&str> = info
+        .dynamic_imports
+        .iter()
+        .map(|imp| imp.source.as_str())
+        .collect();
+    assert!(
+        sources.contains(&"./services/__mocks__/api"),
+        "auto-mock options form should still synthesize the __mocks__ sibling, got {sources:?}"
+    );
 }
 
 // -- Dynamic import namespace tracking --
