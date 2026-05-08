@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **PR / MR comment status bar pluralizes `code issue(s)`, `clone group(s)`, and `health finding(s)` when the count is 1.** Previously the one-line summary read ungrammatically as `**1** code issues · **1** clone groups · **1** health findings`. Each noun now branches on `count == 1` so a single-finding PR reads `**1** code issue · **1** clone group · **1** health finding`. Same fix in both the GitHub Action and GitLab CI variants of `summary-combined.jq`. Regression tests in `action/tests/run.sh` and `ci/tests/run.sh` cover all three nouns.
+
 ### Changed
 
 - **PR / MR comment Duplication section lists the actual clone locations instead of aggregate counts only.** The GitHub Action and GitLab CI top-level summary previously rendered a metric table (`Duplicated lines: 7`, `Clone instances: 2`, `Files with clones: 1`) and left readers to dig through the inline review comments to find the file paths and line ranges. The block now opens a top-5 locations table sorted by `line_count` descending (largest extractable wins first), with each row stacking the clone instances as `path:start-end` ranges joined by `<br>`. Aggregate counts move into the `<details>` summary header (`(N group(s) · M lines · X%)`) so the closed dropdown is still self-explanatory, and a footer states how many distinct files contain clones. When `GH_REPO` + `PR_HEAD_SHA` (Action) or `CI_PROJECT_URL` + `CI_COMMIT_SHA` (GitLab) are set, each cell links to the GitHub or GitLab blob URL with a line-range fragment so a click lands at the right span. Singular/plural grammar is rendered in the header and footer (1 group vs N groups, 1 file vs N files). Top-5 truncation matches the Complexity section's behaviour, with an "and N more groups" overflow line. The same shape is mirrored into the standalone `fallow dupes` summary so users hitting that surface no longer see a bare file list with no line ranges.

@@ -441,6 +441,14 @@ OUT_ONE_GL=$(jq '.dupes.stats.clone_groups = 1 | .dupes.clone_groups = [.dupes.c
 assert_contains "$OUT_ONE_GL" "(1 group ·" "dupes: singular group header"
 assert_not_contains "$OUT_ONE_GL" "(1 groups ·" "dupes: no '1 groups' grammar"
 
+# Status-bar pluralization: 1 of each renders singular
+OUT_SINGULAR_GL=$(jq '.check.unused_files = [.check.unused_files[0]] | .check.unused_exports = [] | .check.unused_dependencies = [] | .check.unused_dev_dependencies = [] | .check.unused_optional_dependencies = [] | .check.unused_types = [] | .check.unused_enum_members = [] | .check.unused_class_members = [] | .check.unresolved_imports = [] | .check.unlisted_dependencies = [] | .check.duplicate_exports = [] | .check.circular_dependencies = [] | .check.boundary_violations = [] | .check.type_only_dependencies = [] | .check.test_only_dependencies = [] | .check.stale_suppressions = [] | .check.private_type_leaks = [] | .check.total_issues = 1 | .dupes.stats.clone_groups = 1 | .dupes.clone_groups = [.dupes.clone_groups[0]] | .health.summary.functions_above_threshold = 1 | .health.findings = [.health.findings[0]]' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_SINGULAR_GL" "**1** code issue " "status-bar: singular code issue"
+assert_not_contains "$OUT_SINGULAR_GL" "**1** code issues" "status-bar: no '1 code issues' grammar"
+assert_contains "$OUT_SINGULAR_GL" "**1** clone group " "status-bar: singular clone group"
+assert_not_contains "$OUT_SINGULAR_GL" "**1** clone groups" "status-bar: no '1 clone groups' grammar"
+assert_not_contains "$OUT_SINGULAR_GL" "**1** health findings" "status-bar: no '1 health findings' grammar"
+
 # Worst-case truncation: 50 groups (paths differentiated per-group via `. as $g |`),
 # top-5 + overflow line, output stays under 65k chars.
 # line_count is ASCENDING in input order so the sort_by in summary-combined.jq must do work.

@@ -91,11 +91,11 @@ else
   "# \ud83c\udf3f Fallow\n\n" +
 
   # One-line status
-  (if $check > 0 then ":warning: **\($check)** code issues" else ":white_check_mark: No code issues" end) +
+  (if $check > 0 then ":warning: **\($check)** code \(if $check == 1 then "issue" else "issues" end)" else ":white_check_mark: No code issues" end) +
   " \u00b7 " +
   (if $dupes > 0 then ":warning: **\($dupes)** clone \(if $dupes == 1 then "group" else "groups" end)" else ":white_check_mark: No duplication" end) +
   " \u00b7 " +
-  (if $health > 0 then ":warning: **\($health)** health findings" else ":white_check_mark: No blocking health findings" end) +
+  (if $health > 0 then ":warning: **\($health)** health \(if $health == 1 then "finding" else "findings" end)" else ":white_check_mark: No blocking health findings" end) +
   (if $prod_advisory > 0 then " \u00b7 :information_source: **\($prod_advisory)** coverage advisory finding\(if $prod_advisory == 1 then "" else "s" end)" else "" end) +
   (if $hot_paths > 0 then " \u00b7 :eyes: **\($hot_paths)** hot path\(if $hot_paths == 1 then "" else "s" end)" else "" end) +
   "\n\n" +
