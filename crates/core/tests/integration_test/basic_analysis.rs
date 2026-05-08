@@ -232,6 +232,45 @@ fn namespace_import_used_through_object_alias_across_packages_via_star_barrel() 
     );
 }
 
+#[test]
+fn namespace_import_used_through_object_alias_across_multi_hop_barrel_chain() {
+    // Issue #310: real-world consumers reach the alias-defining file through
+    // multiple named-re-export hops. The #303 fix only matched consumers whose
+    // import target was the alias-defining file directly; consumers landing at
+    // an intermediate barrel were missed.
+    //
+    //   consumer.ts: import { API } from '@foo/bar'  →  api/src/index.ts
+    //   api/src/index.ts:           export { API } from './methods'
+    //   api/src/methods/index.ts:   export { API } from './methods'
+    //   api/src/methods/methods.ts: import * as bar from './bar'; export const API = { bar }
+    //   api/src/methods/bar/index.ts: export * from './queries'
+    //   api/src/methods/bar/queries.ts: export const searchFoo = ...
+    //
+    // The fix walks re-export edges forward from the alias-defining file to
+    // enumerate every (barrel, exported_name) pair the alias is reachable
+    // through, then matches consumer imports against the full set.
+    let root = fixture_path("issue-310-namespace-object-alias-multi-hop-barrel");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_export_names.contains(&"searchFoo"),
+        "searchFoo should be credited through API.bar.searchFoo across two named-re-export hops, found: {unused_export_names:?}"
+    );
+    // Negative control: the multi-hop walk must not over-credit unrelated
+    // exports of the same star-barrel target file.
+    assert!(
+        unused_export_names.contains(&"unusedQuery"),
+        "unusedQuery must still be flagged as unused; the BFS-walked credit path should not credit every export, found: {unused_export_names:?}"
+    );
+}
+
 // ── Namespace exports (issue #52) ────────────────────────────
 
 #[test]

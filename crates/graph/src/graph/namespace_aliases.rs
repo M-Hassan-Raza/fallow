@@ -13,7 +13,7 @@
 //! (reachability) so any reference attached here participates in reachability
 //! and re-export chain propagation downstream.
 
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ImportedName, NamespaceObjectAlias};
@@ -69,17 +69,81 @@ fn collect_pending_credits(
             let Some(target_module_idx) = module_index_for_file(graph, namespace_target_id) else {
                 continue;
             };
+            // Enumerate every (barrel_file, exported_name) pair through which a
+            // consumer might import this alias. Without this, consumers whose
+            // import lands at an intermediate named-re-export barrel (or a
+            // star-barrel) instead of directly at the alias-defining file would
+            // be missed and the namespace member would surface as unused-export.
+            // See issue #310 (real-world multi-hop case missed by issue #303
+            // which only tested direct + star-barrel-on-target shapes).
+            let reachable =
+                enumerate_alias_reachable_barrels(graph, alias_file_id, &alias.via_export_name);
             collect_credits_for_alias(
                 module_by_id,
                 alias_file_id,
                 alias,
                 target_module_idx,
+                &reachable,
                 &mut pending,
             );
         }
     }
 
     pending
+}
+
+/// Walk re-export edges forward from `(alias_file_id, via_export_name)` and
+/// return every `(barrel_file_id, exported_name_at_barrel)` pair through which
+/// the alias is reachable. Includes the seed pair so a consumer importing
+/// directly from the alias-defining file still matches.
+///
+/// Edge cases:
+/// - Renamed re-exports (`export { A as B } from './src'`) yield
+///   `(barrel, "B")` even though the source name is `"A"`.
+/// - Star re-exports (`export * from './src'`) propagate every reachable name
+///   unchanged; the source's name `"A"` is reachable at the barrel as `"A"`.
+/// - Cycles are bounded by the visited set.
+fn enumerate_alias_reachable_barrels(
+    graph: &ModuleGraph,
+    alias_file_id: FileId,
+    via_export_name: &str,
+) -> FxHashSet<(FileId, String)> {
+    let mut reachable: FxHashSet<(FileId, String)> = FxHashSet::default();
+    reachable.insert((alias_file_id, via_export_name.to_string()));
+    let mut frontier: Vec<(FileId, String)> = vec![(alias_file_id, via_export_name.to_string())];
+
+    while let Some((source_file, source_name)) = frontier.pop() {
+        for (idx, module) in graph.modules.iter().enumerate() {
+            for edge in &module.re_exports {
+                if edge.source_file != source_file {
+                    continue;
+                }
+                let exported_name = if edge.imported_name == source_name {
+                    edge.exported_name.clone()
+                } else if edge.imported_name == "*" && edge.exported_name == "*" {
+                    // Plain `export * from './src'` propagates `source_name`
+                    // through unchanged. `export * as ns from './src'` (where
+                    // `exported_name == "ns"`) wraps the whole namespace under
+                    // a new name, so individual source names are NOT exposed
+                    // at this barrel under their original identifiers.
+                    source_name.clone()
+                } else {
+                    continue;
+                };
+                #[expect(
+                    clippy::cast_possible_truncation,
+                    reason = "file count is bounded by project size, well under u32::MAX"
+                )]
+                let barrel_file = FileId(idx as u32);
+                let pair = (barrel_file, exported_name);
+                if reachable.insert(pair.clone()) {
+                    frontier.push(pair);
+                }
+            }
+        }
+    }
+
+    reachable
 }
 
 /// Resolve the file_id of a namespace import on `alias_module` whose local
@@ -116,6 +180,7 @@ fn collect_credits_for_alias(
     alias_file_id: FileId,
     alias: &NamespaceObjectAlias,
     target_module_idx: usize,
+    reachable: &FxHashSet<(FileId, String)>,
     pending: &mut Vec<PendingCredit>,
 ) {
     let prefix_match = format!(".{}", alias.suffix);
@@ -124,16 +189,15 @@ fn collect_credits_for_alias(
             continue;
         }
         for import in &consumer.resolved_imports {
-            if !matches!(&import.target, ResolveResult::InternalModule(file_id) if *file_id == alias_file_id)
-            {
+            let ResolveResult::InternalModule(target_file_id) = &import.target else {
                 continue;
-            }
-            let imported_matches = match &import.info.imported_name {
-                ImportedName::Named(n) => n == &alias.via_export_name,
-                ImportedName::Default => alias.via_export_name == "default",
-                _ => false,
             };
-            if !imported_matches {
+            let imported_name = match &import.info.imported_name {
+                ImportedName::Named(n) => n.as_str(),
+                ImportedName::Default => "default",
+                _ => continue,
+            };
+            if !reachable.contains(&(*target_file_id, imported_name.to_string())) {
                 continue;
             }
             let consumer_local = import.info.local_name.as_str();
