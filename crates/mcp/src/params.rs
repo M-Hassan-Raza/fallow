@@ -33,7 +33,7 @@ pub struct AnalyzeParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
@@ -155,7 +155,7 @@ pub struct FindDupesParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
     /// Scope analysis to one or more workspaces. Accepts a single package name
@@ -362,7 +362,7 @@ pub struct TraceCloneParams {
     /// Root directory of the project. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
     /// Scope analysis to one or more workspaces. Accepts a single package name
@@ -403,7 +403,7 @@ pub struct HealthParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
     /// Maximum cyclomatic complexity threshold. Functions exceeding this are reported.
@@ -573,7 +573,7 @@ pub struct CheckRuntimeCoverageParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).
@@ -631,7 +631,7 @@ pub struct AuditParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
     /// Git ref to compare against (e.g., "main", "HEAD~5").
@@ -748,7 +748,7 @@ pub struct FeatureFlagsParams {
     /// Root directory of the project to analyze. Defaults to current working directory.
     pub root: Option<String>,
 
-    /// Path to fallow config file (.fallowrc.json or fallow.toml).
+    /// Path to fallow config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml).
     pub config: Option<String>,
 
     /// Only analyze production code (excludes tests, stories, dev files).

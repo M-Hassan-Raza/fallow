@@ -21,7 +21,7 @@ const SECS_PER_DAY: u64 = 86_400;
 pub enum SaveRegressionTarget<'a> {
     /// Don't save.
     None,
-    /// Save into the config file (.fallowrc.json / fallow.toml).
+    /// Save into the config file (.fallowrc.json / .fallowrc.jsonc / fallow.toml / .fallow.toml).
     Config,
     /// Save to an explicit file path.
     File(&'a Path),

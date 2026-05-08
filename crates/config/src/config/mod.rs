@@ -95,7 +95,7 @@ pub struct IgnoreExportsUsedInFileByKind {
     pub interface: bool,
 }
 
-/// User-facing configuration loaded from `.fallowrc.json` or `fallow.toml`.
+/// User-facing configuration loaded from `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`.
 ///
 /// # Examples
 ///

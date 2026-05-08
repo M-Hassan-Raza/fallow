@@ -64,7 +64,7 @@ struct Cli {
     #[arg(short, long, global = true)]
     root: Option<PathBuf>,
 
-    /// Path to config file (.fallowrc.json, .fallowrc.jsonc, or fallow.toml)
+    /// Path to config file (.fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml)
     #[arg(short, long, global = true)]
     config: Option<PathBuf>,
 
