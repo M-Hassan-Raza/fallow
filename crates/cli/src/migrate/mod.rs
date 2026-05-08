@@ -43,8 +43,65 @@ struct MigrationResult {
     pub(super) sources: Vec<String>,
 }
 
+/// Output format selection for the generated fallow config.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum OutputFormat {
+    Json,
+    Jsonc,
+    Toml,
+}
+
+impl OutputFormat {
+    #[expect(
+        clippy::case_sensitive_file_extension_comparisons,
+        reason = "config file extensions are always lowercase"
+    )]
+    fn pick(use_toml: bool, use_jsonc: bool, result: &MigrationResult) -> Self {
+        if use_toml {
+            return Self::Toml;
+        }
+        if use_jsonc {
+            return Self::Jsonc;
+        }
+        // Auto-mirror: if any source we read was JSONC-named, default to .fallowrc.jsonc.
+        // Sources is populated with bare filenames ("knip.jsonc"), full paths
+        // ("<dir>/knip.jsonc"), or `<file> (knip key)` / `<file> (jscpd key)`
+        // suffixed forms (only emitted for package.json embedded configs, which
+        // are always `.json`, never `.jsonc`). `ends_with(".jsonc")` is therefore
+        // sufficient and avoids matching a `.jsonc`-named parent directory in a
+        // user-supplied `--from` path.
+        if result.sources.iter().any(|s| s.ends_with(".jsonc")) {
+            Self::Jsonc
+        } else {
+            Self::Json
+        }
+    }
+
+    fn filename(self) -> &'static str {
+        match self {
+            Self::Toml => "fallow.toml",
+            Self::Jsonc => ".fallowrc.jsonc",
+            Self::Json => ".fallowrc.json",
+        }
+    }
+}
+
 /// Run the migrate command.
-pub fn run_migrate(root: &Path, use_toml: bool, dry_run: bool, from: Option<&Path>) -> ExitCode {
+///
+/// Output format and filename are picked in priority order: `--toml` writes
+/// `fallow.toml`, `--jsonc` writes `.fallowrc.jsonc`, otherwise the source
+/// extension is mirrored (`knip.jsonc` produces `.fallowrc.jsonc`,
+/// `knip.json` / `package.json` keys produce `.fallowrc.json`). The
+/// generated JSONC content includes `//` comments either way; the `.jsonc`
+/// extension exists so editors auto-detect JSON-with-comments syntax
+/// highlighting.
+pub fn run_migrate(
+    root: &Path,
+    use_toml: bool,
+    use_jsonc: bool,
+    dry_run: bool,
+    from: Option<&Path>,
+) -> ExitCode {
     // Check if a fallow config already exists
     let existing_names = [
         ".fallowrc.json",
@@ -79,21 +136,17 @@ pub fn run_migrate(root: &Path, use_toml: bool, dry_run: bool, from: Option<&Pat
         return ExitCode::from(2);
     }
 
-    // Generate output
-    let output_content = if use_toml {
-        generate_toml(&result)
-    } else {
-        generate_jsonc(&result)
+    let format = OutputFormat::pick(use_toml, use_jsonc, &result);
+
+    let output_content = match format {
+        OutputFormat::Toml => generate_toml(&result),
+        OutputFormat::Jsonc | OutputFormat::Json => generate_jsonc(&result),
     };
 
     if dry_run {
         println!("{output_content}");
     } else {
-        let filename = if use_toml {
-            "fallow.toml"
-        } else {
-            ".fallowrc.json"
-        };
+        let filename = format.filename();
         let output_path = root.join(filename);
         if let Err(e) = std::fs::write(&output_path, &output_content) {
             eprintln!("Error: failed to write {filename}: {e}");

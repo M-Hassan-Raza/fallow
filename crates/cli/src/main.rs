@@ -735,9 +735,19 @@ enum Command {
 
     /// Migrate configuration from knip or jscpd to fallow
     Migrate {
-        /// Generate TOML instead of JSONC
-        #[arg(long)]
+        /// Generate `fallow.toml` instead of JSONC
+        #[arg(long, conflicts_with = "jsonc")]
         toml: bool,
+
+        /// Write JSONC content to `.fallowrc.jsonc` instead of `.fallowrc.json`. The
+        /// generated content is the same JSONC (with `//` comments) either way; the
+        /// `.jsonc` extension lets editors auto-detect JSON-with-comments syntax
+        /// highlighting and silences linters that flag comments in `.json`. Without
+        /// `--jsonc` or `--toml`, fallow auto-mirrors the source extension: a
+        /// `knip.jsonc` migration writes `.fallowrc.jsonc`, a `knip.json` migration
+        /// writes `.fallowrc.json`.
+        #[arg(long)]
+        jsonc: bool,
 
         /// Only preview the generated config without writing
         #[arg(long)]
@@ -2169,9 +2179,10 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
         Command::Schema => unreachable!("handled above"),
         Command::Migrate {
             toml,
+            jsonc,
             dry_run,
             from,
-        } => migrate::run_migrate(root, toml, dry_run, from.as_deref()),
+        } => migrate::run_migrate(root, toml, jsonc, dry_run, from.as_deref()),
         Command::License { subcommand } => license::run(&map_license_subcommand(subcommand)),
         Command::Coverage { subcommand } => coverage::run(
             map_coverage_subcommand(&subcommand, cli.explain),

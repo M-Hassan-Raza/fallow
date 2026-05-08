@@ -78,6 +78,114 @@ fn migrate_dry_run_toml_output() {
 }
 
 // ---------------------------------------------------------------------------
+// Output filename selection (--toml / --jsonc / auto-mirror)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn migrate_writes_fallowrc_json_when_source_is_knip_json() {
+    let dir = migrate_temp_dir("out-json", "knip.json", r#"{"entry": ["src/index.ts"]}"#);
+    let output = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        dir.join(".fallowrc.json").exists(),
+        ".fallowrc.json should be written for knip.json source"
+    );
+    assert!(
+        !dir.join(".fallowrc.jsonc").exists(),
+        ".fallowrc.jsonc should NOT be written for knip.json source"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_auto_writes_fallowrc_jsonc_when_source_is_knip_jsonc() {
+    let dir = migrate_temp_dir(
+        "out-jsonc-auto",
+        "knip.jsonc",
+        "{\n  // header comment\n  \"entry\": [\"src/index.ts\"]\n}\n",
+    );
+    let output = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        dir.join(".fallowrc.jsonc").exists(),
+        ".fallowrc.jsonc should be written when source is knip.jsonc"
+    );
+    assert!(
+        !dir.join(".fallowrc.json").exists(),
+        ".fallowrc.json should NOT be written when source is knip.jsonc"
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_explicit_jsonc_flag_overrides_json_source() {
+    let dir = migrate_temp_dir(
+        "out-jsonc-flag",
+        "knip.json",
+        r#"{"entry": ["src/index.ts"]}"#,
+    );
+    let output = run_fallow_raw(&[
+        "migrate",
+        "--jsonc",
+        "--root",
+        dir.to_str().unwrap(),
+        "--quiet",
+    ]);
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        dir.join(".fallowrc.jsonc").exists(),
+        "--jsonc must force .fallowrc.jsonc even when source is knip.json"
+    );
+    assert!(!dir.join(".fallowrc.json").exists());
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_jsonc_and_toml_are_mutually_exclusive() {
+    let dir = migrate_temp_dir("exclusive", "knip.json", r#"{"entry": ["src/index.ts"]}"#);
+    let output = run_fallow_raw(&[
+        "migrate",
+        "--jsonc",
+        "--toml",
+        "--dry-run",
+        "--root",
+        dir.to_str().unwrap(),
+        "--quiet",
+    ]);
+    assert_ne!(
+        output.code, 0,
+        "clap should reject --jsonc and --toml together"
+    );
+    assert!(
+        output.stderr.contains("cannot be used with") || output.stderr.contains("conflicts"),
+        "expected clap conflict error, got stderr: {}",
+        output.stderr
+    );
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_existing_fallowrc_jsonc_blocks_run() {
+    let dir = migrate_temp_dir(
+        "blocked-jsonc",
+        "knip.json",
+        r#"{"entry": ["src/index.ts"]}"#,
+    );
+    fs::write(dir.join(".fallowrc.jsonc"), "{}").unwrap();
+    let output = run_fallow_raw(&["migrate", "--root", dir.to_str().unwrap(), "--quiet"]);
+    assert_eq!(
+        output.code, 2,
+        "migrate should refuse to overwrite existing .fallowrc.jsonc"
+    );
+    assert!(
+        output.stderr.contains(".fallowrc.jsonc already exists"),
+        "stderr should mention the blocking file, got: {}",
+        output.stderr
+    );
+    cleanup(&dir);
+}
+
+// ---------------------------------------------------------------------------
 // Migrate error handling
 // ---------------------------------------------------------------------------
 
