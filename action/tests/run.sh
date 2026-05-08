@@ -366,6 +366,14 @@ assert_not_contains "$OUT" "| Files with clones | 2 |" "dupes: old files-with-cl
 OUT_LINKED=$(GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="abcdef1234567890" jq -r -f "$JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
 assert_contains "$OUT_LINKED" "https://github.com/fallow-rs/fallow/blob/abcdef1234567890/src/helpers/content-parser.ts#L27-L50" "dupes: file_link engages with env vars"
 
+# Deep paths (>3 segments): display is rel_path-truncated but URL keeps the full path
+OUT_DEEP=$(jq '.dupes.clone_groups = [{line_count: 10, token_count: 50, instances: [{file: "apps/web/src/services/billing/calculator.ts", start_line: 5, end_line: 15}, {file: "apps/api/src/services/billing/calculator.ts", start_line: 8, end_line: 18}]}] | .dupes.stats.clone_groups = 1 | .dupes.stats.files_with_clones = 2' "$FIXTURES/combined.json" | GH_REPO="fallow-rs/fallow" PR_HEAD_SHA="deadbeef" jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+# Display truncates to last 3 segments
+assert_contains "$OUT_DEEP" "\`services/billing/calculator.ts:5-15\`" "deep-path: display uses rel_path"
+# URL must contain the FULL path including 'apps/web/' prefix, otherwise the link 404s
+assert_contains "$OUT_DEEP" "/blob/deadbeef/apps/web/src/services/billing/calculator.ts#L5-L15" "deep-path: URL keeps full path"
+assert_contains "$OUT_DEEP" "/blob/deadbeef/apps/api/src/services/billing/calculator.ts#L8-L18" "deep-path: URL keeps full path (sibling)"
+
 # Singular-group header: 1 group renders "group" not "groups"
 OUT_ONE=$(jq '.dupes.stats.clone_groups = 1 | .dupes.clone_groups = [.dupes.clone_groups[0]]' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_ONE" "(1 group ·" "dupes: singular group header"

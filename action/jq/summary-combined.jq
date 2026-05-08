@@ -6,9 +6,10 @@ def prefix: $ENV.PREFIX // "";
 def repo: $ENV.GH_REPO // "";
 def sha: $ENV.PR_HEAD_SHA // "";
 def file_link(path; start; end_line):
+  (path | rel_path) as $display |
   if (repo | length) > 0 and (sha | length) > 0 then
-    "[`\(path):\(start)-\(end_line)`](https://github.com/\(repo)/blob/\(sha)/\(prefix)\(path)#L\(start)-L\(end_line))"
-  else "`\(path):\(start)-\(end_line)`" end;
+    "[`\($display):\(start)-\(end_line)`](https://github.com/\(repo)/blob/\(sha)/\(prefix)\(path)#L\(start)-L\(end_line))"
+  else "`\($display):\(start)-\(end_line)`" end;
 def dead_code_docs: "https://docs.fallow.tools/explanations/dead-code";
 def docs(anchor): dead_code_docs + "#" + anchor;
 def health_docs: "https://docs.fallow.tools/explanations/health";
@@ -138,7 +139,7 @@ else
     "<details>\n<summary><strong><a href=\"\(dupes_docs)\">Duplication</a> (\($dupes) \(if $dupes == 1 then "group" else "groups" end) · \($dupes_stats.duplicated_lines // 0) lines · \(pct($dupes_stats.duplication_percentage // 0))%)</strong></summary>\n\n" +
     "| Locations | Lines | Tokens |\n|:----------|------:|-------:|\n" +
     ([$groups[:5][] |
-      ([(.instances // [])[] | file_link((.file | rel_path); .start_line; .end_line)] | join("<br>")) as $locs |
+      ([(.instances // [])[] | file_link(.file; .start_line; .end_line)] | join("<br>")) as $locs |
       "| \($locs) | \(.line_count) | \(.token_count) |"
     ] | join("\n")) +
     (if $dupes > 5 then "\n\n*… and \($dupes - 5) more groups.*" else "" end) +

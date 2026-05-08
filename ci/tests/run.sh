@@ -436,6 +436,12 @@ assert_not_contains "$OUT" "| [Duplicated lines]" "dupes: old metric table is go
 OUT_LINKED_GL=$(CI_PROJECT_URL="https://gitlab.com/foo/bar" CI_COMMIT_SHA="deadbeef" jq -r -f "$CI_JQ_DIR/summary-combined.jq" "$FIXTURES/combined.json" 2>&1)
 assert_contains "$OUT_LINKED_GL" "https://gitlab.com/foo/bar/-/blob/deadbeef/src/helpers/content-parser.ts#L27-50" "dupes: file_link engages with GitLab env vars"
 
+# Deep paths (>3 segments): display is rel_path-truncated but URL keeps the full path
+OUT_DEEP_GL=$(jq '.dupes.clone_groups = [{line_count: 10, token_count: 50, instances: [{file: "apps/web/src/services/billing/calculator.ts", start_line: 5, end_line: 15}, {file: "apps/api/src/services/billing/calculator.ts", start_line: 8, end_line: 18}]}] | .dupes.stats.clone_groups = 1 | .dupes.stats.files_with_clones = 2' "$FIXTURES/combined.json" | CI_PROJECT_URL="https://gitlab.com/foo/bar" CI_COMMIT_SHA="deadbeef" jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
+assert_contains "$OUT_DEEP_GL" "\`services/billing/calculator.ts:5-15\`" "deep-path: display uses rel_path"
+assert_contains "$OUT_DEEP_GL" "/-/blob/deadbeef/apps/web/src/services/billing/calculator.ts#L5-15" "deep-path: URL keeps full path"
+assert_contains "$OUT_DEEP_GL" "/-/blob/deadbeef/apps/api/src/services/billing/calculator.ts#L8-18" "deep-path: URL keeps full path (sibling)"
+
 # Singular-group header
 OUT_ONE_GL=$(jq '.dupes.stats.clone_groups = 1 | .dupes.clone_groups = [.dupes.clone_groups[0]]' "$FIXTURES/combined.json" | jq -r -f "$CI_JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_ONE_GL" "(1 group ·" "dupes: singular group header"

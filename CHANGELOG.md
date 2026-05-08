@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **PR / MR comment Duplication links keep the full path in the URL when display is shortened.** The new clone-locations table truncates display paths to the last 3 segments for compactness (e.g. `services/billing/calculator.ts` instead of `apps/web/src/services/billing/calculator.ts`), but the previous version used the truncated path for BOTH display AND the GitHub / GitLab blob URL. For any path with more than 3 segments, the link 404'd because the URL was missing the leading directory components. The `file_link` helper now applies `rel_path` only to the display half and uses the full path in the URL. Regression test `dupes: deep-path URL keeps full path` covers a 6-segment monorepo path.
 - **PR / MR comment status bar pluralizes `code issue(s)`, `clone group(s)`, and `health finding(s)` when the count is 1.** Previously the one-line summary read ungrammatically as `**1** code issues · **1** clone groups · **1** health findings`. Each noun now branches on `count == 1` so a single-finding PR reads `**1** code issue · **1** clone group · **1** health finding`. Same fix in both the GitHub Action and GitLab CI variants of `summary-combined.jq`. Regression tests in `action/tests/run.sh` and `ci/tests/run.sh` cover all three nouns.
 
 ### Changed
