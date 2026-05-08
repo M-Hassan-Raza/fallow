@@ -330,18 +330,21 @@ pub fn analyze_with_parse_result(
         &config.ignore_patterns,
         config.quiet,
     );
+    let root_pkg = load_root_package_json(config);
+    let discovery_hidden_dir_scopes =
+        discover::collect_plugin_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
     // Stage 1: Discover files (cheap — needed for file registry and resolution)
     let t = Instant::now();
     let pb = progress.stage_spinner("Discovering files...");
-    let discovered_files = discover::discover_files(config);
+    let discovered_files =
+        discover::discover_files_with_additional_hidden_dirs(config, &discovery_hidden_dir_scopes);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
     pb.finish_and_clear();
 
     let project = project::ProjectState::new(discovered_files, workspaces_vec);
     let files = project.files();
     let workspaces = project.workspaces();
-    let root_pkg = load_root_package_json(config);
     let workspace_pkgs = load_workspace_packages(workspaces);
 
     // Stage 1.5: Run plugin system
@@ -553,11 +556,15 @@ fn analyze_full(
         &config.ignore_patterns,
         config.quiet,
     );
+    let root_pkg = load_root_package_json(config);
+    let discovery_hidden_dir_scopes =
+        discover::collect_plugin_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
     // Stage 1: Discover all source files
     let t = Instant::now();
     let pb = progress.stage_spinner("Discovering files...");
-    let discovered_files = discover::discover_files(config);
+    let discovered_files =
+        discover::discover_files_with_additional_hidden_dirs(config, &discovery_hidden_dir_scopes);
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
     pb.finish_and_clear();
 
@@ -566,7 +573,6 @@ fn analyze_full(
     let project = project::ProjectState::new(discovered_files, workspaces_vec);
     let files = project.files();
     let workspaces = project.workspaces();
-    let root_pkg = load_root_package_json(config);
     let workspace_pkgs = load_workspace_packages(workspaces);
 
     // Stage 1.5: Run plugin system — parse config files, discover dynamic entries
