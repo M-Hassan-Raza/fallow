@@ -56,3 +56,50 @@ fn angular_external_template_credits_inherited_and_di_injected_members() {
         "DataService.unusedServiceMethod is never used and should be flagged, found: {unused:?}"
     );
 }
+
+// Regression for issue #308: members called inside an Angular `@if`
+// alias-binding (`@if (member(); as alias) { ... }`) must be credited as used.
+// Previously, the parenthesized `cond; as alias` content failed to parse as a
+// JS expression (oxc rejects `;` inside `void (...)`), so neither the member
+// call nor the alias was extracted, and the member was falsely flagged.
+// Verified for both inline `template: \`...\`` and external `templateUrl`.
+#[test]
+fn angular_at_if_alias_credits_condition_member() {
+    let root = fixture_path("issue-308-at-if-alias");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused: Vec<(&str, &str)> = results
+        .unused_class_members
+        .iter()
+        .map(|m| (m.parent_name.as_str(), m.member_name.as_str()))
+        .collect();
+
+    // Inline template: `@if (withAlias(); as aliased)` must credit `withAlias`.
+    assert!(
+        !unused.contains(&("InlineTemplateComponent", "withAlias")),
+        "InlineTemplateComponent.withAlias is referenced via `@if (withAlias(); as aliased)`, found: {unused:?}"
+    );
+    // Sibling member without alias is the control case.
+    assert!(
+        !unused.contains(&("InlineTemplateComponent", "withoutAlias")),
+        "InlineTemplateComponent.withoutAlias is referenced via `@if (withoutAlias())`, found: {unused:?}"
+    );
+
+    // External template (`templateUrl`): same fix path must apply.
+    assert!(
+        !unused.contains(&("ExternalTemplateComponent", "externalWithAlias")),
+        "ExternalTemplateComponent.externalWithAlias is referenced in external template via `@if (externalWithAlias(); as aliased)`, found: {unused:?}"
+    );
+
+    // Genuinely unused members must still be reported (proves the fix isn't
+    // over-crediting by suppressing all flags on touched components).
+    assert!(
+        unused.contains(&("InlineTemplateComponent", "genuinelyUnused")),
+        "InlineTemplateComponent.genuinelyUnused is never referenced and must still be flagged, found: {unused:?}"
+    );
+    assert!(
+        unused.contains(&("ExternalTemplateComponent", "externalUnused")),
+        "ExternalTemplateComponent.externalUnused is never referenced and must still be flagged, found: {unused:?}"
+    );
+}

@@ -163,8 +163,36 @@ fn handle_control_flow(
     let keyword = &rest[..keyword_end];
 
     match keyword {
-        "if" | "switch" | "case" => {
+        "if" => {
             // @if (expression) { ... }
+            // @if (expression; as alias) { ... } binds the truthy result to a
+            // template-local. The `;`-separated tail must be split off before
+            // parsing the condition: oxc rejects `;` inside `void (...)`, so the
+            // whole content would otherwise fail to parse and the condition's
+            // refs would be lost (false-positive unused-class-member, issue #308).
+            let after_keyword = &source[start + 1 + keyword_end..];
+            let paren_start = after_keyword.find('(')?;
+            let paren_content_start = start + 1 + keyword_end + paren_start;
+            let (paren_content, after_paren) = scan_parenthesized(source, paren_content_start)?;
+            let (cond_expr, alias_name) = parse_if_condition_and_alias(paren_content);
+            let locals = current_locals(scopes);
+            collect_expression_refs(cond_expr.trim(), &locals, refs);
+            // Bind the alias as a block-scoped local so `{{ alias }}` inside the
+            // body doesn't surface as an unresolved identifier (which would
+            // falsely credit any class member with the same name).
+            let mut scope_locals = Vec::new();
+            if let Some(alias) = alias_name {
+                scope_locals.push(alias.to_string());
+            }
+            scopes.push(scope_locals);
+            // Search for opening brace AFTER the closing paren, not from the opening paren.
+            // Otherwise expressions containing `{` (object literals, template literals)
+            // would cause the scanner to land mid-expression.
+            let brace_pos = source[after_paren..].find('{')?;
+            Some(after_paren + brace_pos + 1)
+        }
+        "switch" | "case" => {
+            // @switch (expression) { ... } / @case (value) { ... }
             let after_keyword = &source[start + 1 + keyword_end..];
             let paren_start = after_keyword.find('(')?;
             let paren_content_start = start + 1 + keyword_end + paren_start;
@@ -172,9 +200,6 @@ fn handle_control_flow(
             let locals = current_locals(scopes);
             collect_expression_refs(expr.trim(), &locals, refs);
             scopes.push(Vec::new());
-            // Search for opening brace AFTER the closing paren, not from the opening paren.
-            // Otherwise expressions containing `{` (object literals, template literals)
-            // would cause the scanner to land mid-expression.
             let brace_pos = source[after_paren..].find('{')?;
             Some(after_paren + brace_pos + 1)
         }
@@ -324,6 +349,76 @@ fn handle_control_flow(
         }
         _ => None,
     }
+}
+
+/// Parse the parenthesized content of an `@if (...)` block, splitting off the
+/// optional `; as alias` clause. Returns `(condition, alias_name_if_any)`.
+///
+/// Angular 17+ supports `@if (expression; as alias) { ... }` to bind the truthy
+/// result of the condition to a template-local variable usable inside the block.
+fn parse_if_condition_and_alias(content: &str) -> (&str, Option<&str>) {
+    let Some(semi_pos) = find_top_level_semicolon(content) else {
+        return (content, None);
+    };
+    let cond = &content[..semi_pos];
+    let rest = content[semi_pos + 1..].trim_start();
+    // Match `as` followed by ANY whitespace (space, tab, newline) before the
+    // alias token. Angular formatters wrap long conditions and can produce
+    // `; as\n  alias`, so a literal `"as "` prefix is not enough.
+    let Some(after_as) = rest.strip_prefix("as").and_then(|tail| {
+        // The character immediately after `as` must be whitespace, otherwise
+        // `as` was a prefix of some other identifier (e.g. `aspect`).
+        let first = tail.chars().next()?;
+        if first.is_whitespace() {
+            Some(tail.trim_start())
+        } else {
+            None
+        }
+    }) else {
+        // Unrecognized continuation (e.g. unexpected keyword); still strip the
+        // condition so the parser doesn't choke on the `;`.
+        return (cond, None);
+    };
+    let alias = after_as
+        .split(|c: char| c.is_whitespace() || c == ';')
+        .find(|s| !s.is_empty())
+        .unwrap_or("");
+    if alias.is_empty() {
+        return (cond, None);
+    }
+    (cond, Some(alias))
+}
+
+/// Find the byte position of the first top-level `;` in `s`, ignoring
+/// semicolons nested inside parens, brackets, braces, or string literals.
+fn find_top_level_semicolon(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut depth = 0u32;
+    let mut in_string: Option<u8> = None;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if let Some(quote) = in_string {
+            if b == b'\\' {
+                i += 2;
+                continue;
+            }
+            if b == quote {
+                in_string = None;
+            }
+            i += 1;
+            continue;
+        }
+        match b {
+            b'\'' | b'"' | b'`' => in_string = Some(b),
+            b'(' | b'[' | b'{' => depth += 1,
+            b')' | b']' | b'}' => depth = depth.saturating_sub(1),
+            b';' if depth == 0 => return Some(i),
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 /// Scan a parenthesized expression starting at the `(` character.
@@ -938,5 +1033,129 @@ mod tests {
             "chain on local binding must not be emitted, got {:?}",
             refs.member_accesses
         );
+    }
+
+    // ── @if alias clause (issue #308) ───────────────────────────
+
+    #[test]
+    fn parse_if_alias_no_semicolon_returns_full_condition() {
+        let (cond, alias) = parse_if_condition_and_alias("withAlias()");
+        assert_eq!(cond, "withAlias()");
+        assert_eq!(alias, None);
+    }
+
+    #[test]
+    fn parse_if_alias_extracts_canonical_form() {
+        let (cond, alias) = parse_if_condition_and_alias("withAlias(); as aliased");
+        assert_eq!(cond, "withAlias()");
+        assert_eq!(alias, Some("aliased"));
+    }
+
+    #[test]
+    fn parse_if_alias_handles_nested_semicolon_in_string() {
+        let (cond, alias) = parse_if_condition_and_alias("fn(';'); as result");
+        assert_eq!(cond, "fn(';')");
+        assert_eq!(alias, Some("result"));
+    }
+
+    #[test]
+    fn parse_if_alias_handles_nested_semicolon_in_call() {
+        let (cond, alias) = parse_if_condition_and_alias("fn(a; b); as result");
+        assert_eq!(cond, "fn(a; b)");
+        assert_eq!(alias, Some("result"));
+    }
+
+    #[test]
+    fn parse_if_alias_unknown_tail_still_strips_condition() {
+        let (cond, alias) = parse_if_condition_and_alias("cond; let foo = bar");
+        assert_eq!(cond, "cond");
+        assert_eq!(alias, None);
+    }
+
+    #[test]
+    fn parse_if_alias_handles_newline_after_as() {
+        // Angular formatters wrap long conditions across lines.
+        let (cond, alias) = parse_if_condition_and_alias("svc.compute();\n  as\n  result");
+        assert_eq!(cond.trim(), "svc.compute()");
+        assert_eq!(alias, Some("result"));
+    }
+
+    #[test]
+    fn parse_if_alias_handles_tab_between_as_and_name() {
+        let (cond, alias) = parse_if_condition_and_alias("cond;\tas\tresult");
+        assert_eq!(cond, "cond");
+        assert_eq!(alias, Some("result"));
+    }
+
+    #[test]
+    fn parse_if_alias_does_not_match_as_prefixed_identifier() {
+        // `aspect` starts with `as` but is not the alias keyword.
+        let (cond, alias) = parse_if_condition_and_alias("cond; aspect");
+        assert_eq!(cond, "cond");
+        assert_eq!(alias, None);
+    }
+
+    #[test]
+    fn at_if_with_alias_extracts_condition_refs() {
+        // Regression for issue #308: `withAlias()` was lost because
+        // `void (withAlias(); as aliased)` fails to parse.
+        let refs = collect_angular_template_refs(
+            r"@if (withAlias(); as aliased) { <p>{{ aliased }}</p> }",
+        );
+        assert!(
+            refs.identifiers.contains("withAlias"),
+            "@if condition with alias must still credit the call, got {:?}",
+            refs.identifiers
+        );
+        assert!(
+            !refs.identifiers.contains("aliased"),
+            "alias name must not leak as a class-member ref, got {:?}",
+            refs.identifiers
+        );
+    }
+
+    #[test]
+    fn at_if_with_alias_extracts_member_chain() {
+        let refs = collect_angular_template_refs(
+            r"@if (svc.compute(); as result) { <p>{{ result }}</p> }",
+        );
+        assert!(refs.identifiers.contains("svc"));
+        let has_chain = refs
+            .member_accesses
+            .iter()
+            .any(|a| a.object == "svc" && a.member == "compute");
+        assert!(
+            has_chain,
+            "member-access chain in @if with alias must be captured, got {:?}",
+            refs.member_accesses
+        );
+        assert!(!refs.identifiers.contains("result"));
+    }
+
+    #[test]
+    fn at_if_alias_does_not_leak_outside_block() {
+        // The alias is a block-local; references to the same name in a sibling
+        // block (or outside any @if) must still surface as identifiers.
+        let refs = collect_angular_template_refs(
+            r"@if (a(); as result) { <p>{{ result }}</p> } <p>{{ result }}</p>",
+        );
+        assert!(refs.identifiers.contains("a"));
+        assert!(
+            refs.identifiers.contains("result"),
+            "@if alias must not leak past its closing brace, got {:?}",
+            refs.identifiers
+        );
+    }
+
+    #[test]
+    fn at_if_alias_with_object_literal_in_condition() {
+        // `cond` here happens to mention an inline object literal; the `;` and
+        // `as alias` parsing must still be correctly anchored at top-level.
+        let refs = collect_angular_template_refs(
+            r"@if (build({ key: value }); as built) { <p>{{ built }}</p> }",
+        );
+        assert!(refs.identifiers.contains("build"));
+        assert!(refs.identifiers.contains("value"));
+        assert!(!refs.identifiers.contains("built"));
     }
 }
