@@ -11,6 +11,7 @@ import {
   getDuplicationThreshold,
   getIssueTypes,
   getChangedSince,
+  getResolvedConfigPath,
 } from "./config.js";
 import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
 import { getInstalledCliPath } from "./download.js";
@@ -247,6 +248,11 @@ export const runAnalysis = async (
       analysisArgs.push("--changed-since", changedSince);
     }
 
+    const configPath = getResolvedConfigPath();
+    if (configPath) {
+      analysisArgs.push("--config", configPath);
+    }
+
     analysisArgs.push("--dupes-mode", getDuplicationMode());
     analysisArgs.push("--dupes-threshold", String(getDuplicationThreshold()));
 
@@ -286,9 +292,15 @@ export const runFix = async (
   }
 
   try {
+    const fixArgs = buildFixArgs(dryRun, getProduction());
+    const configPath = getResolvedConfigPath();
+    if (configPath) {
+      fixArgs.push("--config", configPath);
+    }
+
     const output = await execFallow(
       context,
-      buildFixArgs(dryRun, getProduction()),
+      fixArgs,
       root
     );
     const result = JSON.parse(output) as FallowFixResult;

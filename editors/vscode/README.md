@@ -58,6 +58,7 @@ Mute state is stored in the workspace, so it survives reload but does not bleed 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `fallow.lspPath` | `""` | Path to the `fallow-lsp` binary. Leave empty for auto-detection. |
+| `fallow.configPath` | `""` | Path to a Fallow config file. Relative paths are resolved from the workspace root (the first folder, in multi-root workspaces). Mirrors the CLI's `--config`; empty uses config auto-discovery. |
 | `fallow.autoDownload` | `true` | Automatically download the binary if not found. |
 | `fallow.issueTypes` | all enabled | Toggle individual issue types on/off. |
 | `fallow.duplication.threshold` | `5` | Minimum number of lines for a code block to be reported as a duplicate. |

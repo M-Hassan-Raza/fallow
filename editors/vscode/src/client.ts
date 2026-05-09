@@ -15,6 +15,7 @@ import {
   getAutoDownload,
   getIssueTypes,
   getChangedSince,
+  getResolvedConfigPath,
 } from "./config.js";
 import { findBinaryInPath, findLocalBinary } from "./binary-utils.js";
 import type { DiagnosticFilter } from "./diagnosticFilter.js";
@@ -173,6 +174,7 @@ export const startClient = async (
     initializationOptions: {
       issueTypes: getIssueTypes(),
       changedSince: getChangedSince(),
+      configPath: getResolvedConfigPath(),
     },
     middleware: diagnosticFilter
       ? {

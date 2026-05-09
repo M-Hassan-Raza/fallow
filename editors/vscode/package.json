@@ -133,6 +133,11 @@
           "default": "",
           "description": "Path to the fallow-lsp binary. Leave empty for auto-detection."
         },
+        "fallow.configPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to a Fallow config file. Relative paths are resolved from the workspace root (the first folder, in multi-root workspaces). Mirrors the CLI's `--config` flag. Empty = auto-discover `.fallowrc.json`, `.fallowrc.jsonc`, `fallow.toml`, or `.fallow.toml`."
+        },
         "fallow.autoDownload": {
           "type": "boolean",
           "default": true,

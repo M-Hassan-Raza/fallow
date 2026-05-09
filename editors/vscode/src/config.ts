@@ -1,3 +1,4 @@
+import * as path from "node:path";
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
@@ -9,6 +10,19 @@ const getConfig = (): vscode.WorkspaceConfiguration =>
   vscode.workspace.getConfiguration(SECTION);
 
 export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
+
+export const getConfigPath = (): string =>
+  getConfig().get<string>("configPath", "").trim();
+
+export const getResolvedConfigPath = (): string => {
+  const configPath = getConfigPath();
+  if (!configPath || path.isAbsolute(configPath)) {
+    return configPath;
+  }
+
+  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  return workspaceRoot ? path.resolve(workspaceRoot, configPath) : configPath;
+};
 
 export const getAutoDownload = (): boolean =>
   getConfig().get<boolean>("autoDownload", true);

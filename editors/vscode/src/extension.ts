@@ -198,11 +198,13 @@ export const activate = async (
     onConfigChange(async (e) => {
       const needsRestart =
         e.affectsConfiguration("fallow.lspPath") ||
+        e.affectsConfiguration("fallow.configPath") ||
         e.affectsConfiguration("fallow.trace.server") ||
         e.affectsConfiguration("fallow.issueTypes") ||
         e.affectsConfiguration("fallow.changedSince");
 
       const needsReanalysis =
+        e.affectsConfiguration("fallow.configPath") ||
         e.affectsConfiguration("fallow.production") ||
         e.affectsConfiguration("fallow.duplication") ||
         e.affectsConfiguration("fallow.issueTypes") ||

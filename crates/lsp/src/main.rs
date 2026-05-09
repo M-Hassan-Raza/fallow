@@ -177,6 +177,101 @@ fn diagnostic_issue_types() -> Vec<IssueTypeInfo> {
         .collect()
 }
 
+fn config_load_error_detail(
+    project_root: &Path,
+    explicit_config_path: Option<&Path>,
+    err: impl std::fmt::Display,
+) -> String {
+    match explicit_config_path {
+        Some(path) => format!(
+            "fallow.configPath '{}' failed to load for {}: {err} (no diagnostics will be produced)",
+            path.display(),
+            project_root.display()
+        ),
+        None => format!("config error for {}: {err}", project_root.display()),
+    }
+}
+
+/// Run dead-code + duplicates analysis for a single project root, appending
+/// findings to the merged accumulators and a status message to
+/// `config_messages`. Extracted out of `run_analysis` to keep that method
+/// under the 150-line clippy ceiling.
+fn analyze_project_root(
+    project_root: &Path,
+    config_path: Option<&Path>,
+    merged_results: &mut AnalysisResults,
+    merged_duplication: &mut DuplicationReport,
+    config_messages: &mut Vec<(MessageType, String)>,
+) {
+    let (config, message) = match fallow_core::config_for_project(project_root, config_path) {
+        Ok((config, Some(path))) => (
+            config,
+            (
+                MessageType::INFO,
+                format!("loaded config: {}", path.display()),
+            ),
+        ),
+        Ok((config, None)) => (
+            config,
+            (
+                MessageType::INFO,
+                format!(
+                    "no config file found for {}, using defaults",
+                    project_root.display()
+                ),
+            ),
+        ),
+        Err(e) => {
+            // WARNING (not INFO) so VS Code's notification system pops the
+            // message; INFO goes only to the (hidden-by-default) Output
+            // channel. Only fall back to defaults when the user has NOT
+            // explicitly set a config path; an explicit-but-broken path
+            // should fail loudly rather than silently using defaults.
+            let detail = config_load_error_detail(project_root, config_path, &e);
+            config_messages.push((MessageType::WARNING, detail));
+            if config_path.is_none() {
+                if let Ok(results) = fallow_core::analyze_project(project_root) {
+                    merge_results(merged_results, results);
+                }
+                let duplication = fallow_core::duplicates::find_duplicates_in_project(
+                    project_root,
+                    &fallow_config::DuplicatesConfig::default(),
+                );
+                merge_duplication(merged_duplication, duplication);
+            }
+            return;
+        }
+    };
+    config_messages.push(message);
+
+    if let Ok(results) = fallow_core::analyze_with_usages(&config) {
+        merge_results(merged_results, results);
+    }
+
+    let files = fallow_core::discover::discover_files_with_plugin_scopes(&config);
+    let duplication =
+        fallow_core::duplicates::find_duplicates(project_root, &files, &config.duplicates);
+    merge_duplication(merged_duplication, duplication);
+}
+
+fn initialization_config_path(opts: &serde_json::Value, root: Option<&Path>) -> Option<PathBuf> {
+    let raw = opts.get("configPath").and_then(|v| v.as_str())?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    let path = PathBuf::from(raw);
+    let path = if path.is_absolute() {
+        path
+    } else if let Some(root) = root {
+        root.join(path)
+    } else {
+        path
+    };
+
+    Some(path.canonicalize().unwrap_or(path))
+}
+
 struct FallowLspServer {
     client: Client,
     root: Arc<RwLock<Option<PathBuf>>>,
@@ -192,6 +287,9 @@ struct FallowLspServer {
     /// analysis results and duplication reports are scoped to files changed
     /// since this ref, mirroring the CLI's `--changed-since`.
     changed_since: Arc<RwLock<Option<String>>>,
+    /// Optional explicit config path from `initializationOptions.configPath`.
+    /// Mirrors the CLI's `--config` flag for editor clients.
+    config_path: Arc<RwLock<Option<PathBuf>>>,
     /// Canonical git toplevel for the workspace `root`, resolved on first
     /// analysis run and reused thereafter. Cached so we do not pay for an
     /// extra `git rev-parse --show-toplevel` subprocess on every save.
@@ -260,9 +358,9 @@ impl LanguageServer for FallowLspServer {
         // Windows, 8.3 short paths get expanded. Without this, the
         // `--changed-since` filter silently fails to match because the two
         // sides start from different prefixes for the same files.
-        if let Some(path) = root {
-            let canonical = path.canonicalize().unwrap_or(path);
-            *self.root.write().await = Some(canonical);
+        let canonical_root = root.map(|path| path.canonicalize().unwrap_or(path));
+        if let Some(path) = &canonical_root {
+            *self.root.write().await = Some(path.clone());
         }
 
         // Parse initializationOptions for issue type toggles and changedSince
@@ -297,6 +395,9 @@ impl LanguageServer for FallowLspServer {
                     Some(trimmed.to_string())
                 };
             }
+
+            *self.config_path.write().await =
+                initialization_config_path(opts, canonical_root.as_deref());
         }
 
         Ok(InitializeResult {
@@ -505,6 +606,7 @@ impl FallowLspServer {
             documents: Arc::new(RwLock::new(FxHashMap::default())),
             disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
             changed_since: Arc::new(RwLock::new(None)),
+            config_path: Arc::new(RwLock::new(None)),
             git_toplevel: Arc::new(RwLock::new(None)),
             cached_diagnostics: Arc::new(RwLock::new(FxHashMap::default())),
         }
@@ -586,6 +688,7 @@ impl FallowLspServer {
         // after the join) needs to know whether the filter was active so
         // it can stamp `Diagnostic.data.changedSince` accordingly.
         let changed_since_for_data = changed_since.clone();
+        let config_path = self.config_path.read().await.clone();
 
         // Resolve and cache the canonical git toplevel for `root`. Done even
         // when `changed_since` is None so we can warn the user once if their
@@ -607,37 +710,16 @@ impl FallowLspServer {
             // async caller can surface them via log_message without doing
             // blocking I/O on the async executor or calling find_and_load
             // twice per project root.
-            let mut config_messages = Vec::with_capacity(project_roots.len());
+            let mut config_messages: Vec<(MessageType, String)> =
+                Vec::with_capacity(project_roots.len());
             for project_root in &project_roots {
-                if let Ok(results) = fallow_core::analyze_project(project_root) {
-                    merge_results(&mut merged_results, results);
-                }
-
-                let (dupes_config, message) =
-                    match fallow_config::FallowConfig::find_and_load(project_root) {
-                        Ok(Some((c, path))) => {
-                            let msg = format!("loaded config: {}", path.display());
-                            (c.duplicates, msg)
-                        }
-                        Ok(None) => (
-                            fallow_config::DuplicatesConfig::default(),
-                            format!(
-                                "no config file found for {}, using defaults",
-                                project_root.display()
-                            ),
-                        ),
-                        Err(e) => (
-                            fallow_config::DuplicatesConfig::default(),
-                            format!("config error for {}: {e}", project_root.display()),
-                        ),
-                    };
-                config_messages.push(message);
-
-                let duplication = fallow_core::duplicates::find_duplicates_in_project(
+                analyze_project_root(
                     project_root,
-                    &dupes_config,
+                    config_path.as_deref(),
+                    &mut merged_results,
+                    &mut merged_duplication,
+                    &mut config_messages,
                 );
-                merge_duplication(&mut merged_duplication, duplication);
             }
 
             // Dedupe cross-root duplicates introduced by `merge_results`'s
@@ -703,8 +785,8 @@ impl FallowLspServer {
                 // can verify their config is picked up (addresses silent
                 // config-loss UX). Emitted from the async context after the
                 // blocking task returns.
-                for msg in config_messages {
-                    self.client.log_message(MessageType::INFO, msg).await;
+                for (level, msg) in config_messages {
+                    self.client.log_message(level, msg).await;
                 }
 
                 // Report on changedSince outcome so users see why the Problems
@@ -1297,6 +1379,62 @@ mod tests {
                     && v["label"] == json!("Test-Only Dependencies")),
             "response should include every diagnostic code emitted by fallow-lsp"
         );
+    }
+
+    #[test]
+    fn initialization_config_path_resolves_workspace_relative_path() {
+        let opts = json!({"configPath": "config/fallow.json"});
+        let root = Path::new("/workspace");
+
+        assert_eq!(
+            initialization_config_path(&opts, Some(root)),
+            Some(PathBuf::from("/workspace/config/fallow.json"))
+        );
+    }
+
+    #[test]
+    fn initialization_config_path_ignores_blank_path() {
+        let opts = json!({"configPath": "   "});
+
+        assert_eq!(initialization_config_path(&opts, None), None);
+    }
+
+    #[test]
+    fn initialization_config_path_passes_through_absolute_path() {
+        #[cfg(windows)]
+        let absolute = "C:/configs/fallow.json";
+        #[cfg(not(windows))]
+        let absolute = "/etc/fallow.json";
+
+        let opts = json!({ "configPath": absolute });
+        assert_eq!(
+            initialization_config_path(&opts, None),
+            Some(PathBuf::from(absolute))
+        );
+    }
+
+    #[test]
+    fn initialization_config_path_keeps_relative_path_without_root() {
+        let opts = json!({"configPath": "config/fallow.json"});
+
+        assert_eq!(
+            initialization_config_path(&opts, None),
+            Some(PathBuf::from("config/fallow.json"))
+        );
+    }
+
+    #[test]
+    fn initialization_config_path_returns_none_for_missing_key() {
+        let opts = json!({});
+
+        assert_eq!(initialization_config_path(&opts, None), None);
+    }
+
+    #[test]
+    fn initialization_config_path_returns_none_for_non_string_value() {
+        let opts = json!({"configPath": 42});
+
+        assert_eq!(initialization_config_path(&opts, None), None);
     }
 
     // -----------------------------------------------------------------------

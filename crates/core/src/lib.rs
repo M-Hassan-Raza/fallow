@@ -1222,6 +1222,73 @@ pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
     analyze_with_usages(&config)
 }
 
+/// Run analysis on a project directory using an explicit config path when provided.
+///
+/// # Errors
+///
+/// Returns an error if explicit config loading, file discovery, parsing, or
+/// analysis fails.
+pub fn analyze_project_with_config(
+    root: &Path,
+    config_path: Option<&Path>,
+) -> Result<AnalysisResults, FallowError> {
+    let (config, _) = config_for_project(root, config_path)?;
+    analyze_with_usages(&config)
+}
+
+/// Resolve the analysis config for a project, mirroring the CLI's `--config`
+/// behavior when `config_path` is provided.
+///
+/// # Errors
+///
+/// Returns an error when an explicit config cannot be loaded or automatic
+/// config discovery finds an invalid config.
+pub fn config_for_project(
+    root: &Path,
+    config_path: Option<&Path>,
+) -> Result<(ResolvedConfig, Option<std::path::PathBuf>), FallowError> {
+    let user_config = if let Some(path) = config_path {
+        Some((
+            fallow_config::FallowConfig::load(path)
+                .map_err(|e| FallowError::config(format!("{e:#}")))?,
+            path.to_path_buf(),
+        ))
+    } else {
+        fallow_config::FallowConfig::find_and_load(root).map_err(FallowError::config)?
+    };
+
+    let config = match user_config {
+        Some((mut config, path)) => {
+            let dead_code_production = config
+                .production
+                .for_analysis(fallow_config::ProductionAnalysis::DeadCode);
+            config.production = dead_code_production.into();
+            (
+                config.resolve(
+                    root.to_path_buf(),
+                    fallow_config::OutputFormat::Human,
+                    num_cpus(),
+                    false,
+                    true, // quiet: LSP/programmatic callers don't need progress bars
+                ),
+                Some(path),
+            )
+        }
+        None => (
+            fallow_config::FallowConfig::default().resolve(
+                root.to_path_buf(),
+                fallow_config::OutputFormat::Human,
+                num_cpus(),
+                false,
+                true,
+            ),
+            None,
+        ),
+    };
+
+    Ok(config)
+}
+
 /// Create a default config for a project root.
 ///
 /// `analyze_project` is the dead-code entry point used by the LSP and other
@@ -1233,31 +1300,18 @@ pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
 /// (`unused_dev_dependencies: off`, etc.) plus `resolved.production = true`
 /// are silently dropped.
 pub(crate) fn default_config(root: &Path) -> ResolvedConfig {
-    let user_config = fallow_config::FallowConfig::find_and_load(root)
-        .ok()
-        .flatten();
-    match user_config {
-        Some((mut config, _path)) => {
-            let dead_code_production = config
-                .production
-                .for_analysis(fallow_config::ProductionAnalysis::DeadCode);
-            config.production = dead_code_production.into();
-            config.resolve(
+    config_for_project(root, None).map_or_else(
+        |_| {
+            fallow_config::FallowConfig::default().resolve(
                 root.to_path_buf(),
                 fallow_config::OutputFormat::Human,
                 num_cpus(),
                 false,
-                true, // quiet: LSP/programmatic callers don't need progress bars
+                true,
             )
-        }
-        None => fallow_config::FallowConfig::default().resolve(
-            root.to_path_buf(),
-            fallow_config::OutputFormat::Human,
-            num_cpus(),
-            false,
-            true,
-        ),
-    }
+        },
+        |(config, _)| config,
+    )
 }
 
 fn num_cpus() -> usize {
