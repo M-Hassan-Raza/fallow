@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.69.0] - 2026-05-09
+
+### Added
+
+- **VS Code: `fallow.configPath` setting mirrors the CLI's `--config` flag.** A new string setting points the extension at an explicit Fallow config file. Absolute paths pass through; relative paths are resolved against the workspace root (the first folder in multi-root workspaces) before being forwarded to both the LSP via `initializationOptions.configPath` and the CLI via `--config <path>` for analyze and fix commands. Empty (the default) keeps the existing auto-discovery behavior (`.fallowrc.json` > `.fallowrc.jsonc` > `fallow.toml` > `.fallow.toml`). Changing the setting restarts the LSP and re-runs the sidebar analysis. A broken `configPath` (typo, missing file, parse error) surfaces a WARNING-level notification including the path so users see what went wrong instead of a silent empty Problems panel; auto-discovery still falls back to defaults on parse errors. Two new public `fallow_core` entry points (`config_for_project` and `analyze_project_with_config`) let other programmatic embedders request an explicit config the same way. Thanks [@FunctionDJ](https://github.com/FunctionDJ) for the question. (Closes [#314](https://github.com/fallow-rs/fallow/discussions/314))
+
 ## [2.68.0] - 2026-05-09
 
 ### Added
@@ -2069,7 +2075,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.68.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.69.0...HEAD
+[2.69.0]: https://github.com/fallow-rs/fallow/compare/v2.68.0...v2.69.0
 [2.68.0]: https://github.com/fallow-rs/fallow/compare/v2.67.0...v2.68.0
 [2.67.0]: https://github.com/fallow-rs/fallow/compare/v2.66.2...v2.67.0
 [2.66.2]: https://github.com/fallow-rs/fallow/compare/v2.66.1...v2.66.2
