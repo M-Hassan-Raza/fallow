@@ -1222,20 +1222,6 @@ pub fn analyze_project(root: &Path) -> Result<AnalysisResults, FallowError> {
     analyze_with_usages(&config)
 }
 
-/// Run analysis on a project directory using an explicit config path when provided.
-///
-/// # Errors
-///
-/// Returns an error if explicit config loading, file discovery, parsing, or
-/// analysis fails.
-pub fn analyze_project_with_config(
-    root: &Path,
-    config_path: Option<&Path>,
-) -> Result<AnalysisResults, FallowError> {
-    let (config, _) = config_for_project(root, config_path)?;
-    analyze_with_usages(&config)
-}
-
 /// Resolve the analysis config for a project, mirroring the CLI's `--config`
 /// behavior when `config_path` is provided.
 ///
