@@ -190,6 +190,14 @@ strip = "symbols"
 opt-level = 3
 panic = "abort"                         # Smaller binary — no unwind tables needed
 
+# Profile-with-debug: release-equivalent codegen + debuginfo retained.
+# Use for samply / Instruments / perf without enabling LTO+strip in the
+# regular release profile.
+[profile.release-debug]
+inherits = "release"
+strip = "none"
+debug = "full"
+
 # Optimize heavy deps for size — not in the hot path
 [profile.release.package.regex-syntax]
 opt-level = "z"

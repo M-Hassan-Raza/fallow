@@ -102,6 +102,34 @@ fn should_skip_module(
     module.path.extension().is_some_and(|ext| ext == "svelte")
 }
 
+/// Pick up the subset of ignore + plugin matchers whose globs match this module's
+/// project-relative path. Skips the path-string allocation entirely when both
+/// matcher lists are empty (the common case when the user has no `ignoreExports`
+/// config and no plugin contributed framework rules).
+fn matchers_for_module<'a>(
+    module_path: &std::path::Path,
+    config_root: &std::path::Path,
+    ignore_matchers: &'a IgnoreMatchers<'_>,
+    plugin_matchers: &'a PluginMatchers<'_>,
+) -> (Vec<&'a [String]>, Vec<&'a [&'a str]>) {
+    if ignore_matchers.is_empty() && plugin_matchers.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let relative_path = module_path.strip_prefix(config_root).unwrap_or(module_path);
+    let file_str = relative_path.to_string_lossy();
+    let mi: Vec<&[String]> = ignore_matchers
+        .iter()
+        .filter(|(m, _)| m.is_match(file_str.as_ref()))
+        .map(|(_, exports)| *exports)
+        .collect();
+    let mp: Vec<&[&str]> = plugin_matchers
+        .iter()
+        .filter(|rule| rule.matches(file_str.as_ref()))
+        .map(|rule| rule.exports.as_slice())
+        .collect();
+    (mi, mp)
+}
+
 /// Check whether an export name is covered by config ignore rules or plugin/framework rules.
 fn is_export_ignored(
     export_name: &str,
@@ -230,25 +258,20 @@ pub fn find_unused_exports(
             let mut unused_types = Vec::new();
             let mut stale_expected_unused = Vec::new();
 
-            // Compute relative path once per module for glob matching
-            let relative_path = module
-                .path
-                .strip_prefix(&config.root)
-                .unwrap_or(&module.path);
-            let file_str = relative_path.to_string_lossy();
+            // Fast path: modules with no exports can be skipped before any of the
+            // per-module setup (path strip + matcher filter + re_export_names build).
+            // Reachable+entry-point modules with empty exports would fall through
+            // `should_skip_module` anyway; CJS-only modules are caught there too.
+            if module.exports.is_empty() && !module.has_cjs_exports() {
+                return (unused_exports, unused_types, stale_expected_unused);
+            }
 
-            // Collect ignore/plugin matchers that apply to this file
-            let matching_ignore: Vec<&[String]> = ignore_matchers
-                .iter()
-                .filter(|(m, _)| m.is_match(file_str.as_ref()))
-                .map(|(_, exports)| *exports)
-                .collect();
-
-            let matching_plugin: Vec<&[&str]> = plugin_matchers
-                .iter()
-                .filter(|rule| rule.matches(file_str.as_ref()))
-                .map(|rule| rule.exports.as_slice())
-                .collect();
+            let (matching_ignore, matching_plugin) = matchers_for_module(
+                &module.path,
+                &config.root,
+                &ignore_matchers,
+                &plugin_matchers,
+            );
 
             if should_skip_module(
                 module,
