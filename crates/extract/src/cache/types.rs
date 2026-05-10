@@ -11,7 +11,7 @@ pub(super) const CACHE_VERSION: u32 = 74;
 
 /// Duplication token cache version — bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.
-pub const DUPES_CACHE_VERSION: u32 = 2;
+pub const DUPES_CACHE_VERSION: u32 = 3;
 
 /// Maximum cache file size to deserialize (256 MB).
 pub(super) const MAX_CACHE_SIZE: usize = 256 * 1024 * 1024;

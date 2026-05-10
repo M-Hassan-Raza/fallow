@@ -13,6 +13,7 @@ use xxhash_rust::xxh3::xxh3_64;
 use super::normalize::HashedToken;
 use super::tokenize::{FileTokens, SourceToken, TokenKind};
 use crate::cache::DUPES_CACHE_VERSION;
+use crate::suppress::{IssueKind, Suppression};
 
 const MAX_DUPES_CACHE_SIZE: usize = 512 * 1024 * 1024;
 
@@ -32,6 +33,7 @@ struct CachedTokenFile {
     token_spans: Vec<CachedSpan>,
     source: String,
     line_count: u64,
+    suppressions: Vec<CachedSuppression>,
 }
 
 #[derive(Debug, Clone, Encode, Decode)]
@@ -46,10 +48,18 @@ struct CachedSpan {
     end: u32,
 }
 
+#[derive(Debug, Clone, Encode, Decode)]
+struct CachedSuppression {
+    line: u32,
+    comment_line: u32,
+    kind: u8,
+}
+
 #[derive(Debug, Clone)]
 pub(super) struct TokenCacheEntry {
     pub hashed_tokens: Vec<HashedToken>,
     pub file_tokens: FileTokens,
+    pub suppressions: Vec<Suppression>,
 }
 
 #[derive(Debug)]
@@ -130,6 +140,7 @@ impl TokenCache {
         mode: TokenCacheMode,
         hashed_tokens: &[HashedToken],
         file_tokens: &FileTokens,
+        suppressions: &[Suppression],
     ) {
         let (mtime_ns, file_size) = metadata_key(metadata);
         self.store.entries.insert(
@@ -140,6 +151,7 @@ impl TokenCache {
                 mode.hash,
                 hashed_tokens,
                 file_tokens,
+                suppressions,
             ),
         );
         self.dirty = true;
@@ -204,6 +216,7 @@ impl CachedTokenFile {
         normalization_hash: u64,
         hashed_tokens: &[HashedToken],
         file_tokens: &FileTokens,
+        suppressions: &[Suppression],
     ) -> Self {
         Self {
             mtime_ns,
@@ -231,6 +244,14 @@ impl CachedTokenFile {
                 .collect(),
             source: file_tokens.source.clone(),
             line_count: file_tokens.line_count as u64,
+            suppressions: suppressions
+                .iter()
+                .map(|suppression| CachedSuppression {
+                    line: suppression.line,
+                    comment_line: suppression.comment_line,
+                    kind: suppression.kind.map_or(0, IssueKind::to_discriminant),
+                })
+                .collect(),
         }
     }
 
@@ -256,9 +277,19 @@ impl CachedTokenFile {
                 original_index: usize::try_from(token.original_index).unwrap_or(usize::MAX),
             })
             .collect();
+        let suppressions = self
+            .suppressions
+            .iter()
+            .map(|suppression| Suppression {
+                line: suppression.line,
+                comment_line: suppression.comment_line,
+                kind: IssueKind::from_discriminant(suppression.kind),
+            })
+            .collect();
         TokenCacheEntry {
             hashed_tokens,
             file_tokens,
+            suppressions,
         }
     }
 }
@@ -310,6 +341,11 @@ mod tests {
                 source: source.to_owned(),
                 line_count: 1,
             },
+            suppressions: vec![Suppression {
+                line: 2,
+                comment_line: 1,
+                kind: Some(IssueKind::CodeDuplication),
+            }],
         }
     }
 
@@ -326,6 +362,7 @@ mod tests {
             mode,
             &entry.hashed_tokens,
             &entry.file_tokens,
+            &entry.suppressions,
         );
     }
 
@@ -352,6 +389,10 @@ mod tests {
             &hit.file_tokens.tokens[0].kind,
             TokenKind::Identifier(name) if name == "value"
         ));
+        assert_eq!(hit.suppressions.len(), 1);
+        assert_eq!(hit.suppressions[0].line, 2);
+        assert_eq!(hit.suppressions[0].comment_line, 1);
+        assert_eq!(hit.suppressions[0].kind, Some(IssueKind::CodeDuplication));
     }
 
     #[test]
@@ -436,6 +477,7 @@ mod tests {
                 mode().hash,
                 &entry.hashed_tokens,
                 &entry.file_tokens,
+                &entry.suppressions,
             ),
         );
         std::fs::write(cache_dir.join("cache.bin"), bitcode::encode(&store)).expect("write cache");

@@ -259,8 +259,7 @@ fn find_duplicates_inner(
             let cache_hit = cached_entry.is_some();
 
             let (mut entry, suppressions) = if let Some(entry) = cached_entry {
-                let suppressions =
-                    suppress::parse_suppressions_from_source(&entry.file_tokens.source);
+                let suppressions = entry.suppressions.clone();
                 if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
                     return None;
                 }
@@ -287,6 +286,7 @@ fn find_duplicates_inner(
                 let entry = TokenCacheEntry {
                     hashed_tokens: hashed,
                     file_tokens,
+                    suppressions: suppressions.clone(),
                 };
                 (entry, suppressions)
             };
@@ -319,6 +319,7 @@ fn find_duplicates_inner(
                     token_cache_mode,
                     &file.hashed_tokens,
                     &file.file_tokens,
+                    &file.suppressions,
                 );
             }
         }
