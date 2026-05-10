@@ -852,36 +852,51 @@ fn analyze_all_scripts(
             }
         }
     }
-    for (ws, ws_pkg) in workspace_pkgs {
-        if let Some(ref ws_scripts) = ws_pkg.scripts {
-            let scripts_to_analyze = if config.production {
-                scripts::filter_production_scripts(ws_scripts)
-            } else {
-                ws_scripts.clone()
-            };
-            let ws_analysis = scripts::analyze_scripts(&scripts_to_analyze, &ws.root, &bin_map);
-            plugin_result
-                .script_used_packages
-                .extend(ws_analysis.used_packages);
+    use rayon::prelude::*;
+    type WsScriptOut = (
+        Vec<String>,
+        Vec<(String, String)>,
+        Vec<(plugins::PathRule, String)>,
+    );
+    let ws_results: Vec<WsScriptOut> = workspace_pkgs
+        .par_iter()
+        .map(|(ws, ws_pkg)| {
+            let mut used_packages = Vec::new();
+            let mut discovered_always_used: Vec<(String, String)> = Vec::new();
+            let mut entry_patterns: Vec<(plugins::PathRule, String)> = Vec::new();
+            if let Some(ref ws_scripts) = ws_pkg.scripts {
+                let scripts_to_analyze = if config.production {
+                    scripts::filter_production_scripts(ws_scripts)
+                } else {
+                    ws_scripts.clone()
+                };
+                let ws_analysis = scripts::analyze_scripts(&scripts_to_analyze, &ws.root, &bin_map);
+                used_packages.extend(ws_analysis.used_packages);
 
-            let ws_prefix = ws
-                .root
-                .strip_prefix(&config.root)
-                .unwrap_or(&ws.root)
-                .to_string_lossy();
-            for config_file in &ws_analysis.config_files {
-                plugin_result
-                    .discovered_always_used
-                    .push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
-            }
-            for entry in &ws_analysis.entry_files {
-                if let Some(pat) = scripts::normalize_script_entry_pattern(&ws_prefix, entry) {
-                    plugin_result
-                        .entry_patterns
-                        .push((plugins::PathRule::new(pat), "scripts".to_string()));
+                let ws_prefix = ws
+                    .root
+                    .strip_prefix(&config.root)
+                    .unwrap_or(&ws.root)
+                    .to_string_lossy();
+                for config_file in &ws_analysis.config_files {
+                    discovered_always_used
+                        .push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
+                }
+                for entry in &ws_analysis.entry_files {
+                    if let Some(pat) = scripts::normalize_script_entry_pattern(&ws_prefix, entry) {
+                        entry_patterns.push((plugins::PathRule::new(pat), "scripts".to_string()));
+                    }
                 }
             }
-        }
+            (used_packages, discovered_always_used, entry_patterns)
+        })
+        .collect();
+    for (used_packages, discovered_always_used, entry_patterns) in ws_results {
+        plugin_result.script_used_packages.extend(used_packages);
+        plugin_result
+            .discovered_always_used
+            .extend(discovered_always_used);
+        plugin_result.entry_patterns.extend(entry_patterns);
     }
 
     // Scan CI config files for binary invocations and positional file references.

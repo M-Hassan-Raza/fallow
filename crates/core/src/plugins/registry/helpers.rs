@@ -193,30 +193,40 @@ pub fn discover_config_files<'a>(
     roots: &[&Path],
     production_mode: bool,
 ) -> Vec<(PathBuf, &'a dyn Plugin)> {
-    let mut config_files: Vec<(PathBuf, &'a dyn Plugin)> = Vec::new();
-    let mut seen: FxHashSet<(PathBuf, &'a str)> = FxHashSet::default();
-
+    use rayon::prelude::*;
+    let mut pending: Vec<(&'a dyn Plugin, &Path, String)> = Vec::new();
     for (plugin, _) in config_matchers {
         if resolved_plugins.contains(plugin.name()) {
             continue;
         }
-
         for root in roots {
             for pat in plugin.config_patterns() {
                 if !production_mode && is_source_ext_root_pattern(pat) {
                     continue;
                 }
-                for expanded in expand_brace_pattern(pat) {
-                    for path in discover_pattern_matches(root, &expanded) {
-                        if seen.insert((path.clone(), plugin.name())) {
-                            config_files.push((path, *plugin));
-                        }
-                    }
-                }
+                pending.push((*plugin, *root, pat.to_string()));
             }
         }
     }
 
+    let hits: Vec<(PathBuf, &'a dyn Plugin)> = pending
+        .par_iter()
+        .flat_map_iter(|(plugin, root, pat)| {
+            expand_brace_pattern(pat)
+                .into_iter()
+                .flat_map(|expanded| discover_pattern_matches(root, &expanded))
+                .map(move |path| (path, *plugin))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
+    let mut seen: FxHashSet<(PathBuf, &'a str)> = FxHashSet::default();
+    let mut config_files: Vec<(PathBuf, &'a dyn Plugin)> = Vec::with_capacity(hits.len());
+    for (path, plugin) in hits {
+        if seen.insert((path.clone(), plugin.name())) {
+            config_files.push((path, plugin));
+        }
+    }
     config_files
 }
 

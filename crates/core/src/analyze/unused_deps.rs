@@ -128,25 +128,44 @@ fn node_modules_package_json(base: &Path, package_name: &str) -> PathBuf {
     path.join("package.json")
 }
 
-fn packages_used_in_workspace<'a>(
+/// Reverse index: workspace root -> packages with ANY file under that root using
+/// them (prefix-match attribution, mirroring the original `packages_used_in_workspace`).
+/// Each module's matching workspace roots are pre-computed once in parallel so the
+/// package_usage walk costs O(packages * avg_files_per_package) instead of
+/// O(packages * files * workspaces).
+fn collect_workspace_used_packages<'a>(
     graph: &'a ModuleGraph,
-    workspace_root: &Path,
-) -> FxHashSet<&'a str> {
-    graph
-        .package_usage
-        .iter()
-        .filter_map(|(package_name, file_ids)| {
-            file_ids
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+) -> FxHashMap<&'a Path, FxHashSet<&'a str>> {
+    use rayon::prelude::*;
+    let module_workspaces: Vec<Vec<&Path>> = graph
+        .modules
+        .par_iter()
+        .map(|module| {
+            workspaces
                 .iter()
-                .any(|id| {
-                    graph
-                        .modules
-                        .get(id.0 as usize)
-                        .is_some_and(|module| module.path.starts_with(workspace_root))
-                })
-                .then_some(package_name.as_str())
+                .filter(|ws| module.path.starts_with(&ws.root))
+                .map(|ws| ws.root.as_path())
+                .collect()
         })
-        .collect()
+        .collect();
+    let mut by_ws: FxHashMap<&Path, FxHashSet<&str>> = workspaces
+        .iter()
+        .map(|ws| (ws.root.as_path(), FxHashSet::default()))
+        .collect();
+    for (package_name, file_ids) in &graph.package_usage {
+        for id in file_ids {
+            if let Some(ws_paths) = module_workspaces.get(id.0 as usize) {
+                for ws_path in ws_paths {
+                    by_ws
+                        .entry(*ws_path)
+                        .or_default()
+                        .insert(package_name.as_str());
+                }
+            }
+        }
+    }
+    by_ws
 }
 
 /// Collect unused dependencies for a single category (prod, dev, or optional).
@@ -312,9 +331,9 @@ pub fn find_unused_dependencies(
     // Build per-package set of files that use it (globally)
     let used_packages: FxHashSet<&str> = graph.package_usage.keys().map(String::as_str).collect();
     let package_workspace_usage = collect_package_workspace_usage(graph, workspaces);
-    let mut peer_resolver = PeerDependencyResolver::new();
-    let root_peer_used =
-        peer_resolver.peer_dependency_closure(&config.root, used_packages.iter().copied());
+    let workspace_used_packages = collect_workspace_used_packages(graph, workspaces);
+    let root_peer_used = PeerDependencyResolver::new()
+        .peer_dependency_closure(&config.root, used_packages.iter().copied());
 
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
@@ -369,61 +388,80 @@ pub fn find_unused_dependencies(
         .map(|d| d.package_name.clone())
         .collect();
 
-    for ws in workspaces {
-        let ws_pkg_path = ws.root.join("package.json");
-        if is_package_json_ignored(&ws_pkg_path, config) {
-            continue;
-        }
-        let Ok(ws_pkg) = PackageJson::load(&ws_pkg_path) else {
-            continue;
-        };
-        let ws_pkg_content = read_pkg_json_content(&ws_pkg_path);
+    use rayon::prelude::*;
+    let workspace_findings: Vec<(
+        Vec<UnusedDependency>,
+        Vec<UnusedDependency>,
+        Vec<UnusedDependency>,
+    )> = workspaces
+        .par_iter()
+        .map(|ws| {
+            let ws_pkg_path = ws.root.join("package.json");
+            if is_package_json_ignored(&ws_pkg_path, config) {
+                return (Vec::new(), Vec::new(), Vec::new());
+            }
+            let Some(ws_pkg_content) = std::fs::read_to_string(&ws_pkg_path).ok() else {
+                return (Vec::new(), Vec::new(), Vec::new());
+            };
+            let Ok(ws_pkg) = serde_json::from_str::<PackageJson>(&ws_pkg_content) else {
+                return (Vec::new(), Vec::new(), Vec::new());
+            };
 
-        // Helper: check if a dependency is used by any file within this workspace.
-        // Uses raw path comparison (module paths are absolute, workspace root is absolute)
-        // to avoid per-file canonicalize() syscalls.
-        let ws_root = &ws.root;
-        let ws_used_packages = packages_used_in_workspace(graph, ws_root);
-        let ws_peer_used = peer_resolver.peer_dependency_closure(ws_root, ws_used_packages);
-        let is_used_in_workspace = |dep: &str| -> bool {
-            root_flagged.contains(dep)
-                || ws_peer_used.contains(dep)
-                || package_workspace_usage
-                    .get(dep)
-                    .is_some_and(|roots| roots.iter().any(|root| root == ws_root))
-        };
-        let used_in_workspaces =
-            |dep: &str| used_in_other_workspaces(&package_workspace_usage, dep, ws_root);
+            let ws_root = ws.root.as_path();
+            let ws_used_packages: FxHashSet<&str> = workspace_used_packages
+                .get(&ws_root)
+                .cloned()
+                .unwrap_or_default();
+            let ws_peer_used = PeerDependencyResolver::new()
+                .peer_dependency_closure(ws_root, ws_used_packages.iter().copied());
+            let is_used_in_workspace = |dep: &str| -> bool {
+                root_flagged.contains(dep)
+                    || ws_peer_used.contains(dep)
+                    || package_workspace_usage
+                        .get(dep)
+                        .is_some_and(|roots| roots.iter().any(|root| root == ws_root))
+            };
+            let used_in_workspaces =
+                |dep: &str| used_in_other_workspaces(&package_workspace_usage, dep, ws_root);
 
-        unused_deps.extend(collect_unused_for_category(
-            ws_pkg.production_dependency_names(),
-            &prod_category(),
-            &shared,
-            is_used_in_workspace,
-            used_in_workspaces,
-            &ws_pkg_path,
-            ws_pkg_content.as_deref(),
-        ));
+            let prod = collect_unused_for_category(
+                ws_pkg.production_dependency_names(),
+                &prod_category(),
+                &shared,
+                is_used_in_workspace,
+                used_in_workspaces,
+                &ws_pkg_path,
+                Some(&ws_pkg_content),
+            );
 
-        unused_dev_deps.extend(collect_unused_for_category(
-            ws_pkg.dev_dependency_names(),
-            &dev_category(),
-            &shared,
-            is_used_in_workspace,
-            used_in_workspaces,
-            &ws_pkg_path,
-            ws_pkg_content.as_deref(),
-        ));
+            let dev = collect_unused_for_category(
+                ws_pkg.dev_dependency_names(),
+                &dev_category(),
+                &shared,
+                is_used_in_workspace,
+                used_in_workspaces,
+                &ws_pkg_path,
+                Some(&ws_pkg_content),
+            );
 
-        unused_optional_deps.extend(collect_unused_for_category(
-            ws_pkg.optional_dependency_names(),
-            &optional_category(),
-            &shared,
-            is_used_in_workspace,
-            used_in_workspaces,
-            &ws_pkg_path,
-            ws_pkg_content.as_deref(),
-        ));
+            let optional = collect_unused_for_category(
+                ws_pkg.optional_dependency_names(),
+                &optional_category(),
+                &shared,
+                is_used_in_workspace,
+                used_in_workspaces,
+                &ws_pkg_path,
+                Some(&ws_pkg_content),
+            );
+
+            (prod, dev, optional)
+        })
+        .collect();
+
+    for (prod, dev, optional) in workspace_findings {
+        unused_deps.extend(prod);
+        unused_dev_deps.extend(dev);
+        unused_optional_deps.extend(optional);
     }
 
     (unused_deps, unused_dev_deps, unused_optional_deps)

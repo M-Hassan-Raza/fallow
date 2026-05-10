@@ -11,7 +11,7 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub use conversion::{cached_to_module, module_to_cached};
+pub use conversion::{cached_to_module, cached_to_module_opts, module_to_cached};
 pub use store::CacheStore;
 pub use types::{
     CachedDynamicImport, CachedDynamicImportPattern, CachedExport, CachedImport, CachedMember,

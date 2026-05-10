@@ -21,13 +21,26 @@ use super::types::{
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`].
 #[must_use]
+pub fn cached_to_module(
+    cached: &CachedModule,
+    file_id: fallow_types::discover::FileId,
+) -> crate::ModuleInfo {
+    cached_to_module_opts(cached, file_id, true)
+}
+
+/// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`], skipping
+/// the per-function complexity vec when `need_complexity` is `false`. Avoids the
+/// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `fallow check`)
+/// that don't consume complexity, which adds up across tens of thousands of files.
+#[must_use]
 #[expect(
     clippy::too_many_lines,
     reason = "single flat field-by-field deserialization; splitting it harms readability"
 )]
-pub fn cached_to_module(
+pub fn cached_to_module_opts(
     cached: &CachedModule,
     file_id: fallow_types::discover::FileId,
+    need_complexity: bool,
 ) -> crate::ModuleInfo {
     use crate::{
         DynamicImportInfo, ExportInfo, ImportInfo, ImportedName, LocalTypeDeclaration, MemberInfo,
@@ -164,7 +177,11 @@ pub fn cached_to_module(
         type_referenced_import_bindings: cached.type_referenced_import_bindings.clone(),
         value_referenced_import_bindings: cached.value_referenced_import_bindings.clone(),
         line_offsets: cached.line_offsets.clone(),
-        complexity: cached.complexity.clone(),
+        complexity: if need_complexity {
+            cached.complexity.clone()
+        } else {
+            Vec::new()
+        },
         flag_uses: cached.flag_uses.clone(),
         class_heritage: cached.class_heritage.clone(),
         local_type_declarations: cached

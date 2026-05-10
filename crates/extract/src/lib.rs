@@ -110,16 +110,6 @@ pub fn parse_all_files(
     }
 }
 
-/// Extract mtime (seconds since epoch) from file metadata.
-/// Returns 0 if mtime cannot be determined (pre-epoch, unsupported OS, etc.).
-fn mtime_secs(metadata: &std::fs::Metadata) -> u64 {
-    metadata
-        .modified()
-        .ok()
-        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
-        .map_or(0, |d| d.as_secs())
-}
-
 /// Parse a single file, consulting the cache first.
 ///
 /// Cache validation strategy (fast path -> slow path):
@@ -149,7 +139,11 @@ fn parse_single_file_cached(
             // (populated by a prior `check` run), skip the cache and re-parse.
             if !need_complexity || !cached.complexity.is_empty() {
                 cache_hits.fetch_add(1, Ordering::Relaxed);
-                return Some(cache::cached_to_module(cached, file.id));
+                return Some(cache::cached_to_module_opts(
+                    cached,
+                    file.id,
+                    need_complexity,
+                ));
             }
         }
     }
@@ -164,7 +158,11 @@ fn parse_single_file_cached(
         && (!need_complexity || !cached.complexity.is_empty())
     {
         cache_hits.fetch_add(1, Ordering::Relaxed);
-        return Some(cache::cached_to_module(cached, file.id));
+        return Some(cache::cached_to_module_opts(
+            cached,
+            file.id,
+            need_complexity,
+        ));
     }
     cache_misses.fetch_add(1, Ordering::Relaxed);
 
@@ -176,6 +174,16 @@ fn parse_single_file_cached(
         content_hash,
         need_complexity,
     ))
+}
+
+/// Extract mtime (seconds since epoch) from file metadata.
+/// Returns 0 if mtime cannot be determined (pre-epoch, unsupported OS, etc.).
+fn mtime_secs(metadata: &std::fs::Metadata) -> u64 {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::SystemTime::UNIX_EPOCH).ok())
+        .map_or(0, |d| d.as_secs())
 }
 
 /// Parse a single file and extract module information (without complexity).

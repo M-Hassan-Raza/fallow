@@ -65,8 +65,8 @@ impl CacheStore {
     /// Returns None if not cached or hash mismatch.
     #[must_use]
     pub fn get(&self, path: &Path, content_hash: u64) -> Option<&CachedModule> {
-        let key = path.to_string_lossy().to_string();
-        let entry = self.entries.get(&key)?;
+        let key = path.to_string_lossy();
+        let entry = self.entries.get(key.as_ref())?;
         if entry.content_hash == content_hash {
             Some(entry)
         } else {
@@ -76,7 +76,7 @@ impl CacheStore {
 
     /// Insert or update a cached module.
     pub fn insert(&mut self, path: &Path, module: CachedModule) {
-        let key = path.to_string_lossy().to_string();
+        let key = path.to_string_lossy().into_owned();
         self.entries.insert(key, module);
     }
 
@@ -93,8 +93,8 @@ impl CacheStore {
         mtime_secs: u64,
         file_size: u64,
     ) -> Option<&CachedModule> {
-        let key = path.to_string_lossy().to_string();
-        let entry = self.entries.get(&key)?;
+        let key = path.to_string_lossy();
+        let entry = self.entries.get(key.as_ref())?;
         if entry.mtime_secs == mtime_secs && entry.file_size == file_size && mtime_secs > 0 {
             Some(entry)
         } else {
@@ -107,8 +107,8 @@ impl CacheStore {
     /// requiring the caller to know the hash upfront.
     #[must_use]
     pub fn get_by_path_only(&self, path: &Path) -> Option<&CachedModule> {
-        let key = path.to_string_lossy().to_string();
-        self.entries.get(&key)
+        let key = path.to_string_lossy();
+        self.entries.get(key.as_ref())
     }
 
     /// Remove cache entries for files that are no longer in the project.

@@ -211,6 +211,7 @@ impl PluginRegistry {
             })
             .collect();
 
+        use rayon::prelude::*;
         // Build relative paths lazily: only needed when config matchers exist
         // or plugins have package_json_config_key. Skip entirely for projects
         // with no config-parsing plugins (e.g., only React), avoiding O(files)
@@ -219,7 +220,7 @@ impl PluginRegistry {
             || active.iter().any(|p| p.package_json_config_key().is_some());
         let relative_files: Vec<(PathBuf, String)> = if needs_relative_files {
             discovered_files
-                .iter()
+                .par_iter()
                 .map(|f| {
                     let rel = f
                         .strip_prefix(root)
@@ -234,20 +235,29 @@ impl PluginRegistry {
         };
 
         if !config_matchers.is_empty() {
-            // Phase 3a: Match config files from discovered source files
+            // Phase 3a: Match config files from discovered source files. Per-file
+            // glob matching is parallelized: on monorepos with tens of thousands
+            // of source files, the file-scan cost dominates the plugins phase.
             let mut resolved_plugins: FxHashSet<&str> = FxHashSet::default();
 
             for (plugin, matchers) in &config_matchers {
-                for (abs_path, rel_path) in &relative_files {
-                    if matchers.iter().any(|m| m.is_match(rel_path.as_str()))
-                        && let Ok(source) = std::fs::read_to_string(abs_path)
-                    {
+                let plugin_hits: Vec<&PathBuf> = relative_files
+                    .par_iter()
+                    .filter_map(|(abs_path, rel_path)| {
+                        matchers
+                            .iter()
+                            .any(|m| m.is_match(rel_path.as_str()))
+                            .then_some(abs_path)
+                    })
+                    .collect();
+                for abs_path in plugin_hits {
+                    if let Ok(source) = std::fs::read_to_string(abs_path) {
                         let plugin_result = plugin.resolve_config(abs_path, &source, root);
                         if !plugin_result.is_empty() {
                             resolved_plugins.insert(plugin.name());
                             tracing::debug!(
                                 plugin = plugin.name(),
-                                config = rel_path.as_str(),
+                                config = %abs_path.display(),
                                 entries = plugin_result.entry_patterns.len(),
                                 deps = plugin_result.referenced_dependencies.len(),
                                 "resolved config"
@@ -400,17 +410,25 @@ impl PluginRegistry {
 
         let mut resolved_ws_plugins: FxHashSet<&str> = FxHashSet::default();
         if !workspace_matchers.is_empty() {
+            use rayon::prelude::*;
             for (plugin, matchers) in &workspace_matchers {
-                for (abs_path, rel_path) in relative_files {
-                    if matchers.iter().any(|m| m.is_match(rel_path.as_str()))
-                        && let Ok(source) = std::fs::read_to_string(abs_path)
-                    {
+                let plugin_hits: Vec<&PathBuf> = relative_files
+                    .par_iter()
+                    .filter_map(|(abs_path, rel_path)| {
+                        matchers
+                            .iter()
+                            .any(|m| m.is_match(rel_path.as_str()))
+                            .then_some(abs_path)
+                    })
+                    .collect();
+                for abs_path in plugin_hits {
+                    if let Ok(source) = std::fs::read_to_string(abs_path) {
                         let plugin_result = plugin.resolve_config(abs_path, &source, root);
                         if !plugin_result.is_empty() {
                             resolved_ws_plugins.insert(plugin.name());
                             tracing::debug!(
                                 plugin = plugin.name(),
-                                config = rel_path.as_str(),
+                                config = %abs_path.display(),
                                 entries = plugin_result.entry_patterns.len(),
                                 deps = plugin_result.referenced_dependencies.len(),
                                 "resolved config"
