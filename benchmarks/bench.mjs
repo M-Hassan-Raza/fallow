@@ -13,6 +13,8 @@ const runSynthetic = args.includes('--synthetic') || !hasFilter;
 const runRealWorld = args.includes('--real-world') || !hasFilter;
 const RUNS = parseInt(args.find(a => a.startsWith('--runs='))?.split('=')[1] ?? '5');
 const WARMUP = parseInt(args.find(a => a.startsWith('--warmup='))?.split('=')[1] ?? '2');
+const projectsArg = args.find(a => a.startsWith('--projects='))?.split('=')[1];
+const projectFilter = projectsArg ? new Set(projectsArg.split(',').map(s => s.trim()).filter(Boolean)) : null;
 
 console.log('Building fallow (release)...');
 const buildResult = spawnSync('cargo', ['build', '--release'], { cwd: rootDir, stdio: 'pipe', timeout: 300000 });
@@ -192,12 +194,18 @@ function benchmarkProject(name, dir) {
   }
 
   // --- Warm cache ---
+  // Warmup runs below settle the OS file cache + Spotlight indexing of cache.bin
+  // so the first measured warm run isn't penalized vs the cold loop's warmups.
   clearFallowCache(dir);
   const fArgsWarm = ['check', '--quiet', '--format', 'json'];
   // Populate cache
   const populate = timeRun(fallowBin, fArgsWarm, dir);
   const populateSummary = summarizeBenchmarkRun(populate);
   if (!populateSummary.valid) throw new Error(`[${name}] fallow cache warm-up failed: ${populateSummary.error}`);
+  // Warmup runs (same shape as cold path) to settle OS / Spotlight noise
+  for (let i = 0; i < WARMUP; i++) {
+    timeRun(fallowBin, fArgsWarm, dir);
+  }
   // Benchmark warm runs
   const fTimesWarm = [];
   for (let i = 0; i < RUNS; i++) {
@@ -274,8 +282,10 @@ if (runSynthetic) {
   else {
     console.log('--- Synthetic Projects ---\n');
     const order = ['tiny','small','medium','large','xlarge'];
-    for (const p of readdirSync(d).filter(x => existsSync(join(d,x,'package.json'))).sort((a,b) => order.indexOf(a)-order.indexOf(b)))
+    for (const p of readdirSync(d).filter(x => existsSync(join(d,x,'package.json'))).sort((a,b) => order.indexOf(a)-order.indexOf(b))) {
+      if (projectFilter && !projectFilter.has(p)) continue;
       results.push(benchmarkProject(p, join(d, p)));
+    }
   }
 }
 if (runRealWorld) {
@@ -283,8 +293,10 @@ if (runRealWorld) {
   if (!existsSync(d)) { console.log('No real-world fixtures. Run: npm run download-fixtures\n'); }
   else {
     console.log('--- Real-World Projects ---\n');
-    for (const p of readdirSync(d).filter(x => existsSync(join(d,x,'package.json'))).sort())
+    for (const p of readdirSync(d).filter(x => existsSync(join(d,x,'package.json'))).sort()) {
+      if (projectFilter && !projectFilter.has(p)) continue;
       results.push(benchmarkProject(p, join(d, p)));
+    }
   }
 }
 if (results.length > 0) {

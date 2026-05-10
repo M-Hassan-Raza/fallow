@@ -19,6 +19,8 @@ const FIXTURES = [
   { name: 'vite', repo: 'https://github.com/vitejs/vite.git', tag: 'v8.0.1', pm: 'pnpm' },
   // XL monorepo (10,000+ source files)
   { name: 'next.js', repo: 'https://github.com/vercel/next.js.git', tag: 'v16.2.1', pm: 'pnpm' },
+  { name: 'astro', repo: 'https://github.com/withastro/astro.git', tag: 'astro@6.3.1', pm: 'pnpm' },
+  { name: 'typescript', repo: 'https://github.com/microsoft/TypeScript.git', tag: 'v5.9.3' },
 ];
 
 function countSourceFiles(dir) {
