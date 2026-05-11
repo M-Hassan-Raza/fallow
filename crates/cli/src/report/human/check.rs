@@ -967,7 +967,8 @@ fn build_duplicate_exports_section(
         lines.push(String::new());
     }
 
-    if pair_groups.len() > MAX_FLAT_ITEMS {
+    let truncation_emitted = pair_groups.len() > MAX_FLAT_ITEMS;
+    if truncation_emitted {
         let remaining = pair_groups.len() - MAX_FLAT_ITEMS;
         lines.push(format!(
             "  {}",
@@ -975,6 +976,12 @@ fn build_duplicate_exports_section(
         ));
     }
     if should_show_namespace_barrel_hint(items) {
+        if truncation_emitted {
+            // Keep the truncation hint and the namespace-barrel hint visually
+            // distinct; without this blank line both render as one block of
+            // dim text and read as a single run-on note.
+            lines.push(String::new());
+        }
         lines.push(format!("  {}", NAMESPACE_BARREL_HINT.dimmed()));
     }
     push_section_footer_with_count(lines, title, items.len());

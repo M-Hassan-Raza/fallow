@@ -296,7 +296,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "type": "remove-duplicate",
           "auto_fixable": false,
           "description": "Keep one canonical export location and remove the others",
-          "note": "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer the `add-to-config` ignoreExports action over removing exports."
+          "note": "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer adding these files to `ignoreExports` over removing exports."
         },
         {
           "type": "suppress-line",
