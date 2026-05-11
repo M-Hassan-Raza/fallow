@@ -166,7 +166,7 @@ const root = makeFixture();
 
 {
   const report = await detectDeadCode({ root, explain: true });
-  assert.equal(report.schema_version, 5);
+  assert.equal(report.schema_version, 6);
   assert.ok(report._meta);
   assert.ok(report.unused_exports.some((item) => item.export_name === 'unusedThing'));
   console.log('  [PASS] detectDeadCode');
