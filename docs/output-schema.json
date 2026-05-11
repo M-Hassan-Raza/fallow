@@ -1871,7 +1871,7 @@
         },
         "comment": {
           "type": "string",
-          "description": "The inline comment to place above the line (e.g., '// fallow-ignore-next-line unused-export')."
+          "description": "The inline comment to place above the line (e.g., '// fallow-ignore-next-line unused-export'). When multiple suppressible findings share the same path and line, this may contain a comma-separated issue-kind list such as '// fallow-ignore-next-line unused-export, complexity'."
         },
         "scope": {
           "type": "string",

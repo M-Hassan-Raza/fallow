@@ -19,6 +19,44 @@ fn byte_offset_to_line(source: &str, byte_offset: u32) -> u32 {
     prefix.bytes().filter(|&b| b == b'\n').count() as u32 + 1
 }
 
+fn parse_issue_kind_list(rest: &str) -> Option<Vec<IssueKind>> {
+    let mut kinds = Vec::new();
+    for token in rest
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|token| !token.is_empty())
+    {
+        let Some(kind) = IssueKind::parse(token) else {
+            tracing::warn!(issue_kind = token, "unknown fallow suppression issue kind");
+            return None;
+        };
+        if !kinds.contains(&kind) {
+            kinds.push(kind);
+        }
+    }
+    (!kinds.is_empty()).then_some(kinds)
+}
+
+fn push_suppressions(
+    suppressions: &mut Vec<Suppression>,
+    line: u32,
+    comment_line: u32,
+    rest: &str,
+) {
+    if rest.is_empty() {
+        suppressions.push(Suppression {
+            line,
+            comment_line,
+            kind: None,
+        });
+    } else if let Some(kinds) = parse_issue_kind_list(rest) {
+        suppressions.extend(kinds.into_iter().map(|kind| Suppression {
+            line,
+            comment_line,
+            kind: Some(kind),
+        }));
+    }
+}
+
 /// Parse all fallow suppression comments from a file's comment list.
 ///
 /// Supports:
@@ -26,6 +64,7 @@ fn byte_offset_to_line(source: &str, byte_offset: u32) -> u32 {
 /// - `// fallow-ignore-file unused-export` — suppress specific issue type for the file
 /// - `// fallow-ignore-next-line` — suppress all issues on the next line
 /// - `// fallow-ignore-next-line unused-export` — suppress specific issue type on the next line
+/// - `// fallow-ignore-next-line unused-export, complexity` — suppress multiple issue types on the next line
 /// - `<!-- fallow-ignore-file complexity -->` — suppress specific issue type in HTML-like files
 #[must_use]
 #[expect(
@@ -44,39 +83,13 @@ pub fn parse_suppressions(comments: &[Comment], source: &str) -> Vec<Suppression
         if let Some(rest) = trimmed.strip_prefix("fallow-ignore-file") {
             let rest = rest.trim();
             let src_comment_line = byte_offset_to_line(source, comment.span.start);
-            if rest.is_empty() {
-                suppressions.push(Suppression {
-                    line: 0,
-                    comment_line: src_comment_line,
-                    kind: None,
-                });
-            } else if let Some(kind) = IssueKind::parse(rest) {
-                suppressions.push(Suppression {
-                    line: 0,
-                    comment_line: src_comment_line,
-                    kind: Some(kind),
-                });
-            }
-            // Unknown kind token: silently ignore (no suppression created)
+            push_suppressions(&mut suppressions, 0, src_comment_line, rest);
         } else if let Some(rest) = trimmed.strip_prefix("fallow-ignore-next-line") {
             let rest = rest.trim();
             let src_comment_line = byte_offset_to_line(source, comment.span.start);
             let suppressed_line = src_comment_line + 1;
 
-            if rest.is_empty() {
-                suppressions.push(Suppression {
-                    line: suppressed_line,
-                    comment_line: src_comment_line,
-                    kind: None,
-                });
-            } else if let Some(kind) = IssueKind::parse(rest) {
-                suppressions.push(Suppression {
-                    line: suppressed_line,
-                    comment_line: src_comment_line,
-                    kind: Some(kind),
-                });
-            }
-            // Unknown kind token: silently ignore
+            push_suppressions(&mut suppressions, suppressed_line, src_comment_line, rest);
         }
     }
 
@@ -113,37 +126,13 @@ pub fn parse_suppressions_from_source(source: &str) -> Vec<Suppression> {
         if let Some(rest) = text.strip_prefix("fallow-ignore-file") {
             let rest = rest.trim();
             let src_comment_line = (line_idx as u32) + 1; // 1-based
-            if rest.is_empty() {
-                suppressions.push(Suppression {
-                    line: 0,
-                    comment_line: src_comment_line,
-                    kind: None,
-                });
-            } else if let Some(kind) = IssueKind::parse(rest) {
-                suppressions.push(Suppression {
-                    line: 0,
-                    comment_line: src_comment_line,
-                    kind: Some(kind),
-                });
-            }
+            push_suppressions(&mut suppressions, 0, src_comment_line, rest);
         } else if let Some(rest) = text.strip_prefix("fallow-ignore-next-line") {
             let rest = rest.trim();
             let src_comment_line = (line_idx as u32) + 1; // 1-based
             let suppressed_line = src_comment_line + 1; // next line
 
-            if rest.is_empty() {
-                suppressions.push(Suppression {
-                    line: suppressed_line,
-                    comment_line: src_comment_line,
-                    kind: None,
-                });
-            } else if let Some(kind) = IssueKind::parse(rest) {
-                suppressions.push(Suppression {
-                    line: suppressed_line,
-                    comment_line: src_comment_line,
-                    kind: Some(kind),
-                });
-            }
+            push_suppressions(&mut suppressions, suppressed_line, src_comment_line, rest);
         }
     }
 
@@ -189,6 +178,29 @@ mod tests {
         assert_eq!(suppressions.len(), 1);
         assert_eq!(suppressions[0].line, 2);
         assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+    }
+
+    #[test]
+    fn parse_next_line_suppression_with_comma_kind_list() {
+        let source =
+            "// fallow-ignore-next-line unused-export, complexity\nexport const foo = 1;\n";
+        let suppressions = parse_suppressions_from_source(source);
+        assert_eq!(suppressions.len(), 2);
+        assert_eq!(suppressions[0].line, 2);
+        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(suppressions[1].line, 2);
+        assert_eq!(suppressions[1].kind, Some(IssueKind::Complexity));
+    }
+
+    #[test]
+    fn parse_next_line_suppression_with_space_kind_list() {
+        let source = "// fallow-ignore-next-line unused-export complexity\nexport const foo = 1;\n";
+        let suppressions = parse_suppressions_from_source(source);
+        assert_eq!(suppressions.len(), 2);
+        assert_eq!(suppressions[0].line, 2);
+        assert_eq!(suppressions[0].kind, Some(IssueKind::UnusedExport));
+        assert_eq!(suppressions[1].line, 2);
+        assert_eq!(suppressions[1].kind, Some(IssueKind::Complexity));
     }
 
     #[test]

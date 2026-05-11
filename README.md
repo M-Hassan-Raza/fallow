@@ -548,9 +548,14 @@ No TypeScript compiler, no Node.js runtime needed to analyze your code. [Fallow 
 // fallow-ignore-next-line unused-export
 export const keepThis = 1;
 
+// fallow-ignore-next-line unused-export, complexity
+export const publicComplexHelper = (value: number) => value;
+
 // fallow-ignore-file
 // Suppress all issues in this file
 ```
+
+Use a comma-separated issue-kind list when one line has multiple findings.
 
 Also supports JSDoc visibility tags (`/** @public */`, `/** @internal */`, `/** @beta */`, `/** @alpha */`) to suppress unused export reports for library APIs consumed externally.
 

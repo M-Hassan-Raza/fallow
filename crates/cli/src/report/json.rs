@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::ExitCode;
 use std::time::Duration;
@@ -69,6 +70,7 @@ pub(super) fn print_grouped_json(
             let mut value = serde_json::to_value(&group.results).ok()?;
             strip_root_prefix(&mut value, &root_prefix);
             inject_actions(&mut value);
+            harmonize_multi_kind_suppress_line_actions(&mut value);
 
             if let serde_json::Value::Object(ref mut map) = value {
                 // Insert key, owners (section mode), and total_issues at the
@@ -267,6 +269,7 @@ pub fn build_json(
     // by the path stripper.
     strip_root_prefix(&mut output, &root_prefix);
     inject_actions(&mut output);
+    harmonize_multi_kind_suppress_line_actions(&mut output);
     Ok(output)
 }
 
@@ -629,6 +632,149 @@ fn inject_actions(output: &mut serde_json::Value) {
                 obj.insert("actions".to_string(), actions);
             }
         }
+    }
+}
+
+type SuppressAnchor = (String, u64);
+
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "used through report module re-export by audit.rs"
+)]
+pub(crate) fn harmonize_multi_kind_suppress_line_actions(output: &mut serde_json::Value) {
+    let mut anchors: BTreeMap<SuppressAnchor, Vec<String>> = BTreeMap::new();
+    collect_suppress_line_anchors(output, &mut anchors);
+
+    anchors.retain(|_, kinds| {
+        sort_suppression_kinds(kinds);
+        kinds.dedup();
+        kinds.len() > 1
+    });
+    if anchors.is_empty() {
+        return;
+    }
+
+    rewrite_suppress_line_actions(output, &anchors);
+}
+
+fn collect_suppress_line_anchors(
+    value: &serde_json::Value,
+    anchors: &mut BTreeMap<SuppressAnchor, Vec<String>>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(anchor) = suppression_anchor(map)
+                && let Some(actions) = map.get("actions").and_then(serde_json::Value::as_array)
+            {
+                for action in actions {
+                    if let Some(comment) = suppress_line_comment(action) {
+                        for kind in parse_suppress_line_comment(comment) {
+                            let kinds = anchors.entry(anchor.clone()).or_default();
+                            if !kinds.iter().any(|existing| existing == &kind) {
+                                kinds.push(kind);
+                            }
+                        }
+                    }
+                }
+            }
+
+            for child in map.values() {
+                collect_suppress_line_anchors(child, anchors);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_suppress_line_anchors(item, anchors);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn rewrite_suppress_line_actions(
+    value: &mut serde_json::Value,
+    anchors: &BTreeMap<SuppressAnchor, Vec<String>>,
+) {
+    match value {
+        serde_json::Value::Object(map) => {
+            if let Some(anchor) = suppression_anchor(map)
+                && let Some(kinds) = anchors.get(&anchor)
+            {
+                let comment = format!("// fallow-ignore-next-line {}", kinds.join(", "));
+                if let Some(actions) = map
+                    .get_mut("actions")
+                    .and_then(serde_json::Value::as_array_mut)
+                {
+                    for action in actions {
+                        if suppress_line_comment(action).is_some()
+                            && let serde_json::Value::Object(action_map) = action
+                        {
+                            action_map.insert("comment".to_string(), serde_json::json!(comment));
+                        }
+                    }
+                }
+            }
+
+            for child in map.values_mut() {
+                rewrite_suppress_line_actions(child, anchors);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                rewrite_suppress_line_actions(item, anchors);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn suppression_anchor(map: &serde_json::Map<String, serde_json::Value>) -> Option<SuppressAnchor> {
+    let path = map
+        .get("path")
+        .or_else(|| map.get("from_path"))
+        .and_then(serde_json::Value::as_str)?;
+    let line = map.get("line").and_then(serde_json::Value::as_u64)?;
+    Some((path.to_string(), line))
+}
+
+fn suppress_line_comment(action: &serde_json::Value) -> Option<&str> {
+    (action.get("type").and_then(serde_json::Value::as_str) == Some("suppress-line"))
+        .then_some(())
+        .and_then(|()| action.get("comment").and_then(serde_json::Value::as_str))
+}
+
+fn parse_suppress_line_comment(comment: &str) -> Vec<String> {
+    comment
+        .strip_prefix("// fallow-ignore-next-line ")
+        .map(|rest| {
+            rest.split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|token| !token.is_empty())
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn sort_suppression_kinds(kinds: &mut [String]) {
+    kinds.sort_by_key(|kind| suppression_kind_rank(kind));
+}
+
+fn suppression_kind_rank(kind: &str) -> usize {
+    match kind {
+        "unused-file" => 0,
+        "unused-export" => 1,
+        "unused-type" => 2,
+        "private-type-leak" => 3,
+        "unused-enum-member" => 4,
+        "unused-class-member" => 5,
+        "unresolved-import" => 6,
+        "unlisted-dependency" => 7,
+        "duplicate-export" => 8,
+        "circular-dependency" => 9,
+        "boundary-violation" => 10,
+        "code-duplication" => 11,
+        "complexity" => 12,
+        _ => usize::MAX,
     }
 }
 
@@ -2724,6 +2870,87 @@ mod tests {
         assert_eq!(
             actions[1]["comment"],
             "// fallow-ignore-next-line unused-export"
+        );
+    }
+
+    #[test]
+    fn json_same_line_findings_share_multi_kind_suppression_comment() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results.unused_exports.push(UnusedExport {
+            path: root.join("src/api.ts"),
+            export_name: "helperFn".to_string(),
+            is_type_only: false,
+            line: 10,
+            col: 4,
+            span_start: 120,
+            is_re_export: false,
+        });
+        results.unused_types.push(UnusedExport {
+            path: root.join("src/api.ts"),
+            export_name: "OldType".to_string(),
+            is_type_only: true,
+            line: 10,
+            col: 0,
+            span_start: 60,
+            is_re_export: false,
+        });
+        let output = build_json(&results, &root, Duration::ZERO).unwrap();
+
+        let export_actions = output["unused_exports"][0]["actions"].as_array().unwrap();
+        let type_actions = output["unused_types"][0]["actions"].as_array().unwrap();
+        assert_eq!(
+            export_actions[1]["comment"],
+            "// fallow-ignore-next-line unused-export, unused-type"
+        );
+        assert_eq!(
+            type_actions[1]["comment"],
+            "// fallow-ignore-next-line unused-export, unused-type"
+        );
+    }
+
+    #[test]
+    fn audit_like_json_shares_suppression_comment_across_dead_code_and_complexity() {
+        let mut output = serde_json::json!({
+            "dead_code": {
+                "unused_exports": [{
+                    "path": "src/main.ts",
+                    "line": 1,
+                    "actions": [
+                        { "type": "remove-export", "auto_fixable": true },
+                        {
+                            "type": "suppress-line",
+                            "auto_fixable": false,
+                            "comment": "// fallow-ignore-next-line unused-export"
+                        }
+                    ]
+                }]
+            },
+            "complexity": {
+                "findings": [{
+                    "path": "src/main.ts",
+                    "line": 1,
+                    "actions": [
+                        { "type": "refactor-function", "auto_fixable": false },
+                        {
+                            "type": "suppress-line",
+                            "auto_fixable": false,
+                            "comment": "// fallow-ignore-next-line complexity"
+                        }
+                    ]
+                }]
+            }
+        });
+
+        harmonize_multi_kind_suppress_line_actions(&mut output);
+
+        assert_eq!(
+            output["dead_code"]["unused_exports"][0]["actions"][1]["comment"],
+            "// fallow-ignore-next-line unused-export, complexity"
+        );
+        assert_eq!(
+            output["complexity"]["findings"][0]["actions"][1]["comment"],
+            "// fallow-ignore-next-line unused-export, complexity"
         );
     }
 

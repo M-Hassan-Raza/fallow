@@ -2691,7 +2691,9 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
         }
     }
 
-    report::emit_json(&serde_json::Value::Object(obj), "audit")
+    let mut output = serde_json::Value::Object(obj);
+    report::harmonize_multi_kind_suppress_line_actions(&mut output);
+    report::emit_json(&output, "audit")
 }
 
 // ── SARIF format ─────────────────────────────────────────────────

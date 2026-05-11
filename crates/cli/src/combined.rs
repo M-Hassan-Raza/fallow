@@ -586,7 +586,10 @@ fn print_combined_json(
         }
     }
 
-    match serde_json::to_string_pretty(&serde_json::Value::Object(combined)) {
+    let mut output = serde_json::Value::Object(combined);
+    report::harmonize_multi_kind_suppress_line_actions(&mut output);
+
+    match serde_json::to_string_pretty(&output) {
         Ok(json) => {
             println!("{json}");
             ExitCode::SUCCESS
