@@ -6,6 +6,7 @@
 mod build;
 mod cycles;
 mod namespace_aliases;
+mod namespace_re_exports;
 mod narrowing;
 mod re_exports;
 mod reachability;
@@ -162,6 +163,13 @@ impl ModuleGraph {
         // when the source module exposes `foo` as a namespace alias inside an
         // exported object literal. See issue #303.
         namespace_aliases::propagate_cross_package_aliases(&mut graph, &module_by_id);
+
+        // Phase 2c: Namespace re-export propagation. Credits members reached
+        // through `import { Foo } from './barrel'; Foo.member` when the barrel
+        // does `export * as Foo from './source'`. Without this pass, the
+        // synthesised `Foo` stub on the barrel collects a reference but the
+        // member access never reaches `./source`'s real exports. See issue #324.
+        namespace_re_exports::propagate_namespace_re_exports(&mut graph, &module_by_id);
 
         // Phase 3: BFS from entry points to mark overall/runtime/test reachability
         graph.mark_reachable(

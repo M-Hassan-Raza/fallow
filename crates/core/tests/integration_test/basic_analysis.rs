@@ -271,6 +271,73 @@ fn namespace_import_used_through_object_alias_across_multi_hop_barrel_chain() {
     );
 }
 
+#[test]
+fn namespace_re_export_via_named_import_credits_target_members() {
+    // Issue #324: `export * as MyNamespace from './source-module'` in a
+    // barrel, then `import { MyNamespace } from './barrel'; MyNamespace.X(...)`
+    // in a consumer. The barrel produces a synthesised ExportSymbol named
+    // `MyNamespace` AND a ReExportEdge with imported_name="*", exported_name="MyNamespace".
+    // Phase 2 attaches a reference to the barrel's stub, but Phase 4 looks for
+    // a source export matching `"*"` (never matches), so the source file's
+    // real exports stay unreferenced. Phase 2c (namespace_re_exports) closes
+    // the gap by walking consumer member accesses and crediting them on the
+    // namespace target directly.
+    //
+    // The fixture exercises three orthogonal shapes:
+    //   - Variant A (bug-report): direct barrel + named import + `.X` access.
+    //   - Variant B (multi-hop):  outer named-re-export barrel between
+    //                              consumer and the `export * as` barrel.
+    //   - Variant C (whole-object): consumer uses `Object.keys(Whole)` so
+    //                                every target export must be credited.
+    let root = fixture_path("issue-324-namespace-re-export");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    // Variant A: accessed members credited, stillUnused stays flagged.
+    assert!(
+        !unused_export_names.contains(&"someExportedSymbol"),
+        "someExportedSymbol must be credited via MyNamespace.someExportedSymbol, found: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"anotherSymbol"),
+        "anotherSymbol must be credited via MyNamespace.anotherSymbol, found: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"stillUnused"),
+        "stillUnused must remain flagged (precise narrowing, not blanket credit), found: {unused_export_names:?}"
+    );
+
+    // Variant B: deepUsed credited through outer-barrel -> inner-barrel chain.
+    assert!(
+        !unused_export_names.contains(&"deepUsed"),
+        "deepUsed must be credited through the two-hop named-re-export chain, found: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"deepUnused"),
+        "deepUnused must remain flagged across the chain (no over-credit), found: {unused_export_names:?}"
+    );
+
+    // Variant C: every export credited under whole-object use.
+    assert!(
+        !unused_export_names.contains(&"wholeA"),
+        "wholeA must be credited under Object.keys(Whole) whole-object use, found: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"wholeB"),
+        "wholeB must be credited under whole-object use, found: {unused_export_names:?}"
+    );
+    assert!(
+        !unused_export_names.contains(&"wholeC"),
+        "wholeC must be credited under whole-object use, found: {unused_export_names:?}"
+    );
+}
+
 // ── Namespace exports (issue #52) ────────────────────────────
 
 #[test]
