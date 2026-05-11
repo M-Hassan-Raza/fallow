@@ -1,6 +1,6 @@
 # Fallow Roadmap
 
-> Last updated: 2026-05-09
+> Last updated: 2026-05-12
 
 This roadmap tracks planned work on Fallow. For shipped capabilities, see the [documentation](https://docs.fallow.tools) and [GitHub releases](https://github.com/fallow-rs/fallow/releases).
 
@@ -9,10 +9,6 @@ This roadmap tracks planned work on Fallow. For shipped capabilities, see the [d
 ## Next
 
 Concrete work scoped to the next one or two minor releases.
-
-### Hot-path change review
-
-Runtime coverage ships the data; the review workflow on top of it does not yet exist. The `hot-path-touched` verdict will correlate a PR's changed lines against the hot functions captured by the sidecar and flag diffs that touch runtime-critical code. Paid, runtime-backed.
 
 ### Richer MCP responses
 

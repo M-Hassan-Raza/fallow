@@ -24,7 +24,7 @@
 //!
 //! For the unused-catalog-entry detector we need both the structured catalog
 //! map and the 1-based line number of each entry in the source so findings
-//! can point users to the exact line. `serde_yml` gives us the structural
+//! can point users to the exact line. `serde_yaml_ng` gives us the structural
 //! parse; a second targeted scan over the raw source recovers the line
 //! numbers.
 
@@ -64,7 +64,7 @@ pub struct PnpmCatalogEntry {
 /// are ignored.
 #[must_use]
 pub fn parse_pnpm_catalog_data(source: &str) -> PnpmCatalogData {
-    let value: serde_yml::Value = match serde_yml::from_str(source) {
+    let value: serde_yaml_ng::Value = match serde_yaml_ng::from_str(source) {
         Ok(v) => v,
         Err(_) => return PnpmCatalogData::default(),
     };
@@ -111,7 +111,7 @@ pub fn parse_pnpm_catalog_data(source: &str) -> PnpmCatalogData {
 }
 
 fn collect_entries(
-    mapping: &serde_yml::Mapping,
+    mapping: &serde_yaml_ng::Mapping,
     line_index: &CatalogLineIndex,
     catalog_name: &str,
 ) -> Vec<PnpmCatalogEntry> {
@@ -297,7 +297,7 @@ fn parse_key(line: &str) -> Option<String> {
 fn unescape_key(raw: &str) -> String {
     // Catalog package names rarely need full YAML unescaping; we just collapse
     // the common `\"` and `\\` sequences so quoted scoped names match the
-    // serde_yml-parsed form exactly.
+    // serde_yaml_ng-parsed form exactly.
     let mut out = String::with_capacity(raw.len());
     let mut chars = raw.chars();
     while let Some(c) = chars.next() {
