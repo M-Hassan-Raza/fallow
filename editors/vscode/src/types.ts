@@ -45,9 +45,17 @@ interface UnusedExport {
   readonly col: number;
 }
 
+type DependencyLocation =
+  | "dependencies"
+  | "devDependencies"
+  | "optionalDependencies";
+
 interface UnusedDependency {
   readonly package_name: string;
+  readonly location: DependencyLocation;
   readonly path: string;
+  readonly line: number;
+  readonly used_in_workspaces?: ReadonlyArray<string>;
 }
 
 interface UnusedMember {
@@ -65,9 +73,15 @@ interface UnresolvedImport {
   readonly col: number;
 }
 
+interface ImportSite {
+  readonly path: string;
+  readonly line: number;
+  readonly col: number;
+}
+
 interface UnlistedDependency {
   readonly package_name: string;
-  readonly path: string;
+  readonly imported_from: ReadonlyArray<ImportSite>;
 }
 
 interface DuplicateLocation {
@@ -84,6 +98,7 @@ interface DuplicateExport {
 interface TypeOnlyDependency {
   readonly package_name: string;
   readonly path: string;
+  readonly line: number;
 }
 
 interface CircularDependency {

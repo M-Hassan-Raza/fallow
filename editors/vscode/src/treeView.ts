@@ -5,6 +5,7 @@ import * as path from "node:path";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import { countCheckIssues } from "./analysis-utils.js";
+import { resolveFilePath as resolveFilePathPure } from "./treeView-utils.js";
 import type {
   CloneGroup,
   FallowCheckResult,
@@ -13,17 +14,8 @@ import type {
 } from "./types.js";
 import { ISSUE_CATEGORY_LABELS } from "./types.js";
 
-/** Resolve a potentially relative CLI path to an absolute path. */
-const resolveFilePath = (filePath: string): { absolute: string; relative: string } => {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  const absolute = workspaceRoot && !path.isAbsolute(filePath)
-    ? path.resolve(workspaceRoot, filePath)
-    : filePath;
-  const relative = workspaceRoot
-    ? path.relative(workspaceRoot, absolute)
-    : filePath;
-  return { absolute, relative };
-};
+const resolveFilePath = (filePath: string | undefined) =>
+  resolveFilePathPure(filePath, vscode.workspace.workspaceFolders?.[0]?.uri.fsPath);
 
 /** Icons per issue category. */
 const CATEGORY_ICONS: Record<IssueCategory, string> = {
@@ -243,8 +235,10 @@ export class DeadCodeTreeProvider
 
     addCategory(
       "unlisted-dependencies",
-      this.result.unlisted_dependencies.map(
-        (d) => new IssueItem(d.package_name, d.path, 1, 0, "unlisted-dependencies")
+      this.result.unlisted_dependencies.flatMap((d) =>
+        d.imported_from.map(
+          (site) => new IssueItem(d.package_name, site.path, site.line, site.col, "unlisted-dependencies")
+        )
       )
     );
 

@@ -215,7 +215,12 @@ describe("buildParamsFromCli", () => {
         { path: "c.ts", export_name: "y", line: 1, col: 0 },
       ],
       unused_optional_dependencies: [
-        { path: "package.json", package_name: "fsevents" },
+        {
+          path: "package.json",
+          package_name: "fsevents",
+          location: "optionalDependencies",
+          line: 1,
+        },
       ],
       unresolved_imports: [
         { path: "d.ts", specifier: "./missing", line: 1, col: 0 },
