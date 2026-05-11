@@ -126,6 +126,22 @@ fn sample_results(root: &Path) -> AnalysisResults {
         col: 0,
         is_cross_package: false,
     });
+    r.unused_catalog_entries
+        .push(fallow_core::results::UnusedCatalogEntry {
+            entry_name: "is-even".to_string(),
+            catalog_name: "default".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 6,
+            hardcoded_consumers: vec![],
+        });
+    r.unused_catalog_entries
+        .push(fallow_core::results::UnusedCatalogEntry {
+            entry_name: "old-thing".to_string(),
+            catalog_name: "legacy".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 12,
+            hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
+        });
 
     r
 }
@@ -515,6 +531,7 @@ fn sarif_mixed_severity_snapshot() {
         coverage_gaps: fallow_config::Severity::Warn,
         feature_flags: fallow_config::Severity::Off,
         stale_suppressions: fallow_config::Severity::Warn,
+        unused_catalog_entries: fallow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1252,6 +1269,7 @@ fn codeclimate_mixed_severity_snapshot() {
         coverage_gaps: fallow_config::Severity::Warn,
         feature_flags: fallow_config::Severity::Off,
         stale_suppressions: fallow_config::Severity::Warn,
+        unused_catalog_entries: fallow_config::Severity::Warn,
     };
     let cc = build_codeclimate(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");

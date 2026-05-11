@@ -422,6 +422,33 @@ fn sarif_stale_suppression_fields(
     }
 }
 
+fn sarif_unused_catalog_entry_fields(
+    entry: &fallow_core::results::UnusedCatalogEntry,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    let message = if entry.catalog_name == "default" {
+        format!(
+            "Catalog entry '{}' is not referenced by any workspace package",
+            entry.entry_name
+        )
+    } else {
+        format!(
+            "Catalog entry '{}' (catalog '{}') is not referenced by any workspace package",
+            entry.entry_name, entry.catalog_name
+        )
+    };
+    SarifFields {
+        rule_id: "fallow/unused-catalog-entry",
+        level,
+        message,
+        uri: relative_uri(&entry.path, root),
+        region: Some((entry.line, 1)),
+        source_path: Some(entry.path.clone()),
+        properties: None,
+    }
+}
+
 /// Unlisted deps fan out to one SARIF result per import site, so they do not
 /// fit `push_sarif_results`. Keep the nested-loop shape in its own helper.
 fn push_sarif_unlisted_deps(
@@ -562,6 +589,11 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
             "fallow/stale-suppression",
             "Suppression comment or tag no longer matches any issue",
             rules.stale_suppressions,
+        ),
+        (
+            "fallow/unused-catalog-entry",
+            "pnpm catalog entry not referenced by any workspace package",
+            rules.unused_catalog_entries,
         ),
     ]
     .into_iter()
@@ -789,6 +821,18 @@ pub fn build_sarif(
                 s,
                 root,
                 severity_to_sarif_level(rules.stale_suppressions),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.unused_catalog_entries,
+        &mut snippets,
+        |e| {
+            sarif_unused_catalog_entry_fields(
+                e,
+                root,
+                severity_to_sarif_level(rules.unused_catalog_entries),
             )
         },
     );
@@ -1373,7 +1417,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 17);
+        assert_eq!(rules.len(), 18);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1392,6 +1436,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/duplicate-export"));
         assert!(rule_ids.contains(&"fallow/circular-dependency"));
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
+        assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
     }
 
     #[test]

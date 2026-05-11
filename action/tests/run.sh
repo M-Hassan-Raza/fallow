@@ -380,7 +380,7 @@ assert_contains "$OUT_ONE" "(1 group ·" "dupes: singular group header"
 assert_not_contains "$OUT_ONE" "(1 groups ·" "dupes: no '1 groups' grammar"
 
 # Status-bar pluralization: 1 of each renders singular
-OUT_SINGULAR=$(jq '.check.unused_files = [.check.unused_files[0]] | .check.unused_exports = [] | .check.unused_dependencies = [] | .check.unused_dev_dependencies = [] | .check.unused_optional_dependencies = [] | .check.unused_types = [] | .check.unused_enum_members = [] | .check.unused_class_members = [] | .check.unresolved_imports = [] | .check.unlisted_dependencies = [] | .check.duplicate_exports = [] | .check.circular_dependencies = [] | .check.boundary_violations = [] | .check.type_only_dependencies = [] | .check.test_only_dependencies = [] | .check.stale_suppressions = [] | .check.private_type_leaks = [] | .check.total_issues = 1 | .dupes.stats.clone_groups = 1 | .dupes.clone_groups = [.dupes.clone_groups[0]] | .health.summary.functions_above_threshold = 1 | .health.findings = [.health.findings[0]]' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
+OUT_SINGULAR=$(jq '.check.unused_files = [.check.unused_files[0]] | .check.unused_exports = [] | .check.unused_dependencies = [] | .check.unused_dev_dependencies = [] | .check.unused_optional_dependencies = [] | .check.unused_types = [] | .check.unused_enum_members = [] | .check.unused_class_members = [] | .check.unresolved_imports = [] | .check.unlisted_dependencies = [] | .check.duplicate_exports = [] | .check.circular_dependencies = [] | .check.boundary_violations = [] | .check.type_only_dependencies = [] | .check.test_only_dependencies = [] | .check.stale_suppressions = [] | .check.unused_catalog_entries = [] | .check.private_type_leaks = [] | .check.total_issues = 1 | .dupes.stats.clone_groups = 1 | .dupes.clone_groups = [.dupes.clone_groups[0]] | .health.summary.functions_above_threshold = 1 | .health.findings = [.health.findings[0]]' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_SINGULAR" "**1** code issue " "status-bar: singular code issue"
 assert_not_contains "$OUT_SINGULAR" "**1** code issues" "status-bar: no '1 code issues' grammar"
 assert_contains "$OUT_SINGULAR" "**1** clone group " "status-bar: singular clone group"
@@ -399,7 +399,7 @@ assert_not_contains "$OUT_SINGULAR" "(1 functions above threshold)" "complexity 
 OUT_LARGE=$(jq -n '
   {
     schema_version: 3,
-    check: {total_issues: 0, unused_files: [], unused_exports: [], unused_types: [], unused_dependencies: [], unused_dev_dependencies: [], unused_optional_dependencies: [], unused_enum_members: [], unused_class_members: [], unresolved_imports: [], unlisted_dependencies: [], duplicate_exports: [], circular_dependencies: [], boundary_violations: [], type_only_dependencies: [], test_only_dependencies: [], stale_suppressions: [], private_type_leaks: []},
+    check: {total_issues: 0, unused_files: [], unused_exports: [], unused_types: [], unused_dependencies: [], unused_dev_dependencies: [], unused_optional_dependencies: [], unused_enum_members: [], unused_class_members: [], unresolved_imports: [], unlisted_dependencies: [], duplicate_exports: [], circular_dependencies: [], boundary_violations: [], type_only_dependencies: [], test_only_dependencies: [], stale_suppressions: [], unused_catalog_entries: [], private_type_leaks: []},
     dupes: {
       stats: {clone_groups: 50, clone_instances: 200, files_with_clones: 50, duplicated_lines: 5000, total_lines: 100000, duplication_percentage: 5.0},
       clone_groups: ([range(0;50)] | map(. as $g | {line_count: ($g + 1), token_count: ($g * 5 + 50), instances: ([range(0;4)] | map(. as $i | {file: ("src/group_\($g)/file_\($i).ts"), start_line: ($i * 10 + 1), end_line: ($i * 10 + 9)}))}))
@@ -554,7 +554,7 @@ assert_valid_json "$OUT" "valid JSON"
 assert_json_value "$OUT" '.unused_exports | length' "3" "keeps only exports in changed files"
 assert_json_value "$OUT" '.unused_files | length' "0" "no unused files match changed path"
 assert_json_value "$OUT" '.unused_dependencies | length' "3" "preserves dependency issues (not file-scoped)"
-assert_json_value "$OUT" '.total_issues' "6" "recalculates total_issues"
+assert_json_value "$OUT" '.total_issues' "7" "recalculates total_issues"
 
 echo "  check with no matching files:"
 OUT=$(jq --argjson changed '["nonexistent.ts"]' -f "$JQ_DIR/filter-changed.jq" "$FIXTURES/check.json" 2>&1)
@@ -759,7 +759,7 @@ OUT=$(cd "$WORK_DIR" && \
     fi
     jq -r ".total_issues" "$RESULTS_FILE"
   ' 2>&1)
-[ "$OUT" = "6" ] && pass "filters to 6 issues (pre-computed)" || fail "pre-computed filter" "expected 6, got $OUT"
+[ "$OUT" = "7" ] && pass "filters to 7 issues (pre-computed)" || fail "pre-computed filter" "expected 7, got $OUT"
 
 echo "  fallback to unfiltered when no pre-computed file:"
 rm -f "$WORK_DIR/fallow-changed-files.json"

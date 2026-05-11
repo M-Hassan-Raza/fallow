@@ -98,6 +98,9 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.boundary_violation == Severity::Off {
         results.boundary_violations.clear();
     }
+    if rules.unused_catalog_entries == Severity::Off {
+        results.unused_catalog_entries.clear();
+    }
 }
 
 /// Check whether any issue type with `Severity::Error` has remaining issues.
@@ -181,6 +184,8 @@ pub fn has_error_severity_issues(
             && rules.circular_dependencies == Severity::Error
             && !results.circular_dependencies.is_empty())
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
+        || (rules.unused_catalog_entries == Severity::Error
+            && !results.unused_catalog_entries.is_empty())
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -238,6 +243,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.stale_suppressions == Severity::Warn {
         rules.stale_suppressions = Severity::Error;
+    }
+    if rules.unused_catalog_entries == Severity::Warn {
+        rules.unused_catalog_entries = Severity::Error;
     }
 }
 
@@ -438,6 +446,7 @@ mod tests {
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
+            unused_catalog_entries: Severity::Off,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -546,6 +555,7 @@ mod tests {
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
+            unused_catalog_entries: Severity::Warn,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -576,6 +586,7 @@ mod tests {
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
+            unused_catalog_entries: Severity::Warn,
         };
         // Only unused_files present, but set to Warn — should not trigger
         assert!(!has_error_severity_issues(&results, &rules, None));
@@ -882,6 +893,7 @@ mod tests {
             coverage_gaps: Severity::Warn,
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
+            unused_catalog_entries: Severity::Warn,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -901,6 +913,7 @@ mod tests {
         assert_eq!(rules.test_only_dependencies, Severity::Error);
         assert_eq!(rules.circular_dependencies, Severity::Error);
         assert_eq!(rules.coverage_gaps, Severity::Error);
+        assert_eq!(rules.unused_catalog_entries, Severity::Error);
     }
 
     #[test]
@@ -925,6 +938,7 @@ mod tests {
             coverage_gaps: Severity::Off,
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
+            unused_catalog_entries: Severity::Off,
         };
         promote_warns_to_errors(&mut rules);
 
