@@ -109,7 +109,7 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "https://docs.fallow.tools/explanations/dead-code#unlisted-dependencies",
         )),
         "Duplicate exports" => Some((
-            "Same export name defined in multiple files \u{2014} barrel re-exports may resolve ambiguously",
+            "Same export name defined in multiple files; barrel re-exports may resolve ambiguously",
             "https://docs.fallow.tools/explanations/dead-code#duplicate-exports",
         )),
         "Circular dependencies" => Some((

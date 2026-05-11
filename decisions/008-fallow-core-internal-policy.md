@@ -19,8 +19,8 @@ This ADR records the policy now so the #322 follow-ups (and any future refactor)
 
 External embedders consume the curated programmatic surface at `fallow_cli::programmatic`:
 
-- `detect_dead_code`, `detect_circular_dependencies`, `detect_boundary_violations`, `detect_duplication`, `compute_complexity`, `compute_health` (the user-facing one-shot analyses)
-- `ProgrammaticError { message, exit_code, code, help, context }` and `ProgrammaticResult<T>` (structured errors preserving the CLI's exit-code ladder: 0 ok, 2 generic, 7 network, ...)
+- `detect_dead_code`, `detect_circular_dependencies`, `detect_boundary_violations`, `detect_duplication`, `compute_complexity`, `compute_health` (the user-facing one-shot analyses; each returns `Result<serde_json::Value, ProgrammaticError>`)
+- `ProgrammaticError { message, exit_code, code, help, context }` (structured errors preserving the CLI's exit-code ladder: 0 ok, 2 generic, 7 network, ...). The internal `type ProgrammaticResult<T> = Result<T, ProgrammaticError>` alias is private; external callers spell out the `Result<T, ProgrammaticError>` shape directly.
 - `AnalysisOptions`, `DeadCodeOptions`, `DuplicationOptions`, `ComplexityOptions` (the input option structs)
 
 Each function in `fallow_cli::programmatic` returns a `serde_json::Value` whose shape matches the CLI's `--format json` contract (`schema_version`, `summary`, relative paths, injected `actions`, optional `_meta` under `--explain`). The same crate is what the napi bindings (`crates/napi`) re-export to Node consumers, so the embedder API is also the API agents already integrate against via `@fallow-rs/napi`.
