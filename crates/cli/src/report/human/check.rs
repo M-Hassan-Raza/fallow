@@ -15,7 +15,7 @@ use super::{
     print_explain_tip_if_tty, push_section_footer_rollup, push_section_footer_with_count,
 };
 use crate::report::grouping::OwnershipResolver;
-use crate::report::json::NAMESPACE_BARREL_HINT;
+use crate::report::shared::NAMESPACE_BARREL_HINT;
 use crate::report::{
     Level, elide_common_prefix, plural, relative_path, severity_to_level, split_dir_filename,
 };

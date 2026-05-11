@@ -8,6 +8,7 @@ mod human;
 mod json;
 mod markdown;
 mod sarif;
+mod shared;
 #[cfg(test)]
 pub mod test_helpers;
 

@@ -6,26 +6,10 @@ use std::time::Duration;
 use fallow_core::duplicates::DuplicationReport;
 use fallow_core::results::AnalysisResults;
 
+use super::shared::NAMESPACE_BARREL_HINT;
 use super::{emit_json, normalize_uri};
 use crate::explain;
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
-
-/// Namespace-barrel orientation hint shared between the JSON `remove-duplicate`
-/// action note and the human `Duplicate exports` section.
-///
-/// Centralising the string here prevents drift between the two output paths.
-/// The JSON note fires unconditionally on every duplicate-export finding; the
-/// human path emits the same text once per section, gated on a high match ratio
-/// so it stays useful in shadcn / Radix-clone projects and quiet otherwise. The
-/// wording deliberately avoids naming a specific JSON action so the same string
-/// reads naturally in human output too; AI agents discover the
-/// `add-to-config` action via the position-0 entry in `actions[]`, not via
-/// this note.
-#[expect(
-    clippy::redundant_pub_crate,
-    reason = "pub-in-private-module: read from sibling submodules within report/ via crate::report::json::NAMESPACE_BARREL_HINT; the json module itself is intentionally private."
-)]
-pub(crate) const NAMESPACE_BARREL_HINT: &str = "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer adding these files to `ignoreExports` over removing exports.";
 
 pub(super) fn print_json(
     results: &AnalysisResults,
