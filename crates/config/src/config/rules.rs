@@ -93,7 +93,7 @@ pub struct RulesConfig {
     pub test_only_dependencies: Severity,
     #[serde(default, alias = "circular-dependency")]
     pub circular_dependencies: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "boundary-violations")]
     pub boundary_violation: Severity,
     #[serde(default)]
     pub coverage_gaps: Severity,
@@ -230,7 +230,11 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub circular_dependencies: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "boundary-violations",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub boundary_violation: Option<Severity>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub coverage_gaps: Option<Severity>,
@@ -290,6 +294,18 @@ mod tests {
         }"#;
         let rules: RulesConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(rules.circular_dependencies, Severity::Off);
+    }
+
+    #[test]
+    fn rules_deserialize_boundary_violations_alias() {
+        let json_str = r#"{
+            "boundary-violations": "off"
+        }"#;
+        let rules: RulesConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(rules.boundary_violation, Severity::Off);
+
+        let partial: PartialRulesConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(partial.boundary_violation, Some(Severity::Off));
     }
 
     #[test]
