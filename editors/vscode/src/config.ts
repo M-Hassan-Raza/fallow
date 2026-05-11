@@ -11,7 +11,7 @@ const getConfig = (): vscode.WorkspaceConfiguration =>
 
 export const getLspPath = (): string => getConfig().get<string>("lspPath", "");
 
-export const getConfigPath = (): string =>
+const getConfigPath = (): string =>
   getConfig().get<string>("configPath", "").trim();
 
 export const getResolvedConfigPath = (): string => {

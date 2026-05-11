@@ -132,7 +132,7 @@ export const diagnosticCode = (d: vscode.Diagnostic): string | null => {
   return null;
 };
 
-export interface DiagnosticFilterStateChange {
+interface DiagnosticFilterStateChange {
   readonly mutedAll: boolean;
   readonly mutedCategories: ReadonlySet<string>;
 }
