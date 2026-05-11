@@ -23,7 +23,7 @@ Always preview with `--dry-run` before applying. This is a destructive operation
 
 ## Don't Create Config Unless Needed
 
-Fallow works with zero configuration for most projects thanks to 90 auto-detecting framework plugins. Creating an unnecessary config file can mask issues or override detection behavior.
+Fallow works with zero configuration for most projects thanks to 94 auto-detecting framework plugins. Creating an unnecessary config file can mask issues or override detection behavior.
 
 ```bash
 # WRONG: creating config for a standard Next.js project
@@ -426,6 +426,26 @@ export const Layout = () => (
 ```
 
 Fallow marks `static/style.css` and `static/app.js` as reachable. Root-relative paths (starting with `/`) resolve from the source file's parent directory first, then the project root, matching how Vite/Parcel/Hono serve static assets. Only `StringLiteral` attribute values are captured: expression containers (`href={someVar}`) and capitalized React-style components (`<Script>`, `<Link>`) are intentionally ignored because they have component-specific semantics.
+
+---
+
+## GraphQL `#import` Documents Are Tracked
+
+GraphQL `.graphql` and `.gql` files can keep nearby fragment documents reachable with relative `#import` comments. Fallow tracks `./` and `../` specifiers, including extensionless imports that resolve through `.graphql` and `.gql`; package-style specifiers are ignored.
+
+```graphql
+# src/query.graphql
+
+#import "./fragments/user-fields"
+
+query CurrentUser {
+  currentUser {
+    ...UserFields
+  }
+}
+```
+
+Fallow marks `src/fragments/user-fields.graphql` or `src/fragments/user-fields.gql` as reachable when either file exists. A typo in the relative path is reported as an unresolved import instead of silently dropping the edge.
 
 ---
 
