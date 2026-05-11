@@ -149,6 +149,7 @@
             "unused-files": true,
             "unused-exports": true,
             "unused-types": true,
+            "private-type-leaks": true,
             "unused-dependencies": true,
             "unused-dev-dependencies": true,
             "unused-optional-dependencies": true,
@@ -158,7 +159,10 @@
             "unlisted-dependencies": true,
             "duplicate-exports": true,
             "type-only-dependencies": true,
-            "circular-dependencies": true
+            "test-only-dependencies": true,
+            "circular-dependencies": true,
+            "boundary-violation": true,
+            "stale-suppressions": true
           },
           "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
@@ -169,6 +173,9 @@
               "type": "boolean"
             },
             "unused-types": {
+              "type": "boolean"
+            },
+            "private-type-leaks": {
               "type": "boolean"
             },
             "unused-dependencies": {
@@ -198,7 +205,16 @@
             "type-only-dependencies": {
               "type": "boolean"
             },
+            "test-only-dependencies": {
+              "type": "boolean"
+            },
             "circular-dependencies": {
+              "type": "boolean"
+            },
+            "boundary-violation": {
+              "type": "boolean"
+            },
+            "stale-suppressions": {
               "type": "boolean"
             }
           }

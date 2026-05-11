@@ -13,6 +13,7 @@ import {
   getChangedSince,
   getResolvedConfigPath,
 } from "./config.js";
+import { countCheckIssues } from "./analysis-utils.js";
 import { findBinaryInPath, findLocalBinary, getExecutableExtension } from "./binary-utils.js";
 import { getInstalledCliPath } from "./download.js";
 import {
@@ -112,10 +113,12 @@ const execFallow = (
 /** Filter check results based on the user's issueTypes configuration. */
 const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
   const types = getIssueTypes();
-  return {
+  const filtered: FallowCheckResult = {
+    ...result,
     unused_files: types["unused-files"] ? result.unused_files : [],
     unused_exports: types["unused-exports"] ? result.unused_exports : [],
     unused_types: types["unused-types"] ? result.unused_types : [],
+    private_type_leaks: types["private-type-leaks"] ? result.private_type_leaks : [],
     unused_dependencies: types["unused-dependencies"] ? result.unused_dependencies : [],
     unused_dev_dependencies: types["unused-dev-dependencies"] ? result.unused_dev_dependencies : [],
     unused_optional_dependencies: types["unused-optional-dependencies"] ? result.unused_optional_dependencies : [],
@@ -125,7 +128,37 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     unlisted_dependencies: types["unlisted-dependencies"] ? result.unlisted_dependencies : [],
     duplicate_exports: types["duplicate-exports"] ? result.duplicate_exports : [],
     type_only_dependencies: types["type-only-dependencies"] ? result.type_only_dependencies : [],
+    test_only_dependencies: types["test-only-dependencies"] ? result.test_only_dependencies : [],
     circular_dependencies: types["circular-dependencies"] ? result.circular_dependencies : [],
+    boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
+    stale_suppressions: types["stale-suppressions"] ? result.stale_suppressions : [],
+  };
+  const totalIssues = countCheckIssues(filtered);
+  const summary = {
+    total_issues: totalIssues,
+    unused_files: filtered.unused_files.length,
+    unused_exports: filtered.unused_exports.length,
+    unused_types: filtered.unused_types.length,
+    private_type_leaks: filtered.private_type_leaks?.length ?? 0,
+    unused_dependencies:
+      filtered.unused_dependencies.length +
+      filtered.unused_dev_dependencies.length +
+      (filtered.unused_optional_dependencies?.length ?? 0),
+    unused_enum_members: filtered.unused_enum_members.length,
+    unused_class_members: filtered.unused_class_members.length,
+    unresolved_imports: filtered.unresolved_imports.length,
+    unlisted_dependencies: filtered.unlisted_dependencies.length,
+    duplicate_exports: filtered.duplicate_exports.length,
+    type_only_dependencies: filtered.type_only_dependencies?.length ?? 0,
+    test_only_dependencies: filtered.test_only_dependencies?.length ?? 0,
+    circular_dependencies: filtered.circular_dependencies?.length ?? 0,
+    boundary_violations: filtered.boundary_violations?.length ?? 0,
+    stale_suppressions: filtered.stale_suppressions?.length ?? 0,
+  };
+  return {
+    ...filtered,
+    total_issues: totalIssues,
+    summary,
   };
 };
 

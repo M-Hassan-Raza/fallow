@@ -52,7 +52,10 @@ struct AnalysisCompleteParams {
     unlisted_dependencies: usize,
     duplicate_exports: usize,
     type_only_dependencies: usize,
+    test_only_dependencies: usize,
     circular_dependencies: usize,
+    boundary_violations: usize,
+    stale_suppressions: usize,
     duplication_percentage: f64,
     clone_groups: usize,
 }
@@ -823,7 +826,10 @@ impl FallowLspServer {
                         unlisted_dependencies: results.unlisted_dependencies.len(),
                         duplicate_exports: results.duplicate_exports.len(),
                         type_only_dependencies: results.type_only_dependencies.len(),
+                        test_only_dependencies: results.test_only_dependencies.len(),
                         circular_dependencies: results.circular_dependencies.len(),
+                        boundary_violations: results.boundary_violations.len(),
+                        stale_suppressions: results.stale_suppressions.len(),
                         duplication_percentage: duplication.stats.duplication_percentage,
                         clone_groups: duplication.stats.clone_groups,
                     })

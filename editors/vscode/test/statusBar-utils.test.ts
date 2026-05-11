@@ -13,11 +13,12 @@ import type { FallowCheckResult, FallowDupesResult } from "../src/types.js";
 
 const baseParams = (
   overrides: Partial<AnalysisCompleteParams> = {}
-): AnalysisCompleteParams => ({
+): AnalysisCompleteParams => Object.assign({
   totalIssues: 0,
   unusedFiles: 0,
   unusedExports: 0,
   unusedTypes: 0,
+  privateTypeLeaks: 0,
   unusedDependencies: 0,
   unusedDevDependencies: 0,
   unusedOptionalDependencies: 0,
@@ -27,11 +28,13 @@ const baseParams = (
   unlistedDependencies: 0,
   duplicateExports: 0,
   typeOnlyDependencies: 0,
+  testOnlyDependencies: 0,
   circularDependencies: 0,
+  boundaryViolations: 0,
+  staleSuppressions: 0,
   duplicationPercentage: 0,
   cloneGroups: 0,
-  ...overrides,
-});
+}, overrides);
 
 describe("getDuplicationPercentage", () => {
   it("clamps non-finite values to zero", () => {
@@ -187,6 +190,7 @@ describe("buildParamsFromCli", () => {
     unused_files: [],
     unused_exports: [],
     unused_types: [],
+    private_type_leaks: [],
     unused_dependencies: [],
     unused_dev_dependencies: [],
     unused_optional_dependencies: [],
@@ -196,7 +200,10 @@ describe("buildParamsFromCli", () => {
     unlisted_dependencies: [],
     duplicate_exports: [],
     type_only_dependencies: [],
+    test_only_dependencies: [],
     circular_dependencies: [],
+    boundary_violations: [],
+    stale_suppressions: [],
   });
 
   it("returns zero counts when both inputs are null", () => {
@@ -209,10 +216,28 @@ describe("buildParamsFromCli", () => {
   it("counts issue categories from the check result", () => {
     const check: FallowCheckResult = {
       ...emptyCheck(),
-      unused_files: [{ path: "a.ts" }],
+      unused_files: [{ path: "a.ts", actions: [] }],
       unused_exports: [
-        { path: "b.ts", export_name: "x", line: 1, col: 0 },
-        { path: "c.ts", export_name: "y", line: 1, col: 0 },
+        {
+          path: "b.ts",
+          export_name: "x",
+          is_type_only: false,
+          line: 1,
+          col: 0,
+          span_start: 0,
+          is_re_export: false,
+          actions: [],
+        },
+        {
+          path: "c.ts",
+          export_name: "y",
+          is_type_only: false,
+          line: 1,
+          col: 0,
+          span_start: 0,
+          is_re_export: false,
+          actions: [],
+        },
       ],
       unused_optional_dependencies: [
         {
@@ -220,10 +245,54 @@ describe("buildParamsFromCli", () => {
           package_name: "fsevents",
           location: "optionalDependencies",
           line: 1,
+          actions: [],
         },
       ],
       unresolved_imports: [
-        { path: "d.ts", specifier: "./missing", line: 1, col: 0 },
+        { path: "d.ts", specifier: "./missing", line: 1, col: 0, actions: [] },
+      ],
+      private_type_leaks: [
+        {
+          path: "api.ts",
+          export_name: "makeWidget",
+          type_name: "WidgetState",
+          line: 2,
+          col: 9,
+          span_start: 12,
+          actions: [],
+        },
+      ],
+      test_only_dependencies: [
+        {
+          path: "package.json",
+          package_name: "vitest",
+          line: 2,
+          actions: [],
+        },
+      ],
+      boundary_violations: [
+        {
+          from_path: "ui/button.ts",
+          to_path: "db/client.ts",
+          from_zone: "ui",
+          to_zone: "data",
+          import_specifier: "../db/client",
+          line: 3,
+          col: 0,
+          actions: [],
+        },
+      ],
+      stale_suppressions: [
+        {
+          path: "src/index.ts",
+          line: 4,
+          col: 0,
+          origin: {
+            type: "comment",
+            issue_kind: "unused-export",
+            is_file_level: false,
+          },
+        },
       ],
     };
 
@@ -231,8 +300,12 @@ describe("buildParamsFromCli", () => {
     expect(params.unusedFiles).toBe(1);
     expect(params.unusedExports).toBe(2);
     expect(params.unusedOptionalDependencies).toBe(1);
+    expect(params.privateTypeLeaks).toBe(1);
+    expect(params.testOnlyDependencies).toBe(1);
+    expect(params.boundaryViolations).toBe(1);
+    expect(params.staleSuppressions).toBe(1);
     expect(params.unresolvedImports).toBe(1);
-    expect(params.totalIssues).toBe(5);
+    expect(params.totalIssues).toBe(9);
     expect(params.duplicationPercentage).toBe(0);
   });
 
@@ -266,10 +339,19 @@ describe("buildParamsFromCli", () => {
       .circular_dependencies;
     delete (check as { unused_optional_dependencies?: unknown })
       .unused_optional_dependencies;
+    delete (check as { private_type_leaks?: unknown }).private_type_leaks;
+    delete (check as { test_only_dependencies?: unknown })
+      .test_only_dependencies;
+    delete (check as { boundary_violations?: unknown }).boundary_violations;
+    delete (check as { stale_suppressions?: unknown }).stale_suppressions;
 
     const params = buildParamsFromCli(check, null);
     expect(params.unusedOptionalDependencies).toBe(0);
+    expect(params.privateTypeLeaks).toBe(0);
     expect(params.typeOnlyDependencies).toBe(0);
+    expect(params.testOnlyDependencies).toBe(0);
     expect(params.circularDependencies).toBe(0);
+    expect(params.boundaryViolations).toBe(0);
+    expect(params.staleSuppressions).toBe(0);
   });
 });

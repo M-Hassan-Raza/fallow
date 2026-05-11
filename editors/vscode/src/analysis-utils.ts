@@ -9,6 +9,7 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     result.unused_files.length +
     result.unused_exports.length +
     result.unused_types.length +
+    (result.private_type_leaks?.length ?? 0) +
     result.unused_dependencies.length +
     result.unused_dev_dependencies.length +
     (result.unused_optional_dependencies?.length ?? 0) +
@@ -18,6 +19,9 @@ export const countCheckIssues = (result: FallowCheckResult | null): number => {
     result.unlisted_dependencies.length +
     result.duplicate_exports.length +
     (result.type_only_dependencies?.length ?? 0) +
-    (result.circular_dependencies?.length ?? 0)
+    (result.test_only_dependencies?.length ?? 0) +
+    (result.circular_dependencies?.length ?? 0) +
+    (result.boundary_violations?.length ?? 0) +
+    (result.stale_suppressions?.length ?? 0)
   );
 };

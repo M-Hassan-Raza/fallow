@@ -22,6 +22,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-files": "file-code",
   "unused-exports": "symbol-method",
   "unused-types": "symbol-interface",
+  "private-type-leaks": "symbol-interface",
   "unused-dependencies": "package",
   "unused-dev-dependencies": "package",
   "unused-optional-dependencies": "package",
@@ -31,7 +32,10 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unlisted-dependencies": "package",
   "duplicate-exports": "files",
   "type-only-dependencies": "symbol-interface",
+  "test-only-dependencies": "beaker",
   "circular-dependencies": "sync",
+  "boundary-violation": "symbol-namespace",
+  "stale-suppressions": "trash",
 };
 
 /** Icons for individual issue items. */
@@ -39,6 +43,7 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "unused-files": "file",
   "unused-exports": "symbol-method",
   "unused-types": "symbol-interface",
+  "private-type-leaks": "symbol-interface",
   "unused-dependencies": "package",
   "unused-dev-dependencies": "package",
   "unused-optional-dependencies": "package",
@@ -48,7 +53,24 @@ const ISSUE_ICONS: Record<IssueCategory, string> = {
   "unlisted-dependencies": "package",
   "duplicate-exports": "copy",
   "type-only-dependencies": "package",
+  "test-only-dependencies": "beaker",
   "circular-dependencies": "sync",
+  "boundary-violation": "symbol-namespace",
+  "stale-suppressions": "trash",
+};
+
+const staleSuppressionLabel = (
+  origin: NonNullable<FallowCheckResult["stale_suppressions"]>[number]["origin"]
+): string => {
+  if (origin.type === "jsdoc_tag") {
+    return `@expected-unused ${origin.export_name}`;
+  }
+  if (origin.issue_kind) {
+    return origin.is_file_level
+      ? `file ${origin.issue_kind}`
+      : origin.issue_kind;
+  }
+  return origin.is_file_level ? "file suppression" : "line suppression";
 };
 
 type DeadCodeItem = CategoryItem | IssueItem;
@@ -188,16 +210,30 @@ export class DeadCodeTreeProvider
     );
 
     addCategory(
+      "private-type-leaks",
+      (this.result.private_type_leaks ?? []).map(
+        (l) =>
+          new IssueItem(
+            `${l.export_name} -> ${l.type_name}`,
+            l.path,
+            l.line,
+            l.col,
+            "private-type-leaks"
+          )
+      )
+    );
+
+    addCategory(
       "unused-dependencies",
       this.result.unused_dependencies.map(
-        (d) => new IssueItem(d.package_name, d.path, 1, 0, "unused-dependencies")
+        (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-dependencies")
       )
     );
 
     addCategory(
       "unused-dev-dependencies",
       this.result.unused_dev_dependencies.map(
-        (d) => new IssueItem(d.package_name, d.path, 1, 0, "unused-dev-dependencies")
+        (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-dev-dependencies")
       )
     );
 
@@ -205,7 +241,7 @@ export class DeadCodeTreeProvider
       addCategory(
         "unused-optional-dependencies",
         this.result.unused_optional_dependencies.map(
-          (d) => new IssueItem(d.package_name, d.path, 1, 0, "unused-optional-dependencies")
+          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "unused-optional-dependencies")
         )
       );
     }
@@ -255,7 +291,16 @@ export class DeadCodeTreeProvider
       addCategory(
         "type-only-dependencies",
         this.result.type_only_dependencies.map(
-          (d) => new IssueItem(d.package_name, d.path, 1, 0, "type-only-dependencies")
+          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "type-only-dependencies")
+        )
+      );
+    }
+
+    if (this.result.test_only_dependencies) {
+      addCategory(
+        "test-only-dependencies",
+        this.result.test_only_dependencies.map(
+          (d) => new IssueItem(d.package_name, d.path, d.line, 0, "test-only-dependencies")
         )
       );
     }
@@ -267,10 +312,42 @@ export class DeadCodeTreeProvider
           (c) => new IssueItem(
             `${c.length} files`,
             c.files[0] ?? "",
-            1,
-            0,
+            c.line,
+            c.col,
             "circular-dependencies"
           )
+        )
+      );
+    }
+
+    if (this.result.boundary_violations) {
+      addCategory(
+        "boundary-violation",
+        this.result.boundary_violations.map(
+          (v) =>
+            new IssueItem(
+              `${v.from_zone} -> ${v.to_zone}`,
+              v.from_path,
+              v.line,
+              v.col,
+              "boundary-violation"
+            )
+        )
+      );
+    }
+
+    if (this.result.stale_suppressions) {
+      addCategory(
+        "stale-suppressions",
+        this.result.stale_suppressions.map(
+          (s) =>
+            new IssueItem(
+              staleSuppressionLabel(s.origin),
+              s.path,
+              s.line,
+              s.col,
+              "stale-suppressions"
+            )
         )
       );
     }

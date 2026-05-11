@@ -6,6 +6,7 @@ export interface AnalysisCompleteParams {
   unusedFiles: number;
   unusedExports: number;
   unusedTypes: number;
+  privateTypeLeaks: number;
   unusedDependencies: number;
   unusedDevDependencies: number;
   unusedOptionalDependencies: number;
@@ -15,7 +16,10 @@ export interface AnalysisCompleteParams {
   unlistedDependencies: number;
   duplicateExports: number;
   typeOnlyDependencies: number;
+  testOnlyDependencies: number;
   circularDependencies: number;
+  boundaryViolations: number;
+  staleSuppressions: number;
   duplicationPercentage: number;
   cloneGroups: number;
 }
@@ -33,6 +37,7 @@ export const buildParamsFromCli = (
   unusedFiles: check?.unused_files.length ?? 0,
   unusedExports: check?.unused_exports.length ?? 0,
   unusedTypes: check?.unused_types.length ?? 0,
+  privateTypeLeaks: check?.private_type_leaks?.length ?? 0,
   unusedDependencies: check?.unused_dependencies.length ?? 0,
   unusedDevDependencies: check?.unused_dev_dependencies.length ?? 0,
   unusedOptionalDependencies: check?.unused_optional_dependencies?.length ?? 0,
@@ -42,7 +47,10 @@ export const buildParamsFromCli = (
   unlistedDependencies: check?.unlisted_dependencies.length ?? 0,
   duplicateExports: check?.duplicate_exports.length ?? 0,
   typeOnlyDependencies: check?.type_only_dependencies?.length ?? 0,
+  testOnlyDependencies: check?.test_only_dependencies?.length ?? 0,
   circularDependencies: check?.circular_dependencies?.length ?? 0,
+  boundaryViolations: check?.boundary_violations?.length ?? 0,
+  staleSuppressions: check?.stale_suppressions?.length ?? 0,
   duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
   cloneGroups: dupes?.stats.clone_groups ?? 0,
 });
@@ -66,6 +74,11 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
   { count: "unusedFiles", icon: "$(warning)", label: "unused files" },
   { count: "unusedExports", icon: "$(warning)", label: "unused exports" },
   { count: "unusedTypes", icon: "$(info)", label: "unused types" },
+  {
+    count: "privateTypeLeaks",
+    icon: "$(warning)",
+    label: "private type leaks",
+  },
   {
     count: "unusedDependencies",
     icon: "$(warning)",
@@ -107,9 +120,24 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
     label: "type-only dependencies",
   },
   {
+    count: "testOnlyDependencies",
+    icon: "$(info)",
+    label: "test-only dependencies",
+  },
+  {
     count: "circularDependencies",
     icon: "$(warning)",
     label: "circular dependencies",
+  },
+  {
+    count: "boundaryViolations",
+    icon: "$(warning)",
+    label: "boundary violations",
+  },
+  {
+    count: "staleSuppressions",
+    icon: "$(info)",
+    label: "stale suppressions",
   },
 ];
 

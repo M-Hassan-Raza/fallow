@@ -32,6 +32,7 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "unused-files": true,
     "unused-exports": true,
     "unused-types": true,
+    "private-type-leaks": true,
     "unused-dependencies": true,
     "unused-dev-dependencies": true,
     "unused-optional-dependencies": true,
@@ -41,7 +42,10 @@ export const getIssueTypes = (): IssueTypeConfig =>
     "unlisted-dependencies": true,
     "duplicate-exports": true,
     "type-only-dependencies": true,
+    "test-only-dependencies": true,
     "circular-dependencies": true,
+    "boundary-violation": true,
+    "stale-suppressions": true,
   });
 
 export const getDuplicationThreshold = (): number =>
