@@ -17,6 +17,7 @@ use super::token_types::{
 /// AST visitor that extracts a flat sequence of normalized tokens.
 pub(super) struct TokenExtractor {
     pub(super) tokens: Vec<SourceToken>,
+    pub(super) atomic_invocation_spans: Vec<Span>,
     /// When true, skip TypeScript type annotations, interfaces, and type aliases
     /// to enable cross-language clone detection between .ts and .js files.
     strip_types: bool,
@@ -29,6 +30,7 @@ impl TokenExtractor {
     pub(super) const fn new(strip_types: bool, skip_imports: bool) -> Self {
         Self {
             tokens: Vec::new(),
+            atomic_invocation_spans: Vec::new(),
             strip_types,
             skip_imports,
         }
@@ -49,6 +51,54 @@ impl TokenExtractor {
     fn push_punc(&mut self, p: PunctuationType, span: Span) {
         self.push(TokenKind::Punctuation(p), span);
     }
+
+    fn push_atomic_invocation_span(&mut self, span: Span) {
+        self.atomic_invocation_spans.push(span);
+    }
+}
+
+fn is_atomic_invocation_expr(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::CallExpression(expr) => is_atomic_call_expression(expr),
+        Expression::NewExpression(expr) => is_atomic_new_expression(expr),
+        Expression::AwaitExpression(expr) => is_atomic_invocation_expr(&expr.argument),
+        Expression::ParenthesizedExpression(expr) => is_atomic_invocation_expr(&expr.expression),
+        Expression::TSAsExpression(expr) => is_atomic_invocation_expr(&expr.expression),
+        Expression::TSSatisfiesExpression(expr) => is_atomic_invocation_expr(&expr.expression),
+        Expression::TSNonNullExpression(expr) => is_atomic_invocation_expr(&expr.expression),
+        Expression::ChainExpression(expr) => match &expr.expression {
+            ChainElement::CallExpression(call) => is_atomic_call_expression(call),
+            _ => false,
+        },
+        _ => false,
+    }
+}
+
+fn is_atomic_call_expression(expr: &CallExpression<'_>) -> bool {
+    !expr.arguments.iter().any(argument_is_function_like)
+}
+
+fn is_atomic_new_expression(expr: &NewExpression<'_>) -> bool {
+    !expr.arguments.iter().any(argument_is_function_like)
+}
+
+fn argument_is_function_like(arg: &Argument<'_>) -> bool {
+    match arg {
+        Argument::ArrowFunctionExpression(_) | Argument::FunctionExpression(_) => true,
+        Argument::ParenthesizedExpression(expr) => expression_is_function_like(&expr.expression),
+        _ => false,
+    }
+}
+
+fn expression_is_function_like(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::ArrowFunctionExpression(_) | Expression::FunctionExpression(_) => true,
+        Expression::ParenthesizedExpression(expr) => expression_is_function_like(&expr.expression),
+        Expression::TSAsExpression(expr) => expression_is_function_like(&expr.expression),
+        Expression::TSSatisfiesExpression(expr) => expression_is_function_like(&expr.expression),
+        Expression::TSNonNullExpression(expr) => expression_is_function_like(&expr.expression),
+        _ => false,
+    }
 }
 
 impl<'a> Visit<'a> for TokenExtractor {
@@ -68,6 +118,11 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_return_statement(&mut self, stmt: &ReturnStatement<'a>) {
+        if let Some(argument) = &stmt.argument
+            && is_atomic_invocation_expr(argument)
+        {
+            self.push_atomic_invocation_span(stmt.span);
+        }
         self.push_keyword(KeywordType::Return, stmt.span);
         walk::walk_return_statement(self, stmt);
     }
@@ -229,6 +284,9 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_call_expression(&mut self, expr: &CallExpression<'a>) {
+        if is_atomic_call_expression(expr) {
+            self.push_atomic_invocation_span(expr.span);
+        }
         self.visit_expression(&expr.callee);
         // Use point spans for synthetic punctuation to avoid inflating clone
         // ranges when call expressions are chained (expr.span covers the
@@ -245,6 +303,9 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_new_expression(&mut self, expr: &NewExpression<'a>) {
+        if is_atomic_new_expression(expr) {
+            self.push_atomic_invocation_span(expr.span);
+        }
         self.push_keyword(KeywordType::New, expr.span);
         self.visit_expression(&expr.callee);
         let open = point_span(expr.callee.span().end);
@@ -678,6 +739,9 @@ impl<'a> Visit<'a> for TokenExtractor {
     }
 
     fn visit_expression_statement(&mut self, stmt: &ExpressionStatement<'a>) {
+        if is_atomic_invocation_expr(&stmt.expression) {
+            self.push_atomic_invocation_span(stmt.span);
+        }
         walk::walk_expression_statement(self, stmt);
         self.push_punc(PunctuationType::Semicolon, stmt.span);
     }

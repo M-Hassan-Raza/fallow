@@ -219,7 +219,7 @@ fallow dead-code --group-by section       # Group by GitLab CODEOWNERS section
 
 ## Duplication
 
-Finds copy-pasted code blocks across your codebase. Suffix-array algorithm -- no quadratic pairwise comparison.
+Finds copy-pasted code blocks across your codebase. Suffix-array algorithm -- no quadratic pairwise comparison. Repeated atomic function calls are filtered by default, so long calls to an existing shared abstraction do not show up as refactoring work.
 
 ```bash
 fallow dupes                              # Default (mild mode)

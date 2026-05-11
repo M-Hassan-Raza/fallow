@@ -18,6 +18,7 @@ mod tests;
 
 use std::path::PathBuf;
 
+use oxc_span::Span;
 use rustc_hash::FxHashSet;
 
 use super::normalize::HashedToken;
@@ -29,6 +30,7 @@ struct FileData {
     path: PathBuf,
     hashed_tokens: Vec<HashedToken>,
     file_tokens: FileTokens,
+    atomic_invocation_spans: Vec<Span>,
 }
 
 /// Suffix Array + LCP based clone detection engine.
@@ -95,6 +97,7 @@ impl CloneDetector {
         let files: Vec<FileData> = file_data
             .into_iter()
             .map(|(path, hashed_tokens, file_tokens)| FileData {
+                atomic_invocation_spans: file_tokens.atomic_invocation_spans.clone(),
                 path,
                 hashed_tokens,
                 file_tokens,

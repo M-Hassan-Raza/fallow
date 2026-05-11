@@ -163,6 +163,10 @@ pub enum PunctuationType {
 pub struct FileTokens {
     /// The extracted token sequence.
     pub tokens: Vec<SourceToken>,
+    /// Source spans for invocation-shaped expressions that should not be
+    /// reported as actionable duplicate code when the whole clone fits inside
+    /// one of these spans.
+    pub atomic_invocation_spans: Vec<Span>,
     /// Source text (needed for extracting fragments).
     pub source: String,
     /// Total number of lines in the source.

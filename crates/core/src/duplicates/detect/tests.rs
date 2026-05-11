@@ -34,6 +34,7 @@ fn make_source_tokens(count: usize) -> Vec<SourceToken> {
 fn make_file_tokens(source: &str, count: usize) -> FileTokens {
     FileTokens {
         tokens: make_source_tokens(count),
+        atomic_invocation_spans: Vec::new(),
         source: source.to_string(),
         line_count: source.lines().count().max(1),
     }
@@ -269,11 +270,13 @@ fn rank_reduction_maps_correctly() {
             path: PathBuf::from("a.ts"),
             hashed_tokens: make_hashed_tokens(&[100, 200, 300]),
             file_tokens: make_file_tokens("a b c", 3),
+            atomic_invocation_spans: Vec::new(),
         },
         FileData {
             path: PathBuf::from("b.ts"),
             hashed_tokens: make_hashed_tokens(&[200, 300, 400]),
             file_tokens: make_file_tokens("d e f", 3),
+            atomic_invocation_spans: Vec::new(),
         },
     ];
 
@@ -752,6 +755,7 @@ fn make_file_data(path: &str, source: &str, num_tokens: usize) -> FileData {
         path: PathBuf::from(path),
         hashed_tokens: make_hashed_tokens(&(0..num_tokens as u64).collect::<Vec<_>>()),
         file_tokens: make_file_tokens(source, num_tokens),
+        atomic_invocation_spans: Vec::new(),
     }
 }
 
@@ -856,6 +860,7 @@ fn extraction_removes_overlapping_same_file() {
         path: PathBuf::from("a.ts"),
         hashed_tokens: hashed,
         file_tokens: make_file_tokens("aa\nbb\ncc\ndd\nee", 5),
+        atomic_invocation_spans: Vec::new(),
     };
     let files = vec![file];
     let ranked = ranking::rank_reduce(&files);
@@ -927,6 +932,7 @@ fn rank_reduce_single_empty_file() {
         path: PathBuf::from("a.ts"),
         hashed_tokens: vec![],
         file_tokens: make_file_tokens("", 0),
+        atomic_invocation_spans: Vec::new(),
     }];
     let ranked = ranking::rank_reduce(&files);
     assert_eq!(ranked.len(), 1);
@@ -939,6 +945,7 @@ fn rank_reduce_all_same_hash() {
         path: PathBuf::from("a.ts"),
         hashed_tokens: make_hashed_tokens(&[42, 42, 42]),
         file_tokens: make_file_tokens("a b c", 3),
+        atomic_invocation_spans: Vec::new(),
     }];
     let ranked = ranking::rank_reduce(&files);
     // All same hash -> all same rank.
@@ -954,11 +961,13 @@ fn rank_reduce_preserves_equality() {
             path: PathBuf::from("a.ts"),
             hashed_tokens: make_hashed_tokens(&[10, 20, 30]),
             file_tokens: make_file_tokens("a b c", 3),
+            atomic_invocation_spans: Vec::new(),
         },
         FileData {
             path: PathBuf::from("b.ts"),
             hashed_tokens: make_hashed_tokens(&[30, 20, 10]),
             file_tokens: make_file_tokens("d e f", 3),
+            atomic_invocation_spans: Vec::new(),
         },
     ];
     let ranked = ranking::rank_reduce(&files);
@@ -977,6 +986,7 @@ fn rank_reduce_distinct_hashes_get_distinct_ranks() {
         path: PathBuf::from("a.ts"),
         hashed_tokens: make_hashed_tokens(&[100, 200, 300, 400]),
         file_tokens: make_file_tokens("a b c d", 4),
+        atomic_invocation_spans: Vec::new(),
     }];
     let ranked = ranking::rank_reduce(&files);
 
@@ -1261,11 +1271,13 @@ fn pipeline_rank_concat_sa_lcp_roundtrip() {
             path: PathBuf::from("a.ts"),
             hashed_tokens: make_hashed_tokens(&[10, 20, 30, 40]),
             file_tokens: make_file_tokens("a\nb\nc\nd", 4),
+            atomic_invocation_spans: Vec::new(),
         },
         FileData {
             path: PathBuf::from("b.ts"),
             hashed_tokens: make_hashed_tokens(&[10, 20, 30, 50]),
             file_tokens: make_file_tokens("e\nf\ng\nh", 4),
+            atomic_invocation_spans: Vec::new(),
         },
     ];
 
@@ -1304,11 +1316,13 @@ fn pipeline_no_false_positives_with_different_files() {
             path: PathBuf::from("a.ts"),
             hashed_tokens: make_hashed_tokens(&[1, 2, 3, 4, 5]),
             file_tokens: make_file_tokens("a\nb\nc\nd\ne", 5),
+            atomic_invocation_spans: Vec::new(),
         },
         FileData {
             path: PathBuf::from("b.ts"),
             hashed_tokens: make_hashed_tokens(&[6, 7, 8, 9, 10]),
             file_tokens: make_file_tokens("f\ng\nh\ni\nj", 5),
+            atomic_invocation_spans: Vec::new(),
         },
     ];
 

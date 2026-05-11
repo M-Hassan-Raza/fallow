@@ -53,6 +53,7 @@ fn make_file_tokens_for(count: usize) -> FileTokens {
     let line_count = source.lines().count().max(1);
     FileTokens {
         tokens: make_source_tokens(count),
+        atomic_invocation_spans: Vec::new(),
         source,
         line_count,
     }
@@ -479,6 +480,7 @@ fn empty_files_mixed_with_normal_files_do_not_crash() {
             make_hashed_tokens(&[]),
             FileTokens {
                 tokens: vec![],
+                atomic_invocation_spans: Vec::new(),
                 source: String::new(),
                 line_count: 0,
             },
@@ -495,6 +497,7 @@ fn empty_files_mixed_with_normal_files_do_not_crash() {
             make_hashed_tokens(&[]),
             FileTokens {
                 tokens: vec![],
+                atomic_invocation_spans: Vec::new(),
                 source: String::new(),
                 line_count: 0,
             },

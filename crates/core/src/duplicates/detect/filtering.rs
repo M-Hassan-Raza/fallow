@@ -129,6 +129,54 @@ fn build_line_tables(files: &[FileData]) -> Vec<Vec<usize>> {
         .collect()
 }
 
+fn token_span_for_raw_instance(
+    file: &FileData,
+    offset: usize,
+    length: usize,
+) -> Option<(u32, u32)> {
+    if offset + length > file.hashed_tokens.len() {
+        return None;
+    }
+    let first_hashed = &file.hashed_tokens[offset];
+    let last_hashed = &file.hashed_tokens[offset + length - 1];
+    let first_source = file.file_tokens.tokens.get(first_hashed.original_index)?;
+    let last_source = file.file_tokens.tokens.get(last_hashed.original_index)?;
+    (first_source.span.start <= last_source.span.end)
+        .then_some((first_source.span.start, last_source.span.end))
+}
+
+fn span_is_atomic_invocation(file: &FileData, start: u32, end: u32) -> bool {
+    file.atomic_invocation_spans
+        .iter()
+        .any(|span| span.start <= start && end <= span.end)
+}
+
+/// Return true when the entire clone group is just repeated invocation syntax,
+/// optionally wrapped by a return/await/expression statement. Those findings
+/// tend to be non-actionable: the shared abstraction is already the callee.
+fn is_atomic_invocation_group(rg: &RawGroup, files: &[FileData]) -> bool {
+    let mut seen: FxHashSet<(usize, usize)> = FxHashSet::default();
+    let mut checked = 0;
+
+    for &(file_id, offset) in &rg.instances {
+        if !seen.insert((file_id, offset)) {
+            continue;
+        }
+        let Some(file) = files.get(file_id) else {
+            return false;
+        };
+        let Some((start, end)) = token_span_for_raw_instance(file, offset, rg.length) else {
+            return false;
+        };
+        if !span_is_atomic_invocation(file, start, end) {
+            return false;
+        }
+        checked += 1;
+    }
+
+    checked >= 2
+}
+
 // ── Single clone group construction ─────────────────────────────
 
 /// Convert a single `RawGroup` into a `CloneGroup`, returning `None` when
@@ -303,6 +351,7 @@ pub(super) fn build_groups(
     let t0 = std::time::Instant::now();
     let mut clone_groups: Vec<CloneGroup> = surviving
         .iter()
+        .filter(|rg| !is_atomic_invocation_group(rg, files))
         .filter_map(|rg| build_clone_group(rg, files, &line_tables, min_lines, skip_local))
         .collect();
     let build_clone_us = t0.elapsed().as_micros();
@@ -602,9 +651,11 @@ mod tests {
             hashed_tokens: vec![],
             file_tokens: FileTokens {
                 tokens: vec![],
+                atomic_invocation_spans: Vec::new(),
                 source: source.to_string(),
                 line_count: source.lines().count().max(1),
             },
+            atomic_invocation_spans: Vec::new(),
         }
     }
 
@@ -678,9 +729,11 @@ mod tests {
             hashed_tokens: hashed,
             file_tokens: FileTokens {
                 tokens,
+                atomic_invocation_spans: Vec::new(),
                 source: source.to_string(),
                 line_count: source.lines().count().max(1),
             },
+            atomic_invocation_spans: Vec::new(),
         }
     }
 

@@ -73,6 +73,7 @@ fn tokenize_file_inner(
 fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileTokens {
     let scripts = crate::extract::extract_sfc_scripts(source);
     let mut all_tokens = Vec::new();
+    let mut atomic_invocation_spans = Vec::new();
 
     for script in &scripts {
         let source_type = match (script.is_typescript, script.is_jsx) {
@@ -91,11 +92,16 @@ fn tokenize_sfc(source: &str, strip_types: bool, skip_imports: bool) -> FileToke
         for token in &mut extractor.tokens {
             token.span = Span::new(token.span.start + offset, token.span.end + offset);
         }
+        for span in &mut extractor.atomic_invocation_spans {
+            *span = Span::new(span.start + offset, span.end + offset);
+        }
         all_tokens.extend(extractor.tokens);
+        atomic_invocation_spans.extend(extractor.atomic_invocation_spans);
     }
 
     FileTokens {
         tokens: all_tokens,
+        atomic_invocation_spans,
         source: source.to_string(),
         line_count: source.lines().count().max(1),
     }
@@ -123,9 +129,13 @@ fn tokenize_astro(
         for token in &mut extractor.tokens {
             token.span = Span::new(token.span.start + offset, token.span.end + offset);
         }
+        for span in &mut extractor.atomic_invocation_spans {
+            *span = Span::new(span.start + offset, span.end + offset);
+        }
 
         return FileTokens {
             tokens: extractor.tokens,
+            atomic_invocation_spans: extractor.atomic_invocation_spans,
             source: source.to_string(),
             line_count: source.lines().count().max(1),
         };
@@ -150,6 +160,7 @@ fn tokenize_mdx(
 
         return FileTokens {
             tokens: extractor.tokens,
+            atomic_invocation_spans: extractor.atomic_invocation_spans,
             source: source.to_string(),
             line_count: source.lines().count().max(1),
         };
@@ -161,6 +172,7 @@ fn tokenize_mdx(
 fn empty_tokens(source: &str) -> FileTokens {
     FileTokens {
         tokens: Vec::new(),
+        atomic_invocation_spans: Vec::new(),
         source: source.to_string(),
         line_count: source.lines().count().max(1),
     }
@@ -202,6 +214,7 @@ fn tokenize_js_ts(path: &Path, source: &str, strip_types: bool, skip_imports: bo
 
     FileTokens {
         tokens: extractor.tokens,
+        atomic_invocation_spans: extractor.atomic_invocation_spans,
         source: source.to_string(),
         line_count: source.lines().count().max(1),
     }

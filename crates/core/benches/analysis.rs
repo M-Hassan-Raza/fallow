@@ -673,6 +673,7 @@ fn make_file_tokens_for(count: usize) -> fallow_core::duplicates::tokenize::File
     let line_count = source.lines().count().max(1);
     FileTokens {
         tokens,
+        atomic_invocation_spans: Vec::new(),
         source,
         line_count,
     }

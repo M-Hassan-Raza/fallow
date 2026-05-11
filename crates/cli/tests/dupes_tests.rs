@@ -4,6 +4,21 @@ mod common;
 use common::{fixture_path, parse_json, redact_all, run_fallow, run_fallow_in_root};
 use tempfile::tempdir;
 
+fn init_git_index(root: &std::path::Path) {
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root)
+        .status()
+        .expect("git init should run");
+    assert!(status.success(), "git init should succeed");
+    let status = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(root)
+        .status()
+        .expect("git add should run");
+    assert!(status.success(), "git add should succeed");
+}
+
 // ---------------------------------------------------------------------------
 // JSON output structure
 // ---------------------------------------------------------------------------
@@ -129,6 +144,174 @@ fn dupes_top_flag() {
     assert!(
         groups.len() <= 1,
         "--top 1 should return at most 1 clone group"
+    );
+}
+
+#[test]
+fn dupes_filters_atomic_function_call_clones() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/a")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src/b")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-call-filter","type":"module","main":"src/a/call.ts"}"#,
+    )
+    .unwrap();
+    let call = r#"export function alpha() {
+  return createComplexWidget(
+    currentProject.id,
+    currentUser.id,
+    activeWorkspace.slug,
+    selectedEnvironment.name,
+    featureFlags.enableAuditTrail,
+    permissions.canPublish,
+    billingAccount.plan,
+    retryPolicy.maxAttempts,
+    retryPolicy.backoffMs,
+    notifier.email,
+    logger.child({ scope: "workflow" }),
+    {
+      source: "settings",
+      reason: "manual-run",
+      requestedBy: currentUser.email,
+      correlationId: request.id,
+      priority: selectedWorkflow.priority,
+      tags: selectedWorkflow.tags,
+      metadata: selectedWorkflow.metadata,
+      createdAt: clock.now(),
+    },
+  );
+}
+"#;
+    std::fs::write(dir.path().join("src/a/call.ts"), call).unwrap();
+    std::fs::write(
+        dir.path().join("src/b/call.ts"),
+        call.replace("alpha", "beta"),
+    )
+    .unwrap();
+    init_git_index(dir.path());
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    let groups = json["clone_groups"].as_array().unwrap();
+    assert!(
+        groups.is_empty(),
+        "atomic call clones should be filtered. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    assert_eq!(json["stats"]["clone_groups"], serde_json::json!(0));
+}
+
+#[test]
+fn dupes_still_reports_repeated_control_flow() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/a")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src/b")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-control-flow","type":"module","main":"src/a/flow.ts"}"#,
+    )
+    .unwrap();
+    let flow = r#"export function alpha(value) {
+  const normalized = normalizeValue(value);
+  const score = calculateScore(normalized);
+  if (score > 90) {
+    auditTrail.record("high", normalized.id);
+    notifications.send("high-score", normalized.owner);
+    metrics.increment("score.high");
+    return buildResult(normalized, "high", score);
+  }
+  if (score > 50) {
+    auditTrail.record("medium", normalized.id);
+    notifications.send("medium-score", normalized.owner);
+    metrics.increment("score.medium");
+    return buildResult(normalized, "medium", score);
+  }
+  auditTrail.record("low", normalized.id);
+  notifications.send("low-score", normalized.owner);
+  metrics.increment("score.low");
+  return buildResult(normalized, "low", score);
+}
+"#;
+    std::fs::write(dir.path().join("src/a/flow.ts"), flow).unwrap();
+    std::fs::write(
+        dir.path().join("src/b/flow.ts"),
+        flow.replace("alpha", "beta"),
+    )
+    .unwrap();
+    init_git_index(dir.path());
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    let groups = json["clone_groups"].as_array().unwrap();
+    assert!(
+        !groups.is_empty(),
+        "non-atomic repeated control flow should still be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
+    );
+}
+
+#[test]
+fn dupes_still_reports_repeated_callback_bodies_inside_calls() {
+    let dir = tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src/a")).unwrap();
+    std::fs::create_dir_all(dir.path().join("src/b")).unwrap();
+    std::fs::write(
+        dir.path().join("package.json"),
+        r#"{"name":"dupes-callback-body","type":"module","main":"src/a/routes.ts"}"#,
+    )
+    .unwrap();
+    let route = r#"router.get("/alpha", async (ctx) => {
+  const normalized = normalizeValue(ctx.input);
+  const score = calculateScore(normalized);
+  if (score > 90) {
+    auditTrail.record("high", normalized.id);
+    notifications.send("high-score", normalized.owner);
+    metrics.increment("score.high");
+    return buildResult(normalized, "high", score);
+  }
+  if (score > 50) {
+    auditTrail.record("medium", normalized.id);
+    notifications.send("medium-score", normalized.owner);
+    metrics.increment("score.medium");
+    return buildResult(normalized, "medium", score);
+  }
+  auditTrail.record("low", normalized.id);
+  notifications.send("low-score", normalized.owner);
+  metrics.increment("score.low");
+  return buildResult(normalized, "low", score);
+});
+"#;
+    std::fs::write(dir.path().join("src/a/routes.ts"), route).unwrap();
+    std::fs::write(
+        dir.path().join("src/b/routes.ts"),
+        route.replace("/alpha", "/beta"),
+    )
+    .unwrap();
+    init_git_index(dir.path());
+
+    let output = run_fallow_in_root(
+        "dupes",
+        dir.path(),
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = parse_json(&output);
+    let groups = json["clone_groups"].as_array().unwrap();
+    assert!(
+        !groups.is_empty(),
+        "callback bodies inside calls should still be reported. stdout: {} stderr: {}",
+        output.stdout,
+        output.stderr
     );
 }
 
