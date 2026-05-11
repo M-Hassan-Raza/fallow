@@ -19,7 +19,9 @@ pub use duplicates_config::{
 pub use flags::{FlagsConfig, SdkPattern};
 pub use format::OutputFormat;
 pub use health::{EmailMode, HealthConfig, OwnershipConfig};
-pub use resolution::{ConfigOverride, IgnoreExportRule, ResolvedConfig, ResolvedOverride};
+pub use resolution::{
+    CompiledIgnoreExportRule, ConfigOverride, IgnoreExportRule, ResolvedConfig, ResolvedOverride,
+};
 pub use resolve::ResolveConfig;
 pub use rules::{PartialRulesConfig, RulesConfig, Severity};
 pub use used_class_members::{ScopedUsedClassMemberRule, UsedClassMemberRule};

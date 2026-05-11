@@ -5,8 +5,8 @@ use std::time::Duration;
 use colored::Colorize;
 use fallow_config::{RulesConfig, Severity};
 use fallow_core::results::{
-    AnalysisResults, PrivateTypeLeak, TestOnlyDependency, TypeOnlyDependency, UnusedDependency,
-    UnusedExport, UnusedMember,
+    AnalysisResults, DuplicateExport, PrivateTypeLeak, TestOnlyDependency, TypeOnlyDependency,
+    UnusedDependency, UnusedExport, UnusedMember,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -15,9 +15,74 @@ use super::{
     print_explain_tip_if_tty, push_section_footer_rollup, push_section_footer_with_count,
 };
 use crate::report::grouping::OwnershipResolver;
+use crate::report::json::NAMESPACE_BARREL_HINT;
 use crate::report::{
     Level, elide_common_prefix, plural, relative_path, severity_to_level, split_dir_filename,
 };
+
+/// Minimum number of duplicate-export findings before the human section is
+/// allowed to surface the namespace-barrel orientation hint. Below this floor
+/// the hint is noise outweighing the value it provides.
+const NAMESPACE_BARREL_HINT_MIN_FINDINGS: usize = 3;
+
+/// Minimum ratio of barrel-shaped findings (locations all match
+/// `**/<dir>/index.{ts,tsx,js,jsx,mjs,cjs}`, case-insensitive on the extension)
+/// before the hint fires.
+const NAMESPACE_BARREL_HINT_MIN_RATIO: f32 = 0.8;
+
+/// Whether a duplicate-export location's path is shaped like a namespace-barrel
+/// `index` file. The basename must be exactly `index`; the extension may be any
+/// of the documented JS / TS module forms in any case (the case-insensitivity
+/// applies to the EXTENSION only, so `Index.ts` does not match).
+fn is_namespace_barrel_location(path: &Path) -> bool {
+    let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    if stem != "index" {
+        return false;
+    }
+    let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs"
+    )
+}
+
+/// Ratio of `items` whose every `DuplicateLocation` matches the namespace-barrel
+/// shape. Findings with fewer than two locations (already excluded from the
+/// human render) are skipped to keep the denominator aligned with what the user
+/// actually sees on screen.
+fn namespace_barrel_match_ratio(items: &[DuplicateExport]) -> f32 {
+    let renderable: Vec<&DuplicateExport> =
+        items.iter().filter(|d| d.locations.len() >= 2).collect();
+    if renderable.is_empty() {
+        return 0.0;
+    }
+    let matches = renderable
+        .iter()
+        .filter(|dup| {
+            dup.locations
+                .iter()
+                .all(|loc| is_namespace_barrel_location(&loc.path))
+        })
+        .count();
+    matches as f32 / renderable.len() as f32
+}
+
+/// Whether the namespace-barrel hint should fire for this section. Gate
+/// is `findings >= NAMESPACE_BARREL_HINT_MIN_FINDINGS` AND
+/// `ratio >= NAMESPACE_BARREL_HINT_MIN_RATIO`. The floor prevents the hint
+/// from spamming small projects where the user already knows the layout; the
+/// ratio guards against false positives in mixed codebases.
+fn should_show_namespace_barrel_hint(items: &[DuplicateExport]) -> bool {
+    let renderable_count = items.iter().filter(|d| d.locations.len() >= 2).count();
+    if renderable_count < NAMESPACE_BARREL_HINT_MIN_FINDINGS {
+        return false;
+    }
+    namespace_barrel_match_ratio(items) >= NAMESPACE_BARREL_HINT_MIN_RATIO
+}
 
 /// Maximum files shown per grouped section (unused exports, types, etc.).
 const MAX_GROUPED_FILES: usize = 10;
@@ -908,6 +973,9 @@ fn build_duplicate_exports_section(
             "  {}",
             truncation_hint(remaining, total_issues).dimmed()
         ));
+    }
+    if should_show_namespace_barrel_hint(items) {
+        lines.push(format!("  {}", NAMESPACE_BARREL_HINT.dimmed()));
     }
     push_section_footer_with_count(lines, title, items.len());
     lines.push(String::new());
@@ -1842,6 +1910,196 @@ mod tests {
         assert!(text.contains("src/app.ts"));
         assert!(text.contains(":7"));
         assert!(text.contains("@org/missing-pkg"));
+    }
+
+    // ── Namespace-barrel hint helpers ──
+
+    fn make_dup(name: &str, paths: &[&str]) -> DuplicateExport {
+        DuplicateExport {
+            export_name: name.to_string(),
+            locations: paths
+                .iter()
+                .map(|p| DuplicateLocation {
+                    path: PathBuf::from(p),
+                    line: 1,
+                    col: 0,
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn is_namespace_barrel_location_matches_documented_extensions() {
+        assert!(is_namespace_barrel_location(Path::new(
+            "components/ui/button/index.ts"
+        )));
+        assert!(is_namespace_barrel_location(Path::new(
+            "components/ui/button/index.tsx"
+        )));
+        assert!(is_namespace_barrel_location(Path::new("src/x/index.mjs")));
+        assert!(is_namespace_barrel_location(Path::new("src/x/index.cjs")));
+        assert!(is_namespace_barrel_location(Path::new("src/x/index.jsx")));
+        // Case-insensitive on the extension only.
+        assert!(is_namespace_barrel_location(Path::new(
+            "components/ui/button/index.TS"
+        )));
+        assert!(is_namespace_barrel_location(Path::new(
+            "components/ui/button/index.Tsx"
+        )));
+    }
+
+    #[test]
+    fn is_namespace_barrel_location_rejects_non_index_files() {
+        assert!(!is_namespace_barrel_location(Path::new(
+            "components/ui/button/Button.ts"
+        )));
+        // basename must be exactly `index`; uppercase `Index` does not match.
+        assert!(!is_namespace_barrel_location(Path::new(
+            "components/ui/button/Index.ts"
+        )));
+        // Unsupported extensions.
+        assert!(!is_namespace_barrel_location(Path::new(
+            "components/ui/button/index.svelte"
+        )));
+        assert!(!is_namespace_barrel_location(Path::new(
+            "components/ui/button/index.vue"
+        )));
+        assert!(!is_namespace_barrel_location(Path::new(
+            "components/ui/button/index"
+        )));
+    }
+
+    #[test]
+    fn namespace_barrel_hint_fires_when_4_of_5_findings_match() {
+        let items = vec![
+            make_dup(
+                "Root",
+                &["packages/ui/a/index.ts", "packages/ui/b/index.ts"],
+            ),
+            make_dup(
+                "Content",
+                &["packages/ui/c/index.ts", "packages/ui/d/index.ts"],
+            ),
+            make_dup(
+                "Trigger",
+                &["packages/ui/e/index.ts", "packages/ui/f/index.ts"],
+            ),
+            make_dup(
+                "Item",
+                &["packages/ui/g/index.ts", "packages/ui/h/index.ts"],
+            ),
+            make_dup("Config", &["src/config.ts", "src/types.ts"]),
+        ];
+        assert!(should_show_namespace_barrel_hint(&items));
+    }
+
+    #[test]
+    fn namespace_barrel_hint_does_not_fire_when_2_of_5_findings_match() {
+        let items = vec![
+            make_dup(
+                "Root",
+                &["packages/ui/a/index.ts", "packages/ui/b/index.ts"],
+            ),
+            make_dup("Content", &["packages/ui/c/index.ts", "src/types.ts"]),
+            make_dup("Trigger", &["src/a.ts", "src/b.ts"]),
+            make_dup("Item", &["src/c.ts", "src/d.ts"]),
+            make_dup("Config", &["src/config.ts", "src/types.ts"]),
+        ];
+        assert!(!should_show_namespace_barrel_hint(&items));
+    }
+
+    #[test]
+    fn namespace_barrel_hint_does_not_fire_below_findings_floor() {
+        // 2 of 2 findings match the barrel shape, but the floor is 3 findings.
+        let items = vec![
+            make_dup(
+                "Root",
+                &["packages/ui/a/index.ts", "packages/ui/b/index.ts"],
+            ),
+            make_dup(
+                "Content",
+                &["packages/ui/c/index.ts", "packages/ui/d/index.ts"],
+            ),
+        ];
+        assert!(!should_show_namespace_barrel_hint(&items));
+    }
+
+    #[test]
+    fn namespace_barrel_hint_fires_when_47_of_47_findings_match() {
+        let items: Vec<DuplicateExport> = (0..47)
+            .map(|i| {
+                let path_a = format!("packages/ui/dir_{i}/index.ts");
+                let path_b = format!("packages/ui/other_{i}/index.tsx");
+                make_dup(&format!("Sym{i}"), &[path_a.as_str(), path_b.as_str()])
+            })
+            .collect();
+        assert!(should_show_namespace_barrel_hint(&items));
+    }
+
+    #[test]
+    fn namespace_barrel_hint_skips_single_location_findings_when_computing_ratio() {
+        // Single-location findings are filtered out of the human render and
+        // should not affect the ratio. Three barrel-shaped renderable findings
+        // alongside a single-location finding still satisfy the gate.
+        let items = vec![
+            make_dup(
+                "Root",
+                &["packages/ui/a/index.ts", "packages/ui/b/index.ts"],
+            ),
+            make_dup(
+                "Content",
+                &["packages/ui/c/index.ts", "packages/ui/d/index.ts"],
+            ),
+            make_dup(
+                "Trigger",
+                &["packages/ui/e/index.ts", "packages/ui/f/index.ts"],
+            ),
+            make_dup("Lonely", &["src/lonely.ts"]),
+        ];
+        assert!(should_show_namespace_barrel_hint(&items));
+    }
+
+    #[test]
+    fn duplicate_exports_section_emits_hint_when_gate_passes() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        for i in 0..4 {
+            results.duplicate_exports.push(make_dup(
+                &format!("Sym{i}"),
+                &[
+                    &format!("/project/packages/ui/dir_{i}/index.ts"),
+                    &format!("/project/packages/ui/other_{i}/index.tsx"),
+                ],
+            ));
+        }
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules, None);
+        let text = plain(&lines);
+        assert!(
+            text.contains("namespace-barrel"),
+            "expected hint substring in output: {text}"
+        );
+    }
+
+    #[test]
+    fn duplicate_exports_section_omits_hint_when_gate_fails() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        // Only one finding -> below floor.
+        results.duplicate_exports.push(make_dup(
+            "Sym",
+            &[
+                "/project/packages/ui/a/index.ts",
+                "/project/packages/ui/b/index.ts",
+            ],
+        ));
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules, None);
+        let text = plain(&lines);
+        assert!(
+            !text.contains("namespace-barrel"),
+            "hint must not fire below the 3-finding floor: {text}"
+        );
     }
 
     // ── Duplicate exports show locations ──

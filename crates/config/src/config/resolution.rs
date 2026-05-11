@@ -1,6 +1,10 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -17,12 +21,75 @@ use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 use super::FallowConfig;
 use super::IgnoreExportsUsedInFileConfig;
 
+/// Process-local dedup state for inter-file rule warnings.
+///
+/// Workspace mode calls `FallowConfig::resolve()` once per package, so a single
+/// top-level config with `overrides.rules.{duplicate-exports,circular-dependency}`
+/// would otherwise emit the same warning N times. The set is keyed on a stable
+/// hash of (rule name, sorted glob list) so logically identical override blocks
+/// dedupe across all package resolves.
+///
+/// The state persists across resolves within a single process. That matches the
+/// CLI's "one warning per invocation" expectation. In long-running hosts
+/// (`fallow watch`, the LSP server, NAPI consumers re-using a worker, the MCP
+/// server) the same set survives between re-runs and re-loads, so a user who
+/// edits the config and triggers a re-analysis sees the warning at most once
+/// per process lifetime. That is the documented behavior; restarting the host
+/// re-arms the warning.
+static INTER_FILE_WARN_SEEN: OnceLock<Mutex<FxHashSet<u64>>> = OnceLock::new();
+
+/// Stable hash of `(rule_name, sorted glob list)`.
+///
+/// Sorting deduplicates `["a/*", "b/*"]` against `["b/*", "a/*"]`. The element-
+/// wise hash loop is explicit so the lint sees the sorted Vec as read.
+fn inter_file_warn_key(rule_name: &str, files: &[String]) -> u64 {
+    let mut sorted: Vec<&str> = files.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    let mut hasher = DefaultHasher::new();
+    rule_name.hash(&mut hasher);
+    for s in &sorted {
+        s.hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
+/// Returns `true` if this `(rule_name, files)` warning has not yet been recorded
+/// in the current process; `false` if it has already fired (or the mutex was
+/// poisoned, in which case we behave as if the warning had not fired yet so the
+/// user still sees one warning).
+fn record_inter_file_warn_seen(rule_name: &str, files: &[String]) -> bool {
+    let seen = INTER_FILE_WARN_SEEN.get_or_init(|| Mutex::new(FxHashSet::default()));
+    let key = inter_file_warn_key(rule_name, files);
+    seen.lock().map_or(true, |mut set| set.insert(key))
+}
+
+#[cfg(test)]
+fn reset_inter_file_warn_dedup_for_test() {
+    if let Some(seen) = INTER_FILE_WARN_SEEN.get()
+        && let Ok(mut set) = seen.lock()
+    {
+        set.clear();
+    }
+}
+
 /// Rule for ignoring specific exports.
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct IgnoreExportRule {
     /// Glob pattern for files.
     pub file: String,
     /// Export names to ignore (`*` for all).
+    pub exports: Vec<String>,
+}
+
+/// `IgnoreExportRule` with the glob pre-compiled into a matcher.
+///
+/// Workspace mode runs `find_unused_exports` and `find_duplicate_exports` once
+/// per package, each of which previously re-compiled the same set of globs from
+/// `ignore_export_rules`. Compiling once at `ResolvedConfig` construction and
+/// reading `&[CompiledIgnoreExportRule]` from both detectors removes that work.
+#[derive(Debug)]
+pub struct CompiledIgnoreExportRule {
+    pub matcher: globset::GlobMatcher,
     pub exports: Vec<String>,
 }
 
@@ -56,6 +123,12 @@ pub struct ResolvedConfig {
     pub no_cache: bool,
     pub ignore_dependencies: Vec<String>,
     pub ignore_export_rules: Vec<IgnoreExportRule>,
+    /// Pre-compiled glob matchers for `ignoreExports`.
+    ///
+    /// Populated alongside `ignore_export_rules` so detectors that need to test
+    /// "does this file match a configured `ignoreExports` glob?" can read the
+    /// compiled matchers without re-running `globset::Glob::new` per call.
+    pub compiled_ignore_exports: Vec<CompiledIgnoreExportRule>,
     /// Whether same-file references should suppress unused-export findings.
     pub ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig,
     /// Class member names that should never be flagged as unused-class-members.
@@ -195,13 +268,17 @@ impl FallowConfig {
                 // to one. Warn at load time and point users at the working
                 // escape hatch (`ignoreExports` for duplicates, file-level
                 // `// fallow-ignore-file circular-dependency` for cycles).
-                if o.rules.duplicate_exports.is_some() {
+                if o.rules.duplicate_exports.is_some()
+                    && record_inter_file_warn_seen("duplicate-exports", &o.files)
+                {
                     let files = o.files.join(", ");
                     tracing::warn!(
                         "overrides.rules.duplicate-exports has no effect for files matching [{files}]: duplicate-exports is an inter-file rule. Use top-level `ignoreExports` to exclude these files from duplicate-export grouping."
                     );
                 }
-                if o.rules.circular_dependencies.is_some() {
+                if o.rules.circular_dependencies.is_some()
+                    && record_inter_file_warn_seen("circular-dependency", &o.files)
+                {
                     let files = o.files.join(", ");
                     tracing::warn!(
                         "overrides.rules.circular-dependency has no effect for files matching [{files}]: circular-dependency is an inter-file rule. Use a file-level `// fallow-ignore-file circular-dependency` comment in one participating file instead."
@@ -229,6 +306,25 @@ impl FallowConfig {
             })
             .collect();
 
+        // Compile `ignoreExports` once at resolve time so both `find_unused_exports`
+        // and `find_duplicate_exports` can read pre-built matchers from
+        // `ResolvedConfig` instead of re-compiling per call. Invalid globs warn
+        // once here, replacing the previous "warn-on-every-detector-call" path.
+        let compiled_ignore_exports: Vec<CompiledIgnoreExportRule> = self
+            .ignore_exports
+            .iter()
+            .filter_map(|rule| match Glob::new(&rule.file) {
+                Ok(g) => Some(CompiledIgnoreExportRule {
+                    matcher: g.compile_matcher(),
+                    exports: rule.exports.clone(),
+                }),
+                Err(e) => {
+                    tracing::warn!("invalid ignoreExports pattern '{}': {e}", rule.file);
+                    None
+                }
+            })
+            .collect();
+
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
@@ -239,6 +335,7 @@ impl FallowConfig {
             no_cache,
             ignore_dependencies: self.ignore_dependencies,
             ignore_export_rules: self.ignore_exports,
+            compiled_ignore_exports,
             ignore_exports_used_in_file: self.ignore_exports_used_in_file,
             used_class_members: self.used_class_members,
             duplicates: self.duplicates,
@@ -526,6 +623,110 @@ mod tests {
         );
         let rules = resolved.resolve_rules_for_path(Path::new("/project/ui/dialog.ts"));
         assert_eq!(rules.unused_files, Severity::Warn);
+    }
+
+    #[test]
+    fn inter_file_warn_dedup_returns_true_only_on_first_key_match() {
+        // Reset shared state so test ordering does not affect the assertions
+        // below. Uses unique glob strings (`__test_dedup_*`) so other tests in
+        // this module that exercise the warn path do not collide.
+        reset_inter_file_warn_dedup_for_test();
+        let files_a = vec!["__test_dedup_a/*".to_string()];
+        let files_b = vec!["__test_dedup_b/*".to_string()];
+
+        // First call fires; subsequent identical calls do not.
+        assert!(record_inter_file_warn_seen("duplicate-exports", &files_a));
+        assert!(!record_inter_file_warn_seen("duplicate-exports", &files_a));
+        assert!(!record_inter_file_warn_seen("duplicate-exports", &files_a));
+
+        // Different rule name is a distinct key.
+        assert!(record_inter_file_warn_seen("circular-dependency", &files_a));
+        assert!(!record_inter_file_warn_seen(
+            "circular-dependency",
+            &files_a
+        ));
+
+        // Different glob list is a distinct key.
+        assert!(record_inter_file_warn_seen("duplicate-exports", &files_b));
+
+        // Order-insensitive glob list collapses to the same key.
+        let files_reordered = vec![
+            "__test_dedup_b/*".to_string(),
+            "__test_dedup_a/*".to_string(),
+        ];
+        let files_natural = vec![
+            "__test_dedup_a/*".to_string(),
+            "__test_dedup_b/*".to_string(),
+        ];
+        reset_inter_file_warn_dedup_for_test();
+        assert!(record_inter_file_warn_seen(
+            "duplicate-exports",
+            &files_natural
+        ));
+        assert!(!record_inter_file_warn_seen(
+            "duplicate-exports",
+            &files_reordered
+        ));
+    }
+
+    #[test]
+    fn resolve_called_n_times_dedupes_inter_file_warning_to_one() {
+        // Drive `FallowConfig::resolve()` ten times with identical
+        // `overrides.rules.duplicate-exports` to mirror workspace mode (one
+        // resolve per package). The dedup must surface the warn key as
+        // already-seen on every call after the first.
+        reset_inter_file_warn_dedup_for_test();
+        let files = vec!["__test_resolve_dedup/**".to_string()];
+        let build_config = || FallowConfig {
+            schema: None,
+            extends: vec![],
+            entry: vec![],
+            ignore_patterns: vec![],
+            framework: vec![],
+            workspaces: None,
+            ignore_dependencies: vec![],
+            ignore_exports: vec![],
+            ignore_exports_used_in_file: IgnoreExportsUsedInFileConfig::default(),
+            used_class_members: vec![],
+            duplicates: DuplicatesConfig::default(),
+            health: HealthConfig::default(),
+            rules: RulesConfig::default(),
+            boundaries: BoundaryConfig::default(),
+            production: false.into(),
+            plugins: vec![],
+            dynamically_loaded: vec![],
+            overrides: vec![ConfigOverride {
+                files: files.clone(),
+                rules: PartialRulesConfig {
+                    duplicate_exports: Some(Severity::Off),
+                    ..Default::default()
+                },
+            }],
+            regression: None,
+            audit: crate::config::AuditConfig::default(),
+            codeowners: None,
+            public_packages: vec![],
+            flags: FlagsConfig::default(),
+            resolve: ResolveConfig::default(),
+            sealed: false,
+            include_entry_exports: false,
+        };
+        for _ in 0..10 {
+            let _ = build_config().resolve(
+                PathBuf::from("/project"),
+                OutputFormat::Human,
+                1,
+                true,
+                true,
+            );
+        }
+        // After 10 resolves the dedup state holds the warn key. Asking the
+        // dedup helper for the SAME key returns false (already seen) instead
+        // of true (would fire).
+        assert!(
+            !record_inter_file_warn_seen("duplicate-exports", &files),
+            "warn key for duplicate-exports + __test_resolve_dedup/** should be marked after the first resolve"
+        );
     }
 
     /// Helper to build a FallowConfig with minimal boilerplate.

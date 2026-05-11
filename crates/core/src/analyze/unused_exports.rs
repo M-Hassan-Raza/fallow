@@ -3,7 +3,7 @@ use std::sync::LazyLock;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::ResolvedConfig;
+use fallow_config::{CompiledIgnoreExportRule, ResolvedConfig};
 use fallow_types::extract::{ExportInfo, ExportName, ModuleInfo};
 
 use crate::discover::FileId;
@@ -16,26 +16,8 @@ use crate::suppress::{IssueKind, SuppressionContext};
 
 use super::{LineOffsetsMap, byte_offset_to_line_col, read_source};
 
-/// Pre-compiled glob matchers for config ignore_exports rules.
-type IgnoreMatchers<'a> = Vec<(globset::GlobMatcher, &'a [String])>;
-
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
 type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
-
-/// Compile config ignore_exports rules into glob matchers.
-fn compile_ignore_matchers(config: &ResolvedConfig) -> IgnoreMatchers<'_> {
-    config
-        .ignore_export_rules
-        .iter()
-        .filter_map(|rule| match globset::Glob::new(&rule.file) {
-            Ok(g) => Some((g.compile_matcher(), rule.exports.as_slice())),
-            Err(e) => {
-                tracing::warn!("invalid ignoreExports pattern '{}': {e}", rule.file);
-                None
-            }
-        })
-        .collect()
-}
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
 fn compile_plugin_matchers(
@@ -109,7 +91,7 @@ fn should_skip_module(
 fn matchers_for_module<'a>(
     module_path: &std::path::Path,
     config_root: &std::path::Path,
-    ignore_matchers: &'a IgnoreMatchers<'_>,
+    ignore_matchers: &'a [CompiledIgnoreExportRule],
     plugin_matchers: &'a PluginMatchers<'_>,
 ) -> (Vec<&'a [String]>, Vec<&'a [&'a str]>) {
     if ignore_matchers.is_empty() && plugin_matchers.is_empty() {
@@ -119,8 +101,8 @@ fn matchers_for_module<'a>(
     let file_str = relative_path.to_string_lossy();
     let mi: Vec<&[String]> = ignore_matchers
         .iter()
-        .filter(|(m, _)| m.is_match(file_str.as_ref()))
-        .map(|(_, exports)| *exports)
+        .filter(|rule| rule.matcher.is_match(file_str.as_ref()))
+        .map(|rule| rule.exports.as_slice())
         .collect();
     let mp: Vec<&[&str]> = plugin_matchers
         .iter()
@@ -225,7 +207,7 @@ fn is_inside_export_specifier(
 fn ignore_matchers_for_module<'a>(
     module_path: &std::path::Path,
     config_root: &std::path::Path,
-    ignore_matchers: &'a IgnoreMatchers<'_>,
+    ignore_matchers: &'a [CompiledIgnoreExportRule],
 ) -> Vec<&'a [String]> {
     if ignore_matchers.is_empty() {
         return Vec::new();
@@ -234,8 +216,8 @@ fn ignore_matchers_for_module<'a>(
     let file_str = relative_path.to_string_lossy();
     ignore_matchers
         .iter()
-        .filter(|(m, _)| m.is_match(file_str.as_ref()))
-        .map(|(_, exports)| *exports)
+        .filter(|rule| rule.matcher.is_match(file_str.as_ref()))
+        .map(|rule| rule.exports.as_slice())
         .collect()
 }
 
@@ -252,7 +234,7 @@ pub fn find_unused_exports(
     let mut unused_types = Vec::new();
     let mut stale_expected_unused = Vec::new();
 
-    let ignore_matchers = compile_ignore_matchers(config);
+    let ignore_matchers = config.compiled_ignore_exports.as_slice();
     let plugin_matchers = compile_plugin_matchers(plugin_result);
     let module_info_by_id: Option<FxHashMap<FileId, &ModuleInfo>> =
         if config.ignore_exports_used_in_file.is_enabled() {
@@ -289,7 +271,7 @@ pub fn find_unused_exports(
             let (matching_ignore, matching_plugin) = matchers_for_module(
                 &module.path,
                 &config.root,
-                &ignore_matchers,
+                ignore_matchers,
                 &plugin_matchers,
             );
 
@@ -743,7 +725,7 @@ pub fn find_duplicate_exports(
     line_offsets_by_file: &LineOffsetsMap<'_>,
     resolved_modules: &[crate::resolve::ResolvedModule],
 ) -> Vec<DuplicateExport> {
-    let ignore_matchers = compile_ignore_matchers(config);
+    let ignore_matchers = config.compiled_ignore_exports.as_slice();
     // Build a map from FileId to module index for dynamic re-export source lookup.
     let module_idx_by_file_id: FxHashMap<FileId, usize> = graph
         .modules
@@ -809,7 +791,7 @@ pub fn find_duplicate_exports(
         // where many `components/ui/<name>/index.ts` files intentionally export
         // the same short names (Root, Content, Trigger).
         let matching_ignore =
-            ignore_matchers_for_module(&module.path, &config.root, &ignore_matchers);
+            ignore_matchers_for_module(&module.path, &config.root, ignore_matchers);
 
         for export in &module.exports {
             if matches!(export.name, crate::extract::ExportName::Default) {
@@ -1871,7 +1853,7 @@ mod tests {
         );
     }
 
-    // ---- find_unused_exports tests (exercises compile_ignore_matchers, compile_plugin_matchers,
+    // ---- find_unused_exports tests (exercises ResolvedConfig.compiled_ignore_exports, compile_plugin_matchers,
     //       should_skip_module, is_export_ignored) ----
 
     /// Helper: build a config with ignore_exports rules.
@@ -2232,7 +2214,7 @@ mod tests {
         assert_eq!(exports[0].export_name, "helper");
     }
 
-    // -- compile_ignore_matchers: empty config --
+    // -- compiled_ignore_exports: empty config --
 
     #[test]
     fn unused_exports_empty_ignore_config() {
@@ -2259,7 +2241,7 @@ mod tests {
         );
     }
 
-    // -- compile_ignore_matchers: multiple patterns --
+    // -- compiled_ignore_exports: multiple patterns --
 
     #[test]
     fn unused_exports_ignore_multiple_patterns() {
@@ -2298,7 +2280,7 @@ mod tests {
         );
     }
 
-    // -- compile_ignore_matchers: invalid glob handled gracefully --
+    // -- compiled_ignore_exports: invalid glob handled gracefully --
 
     #[test]
     fn unused_exports_invalid_ignore_glob_skipped() {

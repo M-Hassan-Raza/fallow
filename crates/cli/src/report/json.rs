@@ -10,6 +10,19 @@ use super::{emit_json, normalize_uri};
 use crate::explain;
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
+/// Namespace-barrel orientation hint shared between the JSON `remove-duplicate`
+/// action note and the human `Duplicate exports` section.
+///
+/// Centralising the string here prevents drift between the two output paths.
+/// The JSON note fires unconditionally on every duplicate-export finding; the
+/// human path emits the same text once per section, gated on a high match ratio
+/// so it stays useful in shadcn / Radix-clone projects and quiet otherwise.
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "pub-in-private-module: read from sibling submodules within report/ via crate::report::json::NAMESPACE_BARREL_HINT; the json module itself is intentionally private."
+)]
+pub(crate) const NAMESPACE_BARREL_HINT: &str = "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer the `add-to-config` ignoreExports action over removing exports.";
+
 pub(super) fn print_json(
     results: &AnalysisResults,
     root: &Path,
@@ -424,9 +437,7 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             fix_type: "remove-duplicate",
             auto_fixable: false,
             description: "Keep one canonical export location and remove the others",
-            note: Some(
-                "If every location is the sole `index.*` of its directory, this is likely an intentional namespace-barrel API. Prefer the `add-to-config` ignoreExports action over removing exports.",
-            ),
+            note: Some(NAMESPACE_BARREL_HINT),
             suppress: SuppressKind::InlineComment,
             issue_kind: "duplicate-export",
         }),

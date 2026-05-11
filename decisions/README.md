@@ -16,6 +16,8 @@ Each ADR follows a consistent structure: status, context explaining the problem,
 | 004 | [Path-sorted FileIds](004-path-sorted-file-ids.md) | Accepted |
 | 005 | [Re-export chain resolution](005-re-export-chain-resolution.md) | Accepted |
 | 006 | [Hidden directory allowlist](006-hidden-directory-allowlist.md) | Accepted |
+| 007 | [Boundary zone subtree-relative root](007-boundary-zone-root.md) | Accepted |
+| 008 | [fallow-core is internal; embedders use fallow-cli::programmatic](008-fallow-core-internal-policy.md) | Accepted |
 
 ## Creating a new ADR
 

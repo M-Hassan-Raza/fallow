@@ -216,6 +216,7 @@ mod tests {
             no_cache: true,
             ignore_dependencies: vec![],
             ignore_export_rules: vec![],
+            compiled_ignore_exports: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),
