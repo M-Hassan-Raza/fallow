@@ -272,6 +272,7 @@ interface AddToConfigAction {
         readonly file: string;
         readonly exports: ReadonlyArray<string>;
       }>;
+  readonly value_schema?: string;
 }
 
 export interface FallowDupesResult {

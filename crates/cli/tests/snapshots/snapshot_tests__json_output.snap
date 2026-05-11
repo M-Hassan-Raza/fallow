@@ -110,7 +110,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Add \"lodash\" to ignoreDependencies in fallow config",
           "config_key": "ignoreDependencies",
-          "value": "lodash"
+          "value": "lodash",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -132,7 +133,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Add \"jest\" to ignoreDependencies in fallow config",
           "config_key": "ignoreDependencies",
-          "value": "jest"
+          "value": "jest",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -154,7 +156,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Add \"fsevents\" to ignoreDependencies in fallow config",
           "config_key": "ignoreDependencies",
-          "value": "fsevents"
+          "value": "fsevents",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -251,7 +254,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Add \"chalk\" to ignoreDependencies in fallow config",
           "config_key": "ignoreDependencies",
-          "value": "chalk"
+          "value": "chalk",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -290,7 +294,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
                 "*"
               ]
             }
-          ]
+          ],
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports"
         },
         {
           "type": "remove-duplicate",
@@ -325,7 +330,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Add \"zod\" to ignoreDependencies in fallow config",
           "config_key": "ignoreDependencies",
-          "value": "zod"
+          "value": "zod",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }
@@ -347,7 +353,8 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Add \"msw\" to ignoreDependencies in fallow config",
           "config_key": "ignoreDependencies",
-          "value": "msw"
+          "value": "msw",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }

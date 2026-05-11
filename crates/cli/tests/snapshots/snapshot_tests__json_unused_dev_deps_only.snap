@@ -47,7 +47,8 @@ expression: redact_version(&json_str)
           "auto_fixable": false,
           "description": "Add \"jest\" to ignoreDependencies in fallow config",
           "config_key": "ignoreDependencies",
-          "value": "jest"
+          "value": "jest",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }

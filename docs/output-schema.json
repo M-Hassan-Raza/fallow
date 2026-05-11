@@ -1942,6 +1942,11 @@
             }
           ],
           "description": "Value to add to the config key. Shape depends on `config_key`. For scalar config keys (`ignoreDependencies`, others) this is a string such as `\"lodash\"`. For `ignoreExports` this is an array of `{ file, exports }` rule objects so the snippet can be merged into the user's config verbatim."
+        },
+        "value_schema": {
+          "type": "string",
+          "format": "uri",
+          "description": "Optional URL pointing at a stable JSON Schema fragment that describes the shape of `value`. Agents that intend to validate `value` before writing it into a user's config can fetch the linked schema and run it against `value`. The URL is a JSON Pointer fragment into fallow's main config schema (e.g. `schema.json#/properties/ignoreExports` for the ignoreExports action, or `schema.json#/properties/ignoreDependencies/items` for the per-package ignoreDependencies action). Strictly additive: consumers that ignore the field keep working unchanged."
         }
       }
     },

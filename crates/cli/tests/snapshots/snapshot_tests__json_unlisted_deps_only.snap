@@ -57,7 +57,8 @@ expression: redact_version(&json_str)
           "auto_fixable": false,
           "description": "Add \"chalk\" to ignoreDependencies in fallow config",
           "config_key": "ignoreDependencies",
-          "value": "chalk"
+          "value": "chalk",
+          "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
         }
       ]
     }

@@ -11,6 +11,17 @@ use super::{emit_json, normalize_uri};
 use crate::explain;
 use crate::report::grouping::{OwnershipResolver, ResultGroup};
 
+/// JSON Pointer fragment URL describing the shape of the `value` field on an
+/// `ignoreExports` `add-to-config` action. Agents can fetch and validate the
+/// snippet before writing into a user's config.
+const IGNORE_EXPORTS_VALUE_SCHEMA: &str =
+    "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreExports";
+
+/// JSON Pointer fragment URL describing the shape of the `value` field on an
+/// `ignoreDependencies` `add-to-config` action. Points at the array item schema
+/// (a single string) since the action's `value` is one entry to append.
+const IGNORE_DEPENDENCIES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items";
+
 pub(super) fn print_json(
     results: &AnalysisResults,
     root: &Path,
@@ -501,6 +512,7 @@ fn build_actions(
             "description": "Add an ignoreExports rule so these files are excluded from duplicate-export grouping (use when this duplication is an intentional namespace-barrel API).",
             "config_key": "ignoreExports",
             "value": value,
+            "value_schema": IGNORE_EXPORTS_VALUE_SCHEMA,
         }));
     }
 
@@ -570,6 +582,7 @@ fn build_actions(
                 "description": format!("Add \"{pkg}\" to ignoreDependencies in fallow config"),
                 "config_key": "ignoreDependencies",
                 "value": pkg,
+                "value_schema": IGNORE_DEPENDENCIES_VALUE_SCHEMA,
             }));
         }
     }
