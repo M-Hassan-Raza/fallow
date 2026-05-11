@@ -148,14 +148,14 @@ fn section_suppress_rule(title: &str) -> Option<&'static str> {
         "Unlisted dependencies" => Some("unlisted-dependencies"),
         "Duplicate exports" => Some("duplicate-exports"),
         "Circular dependencies" => Some("circular-dependencies"),
-        "Boundary violations" => Some("boundary-violations"),
+        "Boundary violations" => Some("boundary-violation"),
         _ => None,
     }
 }
 
 /// Rules that only support file-level suppression (not next-line).
 fn is_file_level_only(rule: &str) -> bool {
-    matches!(rule, "circular-dependencies" | "boundary-violations")
+    matches!(rule, "circular-dependencies" | "boundary-violation")
 }
 
 /// Categories that support `fallow fix --dry-run` auto-fix.
