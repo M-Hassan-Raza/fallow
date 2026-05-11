@@ -63,43 +63,46 @@ impl std::str::FromStr for Severity {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct RulesConfig {
-    #[serde(default)]
+    #[serde(default, alias = "unused-file")]
     pub unused_files: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "unused-export")]
     pub unused_exports: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "unused-type")]
     pub unused_types: Severity,
-    #[serde(default = "Severity::default_off")]
+    #[serde(default = "Severity::default_off", alias = "private-type-leak")]
     pub private_type_leaks: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "unused-dependency")]
     pub unused_dependencies: Severity,
-    #[serde(default = "Severity::default_warn")]
+    #[serde(default = "Severity::default_warn", alias = "unused-dev-dependency")]
     pub unused_dev_dependencies: Severity,
-    #[serde(default = "Severity::default_warn")]
+    #[serde(
+        default = "Severity::default_warn",
+        alias = "unused-optional-dependency"
+    )]
     pub unused_optional_dependencies: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "unused-enum-member")]
     pub unused_enum_members: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "unused-class-member")]
     pub unused_class_members: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "unresolved-import")]
     pub unresolved_imports: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "unlisted-dependency")]
     pub unlisted_dependencies: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "duplicate-export")]
     pub duplicate_exports: Severity,
-    #[serde(default = "Severity::default_warn")]
+    #[serde(default = "Severity::default_warn", alias = "type-only-dependency")]
     pub type_only_dependencies: Severity,
-    #[serde(default = "Severity::default_warn")]
+    #[serde(default = "Severity::default_warn", alias = "test-only-dependency")]
     pub test_only_dependencies: Severity,
     #[serde(default, alias = "circular-dependency")]
     pub circular_dependencies: Severity,
     #[serde(default, alias = "boundary-violations")]
     pub boundary_violation: Severity,
-    #[serde(default)]
+    #[serde(default, alias = "coverage-gap")]
     pub coverage_gaps: Severity,
-    #[serde(default = "Severity::default_off")]
+    #[serde(default = "Severity::default_off", alias = "feature-flag")]
     pub feature_flags: Severity,
-    #[serde(default = "Severity::default_warn")]
+    #[serde(default = "Severity::default_warn", alias = "stale-suppression")]
     pub stale_suppressions: Severity,
 }
 
@@ -196,33 +199,89 @@ impl RulesConfig {
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct PartialRulesConfig {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unused-file",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unused_files: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unused-export",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unused_exports: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unused-type",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unused_types: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "private-type-leak",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub private_type_leaks: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unused-dependency",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unused_dependencies: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unused-dev-dependency",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unused_dev_dependencies: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unused-optional-dependency",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unused_optional_dependencies: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unused-enum-member",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unused_enum_members: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unused-class-member",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unused_class_members: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unresolved-import",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unresolved_imports: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "unlisted-dependency",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub unlisted_dependencies: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "duplicate-export",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub duplicate_exports: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "type-only-dependency",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub type_only_dependencies: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "test-only-dependency",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub test_only_dependencies: Option<Severity>,
     #[serde(
         default,
@@ -236,11 +295,23 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub boundary_violation: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "coverage-gap",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub coverage_gaps: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "feature-flag",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub feature_flags: Option<Severity>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "stale-suppression",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub stale_suppressions: Option<Severity>,
 }
 
@@ -306,6 +377,70 @@ mod tests {
 
         let partial: PartialRulesConfig = serde_json::from_str(json_str).unwrap();
         assert_eq!(partial.boundary_violation, Some(Severity::Off));
+    }
+
+    #[test]
+    fn rules_deserialize_singular_aliases_for_every_plural_rule() {
+        // Mirrors the LSP's per-diagnostic singular codes (e.g. "unused-export")
+        // so users who copy the form they see in IDE warnings into their config
+        // get their stated severity honored instead of silently dropped.
+        let json_str = r#"{
+            "unused-file": "off",
+            "unused-export": "off",
+            "unused-type": "off",
+            "private-type-leak": "warn",
+            "unused-dependency": "off",
+            "unused-dev-dependency": "off",
+            "unused-optional-dependency": "off",
+            "unused-enum-member": "off",
+            "unused-class-member": "off",
+            "unresolved-import": "off",
+            "unlisted-dependency": "off",
+            "duplicate-export": "off",
+            "type-only-dependency": "off",
+            "test-only-dependency": "off",
+            "coverage-gap": "warn",
+            "feature-flag": "warn",
+            "stale-suppression": "off"
+        }"#;
+
+        let rules: RulesConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(rules.unused_files, Severity::Off);
+        assert_eq!(rules.unused_exports, Severity::Off);
+        assert_eq!(rules.unused_types, Severity::Off);
+        assert_eq!(rules.private_type_leaks, Severity::Warn);
+        assert_eq!(rules.unused_dependencies, Severity::Off);
+        assert_eq!(rules.unused_dev_dependencies, Severity::Off);
+        assert_eq!(rules.unused_optional_dependencies, Severity::Off);
+        assert_eq!(rules.unused_enum_members, Severity::Off);
+        assert_eq!(rules.unused_class_members, Severity::Off);
+        assert_eq!(rules.unresolved_imports, Severity::Off);
+        assert_eq!(rules.unlisted_dependencies, Severity::Off);
+        assert_eq!(rules.duplicate_exports, Severity::Off);
+        assert_eq!(rules.type_only_dependencies, Severity::Off);
+        assert_eq!(rules.test_only_dependencies, Severity::Off);
+        assert_eq!(rules.coverage_gaps, Severity::Warn);
+        assert_eq!(rules.feature_flags, Severity::Warn);
+        assert_eq!(rules.stale_suppressions, Severity::Off);
+
+        let partial: PartialRulesConfig = serde_json::from_str(json_str).unwrap();
+        assert_eq!(partial.unused_files, Some(Severity::Off));
+        assert_eq!(partial.unused_exports, Some(Severity::Off));
+        assert_eq!(partial.unused_types, Some(Severity::Off));
+        assert_eq!(partial.private_type_leaks, Some(Severity::Warn));
+        assert_eq!(partial.unused_dependencies, Some(Severity::Off));
+        assert_eq!(partial.unused_dev_dependencies, Some(Severity::Off));
+        assert_eq!(partial.unused_optional_dependencies, Some(Severity::Off));
+        assert_eq!(partial.unused_enum_members, Some(Severity::Off));
+        assert_eq!(partial.unused_class_members, Some(Severity::Off));
+        assert_eq!(partial.unresolved_imports, Some(Severity::Off));
+        assert_eq!(partial.unlisted_dependencies, Some(Severity::Off));
+        assert_eq!(partial.duplicate_exports, Some(Severity::Off));
+        assert_eq!(partial.type_only_dependencies, Some(Severity::Off));
+        assert_eq!(partial.test_only_dependencies, Some(Severity::Off));
+        assert_eq!(partial.coverage_gaps, Some(Severity::Warn));
+        assert_eq!(partial.feature_flags, Some(Severity::Warn));
+        assert_eq!(partial.stale_suppressions, Some(Severity::Off));
     }
 
     #[test]
