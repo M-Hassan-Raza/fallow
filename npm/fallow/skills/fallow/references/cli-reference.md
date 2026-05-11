@@ -424,7 +424,7 @@ fallow health --format json --quiet --trend
 ```json
 {
   "schema_version": 3,
-  "version": "2.69.0",
+  "version": "2.70.0",
   "elapsed_ms": 32,
   "summary": {
     "files_analyzed": 482,
@@ -810,7 +810,7 @@ fallow audit \
 ```json
 {
   "schema_version": 3,
-  "version": "2.69.0",
+  "version": "2.70.0",
   "command": "audit",
   "verdict": "fail",
   "changed_files_count": 12,
@@ -883,7 +883,7 @@ fallow flags --format json --quiet --workspace my-package
 ```json
 {
   "schema_version": 3,
-  "version": "2.69.0",
+  "version": "2.70.0",
   "elapsed_ms": 116,
   "feature_flags": [],
   "total_flags": 0
@@ -1302,7 +1302,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 ```json
 {
   "schema_version": 3,
-  "version": "2.69.0",
+  "version": "2.70.0",
   "elapsed_ms": 45,
   "total_issues": 12,
   "entry_points": {
@@ -1359,7 +1359,8 @@ Every issue in `dead-code` JSON output includes an `actions` array with structur
 | `comment` | string | no | Suppression comment text (on `suppress-line` actions) |
 | `note` | string | no | Additional context on non-auto-fixable items |
 | `config_key` | string | no | Config field to update (on `add-to-config` actions) |
-| `value` | string | no | Value to add to the config field (on `add-to-config` actions) |
+| `value` | string \| array | no | Value to add to the config field (on `add-to-config` actions). Scalar for `ignoreDependencies`-style keys (e.g. `"lodash"`); array of `{ file, exports }` rule objects for `ignoreExports`. |
+| `value_schema` | string | no | URL pointing at the JSON Schema fragment that describes `value` (on `add-to-config` actions). Agents that want to validate `value` before writing it into a user's config can fetch and apply the linked schema. |
 
 Example:
 
@@ -1401,7 +1402,8 @@ Dependency issues use `add-to-config` with `config_key` and `value`:
       "auto_fixable": false,
       "description": "Add to ignoreDependencies in fallow config",
       "config_key": "ignoreDependencies",
-      "value": "autoprefixer"
+      "value": "autoprefixer",
+      "value_schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencies/items"
     }
   ]
 }
@@ -1447,7 +1449,7 @@ When `--baseline` is used in combined output, the JSON includes a `baseline_delt
 ```json
 {
   "schema_version": 3,
-  "version": "2.69.0",
+  "version": "2.70.0",
   "elapsed_ms": 82,
   "total_clones": 15,
   "total_lines_duplicated": 230,
@@ -1491,7 +1493,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 {
   "check": {
     "schema_version": 3,
-    "version": "2.69.0",
+    "version": "2.70.0",
     "elapsed_ms": 45,
     "total_issues": 12,
     "unused_files": [],
@@ -1513,7 +1515,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
   },
   "dupes": {
     "schema_version": 3,
-    "version": "2.69.0",
+    "version": "2.70.0",
     "elapsed_ms": 82,
     "total_clones": 15,
     "total_lines_duplicated": 230,
@@ -1522,7 +1524,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
   },
   "health": {
     "schema_version": 3,
-    "version": "2.69.0",
+    "version": "2.70.0",
     "elapsed_ms": 32,
     "summary": {},
     "findings": [],
