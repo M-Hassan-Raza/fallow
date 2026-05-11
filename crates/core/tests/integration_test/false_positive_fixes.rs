@@ -231,6 +231,84 @@ fn broken_tsconfig_path_alias_is_not_misclassified_as_unlisted_dependency() {
     );
 }
 
+// ── Wildcard tsconfig paths keep bare imports correctly classified (issue #327) ──
+
+#[test]
+fn wildcard_tsconfig_paths_do_not_misclassify_bare_imports() {
+    let root = fixture_path("issue-327-wildcard-paths-node-builtins");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|import| import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"node:url"),
+        "`node:url` should resolve to a platform builtin even when tsconfig wildcard paths are configured: {unresolved_specifiers:?}"
+    );
+    assert!(
+        !unresolved_specifiers.contains(&"fs"),
+        "bare `fs` should resolve to a platform builtin even when tsconfig wildcard paths are configured: {unresolved_specifiers:?}"
+    );
+    assert!(
+        !unresolved_specifiers.contains(&"bun:sqlite"),
+        "`bun:sqlite` should resolve to a platform builtin even when tsconfig wildcard paths are configured: {unresolved_specifiers:?}"
+    );
+    assert!(
+        !unresolved_specifiers.contains(&"cloudflare:sockets"),
+        "`cloudflare:sockets` should resolve to a platform builtin even when tsconfig wildcard paths are configured: {unresolved_specifiers:?}"
+    );
+    assert!(
+        !unresolved_specifiers.contains(&"doesnotexist"),
+        "bare package typos should remain dependency findings, not unresolved imports: {unresolved_specifiers:?}"
+    );
+    assert!(
+        unresolved_specifiers.is_empty(),
+        "no imports should be unresolved in the wildcard-paths fixture: {unresolved_specifiers:?}"
+    );
+
+    // Positive case: the wildcard rewrite `*` -> `./src/*` still works after
+    // the fix, so `import { greeting } from "helpers"` resolves to
+    // `./src/helpers.ts` and the file is reachable (not flagged as unused).
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        !unused_files.iter().any(|path| path == "src/helpers.ts"),
+        "`./src/helpers.ts` must stay reachable through the `*` -> `./src/*` rewrite after the fix: {unused_files:?}"
+    );
+
+    let unlisted_names: Vec<&str> = results
+        .unlisted_dependencies
+        .iter()
+        .map(|dep| dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unlisted_names.contains(&"node:url"),
+        "platform builtins must not surface as unlisted dependencies: {unlisted_names:?}"
+    );
+    assert!(
+        !unlisted_names.contains(&"fs"),
+        "platform builtins must not surface as unlisted dependencies: {unlisted_names:?}"
+    );
+    assert!(
+        !unlisted_names.contains(&"bun:sqlite"),
+        "platform builtins must not surface as unlisted dependencies: {unlisted_names:?}"
+    );
+    assert!(
+        !unlisted_names.contains(&"cloudflare:sockets"),
+        "platform builtins must not surface as unlisted dependencies: {unlisted_names:?}"
+    );
+    assert!(
+        unlisted_names.contains(&"doesnotexist"),
+        "bare package typos should still surface as unlisted dependencies: {unlisted_names:?}"
+    );
+}
+
 #[test]
 fn missing_react_native_extends_keeps_local_tsconfig_path_aliases() {
     let dir = tempfile::tempdir().expect("temp dir");

@@ -117,6 +117,18 @@ fn normalize_tsconfig_path_alias(
     root: &Path,
 ) -> Option<(String, String)> {
     let normalized_find = find.strip_suffix('*').unwrap_or(find).to_string();
+    // Wildcard-only patterns (e.g. `"*": ["./src/*"]`) collapse to an empty
+    // prefix here. `path_aliases` are consumed via `specifier.starts_with(prefix)`,
+    // and every specifier starts with `""`, so an empty prefix would over-match
+    // and route platform builtins (`node:url`, `bun:sqlite`) and unrelated bare
+    // imports through the path-alias fallback, surfacing them as
+    // `unresolved-import` instead of letting builtin / npm-package classification
+    // take over. Wildcards are still honoured by `oxc_resolver`'s native tsconfig
+    // paths handling, so dropping them from `path_aliases` does not regress
+    // legitimate `*` rewrites. See issue #327.
+    if normalized_find.is_empty() {
+        return None;
+    }
     let normalized_replacement = replacement
         .strip_suffix("/*")
         .or_else(|| replacement.strip_suffix('*'))
@@ -368,6 +380,35 @@ mod tests {
                 ("@/".to_string(), "src".to_string()),
                 ("@shared/".to_string(), "shared".to_string())
             ]
+        );
+    }
+
+    #[test]
+    fn resolve_config_drops_wildcard_only_path_alias() {
+        // `"*": ["./src/*"]` is honoured by oxc_resolver's native tsconfig
+        // paths handling. Storing it as an empty-prefix entry in
+        // `path_aliases` causes `starts_with("")` to match every specifier,
+        // including `node:url` and other platform builtins. Drop wildcard
+        // patterns at normalization time so the fallback path only kicks in
+        // for genuine prefix aliases (`@/`, `~/`, `#/`). See issue #327.
+        let source = r#"{
+            "compilerOptions": {
+                "paths": {
+                    "*": ["./src/*"],
+                    "@/*": ["./src/*"]
+                }
+            }
+        }"#;
+        let plugin = TypeScriptPlugin;
+        let result = plugin.resolve_config(
+            std::path::Path::new("/project/tsconfig.json"),
+            source,
+            std::path::Path::new("/project"),
+        );
+
+        assert_eq!(
+            result.path_aliases,
+            vec![("@/".to_string(), "src".to_string())],
         );
     }
 
