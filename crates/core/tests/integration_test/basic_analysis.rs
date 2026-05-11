@@ -338,6 +338,99 @@ fn namespace_re_export_via_named_import_credits_target_members() {
     );
 }
 
+#[test]
+fn namespace_object_alias_chains_through_namespace_re_export_target() {
+    // Issue #328: the namespace target of a Phase 2b namespace-object alias
+    // can itself contain `export * as N from './S'` namespace re-exports.
+    // Real-world chain (filipw01's repro):
+    //
+    //   consumer.ts:               import { API } from '@foo/bar'
+    //                              API.foo.inner.used          (one re-export hop)
+    //                              API.foo.outer.deep.deepUsed (two re-export hops)
+    //   api/index.ts:              import * as foo from './nested/barrel'
+    //                              export const API = { foo }
+    //   api/nested/barrel.ts:      export * as inner from './leaf'
+    //                              export * as outer from './deeper-barrel'
+    //                              export * as untouched from './sibling'   (negative)
+    //   api/nested/leaf.ts:        export const used = ...
+    //                              export const stillUnused = ...           (negative)
+    //   api/nested/deeper-barrel.ts: export * as deep from './deeper-leaf'
+    //   api/nested/deeper-leaf.ts: export const deepUsed = ...
+    //                              export const deepUnused = ...            (negative)
+    //   api/nested/sibling.ts:     export const siblingLeaf = ...           (negative)
+    //
+    // Before the fix, Phase 2b credited `inner` / `outer` on barrel.ts but
+    // stopped there; `used` and `deepUsed` were never reached because the
+    // re-export edge `imported_name="*", exported_name="<name>"` is not
+    // followed by Phase 4 chain resolution. The fix walks chained namespace
+    // re-exports on the alias-target side: when a Phase 2b credit lands on a
+    // name namespace-re-exported elsewhere, the consumer's deeper accesses
+    // propagate to the underlying source, recursively for multi-hop chains.
+    let root = fixture_path("issue-328-namespace-object-alias-through-ns-re-export");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export_name.as_str())
+        .collect();
+
+    // Positive case 1 (single hop): `used` must be credited through
+    // API.foo.inner.used (one namespace re-export between barrel and leaf).
+    assert!(
+        !unused_export_names.contains(&"used"),
+        "used should be credited through the object-alias + single namespace-re-export, found: {unused_export_names:?}"
+    );
+
+    // Positive case 2 (multi hop): `deepUsed` must be credited through
+    // API.foo.outer.deep.deepUsed (two consecutive namespace re-exports).
+    // Confirms the chain walker recurses past the first hop.
+    assert!(
+        !unused_export_names.contains(&"deepUsed"),
+        "deepUsed should be credited through the two-hop namespace-re-export chain, found: {unused_export_names:?}"
+    );
+
+    // Negative case 1: same-file unused export on leaf.ts must stay flagged.
+    // Catches over-crediting (whole-target instead of per-member) on the
+    // single-hop side.
+    assert!(
+        unused_export_names.contains(&"stillUnused"),
+        "stillUnused on leaf.ts must remain flagged; the chain walker must be per-member, found: {unused_export_names:?}"
+    );
+
+    // Negative case 2: same-file unused export on deeper-leaf.ts must stay
+    // flagged even after two re-export hops. Catches over-crediting on the
+    // multi-hop side.
+    assert!(
+        unused_export_names.contains(&"deepUnused"),
+        "deepUnused on deeper-leaf.ts must remain flagged across the two-hop chain, found: {unused_export_names:?}"
+    );
+
+    // Negative case 3: sibling.ts's export must stay flagged because the
+    // consumer never accesses `API.foo.untouched.*`. Catches the case where
+    // the walker credits all namespace re-exports on the target instead of
+    // the specific one the consumer touched.
+    assert!(
+        unused_export_names.contains(&"siblingLeaf"),
+        "siblingLeaf on sibling.ts must remain flagged; the walker must key on the touched re-export name, found: {unused_export_names:?}"
+    );
+
+    // Files must still be reachable (the chain credits exports, not files,
+    // but reachability propagates through the re-export edges already).
+    let unused_file_paths: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.path.display().to_string())
+        .collect();
+    for required in ["leaf.ts", "barrel.ts", "deeper-barrel.ts", "deeper-leaf.ts"] {
+        assert!(
+            !unused_file_paths.iter().any(|p| p.ends_with(required)),
+            "{required} must stay reachable, found unused files: {unused_file_paths:?}"
+        );
+    }
+}
+
 // ── Namespace exports (issue #52) ────────────────────────────
 
 #[test]

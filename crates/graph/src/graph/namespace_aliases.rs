@@ -9,6 +9,11 @@
 //! onto the namespace target's matching export so cross-package access does
 //! not surface as a false `unused-export`. See issue #303.
 //!
+//! Chained namespace re-exports on the alias target side are also followed:
+//! when the alias target does `export * as N from './S'` and the consumer
+//! accesses `API.foo.N.X`, the access `X` is credited on `./S` (and so on
+//! recursively). See issue #328.
+//!
 //! Runs once after Phase 2 (reference population) and before Phase 3
 //! (reachability) so any reference attached here participates in reachability
 //! and re-export chain propagation downstream.
@@ -79,6 +84,7 @@ fn collect_pending_credits(
             let reachable =
                 enumerate_alias_reachable_barrels(graph, alias_file_id, &alias.via_export_name);
             collect_credits_for_alias(
+                graph,
                 module_by_id,
                 alias_file_id,
                 alias,
@@ -176,6 +182,7 @@ fn module_index_for_file(graph: &ModuleGraph, file_id: FileId) -> Option<usize> 
 }
 
 fn collect_credits_for_alias(
+    graph: &ModuleGraph,
     module_by_id: &FxHashMap<FileId, &ResolvedModule>,
     alias_file_id: FileId,
     alias: &NamespaceObjectAlias,
@@ -215,7 +222,94 @@ fn collect_credits_for_alias(
                     consumer_file_id: consumer.file_id,
                     import_span: import.info.span,
                 });
+                // If the credited member lands on a namespace re-export
+                // (`export * as <member> from './source'`) at the alias
+                // target, the consumer's deeper accesses (`<expected_object>.<member>.<X>`)
+                // are accesses on the re-exported namespace, so credit
+                // them on the underlying source recursively. Bounded by a
+                // visited set to handle cyclic chains. See issue #328.
+                let mut visited: FxHashSet<usize> = FxHashSet::default();
+                visited.insert(target_module_idx);
+                let ctx = ChainWalkCtx {
+                    graph,
+                    consumer,
+                    import_span: import.info.span,
+                };
+                collect_chained_re_export_credits(
+                    &ctx,
+                    target_module_idx,
+                    &access.member,
+                    &format!("{expected_object}.{}", access.member),
+                    &mut visited,
+                    pending,
+                );
             }
+        }
+    }
+}
+
+/// Invariant context passed through the chain walker: the read-only graph,
+/// the consumer module producing the accesses, and the original import span
+/// to use as the `from` site on every resulting `SymbolReference`. Grouped
+/// into a struct so the recursive helper stays under the workspace's 7-arg
+/// clippy limit.
+struct ChainWalkCtx<'a> {
+    graph: &'a ModuleGraph,
+    consumer: &'a ResolvedModule,
+    import_span: oxc_span::Span,
+}
+
+/// Follow `export * as <name> from './source'` chains on the alias target
+/// side. When `barrel_module_idx.re_exports` contains an edge with
+/// `imported_name == "*" && exported_name == credited_name`, every consumer
+/// access of the form `<accessor_prefix>.<X>` becomes a credit for `<X>` on
+/// the re-export's `source_file`. Recurses if the new credit also lands on
+/// another namespace re-export, bounded by `visited` to short-circuit cycles.
+fn collect_chained_re_export_credits(
+    ctx: &ChainWalkCtx<'_>,
+    barrel_module_idx: usize,
+    credited_name: &str,
+    accessor_prefix: &str,
+    visited: &mut FxHashSet<usize>,
+    pending: &mut Vec<PendingCredit>,
+) {
+    let Some(barrel) = ctx.graph.modules.get(barrel_module_idx) else {
+        return;
+    };
+    // Collect chained namespace re-export targets up-front so the iteration
+    // below does not hold an immutable borrow on `ctx.graph.modules` while
+    // recursing (the recursive call also indexes into `ctx.graph.modules`).
+    let chained_targets: Vec<FileId> = barrel
+        .re_exports
+        .iter()
+        .filter(|edge| edge.imported_name == "*" && edge.exported_name == credited_name)
+        .map(|edge| edge.source_file)
+        .collect();
+    for source_file in chained_targets {
+        let Some(source_module_idx) = module_index_for_file(ctx.graph, source_file) else {
+            continue;
+        };
+        if !visited.insert(source_module_idx) {
+            continue;
+        }
+        for access in &ctx.consumer.member_accesses {
+            if access.object != accessor_prefix {
+                continue;
+            }
+            pending.push(PendingCredit {
+                target_module_idx: source_module_idx,
+                member: access.member.clone(),
+                consumer_file_id: ctx.consumer.file_id,
+                import_span: ctx.import_span,
+            });
+            collect_chained_re_export_credits(
+                ctx,
+                source_module_idx,
+                &access.member,
+                &format!("{accessor_prefix}.{}", access.member),
+                visited,
+                pending,
+            );
         }
     }
 }
