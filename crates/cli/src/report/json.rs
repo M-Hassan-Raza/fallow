@@ -27,6 +27,11 @@ const IGNORE_DEPENDENCIES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.co
 /// consumer? }` entry to append.
 const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreCatalogReferences/items";
 
+/// JSON Pointer fragment URL describing the shape of the `value` field on an
+/// `ignoreDependencyOverrides` `add-to-config` action: one `{ package, source? }`
+/// entry to append.
+const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
+
 pub(super) fn print_json(
     results: &AnalysisResults,
     root: &Path,
@@ -276,6 +281,8 @@ pub fn build_json(
         "stale_suppressions": results.stale_suppressions.len(),
         "unused_catalog_entries": results.unused_catalog_entries.len(),
         "unresolved_catalog_references": results.unresolved_catalog_references.len(),
+        "unused_dependency_overrides": results.unused_dependency_overrides.len(),
+        "misconfigured_dependency_overrides": results.misconfigured_dependency_overrides.len(),
     });
     map.insert("summary".to_string(), summary);
 
@@ -342,6 +349,9 @@ enum SuppressKind {
     /// Add to `ignoreCatalogReferences` in fallow config (with optional
     /// catalog + consumer scope).
     AddToConfigIgnoreCatalogReferences,
+    /// Add to `ignoreDependencyOverrides` in fallow config (with optional
+    /// source scope).
+    AddToConfigIgnoreDependencyOverrides,
 }
 
 /// Specification for actions to inject per issue type.
@@ -523,6 +533,26 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             suppress: SuppressKind::AddToConfigIgnoreCatalogReferences,
             issue_kind: "unresolved-catalog-reference",
         }),
+        "unused_dependency_overrides" => Some(ActionSpec {
+            fix_type: "remove-dependency-override",
+            auto_fixable: false,
+            description: "Remove the override entry from pnpm-workspace.yaml or pnpm.overrides",
+            note: Some(
+                "Conservative static check; verify against `pnpm install --frozen-lockfile` before removing in case the override targets a transitive dependency (CVE-fix pattern)",
+            ),
+            suppress: SuppressKind::AddToConfigIgnoreDependencyOverrides,
+            issue_kind: "unused-dependency-override",
+        }),
+        "misconfigured_dependency_overrides" => Some(ActionSpec {
+            fix_type: "fix-dependency-override",
+            auto_fixable: false,
+            description: "Fix the override key or value: pnpm refuses to honor entries with an unparsable key or empty value",
+            note: Some(
+                "Common shapes: bare `pkg`, scoped `@scope/pkg`, version-selector `pkg@<2`, parent-chain `parent>child`. Valid values include semver ranges, `-` (removal), `$ref` (self-ref), and `npm:alias@^1`.",
+            ),
+            suppress: SuppressKind::AddToConfigIgnoreDependencyOverrides,
+            issue_kind: "misconfigured-dependency-override",
+        }),
         _ => None,
     }
 }
@@ -587,6 +617,10 @@ fn build_unresolved_catalog_reference_primary_action(
 }
 
 /// Build the `actions` array for a single issue item.
+#[expect(
+    clippy::too_many_lines,
+    reason = "One match arm per SuppressKind; the line count grows with new issue types and the structure is clearer than extracting per-arm helpers."
+)]
 fn build_actions(
     item: &serde_json::Value,
     issue_key: &str,
@@ -739,6 +773,42 @@ fn build_actions(
                 "value": value,
                 "value_schema": IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA,
             }));
+        }
+        SuppressKind::AddToConfigIgnoreDependencyOverrides => {
+            // `target_package` is set on unused overrides (the key parsed
+            // successfully) but absent on misconfigured ones whose `raw_key`
+            // could not be parsed. Falling back to `raw_key` is unsafe in the
+            // misconfigured case: it may be empty or malformed. Skip the
+            // suppress action entirely when neither field yields a non-empty
+            // name; an `ignoreDependencyOverrides` entry with `package: ""`
+            // would be silently ignored by the config parser.
+            let package_name = item
+                .get("target_package")
+                .and_then(serde_json::Value::as_str)
+                .filter(|s| !s.is_empty())
+                .or_else(|| {
+                    item.get("raw_key")
+                        .and_then(serde_json::Value::as_str)
+                        .filter(|s| !s.is_empty())
+                });
+            if let Some(package_name) = package_name {
+                let source = item
+                    .get("source")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or("pnpm-workspace.yaml");
+                let value = serde_json::json!({
+                    "package": package_name,
+                    "source": source,
+                });
+                actions.push(serde_json::json!({
+                    "type": "add-to-config",
+                    "auto_fixable": false,
+                    "description": "Suppress this override finding via ignoreDependencyOverrides in fallow config (use for CVE-fix overrides that target a purely-transitive package).",
+                    "config_key": "ignoreDependencyOverrides",
+                    "value": value,
+                    "value_schema": IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA,
+                }));
+            }
         }
     }
 

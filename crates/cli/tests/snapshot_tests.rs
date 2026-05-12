@@ -18,6 +18,10 @@ use fallow_core::extract::MemberKind;
 use fallow_core::results::*;
 
 /// Build sample `AnalysisResults` with one issue of each type for consistent snapshots.
+#[expect(
+    clippy::too_many_lines,
+    reason = "One block per issue type used across the snapshot suite; the line count grows with new issue types and the structure is intentional."
+)]
 fn sample_results(root: &Path) -> AnalysisResults {
     let mut r = AnalysisResults::default();
 
@@ -142,6 +146,41 @@ fn sample_results(root: &Path) -> AnalysisResults {
             line: 12,
             hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
         });
+    r.unresolved_catalog_references
+        .push(fallow_core::results::UnresolvedCatalogReference {
+            entry_name: "old-react".to_string(),
+            catalog_name: "react17".to_string(),
+            path: root.join("packages/app/package.json"),
+            line: 14,
+            available_in_catalogs: vec!["react18".to_string()],
+        });
+    r.unused_dependency_overrides.push(
+        fallow_core::results::UnusedDependencyOverride {
+            raw_key: "axios".to_string(),
+            target_package: "axios".to_string(),
+            parent_package: None,
+            version_constraint: None,
+            version_range: "^1.6.0".to_string(),
+            source: fallow_core::results::DependencyOverrideSource::PnpmWorkspaceYaml,
+            path: root.join("pnpm-workspace.yaml"),
+            line: 9,
+            hint: Some(
+                "May be an intentional pin for a transitive CVE that no workspace package depends on directly"
+                    .to_string(),
+            ),
+        },
+    );
+    r.misconfigured_dependency_overrides.push(
+        fallow_core::results::MisconfiguredDependencyOverride {
+            raw_key: "@types/react@<<18".to_string(),
+            target_package: None,
+            raw_value: "18.0.0".to_string(),
+            reason: fallow_core::results::DependencyOverrideMisconfigReason::UnparsableKey,
+            source: fallow_core::results::DependencyOverrideSource::PnpmPackageJson,
+            path: root.join("package.json"),
+            line: 3,
+        },
+    );
 
     r
 }
@@ -533,6 +572,8 @@ fn sarif_mixed_severity_snapshot() {
         stale_suppressions: fallow_config::Severity::Warn,
         unused_catalog_entries: fallow_config::Severity::Warn,
         unresolved_catalog_references: fallow_config::Severity::Error,
+        unused_dependency_overrides: fallow_config::Severity::Warn,
+        misconfigured_dependency_overrides: fallow_config::Severity::Error,
     };
     let sarif = build_sarif(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&sarif).expect("should serialize");
@@ -1272,6 +1313,8 @@ fn codeclimate_mixed_severity_snapshot() {
         stale_suppressions: fallow_config::Severity::Warn,
         unused_catalog_entries: fallow_config::Severity::Warn,
         unresolved_catalog_references: fallow_config::Severity::Error,
+        unused_dependency_overrides: fallow_config::Severity::Warn,
+        misconfigured_dependency_overrides: fallow_config::Severity::Error,
     };
     let cc = build_codeclimate(&results, &root, &rules);
     let json_str = serde_json::to_string_pretty(&cc).expect("should serialize");

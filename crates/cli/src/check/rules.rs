@@ -44,6 +44,18 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
                 .unresolved_catalog_references
                 != Severity::Off
         });
+        results.unused_dependency_overrides.retain(|o| {
+            config
+                .resolve_rules_for_path(&o.path)
+                .unused_dependency_overrides
+                != Severity::Off
+        });
+        results.misconfigured_dependency_overrides.retain(|o| {
+            config
+                .resolve_rules_for_path(&o.path)
+                .misconfigured_dependency_overrides
+                != Severity::Off
+        });
         results.circular_dependencies.retain(|c| {
             c.files.iter().any(|path| {
                 config.resolve_rules_for_path(path).circular_dependencies != Severity::Off
@@ -109,6 +121,12 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     }
     if rules.unresolved_catalog_references == Severity::Off {
         results.unresolved_catalog_references.clear();
+    }
+    if rules.unused_dependency_overrides == Severity::Off {
+        results.unused_dependency_overrides.clear();
+    }
+    if rules.misconfigured_dependency_overrides == Severity::Off {
+        results.misconfigured_dependency_overrides.clear();
     }
 }
 
@@ -203,6 +221,10 @@ pub fn has_error_severity_issues(
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
+        || (rules.unused_dependency_overrides == Severity::Error
+            && !results.unused_dependency_overrides.is_empty())
+        || (rules.misconfigured_dependency_overrides == Severity::Error
+            && !results.misconfigured_dependency_overrides.is_empty())
 }
 
 /// Promote all `Warn` severities to `Error` for a single run.
@@ -266,6 +288,12 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.unresolved_catalog_references == Severity::Warn {
         rules.unresolved_catalog_references = Severity::Error;
+    }
+    if rules.unused_dependency_overrides == Severity::Warn {
+        rules.unused_dependency_overrides = Severity::Error;
+    }
+    if rules.misconfigured_dependency_overrides == Severity::Warn {
+        rules.misconfigured_dependency_overrides = Severity::Error;
     }
 }
 
@@ -379,6 +407,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),
@@ -469,6 +498,8 @@ mod tests {
             stale_suppressions: Severity::Off,
             unused_catalog_entries: Severity::Off,
             unresolved_catalog_references: Severity::Off,
+            unused_dependency_overrides: Severity::Off,
+            misconfigured_dependency_overrides: Severity::Off,
         };
         let config = config_with_rules(rules);
         apply_rules(&mut results, &config);
@@ -579,6 +610,8 @@ mod tests {
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
+            unused_dependency_overrides: Severity::Warn,
+            misconfigured_dependency_overrides: Severity::Error,
         };
         assert!(!has_error_severity_issues(&results, &rules, None));
     }
@@ -611,6 +644,8 @@ mod tests {
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
+            unused_dependency_overrides: Severity::Warn,
+            misconfigured_dependency_overrides: Severity::Error,
         };
         // Only unused_files present, but set to Warn — should not trigger
         assert!(!has_error_severity_issues(&results, &rules, None));
@@ -652,6 +687,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),
@@ -697,6 +733,7 @@ mod tests {
             ignore_dependencies: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
+            ignore_dependency_overrides: vec![],
             ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
             used_class_members: vec![],
             duplicates: fallow_config::DuplicatesConfig::default(),
@@ -921,6 +958,8 @@ mod tests {
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
+            unused_dependency_overrides: Severity::Warn,
+            misconfigured_dependency_overrides: Severity::Error,
         };
         promote_warns_to_errors(&mut rules);
 
@@ -967,6 +1006,8 @@ mod tests {
             stale_suppressions: Severity::Off,
             unused_catalog_entries: Severity::Off,
             unresolved_catalog_references: Severity::Off,
+            unused_dependency_overrides: Severity::Off,
+            misconfigured_dependency_overrides: Severity::Off,
         };
         promote_warns_to_errors(&mut rules);
 
