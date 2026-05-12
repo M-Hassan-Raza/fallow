@@ -55,3 +55,6 @@ pnpm run package   # vsce package --no-dependencies (runs codegen via prepackage
 
 ## Version management
 Extension version is set from the git tag by CI — do not manually update `editors/vscode/package.json` version. The release workflow handles everything.
+
+## Engine floor
+`engines.vscode` is pinned at `^1.96.0` and `@types/vscode` at `1.96.0`. Dependabot is told to ignore `@types/vscode` in `.github/dependabot.yml`. The combination keeps the VSIX installable on Cursor and Windsurf (older VS Code forks) and satisfies the `vsce` constraint that `@types/vscode` must be `<=` the engine floor. `test/engine-floor.test.ts` asserts both. Do NOT raise either version without a deliberate reason. A `@types/vscode` bump alone breaks `vsce package`; raising `engines.vscode` breaks install on every fork below that base. The cautionary tale is commit `32685cda`, which bumped to ^1.116.0 just to align with a Dependabot types PR.
