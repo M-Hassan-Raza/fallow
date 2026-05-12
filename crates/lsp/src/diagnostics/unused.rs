@@ -286,6 +286,58 @@ pub fn push_dep_diagnostics(
             });
         }
     }
+
+    push_unresolved_catalog_reference_diagnostics(map, results);
+}
+
+/// Emit one `ERROR`-severity diagnostic per unresolved-catalog-reference
+/// finding. The finding's `path` is stored as an absolute filesystem path
+/// (matching the existing convention for path-anchored findings), so
+/// `Url::from_file_path` can be called directly.
+fn push_unresolved_catalog_reference_diagnostics(
+    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+) {
+    use std::fmt::Write as _;
+    for finding in &results.unresolved_catalog_references {
+        let Ok(uri) = Url::from_file_path(&finding.path) else {
+            continue;
+        };
+        let line = finding.line.saturating_sub(1);
+        let catalog_phrase = if finding.catalog_name == "default" {
+            "the default catalog".to_string()
+        } else {
+            format!("catalog '{}'", finding.catalog_name)
+        };
+        let mut message = format!(
+            "Unresolved catalog reference: '{}' is not declared in {}",
+            finding.entry_name, catalog_phrase,
+        );
+        if !finding.available_in_catalogs.is_empty() {
+            let _ = write!(
+                message,
+                " (available in: {})",
+                finding.available_in_catalogs.join(", ")
+            );
+        }
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position { line, character: 0 },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::ERROR),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String(
+                "unresolved-catalog-reference".to_string(),
+            )),
+            code_description: doc_link("unresolved-catalog-references"),
+            message,
+            ..Default::default()
+        });
+    }
 }
 
 #[expect(
@@ -348,8 +400,8 @@ mod tests {
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
         AnalysisResults, DependencyLocation, ImportSite, TestOnlyDependency, TypeOnlyDependency,
-        UnlistedDependency, UnresolvedImport, UnusedCatalogEntry, UnusedDependency, UnusedExport,
-        UnusedFile, UnusedMember,
+        UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
+        UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
     };
     use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
 
@@ -832,6 +884,79 @@ mod tests {
             d.message.contains("react17"),
             "named-catalog diagnostic must surface the catalog name, got: {}",
             d.message
+        );
+    }
+
+    #[test]
+    fn unresolved_catalog_reference_produces_error_diagnostic_with_absolute_uri() {
+        // `UnresolvedCatalogReference.path` is stored as an absolute filesystem
+        // path (matching the convention used by every other path-anchored
+        // finding type), so the LSP can pass it directly into
+        // `Url::from_file_path` without joining against any root.
+        let root = test_root();
+        let abs_path = root.join("packages/app/package.json");
+        let mut results = AnalysisResults::default();
+        results
+            .unresolved_catalog_references
+            .push(UnresolvedCatalogReference {
+                entry_name: "old-react".to_string(),
+                catalog_name: "react17".to_string(),
+                path: abs_path.clone(),
+                line: 14,
+                available_in_catalogs: vec!["react18".to_string()],
+            });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&abs_path).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("unresolved-catalog-reference diagnostic must be keyed by absolute URI");
+        assert_eq!(file_diags.len(), 1);
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String(
+                "unresolved-catalog-reference".to_string()
+            ))
+        );
+        assert!(d.message.contains("old-react"));
+        assert!(d.message.contains("react17"));
+        assert!(d.message.contains("available in: react18"));
+        // Line 14 (1-based) -> LSP line 13 (0-based)
+        assert_eq!(d.range.start.line, 13);
+    }
+
+    #[test]
+    fn unresolved_catalog_reference_default_catalog_uses_default_phrasing() {
+        let root = test_root();
+        let abs_path = root.join("package.json");
+        let mut results = AnalysisResults::default();
+        results
+            .unresolved_catalog_references
+            .push(UnresolvedCatalogReference {
+                entry_name: "foo".to_string(),
+                catalog_name: "default".to_string(),
+                path: abs_path.clone(),
+                line: 5,
+                available_in_catalogs: vec![],
+            });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(&abs_path).unwrap();
+        let d = &diags[&uri][0];
+        assert!(
+            d.message.contains("the default catalog"),
+            "bare `catalog:` should render as 'the default catalog', got: {}",
+            d.message
+        );
+        assert!(
+            !d.message.contains("available in"),
+            "empty available_in_catalogs should not produce an 'available in' suffix",
         );
     }
 }
