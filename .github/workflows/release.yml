@@ -625,8 +625,18 @@ jobs:
       # whatever tag is current at publish time; we keep this explicit so a
       # compromised `latest` tag cannot land in the privileged job without a
       # commit to this file.
+      #
+      # Two-step bootstrap is required on Node 22 runners. The runner's bundled
+      # npm has a broken dependency tree (`Cannot find module 'promise-retry'`)
+      # when asked to install npm@11.x directly. Installing npm@10.9.8 first
+      # repairs the tree so the second step (the actual pinned version that
+      # holds OIDC trusted-publishing config) can land. Both invocations carry
+      # --ignore-scripts so the supply-chain hardening surface stays narrow.
+      # See incident v2.71.0 -> v2.71.1.
       - name: Install pinned npm (required for trusted publishing)
-        run: npm install -g --ignore-scripts npm@11.14.1
+        run: |
+          npm install -g --ignore-scripts npm@10.9.8
+          npm install -g --ignore-scripts npm@11.14.1
 
       - name: Download npm tarballs
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8

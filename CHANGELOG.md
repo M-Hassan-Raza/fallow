@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.71.1] - 2026-05-12
+
+### Fixed
+
+- **Release workflow restores the two-step npm bootstrap so npm packages publish on Node 22 runners again.** The v2.71.0 release workflow consolidated the npm install to a single `npm install -g --ignore-scripts npm@11.14.1` step, but the Node 22 runner's bundled npm has a broken dependency tree (`Cannot find module 'promise-retry'`) when asked to install npm@11.x directly; the v2.71.0 `Publish to npm` job failed before any tarball reached the registry, leaving `npm install fallow` at v2.70.0 while crates.io, the GitHub release, and the VS Code marketplace all shipped v2.71.0. The install step now does `npm install -g --ignore-scripts npm@10.9.8` first to repair the tree, then upgrades to the pinned `npm@11.14.1` that holds the OIDC trusted-publishing config. Both invocations keep `--ignore-scripts` so the supply-chain hardening surface stays narrow. v2.71.0 is functionally equivalent on every platform except npm; users on `npm` jump from `2.70.0` directly to `2.71.1`.
+
 ## [2.71.0] - 2026-05-12
 
 ### Added
@@ -2123,7 +2129,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.71.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.71.1...HEAD
+[2.71.1]: https://github.com/fallow-rs/fallow/compare/v2.71.0...v2.71.1
 [2.71.0]: https://github.com/fallow-rs/fallow/compare/v2.70.0...v2.71.0
 [2.70.0]: https://github.com/fallow-rs/fallow/compare/v2.69.0...v2.70.0
 [2.69.0]: https://github.com/fallow-rs/fallow/compare/v2.68.0...v2.69.0
