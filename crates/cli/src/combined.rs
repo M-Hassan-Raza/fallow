@@ -496,7 +496,10 @@ fn print_combined_json(
     _explain: bool,
 ) -> ExitCode {
     let mut combined = serde_json::Map::new();
-    combined.insert("schema_version".into(), serde_json::Value::Number(3.into()));
+    combined.insert(
+        "schema_version".into(),
+        serde_json::Value::Number(crate::report::SCHEMA_VERSION.into()),
+    );
     combined.insert(
         "version".into(),
         serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()),

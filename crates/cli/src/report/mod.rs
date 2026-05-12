@@ -642,6 +642,11 @@ pub use codeclimate::build_health_codeclimate;
 )]
 pub use compact::build_compact_lines;
 pub use json::HealthActionOptions;
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
+)]
+pub(crate) use json::SCHEMA_VERSION;
 pub use json::build_baseline_deltas_json;
 #[allow(
     unused_imports,

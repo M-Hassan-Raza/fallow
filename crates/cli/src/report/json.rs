@@ -132,7 +132,11 @@ pub(super) fn print_grouped_json(
 /// Bump this when the structure of the JSON output changes in a
 /// backwards-incompatible way (removing/renaming fields, changing types).
 /// Adding new fields is always backwards-compatible and does not require a bump.
-const SCHEMA_VERSION: u32 = 6;
+#[allow(
+    clippy::redundant_pub_crate,
+    reason = "used through report module re-export by combined.rs, audit.rs, flags.rs"
+)]
+pub(crate) const SCHEMA_VERSION: u32 = 6;
 const RUNTIME_COVERAGE_SCHEMA_VERSION: &str = "1";
 
 /// Build a JSON envelope with standard metadata fields at the top.

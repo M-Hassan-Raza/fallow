@@ -2611,7 +2611,10 @@ fn print_audit_status_line(result: &AuditResult) {
 )]
 fn print_audit_json(result: &AuditResult) -> ExitCode {
     let mut obj = serde_json::Map::new();
-    obj.insert("schema_version".into(), serde_json::Value::Number(3.into()));
+    obj.insert(
+        "schema_version".into(),
+        serde_json::Value::Number(crate::report::SCHEMA_VERSION.into()),
+    );
     obj.insert(
         "version".into(),
         serde_json::Value::String(env!("CARGO_PKG_VERSION").to_string()),
