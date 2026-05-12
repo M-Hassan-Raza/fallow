@@ -731,3 +731,140 @@ fn ignore_dependencies_suppresses_unlisted() {
         "axios in ignoreDependencies should not be flagged as unlisted"
     );
 }
+
+#[test]
+fn workspace_file_does_not_use_root_manifest_for_unlisted_check() {
+    let case = workspace_import_case("react", false, None);
+    let pkg = make_pkg(&["react"], &[], &[]);
+    let config = test_config(case.root);
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unlisted = find_unlisted_dependencies(
+        &case.graph,
+        &pkg,
+        &config,
+        &case.workspaces,
+        None,
+        &case.resolved_modules,
+        &line_offsets,
+    );
+
+    assert!(
+        unlisted.iter().any(|dep| dep.package_name == "react"),
+        "workspace imports must be checked against their own package.json, not root deps"
+    );
+}
+
+#[test]
+fn sibling_at_types_package_does_not_suppress_unlisted_check() {
+    let case = workspace_import_case(
+        "geojson",
+        true,
+        Some(r#"{"name":"types-owner","devDependencies":{"@types/geojson":"^1.0.0"}}"#),
+    );
+    let pkg = make_pkg(&[], &[], &[]);
+    let config = test_config(case.root);
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unlisted = find_unlisted_dependencies(
+        &case.graph,
+        &pkg,
+        &config,
+        &case.workspaces,
+        None,
+        &case.resolved_modules,
+        &line_offsets,
+    );
+
+    assert!(
+        unlisted.iter().any(|dep| dep.package_name == "geojson"),
+        "a sibling workspace's @types package must not satisfy the importing workspace"
+    );
+}
+
+struct WorkspaceImportCase {
+    #[allow(dead_code, reason = "keeps tempdir alive for workspace package files")]
+    tmp: tempfile::TempDir,
+    root: PathBuf,
+    graph: ModuleGraph,
+    resolved_modules: Vec<ResolvedModule>,
+    workspaces: Vec<WorkspaceInfo>,
+}
+
+fn workspace_import_case(
+    package_name: &str,
+    is_type_only: bool,
+    sibling_package_json: Option<&str>,
+) -> WorkspaceImportCase {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path().join("repo");
+    let app_root = root.join("packages/app");
+    std::fs::create_dir_all(app_root.join("src")).expect("create workspace source");
+    std::fs::write(app_root.join("package.json"), r#"{"name":"app"}"#)
+        .expect("write app package json");
+
+    let mut workspaces = vec![WorkspaceInfo {
+        root: app_root.clone(),
+        name: "app".to_string(),
+        is_internal_dependency: false,
+    }];
+
+    if let Some(package_json) = sibling_package_json {
+        let sibling_root = root.join("packages/types-owner");
+        std::fs::create_dir_all(sibling_root.join("src")).expect("create sibling source");
+        std::fs::write(sibling_root.join("package.json"), package_json)
+            .expect("write sibling package json");
+        workspaces.push(WorkspaceInfo {
+            root: sibling_root,
+            name: "types-owner".to_string(),
+            is_internal_dependency: false,
+        });
+    }
+
+    let file_path = app_root.join("src/index.ts");
+    let files = vec![DiscoveredFile {
+        id: FileId(0),
+        path: file_path.clone(),
+        size_bytes: 100,
+    }];
+    let entry_points = vec![EntryPoint {
+        path: file_path.clone(),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: file_path,
+        exports: vec![],
+        re_exports: vec![],
+        resolved_imports: vec![ResolvedImport {
+            info: ImportInfo {
+                source: package_name.to_string(),
+                imported_name: ImportedName::Named("value".to_string()),
+                local_name: "value".to_string(),
+                is_type_only,
+                from_style: false,
+                span: oxc_span::Span::new(0, 35),
+                source_span: oxc_span::Span::default(),
+            },
+            target: ResolveResult::NpmPackage(package_name.to_string()),
+        }],
+        resolved_dynamic_imports: vec![],
+        resolved_dynamic_patterns: vec![],
+        member_accesses: vec![],
+        whole_object_uses: vec![],
+        has_cjs_exports: false,
+        unused_import_bindings: FxHashSet::default(),
+        type_referenced_import_bindings: vec![],
+        value_referenced_import_bindings: vec![],
+        namespace_object_aliases: vec![],
+    }];
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+    WorkspaceImportCase {
+        tmp,
+        root,
+        graph,
+        resolved_modules,
+        workspaces,
+    }
+}

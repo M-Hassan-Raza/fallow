@@ -1,7 +1,9 @@
 #[cfg(unix)]
 use rmcp::model::*;
+#[cfg(unix)]
+use std::time::Duration;
 
-use crate::tools::{run_fallow, run_fallow_with_top_level_warnings};
+use crate::tools::{run_fallow, run_fallow_with_timeout, run_fallow_with_top_level_warnings};
 
 use super::super::resolve_binary;
 
@@ -463,18 +465,13 @@ async fn run_fallow_stdin_is_not_inherited() {
 
 #[cfg(unix)]
 #[tokio::test]
-#[expect(unsafe_code, reason = "env var mutation requires unsafe")]
 async fn run_fallow_timeout_returns_mcp_error() {
-    // Set a very short timeout to trigger it reliably.
-    // Note: env var mutation can race with parallel tests that call timeout_duration().
-    // In practice the 1s window is narrow and no other test depends on this env var.
-    // SAFETY: test-only, sequential env access within this function
-    unsafe { std::env::set_var("FALLOW_TIMEOUT_SECS", "1") };
-
-    let result = run_fallow("/bin/sh", &["-c".to_string(), "sleep 10".to_string()]).await;
-
-    // SAFETY: test-only cleanup
-    unsafe { std::env::remove_var("FALLOW_TIMEOUT_SECS") };
+    let result = run_fallow_with_timeout(
+        "/bin/sh",
+        &["-c".to_string(), "sleep 10".to_string()],
+        Duration::from_millis(20),
+    )
+    .await;
 
     assert!(result.is_err(), "timeout should produce an MCP error");
     let err = result.unwrap_err();

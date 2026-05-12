@@ -648,12 +648,22 @@ pub fn is_package_listed_for_file(
     root_deps: &FxHashSet<String>,
     ws_dep_map: &[(PathBuf, FxHashSet<String>)],
 ) -> bool {
-    if root_deps.contains(package_name) {
-        return true;
+    if let Some(ws_deps) = owning_workspace_deps(file_path, ws_dep_map) {
+        return ws_deps.contains(package_name);
     }
+
+    root_deps.contains(package_name)
+}
+
+fn owning_workspace_deps<'a>(
+    file_path: &Path,
+    ws_dep_map: &'a [(PathBuf, FxHashSet<String>)],
+) -> Option<&'a FxHashSet<String>> {
     ws_dep_map
         .iter()
-        .any(|(ws_root, ws_deps)| file_path.starts_with(ws_root) && ws_deps.contains(package_name))
+        .filter(|(ws_root, _)| file_path.starts_with(ws_root))
+        .max_by_key(|(ws_root, _)| ws_root.components().count())
+        .map(|(_, ws_deps)| ws_deps)
 }
 
 /// Check if a corresponding `@types/<package>` is listed in dependencies.
@@ -664,13 +674,22 @@ pub fn is_package_listed_for_file(
 /// regardless of whether it uses the `import type` syntax.
 ///
 /// For scoped packages like `@scope/pkg`, the DefinitelyTyped convention is `@types/scope__pkg`.
-fn has_types_package(package_name: &str, all_workspace_deps: &FxHashSet<String>) -> bool {
-    let types_name = package_name.strip_prefix('@').map_or_else(
+fn types_package_name(package_name: &str) -> String {
+    package_name.strip_prefix('@').map_or_else(
         || format!("@types/{package_name}"),
         // @scope/pkg -> @types/scope__pkg
         |scoped| format!("@types/{}", scoped.replacen('/', "__", 1)),
-    );
-    all_workspace_deps.contains(&types_name)
+    )
+}
+
+fn has_types_package_for_file(
+    file_path: &Path,
+    package_name: &str,
+    root_deps: &FxHashSet<String>,
+    ws_dep_map: &[(PathBuf, FxHashSet<String>)],
+) -> bool {
+    let types_name = types_package_name(package_name);
+    is_package_listed_for_file(file_path, &types_name, root_deps, ws_dep_map)
 }
 
 /// Look up the import location (line, col) for a given package in a given file.
@@ -707,17 +726,10 @@ pub fn find_unlisted_dependencies(
 ) -> Vec<UnlistedDependency> {
     let all_deps: FxHashSet<String> = pkg.all_dependency_names().into_iter().collect();
 
-    // Build a set of all deps across all workspace package.json files.
-    // In monorepos, imports in workspace files reference deps from that workspace's package.json.
-    let mut all_workspace_deps: FxHashSet<String> = all_deps.clone();
-    // Also collect workspace package names so internal workspace deps can be
-    // checked against the declaring workspace instead of skipped globally.
-    let mut workspace_names: FxHashSet<String> = FxHashSet::default();
     // Map: canonical workspace root -> set of dep names (for per-file checks)
     let mut ws_dep_map: Vec<(PathBuf, FxHashSet<String>)> = Vec::new();
 
     for ws in workspaces {
-        workspace_names.insert(ws.name.clone());
         let ws_pkg_path = ws.root.join("package.json");
         if is_package_json_ignored(&ws_pkg_path, config) {
             continue;
@@ -726,7 +738,6 @@ pub fn find_unlisted_dependencies(
             let mut ws_deps: FxHashSet<String> =
                 ws_pkg.all_dependency_names().into_iter().collect();
             ws_deps.insert(ws.name.clone());
-            all_workspace_deps.extend(ws_deps.iter().cloned());
             // Use raw workspace root path for starts_with checks (avoids per-file canonicalize)
             ws_dep_map.push((ws.root.clone(), ws_deps));
         }
@@ -813,20 +824,7 @@ pub fn find_unlisted_dependencies(
         {
             continue;
         }
-        // Quick check: if an external dependency is listed in any root or workspace
-        // deps, skip. Internal workspace package names need the slower per-file
-        // check below so imports from workspaces that did not declare the internal
-        // dependency are still reported.
-        if all_workspace_deps.contains(package_name) && !workspace_names.contains(package_name) {
-            continue;
-        }
-        // When @types/<package> is listed, the bare package is used for types only —
-        // TypeScript resolves types from @types/ and erases the import at compile time.
-        if has_types_package(package_name, &all_workspace_deps) {
-            continue;
-        }
-
-        // Slower fallback: check if each importing file belongs to a workspace that lists this dep.
+        // Check each importing file against the package.json that owns that file.
         // Uses raw path comparison (module paths are absolute) to avoid per-file canonicalize().
         let mut unlisted_sites: Vec<ImportSite> = Vec::new();
         for id in file_ids {
@@ -834,6 +832,12 @@ pub fn find_unlisted_dependencies(
                 continue;
             };
             if is_package_listed_for_file(&module.path, package_name, &all_deps, &ws_dep_map) {
+                continue;
+            }
+            // When @types/<package> is listed in the owning manifest, the bare
+            // package is used for types only. TypeScript resolves types from
+            // @types/ and erases the import at compile time.
+            if has_types_package_for_file(&module.path, package_name, &all_deps, &ws_dep_map) {
                 continue;
             }
             let (line, col) = find_import_location(
