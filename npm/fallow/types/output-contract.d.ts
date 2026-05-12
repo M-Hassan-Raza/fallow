@@ -964,17 +964,21 @@ total_tokens: number
  */
 duplicated_tokens: number
 /**
- * Number of clone groups found.
+ * Number of clone groups in the reported `clone_groups[]` array. Matches `clone_groups[].length` post `minOccurrences` filtering; the count of groups hidden by the filter is exposed in `clone_groups_below_min_occurrences`.
  */
 clone_groups: number
 /**
- * Total clone instances across all groups.
+ * Total clone instances across all reported groups. Matches `clone_groups[]`'s flattened instance count post `minOccurrences` filtering.
  */
 clone_instances: number
 /**
- * Percentage of duplicated lines (0.0–100.0).
+ * Percentage of duplicated lines (0.0 to 100.0). Always reflects the FULL corpus, computed BEFORE the `minOccurrences` filter so trend lines and `threshold` gates stay stable when the filter changes.
  */
 duplication_percentage: number
+/**
+ * Number of clone groups hidden by `duplicates.minOccurrences`. Absent (or `0`) when the filter is at its default of `2` and nothing was hidden. Pre-filter clone group count = `clone_groups + clone_groups_below_min_occurrences`.
+ */
+clone_groups_below_min_occurrences?: number
 }
 /**
  * A pair of directories with high structural duplication, indicating systematic copy-paste of directory trees.
