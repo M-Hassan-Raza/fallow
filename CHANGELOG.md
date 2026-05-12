@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.71.0] - 2026-05-12
+
 ### Added
 
 - **`import type { CheckOutput, FallowJsonOutput } from "fallow/types"` now works for any TypeScript consumer of `npx fallow --format json`.** Previously CI scripts, monorepo tooling, and AI agents parsing fallow output invented their own `interface`s or used `any`. The npm `fallow` package now exposes the generated `.d.ts` the VS Code extension already uses, covering every command's JSON shape (`CheckOutput`, `HealthOutput`, `DupesOutput`, `AuditOutput`, `CombinedOutput`, `IssueAction`, every per-finding struct). `SchemaVersion` is pinned to a literal (currently `6`) at codegen time, so a future major-version schema bump produces a compile error at consumer call sites that gate on the version rather than silently drifting. Works on both modern (`moduleResolution: "node16"` / `"nodenext"` / `"bundler"`) and legacy (`"node"`) TypeScript configs via paired `exports` and `typesVersions` entries. Types-only, no JS runtime added. (Closes [#339](https://github.com/fallow-rs/fallow/issues/339))
@@ -2121,7 +2123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.70.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.71.0...HEAD
+[2.71.0]: https://github.com/fallow-rs/fallow/compare/v2.70.0...v2.71.0
 [2.70.0]: https://github.com/fallow-rs/fallow/compare/v2.69.0...v2.70.0
 [2.69.0]: https://github.com/fallow-rs/fallow/compare/v2.68.0...v2.69.0
 [2.68.0]: https://github.com/fallow-rs/fallow/compare/v2.67.0...v2.68.0
