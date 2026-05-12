@@ -20,6 +20,27 @@ Review changes to fallow's VS Code extension. This is the editor integration lay
 9. **Auto-download**: Platform detection, version pinning, progress indication, retry on network failure. Never silently download without user consent (respect `autoDownload` setting)
 10. **package.json**: `engines.vscode` minimum version, activation events, contributes section completeness
 
+## Surface-specific checks
+
+For each VS Code extension diff, walk this list in addition to the generic checks above:
+
+- [ ] **VS Code committed `dist/` bundle regenerated when TS source or build config changes**: any diff touching `editors/vscode/src/**/*.ts` (sources), `editors/vscode/package.json`, `editors/vscode/rolldown.config.ts`, or `editors/vscode/tsconfig.json` (build inputs) requires `pnpm run build` in `editors/vscode/` so the tracked `dist/extension.js` + `dist/extension.js.map` artifacts ship in the same commit as the source. The marketplace consumer sees the bundle, not the source; the source map's `sourcesContent` embeds the TS source verbatim, so type-only edits still produce a load-bearing `.map` delta. `pnpm run lint` (`tsc --noEmit`) is necessary for typecheck but does NOT invoke rolldown. **Semantic check, not numeric**: type-only edits keep `extension.js` byte-identical and only `extension.js.map` changes, so a "2 dist files committed" count produces a false positive. Verify by running `pnpm run build` and confirming `git status` shows no new modifications under `dist/`:
+  ```bash
+  if git diff origin/main..HEAD --name-only | grep -qE '^editors/vscode/(src/|package\.json|rolldown\.config\.ts|tsconfig\.json)'; then
+    (cd editors/vscode && pnpm run build > /dev/null 2>&1)
+    NEW_DIFF=$(git status --short editors/vscode/dist/ | wc -l)
+    [ "$NEW_DIFF" -eq 0 ] || { echo "FAIL: pnpm run build produced fresh dist/ diff after commit"; git status --short editors/vscode/dist/; }
+  fi
+  ```
+  Caught 2026-05-11 by codex's parallel /fallow-review on commit `7267aada`: TS-only edit to `editors/vscode/src/types.ts` shipped with a stale `dist/extension.js.map` because my review ran only `pnpm run lint` and reported `editors/vscode` as OK. Fix landed as `d1a5a800`.
+- [ ] **VS Code generated types regenerated when `docs/output-schema.json` changes**: any diff touching `docs/output-schema.json` OR any file under `editors/vscode/` requires running `pnpm run check:codegen` to confirm the committed `editors/vscode/src/generated/output-contract.d.ts` (and `npm/fallow/types/output-contract.d.ts`) is in sync with the schema. The codegen runs as a CI job in `.github/workflows/*.yml`; a stale generated file passes local `cargo test` + `pnpm run lint` (`tsc --noEmit` ignores upstream-schema-vs-generated drift) but fails CI's `check:codegen` job. Run alongside `pnpm run lint`:
+  ```bash
+  if git diff origin/main..HEAD --name-only | grep -qE '^(docs/output-schema\.json|editors/vscode/)'; then
+    (cd editors/vscode && pnpm run lint 2>&1 | tail -3 && pnpm run check:codegen 2>&1 | tail -3)
+  fi
+  ```
+  Caught 2026-05-12 on PR #340 (issue #334): added four `FixAction` enum variants + `available_in_catalogs` to `docs/output-schema.json` but did not regenerate `editors/vscode/src/output-contract.d.ts`; local `pnpm run lint` passed because the hand-written re-export wrapper compiles fine against the stale generated file, but CI's `check:codegen` job flagged the drift. Fix landed as commit `00645dc5`. The two pnpm commands serve different purposes: `pnpm run lint` validates the TS source against itself, `pnpm run check:codegen` validates the generated file is byte-equivalent to a fresh regen from the schema.
+
 ## Key files
 
 - `editors/vscode/package.json` (extension manifest)
