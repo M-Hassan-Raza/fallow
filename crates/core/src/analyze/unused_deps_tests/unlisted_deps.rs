@@ -783,7 +783,7 @@ fn sibling_at_types_package_does_not_suppress_unlisted_check() {
 }
 
 struct WorkspaceImportCase {
-    #[allow(dead_code, reason = "keeps tempdir alive for workspace package files")]
+    #[expect(dead_code, reason = "keeps tempdir alive for workspace package files")]
     tmp: tempfile::TempDir,
     root: PathBuf,
     graph: ModuleGraph,
