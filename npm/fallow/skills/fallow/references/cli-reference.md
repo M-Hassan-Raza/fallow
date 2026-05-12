@@ -192,7 +192,7 @@ fallow dupes --format json --quiet --baseline fallow-baselines/dupes.json --thre
 
 ## `fix`: Auto-Remove Unused Code
 
-Auto-removes unused exports and dependencies.
+Auto-removes unused exports, dependencies, enum members, and pnpm catalog entries.
 
 ### Flags
 
@@ -203,6 +203,13 @@ Auto-removes unused exports and dependencies.
 | `--force` | bool | `false` | Alias for `--yes` |
 | `--format` | `human\|json` | `human` | Output format |
 | `--quiet` | bool | `false` | Suppress progress bars |
+
+### What gets fixed
+
+- Unused exports (removes the `export` keyword; whole-enum block when every member is unused)
+- Unused dependencies (removed from `package.json`)
+- Unused enum members (removed from the declaration)
+- Unused pnpm catalog entries (removed from `pnpm-workspace.yaml` by line-aware deletion; comments preserved). When the last entry of a catalog group is removed, the header is rewritten to `catalog: {}` / `<name>: {}` so pnpm doesn't reject the resulting null value. Entries with non-empty `hardcoded_consumers` are skipped to avoid breaking `pnpm install`; the skip is surfaced in the JSON fix output as `{"type": "remove_catalog_entry", "applied": false, "skipped": true, "skip_reason": "hardcoded_consumers", "consumers": [...]}`. After a successful catalog edit the CLI emits a one-line `Run pnpm install to refresh pnpm-lock.yaml` reminder. The JSON envelope carries a top-level `"skipped"` count alongside `"total_fixed"` for partial-fix gating.
 
 ### Examples
 
@@ -425,7 +432,7 @@ fallow health --format json --quiet --trend
 ```json
 {
   "schema_version": 3,
-  "version": "2.72.0",
+  "version": "2.73.0",
   "elapsed_ms": 32,
   "summary": {
     "files_analyzed": 482,
@@ -811,7 +818,7 @@ fallow audit \
 ```json
 {
   "schema_version": 3,
-  "version": "2.72.0",
+  "version": "2.73.0",
   "command": "audit",
   "verdict": "fail",
   "changed_files_count": 12,
@@ -884,7 +891,7 @@ fallow flags --format json --quiet --workspace my-package
 ```json
 {
   "schema_version": 3,
-  "version": "2.72.0",
+  "version": "2.73.0",
   "elapsed_ms": 116,
   "feature_flags": [],
   "total_flags": 0
@@ -1303,7 +1310,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 ```json
 {
   "schema_version": 3,
-  "version": "2.72.0",
+  "version": "2.73.0",
   "elapsed_ms": 45,
   "total_issues": 12,
   "entry_points": {
@@ -1450,7 +1457,7 @@ When `--baseline` is used in combined output, the JSON includes a `baseline_delt
 ```json
 {
   "schema_version": 3,
-  "version": "2.72.0",
+  "version": "2.73.0",
   "elapsed_ms": 82,
   "total_clones": 15,
   "total_lines_duplicated": 230,
@@ -1494,7 +1501,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 {
   "check": {
     "schema_version": 3,
-    "version": "2.72.0",
+    "version": "2.73.0",
     "elapsed_ms": 45,
     "total_issues": 12,
     "unused_files": [],
@@ -1516,7 +1523,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
   },
   "dupes": {
     "schema_version": 3,
-    "version": "2.72.0",
+    "version": "2.73.0",
     "elapsed_ms": 82,
     "total_clones": 15,
     "total_lines_duplicated": 230,
@@ -1525,7 +1532,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
   },
   "health": {
     "schema_version": 3,
-    "version": "2.72.0",
+    "version": "2.73.0",
     "elapsed_ms": 32,
     "summary": {},
     "findings": [],
