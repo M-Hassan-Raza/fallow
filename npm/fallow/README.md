@@ -28,6 +28,14 @@ npx @tanstack/intent load fallow#fallow
 
 For one-off CLI use without project-local skill discovery, run `npx fallow`.
 
+Parsing fallow's JSON output in TypeScript? Import the typed shapes:
+
+```ts
+import type { CheckOutput, FallowJsonOutput } from "fallow/types";
+```
+
+The types are generated from the same schema as the VS Code extension and pin to the CLI version you install. See [docs.fallow.tools](https://docs.fallow.tools) for the full output contract.
+
 ## Usage
 
 ```bash

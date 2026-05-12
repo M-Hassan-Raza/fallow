@@ -36,11 +36,27 @@
     "fallow-lsp": "bin/fallow-lsp",
     "fallow-mcp": "bin/fallow-mcp"
   },
+  "exports": {
+    "./types": {
+      "types": "./types/output-contract.d.ts"
+    },
+    "./package.json": "./package.json",
+    "./bin/*": "./bin/*",
+    "./scripts/*": "./scripts/*",
+    "./skills/*": "./skills/*",
+    "./schema.json": "./schema.json"
+  },
+  "typesVersions": {
+    "*": {
+      "types": ["./types/output-contract.d.ts"]
+    }
+  },
   "files": [
     "bin",
     "scripts",
     "skills",
     "!skills/_artifacts",
+    "types",
     "README.md",
     "schema.json"
   ],
