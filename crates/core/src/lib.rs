@@ -332,7 +332,7 @@ pub fn analyze_with_parse_result(
     );
     let root_pkg = load_root_package_json(config);
     let discovery_hidden_dir_scopes =
-        discover::collect_plugin_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
+        discover::collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
     // Stage 1: Discover files (cheap — needed for file registry and resolution)
     let t = Instant::now();
@@ -558,7 +558,7 @@ fn analyze_full(
     );
     let root_pkg = load_root_package_json(config);
     let discovery_hidden_dir_scopes =
-        discover::collect_plugin_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
+        discover::collect_hidden_dir_scopes(config, root_pkg.as_ref(), &workspaces_vec);
 
     // Stage 1: Discover all source files
     let t = Instant::now();
