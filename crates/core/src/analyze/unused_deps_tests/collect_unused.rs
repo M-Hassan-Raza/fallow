@@ -273,6 +273,20 @@ fn listed_in_root_deps() {
 }
 
 #[test]
+fn workspace_file_does_not_inherit_root_deps() {
+    let mut root_deps = FxHashSet::default();
+    root_deps.insert("react".to_string());
+    let ws_dep_map = vec![(PathBuf::from("/project/packages/app"), FxHashSet::default())];
+
+    assert!(!is_package_listed_for_file(
+        Path::new("/project/packages/app/src/index.ts"),
+        "react",
+        &root_deps,
+        &ws_dep_map,
+    ));
+}
+
+#[test]
 fn listed_in_workspace_deps() {
     let root_deps = FxHashSet::default();
     let mut ws_deps = FxHashSet::default();
@@ -309,6 +323,35 @@ fn listed_in_different_workspace_not_matching() {
     assert!(!is_package_listed_for_file(
         Path::new("/project/packages/app/src/index.ts"),
         "lodash",
+        &root_deps,
+        &ws_dep_map,
+    ));
+}
+
+#[test]
+fn nested_workspace_uses_most_specific_manifest() {
+    let root_deps = FxHashSet::default();
+    let mut parent_deps = FxHashSet::default();
+    parent_deps.insert("react".to_string());
+    let mut child_deps = FxHashSet::default();
+    child_deps.insert("vue".to_string());
+    let ws_dep_map = vec![
+        (PathBuf::from("/project/packages/app"), parent_deps),
+        (
+            PathBuf::from("/project/packages/app/plugins/widget"),
+            child_deps,
+        ),
+    ];
+
+    assert!(is_package_listed_for_file(
+        Path::new("/project/packages/app/plugins/widget/src/index.ts"),
+        "vue",
+        &root_deps,
+        &ws_dep_map,
+    ));
+    assert!(!is_package_listed_for_file(
+        Path::new("/project/packages/app/plugins/widget/src/index.ts"),
+        "react",
         &root_deps,
         &ws_dep_map,
     ));

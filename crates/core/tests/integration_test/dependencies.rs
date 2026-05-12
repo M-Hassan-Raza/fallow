@@ -154,6 +154,24 @@ fn unused_workspace_dependency_reports_other_workspace_usage() {
         vec![root.join("packages/consumer")],
         "unused dependency should identify the sibling workspace importing it"
     );
+
+    let unlisted = results
+        .unlisted_dependencies
+        .iter()
+        .find(|dep| dep.package_name == "lodash-es")
+        .expect("lodash-es should be unlisted in the consumer workspace");
+    assert_eq!(
+        unlisted.imported_from.len(),
+        1,
+        "lodash-es should have one unlisted import site"
+    );
+    assert!(
+        unlisted.imported_from[0]
+            .path
+            .ends_with("packages/consumer/src/index.ts"),
+        "finding should point at the importing consumer file, got {}",
+        unlisted.imported_from[0].path.display()
+    );
 }
 
 // ── Peer dependencies ─────────────────────────────────────────

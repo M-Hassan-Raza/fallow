@@ -159,8 +159,14 @@ fn timeout_duration() -> Duration {
 
 /// Execute the fallow CLI binary with the given arguments and return the result.
 pub async fn run_fallow(binary: &str, args: &[String]) -> Result<CallToolResult, McpError> {
-    let timeout = timeout_duration();
+    run_fallow_with_timeout(binary, args, timeout_duration()).await
+}
 
+pub async fn run_fallow_with_timeout(
+    binary: &str,
+    args: &[String],
+    timeout: Duration,
+) -> Result<CallToolResult, McpError> {
     let output = tokio::time::timeout(
         timeout,
         Command::new(binary)
