@@ -14,7 +14,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::suppress::Suppression;
 use crate::{
     DynamicImportInfo, DynamicImportPattern, ExportInfo, ExportName, ImportInfo, ImportedName,
-    MemberAccess, MemberInfo, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
+    MemberAccess, MemberInfo, MemberKind, ModuleInfo, ReExportInfo, RequireCallInfo, VisibilityTag,
 };
 use fallow_types::extract::{
     ClassHeritageInfo, LocalTypeDeclaration, PublicSignatureTypeReference,
@@ -40,6 +40,16 @@ struct LocalSignatureTypeReference {
 struct ObjectBindingCandidate {
     binding_path: String,
     source_name: String,
+}
+
+/// Captured at variable-declarator visit time for `const <local_name> = <callee_object>.<callee_method>()`.
+/// Resolved at finalize against this module's imports and class declarations.
+/// See issue #346.
+#[derive(Debug, Clone)]
+pub(crate) struct FactoryCallCandidate {
+    pub(crate) local_name: String,
+    pub(crate) callee_object: String,
+    pub(crate) callee_method: String,
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +157,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// resolved after the full walk so the decorator binding can be checked
     /// against imports regardless of source order.
     lit_custom_element_candidates: Vec<LitCustomElementCandidate>,
+    /// Captured `const <local> = <callee_object>.<callee_method>()` shapes.
+    /// Resolved at finalize: a same-file class match seeds a direct binding
+    /// target (`local -> class_name`), an import match seeds a sentinel target
+    /// the analyze layer decodes. Records that do not match either are
+    /// dropped without effect. See issue #346.
+    pub(crate) factory_call_candidates: Vec<FactoryCallCandidate>,
 }
 
 impl ModuleInfoExtractor {
@@ -367,6 +383,65 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Resolve `const x = ID.METHOD()` factory call candidates into
+    /// `binding_target_names` entries. Runs after the full AST walk so the
+    /// `local_class_exports` and `imports` maps are populated regardless of
+    /// source order between the call and the class/import declaration.
+    ///
+    /// Two outcomes per candidate:
+    /// - Local match: `ID` names a class declared in this module and `METHOD`
+    ///   is in its members with `is_instance_returning_static`. Bind directly:
+    ///   `local -> ID`. `resolve_bound_member_accesses` then re-emits
+    ///   `<local>.<X>` accesses as `<ID>.<X>`, which the analyze layer credits
+    ///   on the export through the existing same-module access pipeline.
+    /// - Import match: `ID` names a static or dynamic import binding in this
+    ///   module. Bind with the sentinel: `local -> FACTORY_CALL_SENTINEL:ID:METHOD`.
+    ///   The analyze layer resolves the import to the source class export and
+    ///   confirms the `is_instance_returning_static` flag before crediting.
+    ///
+    /// Candidates that match neither (globals like `Math.floor`, untracked
+    /// identifiers) are dropped silently. See issue #346.
+    fn resolve_factory_call_candidates(&mut self) {
+        if self.factory_call_candidates.is_empty() {
+            return;
+        }
+        let candidates = std::mem::take(&mut self.factory_call_candidates);
+        for candidate in candidates {
+            let FactoryCallCandidate {
+                local_name,
+                callee_object,
+                callee_method,
+            } = candidate;
+
+            if self.binding_target_names.contains_key(&local_name) {
+                continue;
+            }
+
+            if let Some(local_class) = self.local_class_exports.get(&callee_object)
+                && local_class.members.iter().any(|m| {
+                    m.is_instance_returning_static
+                        && m.kind == MemberKind::ClassMethod
+                        && m.name == callee_method
+                })
+            {
+                self.binding_target_names.insert(local_name, callee_object);
+                continue;
+            }
+
+            let has_import = self
+                .imports
+                .iter()
+                .any(|import| import.local_name == callee_object);
+            if has_import {
+                let sentinel = format!(
+                    "{}{callee_object}:{callee_method}",
+                    crate::FACTORY_CALL_SENTINEL,
+                );
+                self.binding_target_names.insert(local_name, sentinel);
+            }
+        }
+    }
+
     /// Map bound member accesses to their target symbol member accesses.
     ///
     /// When `const x = new Foo()` and later `x.bar()`, or `const x: Service`
@@ -482,6 +557,7 @@ impl ModuleInfoExtractor {
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
+        self.resolve_factory_call_candidates();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();
@@ -534,6 +610,7 @@ impl ModuleInfoExtractor {
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
+        self.resolve_factory_call_candidates();
         self.resolve_bound_member_accesses();
         self.map_local_signature_refs_to_exports();
         self.apply_side_effect_registrations();

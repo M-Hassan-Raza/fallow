@@ -1410,6 +1410,29 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     .insert(id.name.to_string(), class_name);
             }
 
+            // `const x = ID.METHOD(...)`: static-factory call candidate.
+            // We cannot decide here whether `ID` resolves to a class whose
+            // `METHOD` is an instance-returning static factory because the
+            // class declaration may appear later in the file and the import
+            // statements may also be unresolved. Record a candidate; the
+            // finalize step (`resolve_factory_call_candidates`) checks each
+            // candidate against local classes and imports and inserts the
+            // appropriate `binding_target_names` entry (direct class name
+            // for same-file matches, sentinel-encoded for cross-file). See
+            // issue #346.
+            if let Expression::CallExpression(call) = init
+                && let BindingPattern::BindingIdentifier(id) = &declarator.id
+                && let Expression::StaticMemberExpression(member) = &call.callee
+                && let Expression::Identifier(callee_object) = &member.object
+            {
+                self.factory_call_candidates
+                    .push(super::FactoryCallCandidate {
+                        local_name: id.name.to_string(),
+                        callee_object: callee_object.name.to_string(),
+                        callee_method: member.property.name.to_string(),
+                    });
+            }
+
             // `const { a, b } = ns` — namespace destructuring for member narrowing.
             // Scope-unaware: consistent with flat member_accesses approach.
             if let Expression::Identifier(ident) = init

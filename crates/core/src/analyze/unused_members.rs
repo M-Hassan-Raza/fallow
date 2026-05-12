@@ -6,8 +6,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::discover::FileId;
 use crate::extract::{
-    ANGULAR_TPL_SENTINEL, ExportName, INSTANCE_EXPORT_SENTINEL, MemberKind, ModuleInfo,
-    PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
+    ANGULAR_TPL_SENTINEL, ExportName, FACTORY_CALL_SENTINEL, INSTANCE_EXPORT_SENTINEL, MemberKind,
+    ModuleInfo, PLAYWRIGHT_FIXTURE_DEF_SENTINEL, PLAYWRIGHT_FIXTURE_USE_SENTINEL,
 };
 use crate::graph::ModuleGraph;
 use crate::resolve::{ResolveResult, ResolvedModule};
@@ -566,6 +566,82 @@ fn propagate_accesses_through_instance_exports(
     }
 }
 
+/// Decode a `FACTORY_CALL_SENTINEL{callee_object}:{callee_method}` access object
+/// into its `(callee_object, callee_method)` components. Returns `None` when the
+/// object is not sentinel-prefixed or the embedded delimiter is missing.
+fn parse_factory_call_sentinel(object: &str) -> Option<(&str, &str)> {
+    object
+        .strip_prefix(FACTORY_CALL_SENTINEL)
+        .and_then(|payload| payload.split_once(':'))
+}
+
+/// Credit member accesses produced by static-factory call bindings on the
+/// originating class export.
+///
+/// Each `const <local> = <ID>.<METHOD>()` site emitted (via the visitor's
+/// `resolve_factory_call_candidates` and `resolve_bound_member_accesses`)
+/// sentinel-encoded `MemberAccess { object: "{sentinel}{ID}:{METHOD}", member }`
+/// entries on the consumer module. This pass resolves `<ID>` through the
+/// consumer's `local_to_export_keys` (same map used for direct accesses, so it
+/// covers both same-file local classes and cross-file imports). The matched
+/// `ExportKey` is then walked through `walk_re_export_origins` to reach every
+/// defining-site export. For each origin whose `MemberInfo` array contains a
+/// member named `<METHOD>` with `is_instance_returning_static == true`, the
+/// consumed `member` is inserted into `accessed_members` at the origin key.
+///
+/// Origins lacking the matching flagged method are skipped silently: the
+/// sentinel was recorded speculatively at extract time, so this is the
+/// intended drop point for imports that turn out not to name a factory class.
+/// See issue #346.
+fn propagate_factory_call_accesses(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    let module_by_id: FxHashMap<FileId, &ResolvedModule> = resolved_modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
+
+    for resolved in resolved_modules {
+        let local_to_export_keys = build_local_to_export_keys(resolved);
+        for access in &resolved.member_accesses {
+            let Some((callee_object, callee_method)) =
+                parse_factory_call_sentinel(access.object.as_str())
+            else {
+                continue;
+            };
+            let Some(seed_keys) = local_to_export_keys.get(callee_object) else {
+                continue;
+            };
+            for seed_key in seed_keys {
+                for origin in
+                    walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str())
+                {
+                    let Some(origin_module) = module_by_id.get(&origin.file_id) else {
+                        continue;
+                    };
+                    let matches_factory = origin_module.exports.iter().any(|export| {
+                        export.name.matches_str(origin.export_name.as_str())
+                            && export.members.iter().any(|member| {
+                                member.is_instance_returning_static
+                                    && member.kind == MemberKind::ClassMethod
+                                    && member.name == callee_method
+                            })
+                    });
+                    if !matches_factory {
+                        continue;
+                    }
+                    accessed_members
+                        .entry(origin)
+                        .or_default()
+                        .insert(access.member.clone());
+                }
+            }
+        }
+    }
+}
+
 /// Build `parent_export -> [child_export, ...]` from each exported class's
 /// `extends` clause (resolved through the importing module's
 /// `local_to_export_keys`). Output is deduplicated per-parent.
@@ -756,7 +832,9 @@ pub fn find_unused_members(
         let local_to_export_keys = build_local_to_export_keys(resolved);
 
         for access in &resolved.member_accesses {
-            if access.object.starts_with(INSTANCE_EXPORT_SENTINEL) {
+            if access.object.starts_with(INSTANCE_EXPORT_SENTINEL)
+                || access.object.starts_with(FACTORY_CALL_SENTINEL)
+            {
                 continue;
             }
             // Track `this.member` accesses per-file for internal class usage
@@ -789,6 +867,7 @@ pub fn find_unused_members(
     // that import a barrel-re-exported enum/class credit the originating
     // file's `members`. See issue #178.
     propagate_playwright_fixture_accesses(graph, resolved_modules, &mut accessed_members);
+    propagate_factory_call_accesses(graph, resolved_modules, &mut accessed_members);
     propagate_accesses_through_re_exports(graph, &mut accessed_members);
     propagate_whole_object_through_re_exports(graph, &mut whole_object_used_exports);
     let instance_targets = build_instance_export_targets(graph, resolved_modules);
@@ -868,6 +947,7 @@ pub fn find_unused_members(
                     a.object != ANGULAR_TPL_SENTINEL
                         && a.object != "this"
                         && !a.object.starts_with(INSTANCE_EXPORT_SENTINEL)
+                        && !a.object.starts_with(FACTORY_CALL_SENTINEL)
                 })
                 .map(|a| (a.object.as_str(), a.member.as_str()))
                 .collect();
@@ -1170,6 +1250,7 @@ mod tests {
             kind,
             span: Span::new(10, 20),
             has_decorator: false,
+            is_instance_returning_static: false,
         }
     }
 
@@ -1672,6 +1753,7 @@ mod tests {
                 kind: MemberKind::ClassProperty,
                 span: Span::new(10, 20),
                 has_decorator: true, // @Column() etc.
+                is_instance_returning_static: false,
             }],
             Some(0),
         )];

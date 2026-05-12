@@ -1058,3 +1058,246 @@ fn super_access_respects_nested_class_boundary() {
         info.member_accesses
     );
 }
+
+// ── Static factory methods (issue #346) ─────────────────────
+
+#[test]
+fn static_factory_method_returning_new_this_is_flagged() {
+    let info = parse_source(
+        r"export class MyClass {
+            static getInstance() { return new this(); }
+            getData() { return [1, 2, 3]; }
+        }",
+    );
+    let class_export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == "MyClass"))
+        .expect("MyClass export should be present");
+    let get_instance = class_export
+        .members
+        .iter()
+        .find(|m| m.name == "getInstance")
+        .expect("getInstance member should be present");
+    assert!(
+        get_instance.is_instance_returning_static,
+        "static getInstance() {{ return new this(); }} should be flagged as instance-returning"
+    );
+    let get_data = class_export
+        .members
+        .iter()
+        .find(|m| m.name == "getData")
+        .expect("getData member should be present");
+    assert!(
+        !get_data.is_instance_returning_static,
+        "instance method getData must not be flagged as instance-returning static"
+    );
+}
+
+#[test]
+fn static_factory_method_returning_new_same_class_name_is_flagged() {
+    let info = parse_source(
+        r"export class Service {
+            static create() { return new Service(); }
+        }",
+    );
+    let class_export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == "Service"))
+        .expect("Service export should be present");
+    let create = class_export
+        .members
+        .iter()
+        .find(|m| m.name == "create")
+        .expect("create member should be present");
+    assert!(
+        create.is_instance_returning_static,
+        "static create() {{ return new Service(); }} should be flagged as instance-returning"
+    );
+}
+
+#[test]
+fn static_factory_method_returning_other_class_not_flagged() {
+    // `new SomeOther()` is not an instance of MyClass, so the static method
+    // must NOT be flagged as instance-returning. Conservative: only
+    // `new this()` or `new <SameClassName>()` qualifies.
+    let info = parse_source(
+        r"export class MyClass {
+            static getBuilder() { return new Builder(); }
+        }",
+    );
+    let class_export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == "MyClass"))
+        .expect("MyClass export should be present");
+    let get_builder = class_export
+        .members
+        .iter()
+        .find(|m| m.name == "getBuilder")
+        .expect("getBuilder member should be present");
+    assert!(
+        !get_builder.is_instance_returning_static,
+        "factory returning a different class must not be flagged"
+    );
+}
+
+#[test]
+fn instance_method_with_new_this_return_not_flagged() {
+    // The flag applies only to STATIC methods. An instance method returning
+    // `new this.constructor()` or similar is a different pattern out of scope.
+    let info = parse_source(
+        r"export class MyClass {
+            clone() { return new this.constructor(); }
+        }",
+    );
+    let class_export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == "MyClass"))
+        .expect("MyClass export should be present");
+    let clone = class_export
+        .members
+        .iter()
+        .find(|m| m.name == "clone")
+        .expect("clone member should be present");
+    assert!(
+        !clone.is_instance_returning_static,
+        "instance method must not be flagged regardless of return shape"
+    );
+}
+
+#[test]
+fn static_factory_binding_emits_sentinel_member_access() {
+    // Cross-file case: `MyClass` comes from an import, so `resolve_factory_call_candidates`
+    // takes the import-match branch and emits a sentinel binding the analyze
+    // layer decodes. The visitor surface check is that the sentinel access
+    // appears on `myInstance.getData()`.
+    let info = parse_source(
+        r"import { MyClass } from './my-class';
+        const myInstance = MyClass.getInstance();
+        myInstance.getData();",
+    );
+    let sentinel_access = info
+        .member_accesses
+        .iter()
+        .find(|a| a.object.starts_with(crate::FACTORY_CALL_SENTINEL))
+        .expect("sentinel-prefixed access should be emitted for the factory call result");
+    assert_eq!(sentinel_access.member, "getData");
+    assert!(
+        sentinel_access.object.ends_with("MyClass:getInstance"),
+        "sentinel should encode the call shape, got: {}",
+        sentinel_access.object
+    );
+}
+
+#[test]
+fn static_factory_binding_same_file_emits_direct_access() {
+    // Same-file case: `MyClass` is a locally declared class with an
+    // instance-returning static method. `resolve_factory_call_candidates`
+    // takes the local-class branch and binds directly to `MyClass` instead
+    // of the sentinel. The visitor surface check is the direct
+    // `MemberAccess { object: "MyClass", member: "getData" }`.
+    let info = parse_source(
+        r"export class MyClass {
+            static getInstance() { return new this(); }
+            getData() { return [1, 2, 3]; }
+        }
+        const myInstance = MyClass.getInstance();
+        myInstance.getData();",
+    );
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|a| a.object == "MyClass" && a.member == "getData"),
+        "same-file factory call should expand `myInstance.getData` to `MyClass.getData`, found: {:?}",
+        info.member_accesses
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(crate::FACTORY_CALL_SENTINEL)),
+        "same-file case must not emit a sentinel access: {:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn static_factory_with_early_guard_return_is_flagged() {
+    // `if (cond) return null;` is a top-level `IfStatement` (the nested
+    // `return null` lives inside the consequent block) so it does not count
+    // as a top-level qualifying return. The last top-level statement is
+    // `return new this()`, which IS the canonical factory shape, so the
+    // method must stay flagged as instance-returning.
+    let info = parse_source(
+        r"export class MyClass {
+            static getInstance(cond: boolean) {
+                if (cond) return null;
+                return new this();
+            }
+        }",
+    );
+    let class_export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == "MyClass"))
+        .expect("MyClass export should be present");
+    let get_instance = class_export
+        .members
+        .iter()
+        .find(|m| m.name == "getInstance")
+        .expect("getInstance member should be present");
+    assert!(
+        get_instance.is_instance_returning_static,
+        "factory with an early guard return must still be flagged as instance-returning"
+    );
+}
+
+#[test]
+fn static_method_returning_conditional_expression_is_not_flagged() {
+    // `return cond ? new this() : null;` returns a ConditionalExpression,
+    // not a bare NewExpression. The conservative detection requires the
+    // return argument to be a `new ...` directly, so this shape must NOT
+    // be flagged.
+    let info = parse_source(
+        r"export class MyClass {
+            static maybe(cond: boolean) {
+                return cond ? new this() : null;
+            }
+        }",
+    );
+    let class_export = info
+        .exports
+        .iter()
+        .find(|e| matches!(&e.name, ExportName::Named(n) if n == "MyClass"))
+        .expect("MyClass export should be present");
+    let maybe = class_export
+        .members
+        .iter()
+        .find(|m| m.name == "maybe")
+        .expect("maybe member should be present");
+    assert!(
+        !maybe.is_instance_returning_static,
+        "ConditionalExpression in the return argument must not flag the method"
+    );
+}
+
+#[test]
+fn factory_call_candidate_with_unknown_object_is_dropped() {
+    // `Math.floor()` is not a known import and not a local class. The
+    // visitor must not emit a sentinel-prefixed access for it.
+    let info = parse_source(
+        r"const n = Math.floor(1.5);
+        n.toString();",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|a| a.object.starts_with(crate::FACTORY_CALL_SENTINEL)),
+        "calls on globals must not produce a sentinel binding: {:?}",
+        info.member_accesses
+    );
+}

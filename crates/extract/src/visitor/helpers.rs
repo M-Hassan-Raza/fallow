@@ -494,6 +494,7 @@ pub(super) fn has_angular_plural_query_decorator(
 /// APIs (`input()`, `output()`, `outputFromObservable()`, `model()`, `viewChild()`, etc.) are treated as
 /// decorated (framework-managed) to prevent false unused-member reports.
 pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<MemberInfo> {
+    let class_name = class.id.as_ref().map(|id| id.name.as_str());
     let mut members = Vec::new();
     for element in &class.body.body {
         match element {
@@ -509,11 +510,14 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
                             )
                         )
                     {
+                        let is_instance_returning_static = method.r#static
+                            && is_instance_returning_static_method(method, class_name);
                         members.push(MemberInfo {
                             name: name_str,
                             kind: MemberKind::ClassMethod,
                             span: method.span,
                             has_decorator: !method.decorators.is_empty(),
+                            is_instance_returning_static,
                         });
                     }
                 }
@@ -536,6 +540,7 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
                         kind: MemberKind::ClassProperty,
                         span: prop.span,
                         has_decorator,
+                        is_instance_returning_static: false,
                     });
                 }
             }
@@ -543,6 +548,48 @@ pub fn extract_class_members(class: &Class<'_>, is_angular_class: bool) -> Vec<M
         }
     }
     members
+}
+
+/// Detect whether a static method's body returns a fresh instance of the
+/// enclosing class. Conservative: only the body's LAST top-level statement
+/// being `return new this()` or `return new <class_name>()` qualifies.
+/// Earlier guard returns (`if (cond) return null;`) stay inside an
+/// `IfStatement` and so are not top-level, while a stray dead-code
+/// `return null; return new this();` pair is correctly rejected because
+/// the qualifying return is not the last statement. Chained `.build()`,
+/// `Object.assign(new this(), ...)`, ternaries, and other transformations
+/// are intentionally out of scope. See issue #346.
+fn is_instance_returning_static_method(
+    method: &oxc_ast::ast::MethodDefinition<'_>,
+    class_name: Option<&str>,
+) -> bool {
+    let Some(body) = method.value.body.as_ref() else {
+        return false;
+    };
+    body.statements
+        .last()
+        .is_some_and(|stmt| statement_returns_class_instance(stmt, class_name))
+}
+
+fn statement_returns_class_instance(stmt: &Statement<'_>, class_name: Option<&str>) -> bool {
+    let Statement::ReturnStatement(ret) = stmt else {
+        return false;
+    };
+    let Some(expr) = ret.argument.as_ref() else {
+        return false;
+    };
+    is_self_construction_expression(expr, class_name)
+}
+
+fn is_self_construction_expression(expr: &Expression<'_>, class_name: Option<&str>) -> bool {
+    let Expression::NewExpression(new_expr) = expr else {
+        return false;
+    };
+    match &new_expr.callee {
+        Expression::ThisExpression(_) => true,
+        Expression::Identifier(ident) => class_name.is_some_and(|name| ident.name.as_str() == name),
+        _ => false,
+    }
 }
 
 /// Extract the parent class name from an `extends` clause, if present.

@@ -69,6 +69,16 @@ pub const PLAYWRIGHT_FIXTURE_DEF_SENTINEL: &str = "__fallow_playwright_fixture_d
 /// destructures `fixture` and accesses `fixture.member`.
 pub const PLAYWRIGHT_FIXTURE_USE_SENTINEL: &str = "__fallow_playwright_fixture_use__:";
 
+/// Synthetic member-access object prefix for static-factory call returns.
+///
+/// `MemberAccess { object: format!("{FACTORY_CALL_SENTINEL}{callee}:{method}"), member }`
+/// means a local binding was assigned from `<callee>.<method>()` and a member
+/// is accessed on the result. The analyze layer resolves `callee` through the
+/// consumer module's imports to a class export and credits `member` on the
+/// class when the matching method carries `is_instance_returning_static`.
+/// See issue #346.
+pub const FACTORY_CALL_SENTINEL: &str = "__fallow_factory_call__:";
+
 use parse::parse_source_to_module;
 
 /// Parse all files in parallel, extracting imports and exports.

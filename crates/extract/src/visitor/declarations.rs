@@ -112,6 +112,7 @@ impl ModuleInfoExtractor {
                             kind: MemberKind::EnumMember,
                             span: member.span,
                             has_decorator: false,
+                            is_instance_returning_static: false,
                         })
                     })
                     .collect();
@@ -194,6 +195,7 @@ impl ModuleInfoExtractor {
                         kind: MemberKind::NamespaceMember,
                         span: id.span,
                         has_decorator: false,
+                        is_instance_returning_static: false,
                     });
                 }
             }
@@ -205,6 +207,7 @@ impl ModuleInfoExtractor {
                             kind: MemberKind::NamespaceMember,
                             span: id.span,
                             has_decorator: false,
+                            is_instance_returning_static: false,
                         });
                     }
                 }
@@ -216,6 +219,7 @@ impl ModuleInfoExtractor {
                         kind: MemberKind::NamespaceMember,
                         span: id.span,
                         has_decorator: false,
+                        is_instance_returning_static: false,
                     });
                 }
             }
@@ -225,6 +229,7 @@ impl ModuleInfoExtractor {
                     kind: MemberKind::NamespaceMember,
                     span: enumd.id.span,
                     has_decorator: false,
+                    is_instance_returning_static: false,
                 });
             }
             Declaration::TSInterfaceDeclaration(iface) => {
@@ -233,6 +238,7 @@ impl ModuleInfoExtractor {
                     kind: MemberKind::NamespaceMember,
                     span: iface.id.span,
                     has_decorator: false,
+                    is_instance_returning_static: false,
                 });
             }
             Declaration::TSTypeAliasDeclaration(alias) => {
@@ -241,6 +247,7 @@ impl ModuleInfoExtractor {
                     kind: MemberKind::NamespaceMember,
                     span: alias.id.span,
                     has_decorator: false,
+                    is_instance_returning_static: false,
                 });
             }
             Declaration::TSModuleDeclaration(module) => match &module.id {
@@ -250,6 +257,7 @@ impl ModuleInfoExtractor {
                         kind: MemberKind::NamespaceMember,
                         span: id.span,
                         has_decorator: false,
+                        is_instance_returning_static: false,
                     });
                 }
                 TSModuleDeclarationName::StringLiteral(lit) => {
@@ -258,6 +266,7 @@ impl ModuleInfoExtractor {
                         kind: MemberKind::NamespaceMember,
                         span: lit.span,
                         has_decorator: false,
+                        is_instance_returning_static: false,
                     });
                 }
             },

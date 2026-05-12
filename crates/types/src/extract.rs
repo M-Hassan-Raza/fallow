@@ -367,6 +367,13 @@ pub struct MemberInfo {
     /// flagged as unused class members.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub has_decorator: bool,
+    /// True when this is a static class method whose body returns a fresh
+    /// instance of the same class via `return new this()` or
+    /// `return new <SameClassName>()`. Consumers calling such a static method
+    /// receive an instance, so the call result's member accesses are credited
+    /// against the class. See issue #346.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_instance_returning_static: bool,
 }
 
 /// The kind of member.

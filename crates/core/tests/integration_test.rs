@@ -89,6 +89,8 @@ mod workspace_internal_deps;
 
 #[path = "integration_test/inheritance_members.rs"]
 mod inheritance_members;
+#[path = "integration_test/issue_346_static_factory_method.rs"]
+mod issue_346_static_factory_method;
 #[path = "integration_test/lit_custom_element.rs"]
 mod lit_custom_element;
 #[path = "integration_test/scoped_used_class_members.rs"]
