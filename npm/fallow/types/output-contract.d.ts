@@ -118,6 +118,10 @@ stale_suppressions: StaleSuppression[]
  */
 unused_catalog_entries?: UnusedCatalogEntry[]
 /**
+ * Named groups under pnpm-workspace.yaml's catalogs: section that declare no package entries. The top-level catalog: map is not reported.
+ */
+empty_catalog_groups?: EmptyCatalogGroup[]
+/**
  * Workspace package.json references to catalogs (catalog: or catalog:<name>) that do not declare the consumed package. pnpm install will error until the named catalog grows to include the package or the reference is switched / removed.
  */
 unresolved_catalog_references?: UnresolvedCatalogReference[]
@@ -151,7 +155,7 @@ export interface FixAction {
 /**
  * Kebab-case identifier for the fix action.
  */
-type: ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override")
+type: ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "refactor-cycle" | "refactor-boundary" | "export-type" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override")
 /**
  * Whether `fallow fix` can apply this fix automatically.
  */
@@ -605,6 +609,25 @@ actions?: IssueAction[]
 introduced?: AuditIntroduced
 }
 /**
+ * A named pnpm catalog group under catalogs: with no package entries.
+ */
+export interface EmptyCatalogGroup {
+/**
+ * Named catalog group under the top-level catalogs: map.
+ */
+catalog_name: string
+/**
+ * Relative path to pnpm-workspace.yaml.
+ */
+path: string
+/**
+ * 1-based line number of the empty catalog group header.
+ */
+line: number
+actions?: IssueAction[]
+introduced?: AuditIntroduced
+}
+/**
  * A workspace package.json reference (catalog: or catalog:<name>) pointing at a catalog that does not declare the consumed package. `pnpm install` will fail with ERR_PNPM_CATALOG_ENTRY_NOT_FOUND_FOR_CATALOG_PROTOCOL.
  */
 export interface UnresolvedCatalogReference {
@@ -739,6 +762,7 @@ circular_dependencies?: number
 boundary_violations?: number
 stale_suppressions?: number
 unused_catalog_entries?: number
+empty_catalog_groups?: number
 unresolved_catalog_references?: number
 unused_dependency_overrides?: number
 misconfigured_dependency_overrides?: number
