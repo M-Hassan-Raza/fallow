@@ -2154,6 +2154,7 @@ pub fn print_health_result(
         summary,
         show_explain_tip,
         baseline_matched: None,
+        config_fixable: false,
         health_action_opts: health_action_opts(result),
     };
     let report_code = report::print_health_report(

@@ -48,6 +48,11 @@ pub struct ReportContext<'a> {
     pub show_explain_tip: bool,
     /// When a baseline was loaded: (total entries in baseline, entries that matched).
     pub baseline_matched: Option<(usize, usize)>,
+    /// Whether config-edit actions can be applied by `fallow fix`.
+    ///
+    /// This is caller-provided because an explicit `--config` path is fixable
+    /// even when default config discovery from the root would find nothing.
+    pub config_fixable: bool,
     /// JSON-only: controls emission of `suppress-line` action entries on
     /// health findings. Other formats ignore this field. Computed by the
     /// caller from `HealthResult::baseline_active` and
@@ -194,6 +199,7 @@ pub fn print_results(
             ctx.explain,
             regression,
             ctx.baseline_matched,
+            ctx.config_fixable,
         ),
         OutputFormat::Compact => {
             compact::print_compact(results, ctx.root);
@@ -256,6 +262,7 @@ fn print_grouped_results(
             ctx.elapsed,
             ctx.explain,
             resolver,
+            ctx.config_fixable,
         ),
         OutputFormat::Compact => {
             compact::print_grouped_compact(groups, ctx.root);
@@ -665,11 +672,6 @@ pub use json::build_grouped_duplication_json;
 pub use json::build_health_json;
 #[allow(
     unused_imports,
-    reason = "target-dependent: used in lib, unused in bin"
-)]
-pub use json::build_json;
-#[allow(
-    unused_imports,
     reason = "target-dependent: used in bin audit.rs, unused in lib"
 )]
 #[allow(
@@ -695,6 +697,11 @@ pub(crate) use json::inject_dupes_actions;
     reason = "pub(crate) deliberately limits visibility, report is pub but these are internal"
 )]
 pub(crate) use json::inject_health_actions;
+#[allow(
+    unused_imports,
+    reason = "target-dependent: used in lib, unused in bin"
+)]
+pub use json::{build_json, build_json_with_config_fixable};
 #[allow(
     unused_imports,
     reason = "target-dependent: used in lib, unused in bin"

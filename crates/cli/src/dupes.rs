@@ -488,6 +488,7 @@ pub fn print_dupes_result(
         summary,
         show_explain_tip,
         baseline_matched: None,
+        config_fixable: false,
         health_action_opts: report::HealthActionOptions::default(),
     };
     print_default_ignore_note(result, quiet);
@@ -610,6 +611,7 @@ fn print_dupes_result_with_grouping(
         summary,
         show_explain_tip,
         baseline_matched: None,
+        config_fixable: false,
         health_action_opts: report::HealthActionOptions::default(),
     };
     print_default_ignore_note(result, quiet);

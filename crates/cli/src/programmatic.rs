@@ -8,7 +8,7 @@ use crate::check::{CheckOptions, IssueFilters, TraceOptions};
 use crate::dupes::{DupesMode, DupesOptions};
 use crate::health::{HealthOptions, SortBy};
 use crate::health_types::EffortEstimate;
-use crate::report::{build_duplication_json, build_health_json, build_json};
+use crate::report::{build_duplication_json, build_health_json};
 
 /// Structured error surface for the programmatic API.
 #[derive(Debug, Clone, Serialize)]
@@ -360,12 +360,15 @@ fn build_dead_code_json(
     root: &Path,
     elapsed: std::time::Duration,
     explain: bool,
+    config_fixable: bool,
 ) -> ProgrammaticResult<serde_json::Value> {
-    let mut output = build_json(results, root, elapsed).map_err(|err| {
-        ProgrammaticError::new(format!("failed to serialize dead-code report: {err}"), 2)
-            .with_code("FALLOW_SERIALIZE_DEAD_CODE_REPORT")
-            .with_context("dead-code")
-    })?;
+    let mut output =
+        crate::report::build_json_with_config_fixable(results, root, elapsed, config_fixable)
+            .map_err(|err| {
+                ProgrammaticError::new(format!("failed to serialize dead-code report: {err}"), 2)
+                    .with_code("FALLOW_SERIALIZE_DEAD_CODE_REPORT")
+                    .with_context("dead-code")
+            })?;
     if explain {
         insert_meta(&mut output, crate::explain::check_meta());
     }
@@ -512,6 +515,7 @@ pub fn detect_dead_code(options: &DeadCodeOptions) -> ProgrammaticResult<serde_j
         &result.config.root,
         result.elapsed,
         resolved.explain,
+        result.config_fixable,
     )
 }
 
@@ -537,6 +541,7 @@ pub fn detect_circular_dependencies(
         &result.config.root,
         result.elapsed,
         resolved.explain,
+        result.config_fixable,
     )
 }
 
@@ -562,6 +567,7 @@ pub fn detect_boundary_violations(
         &result.config.root,
         result.elapsed,
         resolved.explain,
+        result.config_fixable,
     )
 }
 
@@ -763,7 +769,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let filtered = filter_for_circular_dependencies(&results);
-        let json = build_dead_code_json(&filtered, &root, std::time::Duration::ZERO, false)
+        let json = build_dead_code_json(&filtered, &root, std::time::Duration::ZERO, false, false)
             .expect("should serialize");
 
         assert_eq!(json["circular_dependencies"].as_array().unwrap().len(), 1);
@@ -777,7 +783,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let results = sample_results(&root);
         let filtered = filter_for_boundary_violations(&results);
-        let json = build_dead_code_json(&filtered, &root, std::time::Duration::ZERO, false)
+        let json = build_dead_code_json(&filtered, &root, std::time::Duration::ZERO, false, false)
             .expect("should serialize");
 
         assert_eq!(json["boundary_violations"].as_array().unwrap().len(), 1);

@@ -2776,7 +2776,12 @@ fn print_audit_json(result: &AuditResult) -> ExitCode {
 
     // Full sub-results
     if let Some(ref check) = result.check {
-        match report::build_json(&check.results, &check.config.root, check.elapsed) {
+        match report::build_json_with_config_fixable(
+            &check.results,
+            &check.config.root,
+            check.elapsed,
+            check.config_fixable,
+        ) {
             Ok(mut json) => {
                 if let Some(ref base) = result.base_snapshot {
                     annotate_dead_code_json(

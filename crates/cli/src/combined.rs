@@ -242,6 +242,8 @@ fn print_combined_report(
                 opts.root,
                 total_elapsed,
                 opts.explain,
+                opts.config_path.is_some()
+                    || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
             );
             if code != ExitCode::SUCCESS {
                 return Err(code);
@@ -494,6 +496,7 @@ fn print_combined_json(
     root: &std::path::Path,
     elapsed: std::time::Duration,
     _explain: bool,
+    config_fixable: bool,
 ) -> ExitCode {
     let mut combined = serde_json::Map::new();
     combined.insert(
@@ -510,7 +513,12 @@ fn print_combined_json(
     );
 
     if let Some(result) = check {
-        match report::build_json(&result.results, &result.config.root, result.elapsed) {
+        match report::build_json_with_config_fixable(
+            &result.results,
+            &result.config.root,
+            result.elapsed,
+            config_fixable,
+        ) {
             Ok(mut json) => {
                 if let Some(ref outcome) = result.regression
                     && let serde_json::Value::Object(ref mut map) = json

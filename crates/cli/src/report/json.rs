@@ -40,8 +40,9 @@ pub(super) fn print_json(
     explain: bool,
     regression: Option<&crate::regression::RegressionOutcome>,
     baseline_matched: Option<(usize, usize)>,
+    config_fixable: bool,
 ) -> ExitCode {
-    match build_json(results, root, elapsed) {
+    match build_json_with_config_fixable(results, root, elapsed, config_fixable) {
         Ok(mut output) => {
             if let Some(outcome) = regression
                 && let serde_json::Value::Object(ref mut map) = output
@@ -84,9 +85,9 @@ pub(super) fn print_grouped_json(
     elapsed: Duration,
     explain: bool,
     resolver: &OwnershipResolver,
+    config_fixable: bool,
 ) -> ExitCode {
     let root_prefix = format!("{}/", root.display());
-    let config_fixable = FallowConfig::find_config_path(root).is_some();
 
     let group_values: Vec<serde_json::Value> = groups
         .iter()
@@ -220,10 +221,32 @@ fn inject_runtime_coverage_report_schema_version(report: &mut serde_json::Value)
 /// # Errors
 ///
 /// Returns an error if the results cannot be serialized to JSON.
+#[allow(
+    dead_code,
+    reason = "used by the fallow-cli library target for embedders, but dead in the binary target"
+)]
 pub fn build_json(
     results: &AnalysisResults,
     root: &Path,
     elapsed: Duration,
+) -> Result<serde_json::Value, serde_json::Error> {
+    build_json_with_config_fixable(
+        results,
+        root,
+        elapsed,
+        FallowConfig::find_config_path(root).is_some(),
+    )
+}
+
+/// Build the JSON output value with an explicit config-action fixability signal.
+///
+/// Use this when the caller already knows how the config was loaded, including
+/// explicit `--config` paths that default discovery cannot see.
+pub fn build_json_with_config_fixable(
+    results: &AnalysisResults,
+    root: &Path,
+    elapsed: Duration,
+    config_fixable: bool,
 ) -> Result<serde_json::Value, serde_json::Error> {
     let results_value = serde_json::to_value(results)?;
 
@@ -301,7 +324,7 @@ pub fn build_json(
     // action fields (static strings and package names) are not processed
     // by the path stripper.
     strip_root_prefix(&mut output, &root_prefix);
-    inject_actions(&mut output, FallowConfig::find_config_path(root).is_some());
+    inject_actions(&mut output, config_fixable);
     harmonize_multi_kind_suppress_line_actions(&mut output);
     Ok(output)
 }

@@ -197,6 +197,7 @@ pub struct CheckOptions<'a> {
 pub struct CheckResult {
     pub results: AnalysisResults,
     pub config: ResolvedConfig,
+    pub config_fixable: bool,
     pub elapsed: Duration,
     pub fail_on_issues: bool,
     pub regression: Option<RegressionOutcome>,
@@ -458,9 +459,13 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         _ => None,
     };
 
+    let config_fixable = opts.config_path.is_some()
+        || fallow_config::FallowConfig::find_config_path(opts.root).is_some();
+
     Ok(CheckResult {
         results,
         config,
+        config_fixable,
         elapsed,
         fail_on_issues: opts.fail_on_issues,
         regression: regression_outcome,
@@ -502,6 +507,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
         summary: opts.summary,
         show_explain_tip: opts.show_explain_tip,
         baseline_matched: result.baseline_matched,
+        config_fixable: result.config_fixable,
         health_action_opts: report::HealthActionOptions::default(),
     };
     let report_code = report::print_results(

@@ -2,7 +2,8 @@
 mod common;
 
 use common::{
-    fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_raw,
+    fixture_path, parse_json, redact_all, run_fallow, run_fallow_combined, run_fallow_in_root,
+    run_fallow_raw,
 };
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,51 @@ fn check_json_format_produces_valid_json() {
         "JSON output should have schema_version"
     );
     assert!(json.is_object(), "JSON output should be an object");
+}
+
+#[test]
+fn duplicate_export_add_to_config_is_auto_fixable_with_explicit_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src/one")).unwrap();
+    std::fs::create_dir_all(root.join("src/two")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"explicit-config","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    let config_path = root.join("custom.fallow.json");
+    std::fs::write(&config_path, "{}\n").unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export { Button } from './one';\nexport { Button as Button2 } from './two';\nconsole.log(Button2);\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/one/index.ts"), "export const Button = 1;\n").unwrap();
+    std::fs::write(root.join("src/two/index.ts"), "export const Button = 2;\n").unwrap();
+
+    let output = run_fallow_in_root(
+        "dead-code",
+        root,
+        &[
+            "--config",
+            config_path.to_str().unwrap(),
+            "--duplicate-exports",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "duplicate export should be reported: stdout={}, stderr={}",
+        output.stdout, output.stderr
+    );
+
+    let json = parse_json(&output);
+    let actions = json["duplicate_exports"][0]["actions"].as_array().unwrap();
+    assert_eq!(actions[0]["type"], "add-to-config");
+    assert_eq!(actions[0]["auto_fixable"], true);
 }
 
 #[test]
