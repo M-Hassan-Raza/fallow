@@ -233,18 +233,13 @@ mod tests {
 
     #[test]
     fn read_pkg_json_content_valid_path() {
-        // Create a temp file and read it back
-        let dir = std::env::temp_dir().join("fallow_test_read_pkg");
-        let _ = std::fs::create_dir_all(&dir);
-        let pkg_path = dir.join("package.json");
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let pkg_path = dir.path().join("package.json");
         std::fs::write(&pkg_path, r#"{"name": "test"}"#).expect("write temp file");
 
         let result = read_pkg_json_content(&pkg_path);
         assert!(result.is_some(), "valid path should return Some");
         assert_eq!(result.unwrap(), r#"{"name": "test"}"#);
-
-        // Cleanup
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
