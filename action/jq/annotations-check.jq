@@ -54,6 +54,8 @@ def dependency_action(pkg):
     end),
   (.unused_catalog_entries[]? |
     "::warning file=\(.path | san),line=\(.line),title=Unused catalog entry::Catalog entry '\(.entry_name | san)' (catalog '\(.catalog_name | san)') is not referenced by any workspace package via the catalog: protocol.\(nl)\(nl)\(if ((.hardcoded_consumers // []) | length) > 0 then "Hardcoded consumers: " + (.hardcoded_consumers | map(san) | join(", ")) + ".\(nl)Switch them to catalog: before removing." else "Remove the entry from pnpm-workspace.yaml." end)"),
+  (.empty_catalog_groups[]? |
+    "::warning file=\(.path | san),line=\(.line),title=Empty catalog group::Catalog group '\(.catalog_name | san)' has no entries.\(nl)\(nl)Remove the empty group header from pnpm-workspace.yaml."),
   (.unresolved_catalog_references[]? |
     "::error file=\(.path | san),line=\(.line),title=Unresolved catalog reference::Package '\(.entry_name | san)' is referenced via `catalog:\(if .catalog_name == "default" then "" else (.catalog_name | san) end)` but \(if .catalog_name == "default" then "the default catalog" else "catalog '" + (.catalog_name | san) + "'" end) does not declare it. `pnpm install` will fail.\(nl)\(nl)\(if ((.available_in_catalogs // []) | length) > 0 then "Available in: " + (.available_in_catalogs | map(san) | join(", ")) + ".\(nl)Switch the reference to a catalog that declares this package, or add it to the named catalog." else "Add this package to the named catalog in pnpm-workspace.yaml, or remove the reference and pin a hardcoded version." end)"),
   (.unused_dependency_overrides[]? |

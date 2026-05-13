@@ -106,6 +106,8 @@ pub struct RulesConfig {
     pub stale_suppressions: Severity,
     #[serde(default = "Severity::default_warn", alias = "unused-catalog-entry")]
     pub unused_catalog_entries: Severity,
+    #[serde(default = "Severity::default_warn", alias = "empty-catalog-group")]
+    pub empty_catalog_groups: Severity,
     #[serde(default, alias = "unresolved-catalog-reference")]
     pub unresolved_catalog_references: Severity,
     #[serde(
@@ -140,6 +142,7 @@ impl Default for RulesConfig {
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
+            empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
             unused_dependency_overrides: Severity::Warn,
             misconfigured_dependency_overrides: Severity::Error,
@@ -209,6 +212,9 @@ impl RulesConfig {
         }
         if let Some(s) = partial.unused_catalog_entries {
             self.unused_catalog_entries = s;
+        }
+        if let Some(s) = partial.empty_catalog_groups {
+            self.empty_catalog_groups = s;
         }
         if let Some(s) = partial.unresolved_catalog_references {
             self.unresolved_catalog_references = s;
@@ -348,6 +354,12 @@ pub struct PartialRulesConfig {
     pub unused_catalog_entries: Option<Severity>,
     #[serde(
         default,
+        alias = "empty-catalog-group",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub empty_catalog_groups: Option<Severity>,
+    #[serde(
+        default,
         alias = "unresolved-catalog-reference",
         skip_serializing_if = "Option::is_none"
     )]
@@ -393,6 +405,7 @@ mod tests {
         assert_eq!(rules.feature_flags, Severity::Off);
         assert_eq!(rules.stale_suppressions, Severity::Warn);
         assert_eq!(rules.unused_catalog_entries, Severity::Warn);
+        assert_eq!(rules.empty_catalog_groups, Severity::Warn);
         assert_eq!(rules.unresolved_catalog_references, Severity::Error);
     }
 
@@ -456,6 +469,7 @@ mod tests {
             "feature-flag": "warn",
             "stale-suppression": "off",
             "unused-catalog-entry": "error",
+            "empty-catalog-group": "error",
             "unresolved-catalog-reference": "warn"
         }"#;
 
@@ -478,6 +492,7 @@ mod tests {
         assert_eq!(rules.feature_flags, Severity::Warn);
         assert_eq!(rules.stale_suppressions, Severity::Off);
         assert_eq!(rules.unused_catalog_entries, Severity::Error);
+        assert_eq!(rules.empty_catalog_groups, Severity::Error);
         assert_eq!(rules.unresolved_catalog_references, Severity::Warn);
 
         let partial: PartialRulesConfig = serde_json::from_str(json_str).unwrap();
@@ -499,6 +514,7 @@ mod tests {
         assert_eq!(partial.feature_flags, Some(Severity::Warn));
         assert_eq!(partial.stale_suppressions, Some(Severity::Off));
         assert_eq!(partial.unused_catalog_entries, Some(Severity::Error));
+        assert_eq!(partial.empty_catalog_groups, Some(Severity::Error));
         assert_eq!(partial.unresolved_catalog_references, Some(Severity::Warn));
     }
 
@@ -573,6 +589,7 @@ mod tests {
             feature_flags: Some(Severity::Off),
             stale_suppressions: Some(Severity::Off),
             unused_catalog_entries: Some(Severity::Off),
+            empty_catalog_groups: Some(Severity::Off),
             unresolved_catalog_references: Some(Severity::Off),
             unused_dependency_overrides: Some(Severity::Off),
             misconfigured_dependency_overrides: Some(Severity::Off),

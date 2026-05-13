@@ -287,8 +287,41 @@ pub fn push_dep_diagnostics(
         }
     }
 
+    push_empty_catalog_group_diagnostics(map, results, root);
+
     push_unresolved_catalog_reference_diagnostics(map, results);
     push_dependency_override_diagnostics(map, results);
+}
+
+fn push_empty_catalog_group_diagnostics(
+    map: &mut FxHashMap<Url, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    root: &std::path::Path,
+) {
+    for group in &results.empty_catalog_groups {
+        let Ok(uri) = Url::from_file_path(root.join(&group.path)) else {
+            continue;
+        };
+        let line = group.line.saturating_sub(1);
+        map.entry(uri).or_default().push(Diagnostic {
+            range: Range {
+                start: Position { line, character: 0 },
+                end: Position {
+                    line,
+                    character: u32::MAX,
+                },
+            },
+            severity: Some(DiagnosticSeverity::WARNING),
+            source: Some("fallow".to_string()),
+            code: Some(NumberOrString::String("empty-catalog-group".to_string())),
+            code_description: doc_link("empty-catalog-groups"),
+            message: format!(
+                "Empty catalog group: '{}' has no entries",
+                group.catalog_name
+            ),
+            ..Default::default()
+        });
+    }
 }
 
 /// Emit one `ERROR`-severity diagnostic per unresolved-catalog-reference
@@ -472,9 +505,9 @@ mod tests {
     use fallow_core::duplicates::{DuplicationReport, DuplicationStats};
     use fallow_core::extract::MemberKind;
     use fallow_core::results::{
-        AnalysisResults, DependencyLocation, ImportSite, TestOnlyDependency, TypeOnlyDependency,
-        UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry,
-        UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
+        AnalysisResults, DependencyLocation, EmptyCatalogGroup, ImportSite, TestOnlyDependency,
+        TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
+        UnusedCatalogEntry, UnusedDependency, UnusedExport, UnusedFile, UnusedMember,
     };
     use tower_lsp::lsp_types::{DiagnosticSeverity, DiagnosticTag, NumberOrString, Url};
 
@@ -959,6 +992,37 @@ mod tests {
             "named-catalog diagnostic must surface the catalog name, got: {}",
             d.message
         );
+    }
+
+    #[test]
+    fn empty_catalog_group_produces_warning_diagnostic() {
+        let root = test_root();
+        let mut results = AnalysisResults::default();
+        results.empty_catalog_groups.push(EmptyCatalogGroup {
+            catalog_name: "legacy".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 9,
+        });
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics(&results, &duplication, &root);
+
+        let uri = Url::from_file_path(root.join("pnpm-workspace.yaml")).unwrap();
+        let file_diags = diags
+            .get(&uri)
+            .expect("empty catalog diagnostic should be keyed by the absolute YAML URI");
+        assert_eq!(file_diags.len(), 1);
+
+        let d = &file_diags[0];
+        assert_eq!(d.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(
+            d.code,
+            Some(NumberOrString::String("empty-catalog-group".to_string()))
+        );
+        assert_eq!(d.source, Some("fallow".to_string()));
+        assert!(d.message.contains("legacy"));
+        assert_eq!(d.range.start.line, 8);
+        assert_eq!(d.range.start.character, 0);
     }
 
     #[test]

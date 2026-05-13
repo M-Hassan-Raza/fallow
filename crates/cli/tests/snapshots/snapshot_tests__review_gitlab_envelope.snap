@@ -3,7 +3,7 @@ source: crates/cli/tests/snapshot_tests.rs
 expression: json_str
 ---
 {
-  "body": "### Fallow dead-code report\n\n20 inline findings selected for GitLab review.\n\n<!-- fallow-review -->",
+  "body": "### Fallow dead-code report\n\n21 inline findings selected for GitLab review.\n\n<!-- fallow-review -->",
   "comments": [
     {
       "body": "**error** `fallow/misconfigured-dependency-override`: Override \\`@types/react@\\<\\<18\\` -\\> \\`18.0.0\\` is malformed: override key cannot be parsed\n\n<!-- fallow-fingerprint: 21be520b86ce0207 -->",
@@ -94,6 +94,16 @@ expression: json_str
         "new_line": 9
       },
       "fingerprint": "9e455c649fd184fe"
+    },
+    {
+      "body": "**warn** `fallow/empty-catalog-group`: Catalog group 'react17' has no entries\n\n<!-- fallow-fingerprint: 03506bd5a376e100 -->",
+      "position": {
+        "position_type": "text",
+        "old_path": "pnpm-workspace.yaml",
+        "new_path": "pnpm-workspace.yaml",
+        "new_line": 10
+      },
+      "fingerprint": "03506bd5a376e100"
     },
     {
       "body": "**warn** `fallow/unused-catalog-entry`: Catalog entry 'old-thing' \\(catalog 'legacy'\\) is not referenced by any workspace package\n\n<!-- fallow-fingerprint: 2d5072d3451b44dd -->",

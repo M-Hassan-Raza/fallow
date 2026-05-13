@@ -193,6 +193,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-catalog-entries",
     },
     RuleDef {
+        id: "fallow/empty-catalog-group",
+        category: "Dependencies",
+        name: "Empty pnpm catalog group",
+        short: "Named catalog group in pnpm-workspace.yaml has no entries",
+        full: "A named group under `catalogs:` in pnpm-workspace.yaml has no package entries. Empty named groups are leftover catalog structure after the last entry is removed. The top-level `catalog:` map is intentionally ignored because some projects keep it as a stable hook.",
+        docs_path: "explanations/dead-code#empty-catalog-groups",
+    },
+    RuleDef {
         id: "fallow/unresolved-catalog-reference",
         category: "Dependencies",
         name: "Unresolved pnpm catalog reference",
@@ -283,6 +291,9 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
         "stale-suppressions" => Some("fallow/stale-suppression"),
         "unused-catalog-entries" | "unused-catalog-entry" | "catalog" => {
             Some("fallow/unused-catalog-entry")
+        }
+        "empty-catalog-groups" | "empty-catalog-group" | "empty-catalog" => {
+            Some("fallow/empty-catalog-group")
         }
         "unresolved-catalog-references" | "unresolved-catalog-reference" | "unresolved-catalog" => {
             Some("fallow/unresolved-catalog-reference")
@@ -398,6 +409,10 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         "fallow/unused-catalog-entry" => RuleGuide {
             example: "pnpm-workspace.yaml declares `catalog: { is-even: ^1.0.0 }`, but no workspace package.json declares `\"is-even\": \"catalog:\"`.",
             how_to_fix: "Delete the entry from pnpm-workspace.yaml. If any consumer uses a hardcoded version (surfaced in `hardcoded_consumers`), switch that consumer to `catalog:` first to keep versions aligned.",
+        },
+        "fallow/empty-catalog-group" => RuleGuide {
+            example: "pnpm-workspace.yaml declares `catalogs: { react17: {} }` after the last react17 entry was removed.",
+            how_to_fix: "Delete the empty named group header from pnpm-workspace.yaml. Comments between the deleted header and the next sibling can stay in place for manual review.",
         },
         "fallow/unresolved-catalog-reference" => RuleGuide {
             example: "packages/app/package.json declares `\"old-react\": \"catalog:react17\"`, but `catalogs.react17` in pnpm-workspace.yaml does not declare `old-react`. `pnpm install` will fail.",
@@ -1487,7 +1502,7 @@ mod tests {
 
     #[test]
     fn check_rules_count() {
-        assert_eq!(CHECK_RULES.len(), 21);
+        assert_eq!(CHECK_RULES.len(), 22);
     }
 
     #[test]

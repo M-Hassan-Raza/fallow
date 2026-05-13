@@ -36,6 +36,9 @@ def filter_check:
   (if .unresolved_catalog_references then
     .unresolved_catalog_references |= map(select(.path | in_changed))
   else . end) |
+  (if .empty_catalog_groups then
+    .empty_catalog_groups |= map(select(.path | in_changed))
+  else . end) |
   (if .unused_dependency_overrides then
     .unused_dependency_overrides |= map(select(.path | in_changed))
   else . end) |
@@ -62,6 +65,7 @@ def filter_check:
       (.type_only_dependencies // [] | length) +
       (.stale_suppressions // [] | length) +
       (.unused_catalog_entries // [] | length) +
+      (.empty_catalog_groups // [] | length) +
       (.unresolved_catalog_references // [] | length) +
       (.unused_dependency_overrides // [] | length) +
       (.misconfigured_dependency_overrides // [] | length)

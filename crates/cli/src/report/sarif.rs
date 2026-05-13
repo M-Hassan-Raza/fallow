@@ -534,6 +534,22 @@ fn sarif_unresolved_catalog_reference_fields(
     }
 }
 
+fn sarif_empty_catalog_group_fields(
+    group: &fallow_core::results::EmptyCatalogGroup,
+    root: &Path,
+    level: &'static str,
+) -> SarifFields {
+    SarifFields {
+        rule_id: "fallow/empty-catalog-group",
+        level,
+        message: format!("Catalog group '{}' has no entries", group.catalog_name),
+        uri: relative_uri(&group.path, root),
+        region: Some((group.line, 1)),
+        source_path: Some(group.path.clone()),
+        properties: None,
+    }
+}
+
 /// Unlisted deps fan out to one SARIF result per import site, so they do not
 /// fit `push_sarif_results`. Keep the nested-loop shape in its own helper.
 fn push_sarif_unlisted_deps(
@@ -679,6 +695,11 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
             "fallow/unused-catalog-entry",
             "pnpm catalog entry not referenced by any workspace package",
             rules.unused_catalog_entries,
+        ),
+        (
+            "fallow/empty-catalog-group",
+            "pnpm named catalog group has no entries",
+            rules.empty_catalog_groups,
         ),
         (
             "fallow/unresolved-catalog-reference",
@@ -933,6 +954,18 @@ pub fn build_sarif(
                 e,
                 root,
                 severity_to_sarif_level(rules.unused_catalog_entries),
+            )
+        },
+    );
+    push_sarif_results(
+        &mut sarif_results,
+        &results.empty_catalog_groups,
+        &mut snippets,
+        |g| {
+            sarif_empty_catalog_group_fields(
+                g,
+                root,
+                severity_to_sarif_level(rules.empty_catalog_groups),
             )
         },
     );
@@ -1553,7 +1586,7 @@ mod tests {
         let rules = sarif["runs"][0]["tool"]["driver"]["rules"]
             .as_array()
             .expect("rules should be an array");
-        assert_eq!(rules.len(), 21);
+        assert_eq!(rules.len(), 22);
 
         let rule_ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert!(rule_ids.contains(&"fallow/unused-file"));
@@ -1573,6 +1606,7 @@ mod tests {
         assert!(rule_ids.contains(&"fallow/circular-dependency"));
         assert!(rule_ids.contains(&"fallow/boundary-violation"));
         assert!(rule_ids.contains(&"fallow/unused-catalog-entry"));
+        assert!(rule_ids.contains(&"fallow/empty-catalog-group"));
         assert!(rule_ids.contains(&"fallow/unresolved-catalog-reference"));
         assert!(rule_ids.contains(&"fallow/unused-dependency-override"));
         assert!(rule_ids.contains(&"fallow/misconfigured-dependency-override"));

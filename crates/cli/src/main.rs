@@ -323,6 +323,10 @@ enum Command {
         #[arg(long)]
         unused_catalog_entries: bool,
 
+        /// Only report empty pnpm catalog groups
+        #[arg(long)]
+        empty_catalog_groups: bool,
+
         /// Only report unresolved pnpm catalog references
         #[arg(long)]
         unresolved_catalog_references: bool,
@@ -2012,6 +2016,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
             boundary_violations,
             stale_suppressions,
             unused_catalog_entries,
+            empty_catalog_groups,
             unresolved_catalog_references,
             unused_dependency_overrides,
             misconfigured_dependency_overrides,
@@ -2039,6 +2044,7 @@ fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> Exit
                     boundary_violations,
                     stale_suppressions,
                     unused_catalog_entries,
+                    empty_catalog_groups,
                     unresolved_catalog_references,
                     unused_dependency_overrides,
                     misconfigured_dependency_overrides,

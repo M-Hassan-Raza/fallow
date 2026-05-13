@@ -51,7 +51,8 @@ pub struct AnalyzeParams {
     /// private-type-leaks, unused-deps, unused-enum-members, unused-class-members, unresolved-imports,
     /// unlisted-deps, duplicate-exports, circular-deps, boundary-violations,
     /// stale-suppressions, unused-catalog-entries (catalog declares packages no
-    /// consumer references; dead config), unresolved-catalog-references
+    /// consumer references; dead config), empty-catalog-groups (named pnpm
+    /// catalog groups with no entries), unresolved-catalog-references
     /// (consumer references catalogs that do not declare the package; broken
     /// config that pnpm install will reject), unused-dependency-overrides
     /// (pnpm.overrides forces a version no workspace package depends on; may be

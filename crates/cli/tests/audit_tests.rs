@@ -729,6 +729,82 @@ fn audit_new_unlisted_dependency_import_site_is_introduced() {
 }
 
 #[test]
+fn audit_empty_catalog_group_changed_manifest_is_introduced() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("packages/app")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-empty-catalog-group","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("packages/app/package.json"),
+        r#"{"name":"app","private":true,"main":"src/index.ts","dependencies":{"vue":"catalog:vue3"}}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("packages/app/src")).unwrap();
+    fs::write(
+        dir.join("packages/app/src/index.ts"),
+        "import { ref } from 'vue';\nconsole.log(ref);\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n\ncatalogs:\n  vue3:\n    vue: ^3.4.0\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "initial");
+
+    fs::write(
+        dir.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n\ncatalogs:\n  legacy: {}\n  vue3:\n    old-react: ^17.0.2\n    vue: ^3.4.0\n",
+    )
+    .unwrap();
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+
+    assert_eq!(
+        output.code, 0,
+        "new warning-level catalog hygiene should not fail audit. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"].as_str(), Some("warn"));
+    assert_eq!(
+        json["attribution"]["dead_code_introduced"].as_u64(),
+        Some(2)
+    );
+    assert_eq!(
+        json["dead_code"]["unused_catalog_entries"][0]["entry_name"].as_str(),
+        Some("old-react")
+    );
+    assert_eq!(
+        json["dead_code"]["unused_catalog_entries"][0]["introduced"],
+        true
+    );
+    assert_eq!(
+        json["dead_code"]["empty_catalog_groups"][0]["catalog_name"].as_str(),
+        Some("legacy")
+    );
+    assert_eq!(
+        json["dead_code"]["empty_catalog_groups"][0]["introduced"],
+        true
+    );
+}
+
+#[test]
 fn audit_dependency_location_change_is_introduced() {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();

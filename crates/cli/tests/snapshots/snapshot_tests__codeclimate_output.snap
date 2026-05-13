@@ -277,6 +277,22 @@ expression: json_str
   },
   {
     "type": "issue",
+    "check_name": "fallow/empty-catalog-group",
+    "description": "Catalog group 'react17' has no entries",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "minor",
+    "fingerprint": "03506bd5a376e100",
+    "location": {
+      "path": "pnpm-workspace.yaml",
+      "lines": {
+        "begin": 10
+      }
+    }
+  },
+  {
+    "type": "issue",
     "check_name": "fallow/unresolved-catalog-reference",
     "description": "Package 'old-react' is referenced via `catalog:react17` but catalog 'react17' does not declare it; `pnpm install` will fail (available in: react18)",
     "categories": [

@@ -30,6 +30,11 @@ const NON_CORE_KINDS: &[IssueKind] = &[
     IssueKind::UnlistedDependency,
     IssueKind::TypeOnlyDependency,
     IssueKind::TestOnlyDependency,
+    IssueKind::PnpmCatalogEntry,
+    IssueKind::EmptyCatalogGroup,
+    IssueKind::UnresolvedCatalogReference,
+    IssueKind::UnusedDependencyOverride,
+    IssueKind::MisconfiguredDependencyOverride,
     // Meta: stale-suppression itself is never consumed by any detector,
     // so a `// fallow-ignore-next-line stale-suppression` comment would
     // always appear stale. Exclude to prevent recursive confusion.
@@ -208,6 +213,7 @@ impl<'a> SuppressionContext<'a> {
                         IssueKind::Complexity => "complexity",
                         IssueKind::StaleSuppression => "stale-suppression",
                         IssueKind::PnpmCatalogEntry => "unused-catalog-entry",
+                        IssueKind::EmptyCatalogGroup => "empty-catalog-group",
                         IssueKind::UnresolvedCatalogReference => "unresolved-catalog-reference",
                         IssueKind::UnusedDependencyOverride => "unused-dependency-override",
                         IssueKind::MisconfiguredDependencyOverride => {
@@ -330,6 +336,7 @@ mod tests {
             IssueKind::Complexity,
             IssueKind::StaleSuppression,
             IssueKind::PnpmCatalogEntry,
+            IssueKind::EmptyCatalogGroup,
             IssueKind::UnresolvedCatalogReference,
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,
@@ -340,7 +347,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(25), None);
+        assert_eq!(IssueKind::from_discriminant(26), None);
     }
 
     #[test]
@@ -632,6 +639,11 @@ mod tests {
             IssueKind::FeatureFlag,
             IssueKind::Complexity,
             IssueKind::StaleSuppression,
+            IssueKind::PnpmCatalogEntry,
+            IssueKind::EmptyCatalogGroup,
+            IssueKind::UnresolvedCatalogReference,
+            IssueKind::UnusedDependencyOverride,
+            IssueKind::MisconfiguredDependencyOverride,
         ];
 
         for kind in all_kinds {

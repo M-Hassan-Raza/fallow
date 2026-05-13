@@ -165,6 +165,7 @@
         "feature-flags": "off",
         "stale-suppressions": "warn",
         "unused-catalog-entries": "warn",
+        "empty-catalog-groups": "warn",
         "unresolved-catalog-references": "error",
         "unused-dependency-overrides": "warn",
         "misconfigured-dependency-overrides": "error"
@@ -953,6 +954,10 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "empty-catalog-groups": {
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
+        },
         "unresolved-catalog-references": {
           "$ref": "#/$defs/Severity",
           "default": "error"
@@ -1410,6 +1415,16 @@
           ]
         },
         "unused-catalog-entries": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "empty-catalog-groups": {
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

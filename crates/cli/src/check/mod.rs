@@ -36,6 +36,7 @@ pub struct IssueFilters {
     pub boundary_violations: bool,
     pub stale_suppressions: bool,
     pub unused_catalog_entries: bool,
+    pub empty_catalog_groups: bool,
     pub unresolved_catalog_references: bool,
     pub unused_dependency_overrides: bool,
     pub misconfigured_dependency_overrides: bool,
@@ -57,6 +58,7 @@ impl IssueFilters {
             || self.boundary_violations
             || self.stale_suppressions
             || self.unused_catalog_entries
+            || self.empty_catalog_groups
             || self.unresolved_catalog_references
             || self.unused_dependency_overrides
             || self.misconfigured_dependency_overrides
@@ -118,6 +120,9 @@ impl IssueFilters {
         }
         if !self.unused_catalog_entries {
             results.unused_catalog_entries.clear();
+        }
+        if !self.empty_catalog_groups {
+            results.empty_catalog_groups.clear();
         }
         if !self.unresolved_catalog_references {
             results.unresolved_catalog_references.clear();
@@ -690,6 +695,7 @@ mod tests {
             boundary_violations: false,
             stale_suppressions: false,
             unused_catalog_entries: false,
+            empty_catalog_groups: false,
             unresolved_catalog_references: false,
             unused_dependency_overrides: false,
             misconfigured_dependency_overrides: false,
@@ -1042,6 +1048,7 @@ mod tests {
             boundary_violations: true,
             stale_suppressions: true,
             unused_catalog_entries: true,
+            empty_catalog_groups: true,
             unresolved_catalog_references: true,
             unused_dependency_overrides: true,
             misconfigured_dependency_overrides: true,

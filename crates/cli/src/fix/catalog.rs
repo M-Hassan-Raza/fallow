@@ -23,7 +23,7 @@
 use std::path::Path;
 
 use fallow_config::OutputFormat;
-use fallow_core::results::UnusedCatalogEntry;
+use fallow_core::results::{EmptyCatalogGroup, UnusedCatalogEntry};
 
 use super::io::{atomic_write, read_source};
 
@@ -219,6 +219,125 @@ pub(super) fn apply_catalog_entry_fixes(
             fixes.push(remove_record(entry, range, true, relative_path));
         }
         summary.applied += deduped.len();
+    }
+
+    summary
+}
+
+/// Apply empty-catalog-group fixes to `pnpm-workspace.yaml`.
+///
+/// Deletes only the named catalog header line. Comments or blank lines between
+/// that header and the next sibling remain in place, matching the conservative
+/// comment-preservation policy used by the catalog entry fixer.
+pub(super) fn apply_empty_catalog_group_fixes(
+    root: &Path,
+    groups: &[EmptyCatalogGroup],
+    output: OutputFormat,
+    dry_run: bool,
+    fixes: &mut Vec<serde_json::Value>,
+) -> CatalogFixSummary {
+    let mut summary = CatalogFixSummary::default();
+
+    if groups.is_empty() {
+        return summary;
+    }
+
+    let mut by_path: rustc_hash::FxHashMap<&Path, Vec<&EmptyCatalogGroup>> =
+        rustc_hash::FxHashMap::default();
+    for group in groups {
+        by_path.entry(group.path.as_path()).or_default().push(group);
+    }
+
+    for (relative_path, file_groups) in by_path {
+        let absolute = root.join(relative_path);
+        let Some((content, line_ending)) = read_source(root, &absolute) else {
+            continue;
+        };
+
+        if is_multi_document_yaml(&content) {
+            for group in &file_groups {
+                summary.skipped += 1;
+                fixes.push(skip_group_record(
+                    group,
+                    "multi_document_yaml",
+                    "Skipped: pnpm-workspace.yaml contains a `---` document separator; fallow fix does not support multi-document YAML",
+                    output,
+                    relative_path,
+                ));
+            }
+            continue;
+        }
+
+        let lines: Vec<&str> = content.split(line_ending).collect();
+        let mut to_remove: Vec<(usize, &EmptyCatalogGroup)> = Vec::new();
+        for group in &file_groups {
+            let line_idx = group.line.saturating_sub(1) as usize;
+            if line_idx >= lines.len() {
+                summary.skipped += 1;
+                fixes.push(skip_group_record(
+                    group,
+                    "line_out_of_range",
+                    "Skipped: the reported line is past the end of pnpm-workspace.yaml; the file may have been edited since fallow check ran",
+                    output,
+                    relative_path,
+                ));
+                continue;
+            }
+            to_remove.push((line_idx, group));
+        }
+
+        if to_remove.is_empty() {
+            continue;
+        }
+
+        to_remove.sort_by_key(|(line_idx, _)| std::cmp::Reverse(*line_idx));
+        to_remove.dedup_by_key(|(line_idx, _)| *line_idx);
+
+        if dry_run {
+            for (line_idx, group) in &to_remove {
+                if !matches!(output, OutputFormat::Json) {
+                    eprintln!(
+                        "Would remove empty catalog group from {}:{} `{}`",
+                        relative_path.display(),
+                        line_idx + 1,
+                        group.catalog_name,
+                    );
+                }
+                fixes.push(remove_group_record(group, *line_idx, false, relative_path));
+            }
+            summary.applied += to_remove.len();
+            continue;
+        }
+
+        let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
+        for (line_idx, _) in &to_remove {
+            new_lines.remove(*line_idx);
+        }
+
+        let mut new_content = new_lines.join(line_ending);
+        if content.ends_with(line_ending) && !new_content.ends_with(line_ending) {
+            new_content.push_str(line_ending);
+        }
+
+        if serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&new_content).is_err() {
+            summary.write_error = true;
+            eprintln!(
+                "Error: refusing to write {}: post-edit content failed YAML reparse. The file was not modified.",
+                relative_path.display(),
+            );
+            continue;
+        }
+
+        if let Err(e) = atomic_write(&absolute, new_content.as_bytes()) {
+            summary.write_error = true;
+            eprintln!("Error: failed to write {}: {e}", relative_path.display());
+            continue;
+        }
+
+        for (line_idx, group) in &to_remove {
+            fixes.push(remove_group_record(group, *line_idx, true, relative_path));
+        }
+        summary.applied += to_remove.len();
     }
 
     summary
@@ -463,6 +582,52 @@ fn remove_record(
     value
 }
 
+fn skip_group_record(
+    group: &EmptyCatalogGroup,
+    skip_reason: &str,
+    description: &str,
+    output: OutputFormat,
+    relative_path: &Path,
+) -> serde_json::Value {
+    if !matches!(output, OutputFormat::Json) {
+        eprintln!(
+            "Skipped empty catalog group {}:{} `{}` ({skip_reason})",
+            relative_path.display(),
+            group.line,
+            group.catalog_name,
+        );
+    }
+    serde_json::json!({
+        "type": "remove_empty_catalog_group",
+        "catalog_name": group.catalog_name,
+        "file": relative_path.to_string_lossy().replace('\\', "/"),
+        "line": group.line,
+        "applied": false,
+        "skipped": true,
+        "skip_reason": skip_reason,
+        "description": description,
+    })
+}
+
+fn remove_group_record(
+    group: &EmptyCatalogGroup,
+    line_idx: usize,
+    applied: bool,
+    relative_path: &Path,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "type": "remove_empty_catalog_group",
+        "catalog_name": group.catalog_name,
+        "file": relative_path.to_string_lossy().replace('\\', "/"),
+        "line": line_idx + 1,
+        "removed_lines": 1,
+    });
+    if applied && let serde_json::Value::Object(map) = &mut value {
+        map.insert("applied".to_string(), serde_json::Value::Bool(true));
+    }
+    value
+}
+
 fn format_consumer_summary(consumers: &[std::path::PathBuf]) -> String {
     match consumers.len() {
         0 => String::new(),
@@ -510,9 +675,44 @@ mod tests {
         }
     }
 
+    fn make_group(name: &str, line: u32) -> EmptyCatalogGroup {
+        EmptyCatalogGroup {
+            catalog_name: name.to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line,
+        }
+    }
+
     fn seed_workspace_file(root: &Path, content: &str) {
         let path = root.join("pnpm-workspace.yaml");
         std::fs::write(&path, content).unwrap();
+    }
+
+    #[test]
+    fn removes_empty_named_catalog_group_header_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let content = "catalogs:\n  react17: {}\n  # keep this note\n  vue3:\n    vue: ^3.4.0\n";
+        seed_workspace_file(dir.path(), content);
+        let groups = vec![make_group("react17", 2)];
+        let mut fixes = Vec::new();
+
+        let summary = apply_empty_catalog_group_fixes(
+            dir.path(),
+            &groups,
+            OutputFormat::Json,
+            false,
+            &mut fixes,
+        );
+
+        assert!(!summary.write_error);
+        assert_eq!(summary.applied, 1);
+        let result = std::fs::read_to_string(dir.path().join("pnpm-workspace.yaml")).unwrap();
+        assert_eq!(
+            result,
+            "catalogs:\n  # keep this note\n  vue3:\n    vue: ^3.4.0\n"
+        );
+        assert_eq!(fixes[0]["type"], "remove_empty_catalog_group");
+        assert_eq!(fixes[0]["applied"], true);
     }
 
     #[test]

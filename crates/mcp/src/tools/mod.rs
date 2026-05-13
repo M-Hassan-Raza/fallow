@@ -118,6 +118,7 @@ pub const ISSUE_TYPE_FLAGS: &[(&str, &str)] = &[
     ("boundary-violations", "--boundary-violations"),
     ("stale-suppressions", "--stale-suppressions"),
     ("unused-catalog-entries", "--unused-catalog-entries"),
+    ("empty-catalog-groups", "--empty-catalog-groups"),
     (
         "unresolved-catalog-references",
         "--unresolved-catalog-references",

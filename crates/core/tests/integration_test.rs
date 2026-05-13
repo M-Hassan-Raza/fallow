@@ -120,6 +120,8 @@ mod issue_334_unresolved_catalog_ref;
 mod issue_336_unused_overrides;
 #[path = "integration_test/issue_358_custom_eslint_config.rs"]
 mod issue_358_custom_eslint_config;
+#[path = "integration_test/issue_359_empty_catalog_group.rs"]
+mod issue_359_empty_catalog_group;
 #[path = "integration_test/script_multiplexers.rs"]
 mod script_multiplexers;
 #[path = "integration_test/visibility_tags.rs"]

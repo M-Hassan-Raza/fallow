@@ -146,6 +146,12 @@ fn sample_results(root: &Path) -> AnalysisResults {
             line: 12,
             hardcoded_consumers: vec![PathBuf::from("apps/web/package.json")],
         });
+    r.empty_catalog_groups
+        .push(fallow_core::results::EmptyCatalogGroup {
+            catalog_name: "react17".to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 10,
+        });
     r.unresolved_catalog_references
         .push(fallow_core::results::UnresolvedCatalogReference {
             entry_name: "old-react".to_string(),
@@ -571,6 +577,7 @@ fn sarif_mixed_severity_snapshot() {
         feature_flags: fallow_config::Severity::Off,
         stale_suppressions: fallow_config::Severity::Warn,
         unused_catalog_entries: fallow_config::Severity::Warn,
+        empty_catalog_groups: fallow_config::Severity::Warn,
         unresolved_catalog_references: fallow_config::Severity::Error,
         unused_dependency_overrides: fallow_config::Severity::Warn,
         misconfigured_dependency_overrides: fallow_config::Severity::Error,
@@ -1312,6 +1319,7 @@ fn codeclimate_mixed_severity_snapshot() {
         feature_flags: fallow_config::Severity::Off,
         stale_suppressions: fallow_config::Severity::Warn,
         unused_catalog_entries: fallow_config::Severity::Warn,
+        empty_catalog_groups: fallow_config::Severity::Warn,
         unresolved_catalog_references: fallow_config::Severity::Error,
         unused_dependency_overrides: fallow_config::Severity::Warn,
         misconfigured_dependency_overrides: fallow_config::Severity::Error,

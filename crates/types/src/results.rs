@@ -82,6 +82,9 @@ pub struct AnalysisResults {
     /// Entries in pnpm-workspace.yaml catalogs that no workspace package references.
     #[serde(default)]
     pub unused_catalog_entries: Vec<UnusedCatalogEntry>,
+    /// Empty named groups under pnpm-workspace.yaml's catalogs: section.
+    #[serde(default)]
+    pub empty_catalog_groups: Vec<EmptyCatalogGroup>,
     /// Workspace package.json references to pnpm catalogs that don't declare the package.
     #[serde(default)]
     pub unresolved_catalog_references: Vec<UnresolvedCatalogReference>,
@@ -156,6 +159,7 @@ impl AnalysisResults {
             + self.boundary_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
+            + self.empty_catalog_groups.len()
             + self.unresolved_catalog_references.len()
             + self.unused_dependency_overrides.len()
             + self.misconfigured_dependency_overrides.len()
@@ -306,6 +310,16 @@ impl AnalysisResults {
             entry.hardcoded_consumers.sort();
             entry.hardcoded_consumers.dedup();
         }
+
+        self.empty_catalog_groups.sort_by(|a, b| {
+            a.path
+                .cmp(&b.path)
+                .then_with(|| {
+                    catalog_sort_key(&a.catalog_name).cmp(&catalog_sort_key(&b.catalog_name))
+                })
+                .then(a.catalog_name.cmp(&b.catalog_name))
+                .then(a.line.cmp(&b.line))
+        });
 
         self.unresolved_catalog_references.sort_by(|a, b| {
             a.path
@@ -581,6 +595,18 @@ pub struct UnusedCatalogEntry {
         skip_serializing_if = "Vec::is_empty"
     )]
     pub hardcoded_consumers: Vec<PathBuf>,
+}
+
+/// A named `catalogs.<name>:` group in `pnpm-workspace.yaml` with no package entries.
+#[derive(Debug, Clone, Serialize)]
+pub struct EmptyCatalogGroup {
+    /// Catalog group name declared under the top-level `catalogs:` map.
+    pub catalog_name: String,
+    /// Path to `pnpm-workspace.yaml`, relative to the analyzed root.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// 1-based line number of the empty group header within `pnpm-workspace.yaml`.
+    pub line: u32,
 }
 
 /// A workspace package.json reference (`catalog:` or `catalog:<name>`) that points

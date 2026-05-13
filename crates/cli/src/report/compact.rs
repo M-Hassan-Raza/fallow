@@ -150,6 +150,14 @@ pub fn build_compact_lines(results: &AnalysisResults, root: &Path) -> Vec<String
             entry.entry_name,
         ));
     }
+    for group in &results.empty_catalog_groups {
+        lines.push(format!(
+            "empty-catalog-group:{}:{}:{}",
+            rel(&group.path),
+            group.line,
+            group.catalog_name,
+        ));
+    }
     for finding in &results.unresolved_catalog_references {
         lines.push(format!(
             "unresolved-catalog-reference:{}:{}:{}:{}",

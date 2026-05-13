@@ -61,6 +61,8 @@ pub enum IssueKind {
     StaleSuppression,
     /// A pnpm catalog entry in pnpm-workspace.yaml not referenced by any workspace package.
     PnpmCatalogEntry,
+    /// A named pnpm catalog group in pnpm-workspace.yaml with no entries.
+    EmptyCatalogGroup,
     /// A workspace package.json reference (`catalog:` / `catalog:<name>`) pointing at
     /// a catalog that does not declare the consumed package.
     UnresolvedCatalogReference,
@@ -98,6 +100,7 @@ impl IssueKind {
             "complexity" => Some(Self::Complexity),
             "stale-suppression" => Some(Self::StaleSuppression),
             "unused-catalog-entry" | "unused-catalog-entries" => Some(Self::PnpmCatalogEntry),
+            "empty-catalog-group" | "empty-catalog-groups" => Some(Self::EmptyCatalogGroup),
             "unresolved-catalog-reference" | "unresolved-catalog-references" => {
                 Some(Self::UnresolvedCatalogReference)
             }
@@ -139,6 +142,7 @@ impl IssueKind {
             Self::UnresolvedCatalogReference => 22,
             Self::UnusedDependencyOverride => 23,
             Self::MisconfiguredDependencyOverride => 24,
+            Self::EmptyCatalogGroup => 25,
         }
     }
 
@@ -170,6 +174,7 @@ impl IssueKind {
             22 => Some(Self::UnresolvedCatalogReference),
             23 => Some(Self::UnusedDependencyOverride),
             24 => Some(Self::MisconfiguredDependencyOverride),
+            25 => Some(Self::EmptyCatalogGroup),
             _ => None,
         }
     }
@@ -301,6 +306,14 @@ mod tests {
             Some(IssueKind::PnpmCatalogEntry)
         );
         assert_eq!(
+            IssueKind::parse("empty-catalog-group"),
+            Some(IssueKind::EmptyCatalogGroup)
+        );
+        assert_eq!(
+            IssueKind::parse("empty-catalog-groups"),
+            Some(IssueKind::EmptyCatalogGroup)
+        );
+        assert_eq!(
             IssueKind::parse("unresolved-catalog-reference"),
             Some(IssueKind::UnresolvedCatalogReference)
         );
@@ -345,7 +358,7 @@ mod tests {
     #[test]
     fn discriminant_out_of_range() {
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(25), None);
+        assert_eq!(IssueKind::from_discriminant(26), None);
         assert_eq!(IssueKind::from_discriminant(u8::MAX), None);
     }
 
@@ -373,6 +386,7 @@ mod tests {
             IssueKind::Complexity,
             IssueKind::StaleSuppression,
             IssueKind::PnpmCatalogEntry,
+            IssueKind::EmptyCatalogGroup,
             IssueKind::UnresolvedCatalogReference,
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,
@@ -383,7 +397,7 @@ mod tests {
             );
         }
         assert_eq!(IssueKind::from_discriminant(0), None);
-        assert_eq!(IssueKind::from_discriminant(25), None);
+        assert_eq!(IssueKind::from_discriminant(26), None);
     }
 
     // ── Discriminant uniqueness ─────────────────────────────────
@@ -412,6 +426,7 @@ mod tests {
             IssueKind::Complexity,
             IssueKind::StaleSuppression,
             IssueKind::PnpmCatalogEntry,
+            IssueKind::EmptyCatalogGroup,
             IssueKind::UnresolvedCatalogReference,
             IssueKind::UnusedDependencyOverride,
             IssueKind::MisconfiguredDependencyOverride,

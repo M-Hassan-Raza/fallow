@@ -601,6 +601,37 @@ fn push_unresolved_catalog_reference_issues(
     }
 }
 
+fn push_empty_catalog_group_issues(
+    issues: &mut Vec<serde_json::Value>,
+    groups: &[fallow_core::results::EmptyCatalogGroup],
+    root: &Path,
+    severity: Severity,
+) {
+    if groups.is_empty() {
+        return;
+    }
+    let level = severity_to_codeclimate(severity);
+    for group in groups {
+        let path = cc_path(&group.path, root);
+        let line_str = group.line.to_string();
+        let fp = fingerprint_hash(&[
+            "fallow/empty-catalog-group",
+            &path,
+            &line_str,
+            &group.catalog_name,
+        ]);
+        issues.push(cc_issue(
+            "fallow/empty-catalog-group",
+            &format!("Catalog group '{}' has no entries", group.catalog_name),
+            level,
+            "Bug Risk",
+            &path,
+            Some(group.line),
+            &fp,
+        ));
+    }
+}
+
 fn push_unused_dependency_override_issues(
     issues: &mut Vec<serde_json::Value>,
     findings: &[fallow_core::results::UnusedDependencyOverride],
@@ -806,6 +837,12 @@ pub fn build_codeclimate(
         &results.unused_catalog_entries,
         root,
         rules.unused_catalog_entries,
+    );
+    push_empty_catalog_group_issues(
+        &mut issues,
+        &results.empty_catalog_groups,
+        root,
+        rules.empty_catalog_groups,
     );
     push_unresolved_catalog_reference_issues(
         &mut issues,

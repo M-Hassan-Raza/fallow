@@ -345,6 +345,11 @@
           "items": { "$ref": "#/definitions/UnusedCatalogEntry" },
           "description": "Entries in pnpm-workspace.yaml's catalog: or catalogs: sections not referenced by any workspace package via the catalog: protocol."
         },
+        "empty_catalog_groups": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/EmptyCatalogGroup" },
+          "description": "Named groups under pnpm-workspace.yaml's catalogs: section that declare no package entries. The top-level catalog: map is not reported."
+        },
         "unresolved_catalog_references": {
           "type": "array",
           "items": { "$ref": "#/definitions/UnresolvedCatalogReference" },
@@ -1854,7 +1859,7 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["remove-export", "delete-file", "remove-dependency", "move-dependency", "remove-enum-member", "remove-class-member", "resolve-import", "install-dependency", "remove-duplicate", "move-to-dev", "refactor-cycle", "refactor-boundary", "export-type", "remove-catalog-entry", "update-catalog-reference", "add-catalog-entry", "remove-catalog-reference", "remove-dependency-override", "fix-dependency-override"],
+          "enum": ["remove-export", "delete-file", "remove-dependency", "move-dependency", "remove-enum-member", "remove-class-member", "resolve-import", "install-dependency", "remove-duplicate", "move-to-dev", "refactor-cycle", "refactor-boundary", "export-type", "remove-catalog-entry", "remove-empty-catalog-group", "update-catalog-reference", "add-catalog-entry", "remove-catalog-reference", "remove-dependency-override", "fix-dependency-override"],
           "description": "Kebab-case identifier for the fix action."
         },
         "auto_fixable": {
@@ -2626,6 +2631,33 @@
       }
     },
 
+    "EmptyCatalogGroup": {
+      "type": "object",
+      "required": ["catalog_name", "path", "line"],
+      "description": "A named pnpm catalog group under catalogs: with no package entries.",
+      "properties": {
+        "catalog_name": {
+          "type": "string",
+          "description": "Named catalog group under the top-level catalogs: map."
+        },
+        "path": {
+          "type": "string",
+          "description": "Relative path to pnpm-workspace.yaml."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number of the empty catalog group header."
+        },
+        "actions": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/IssueAction" }
+        },
+        "introduced": {
+          "$ref": "#/definitions/AuditIntroduced"
+        }
+      }
+    },
+
     "UnresolvedCatalogReference": {
       "type": "object",
       "required": ["entry_name", "catalog_name", "path", "line"],
@@ -2967,6 +2999,7 @@
         "boundary_violations": { "type": "integer" },
         "stale_suppressions": { "type": "integer" },
         "unused_catalog_entries": { "type": "integer" },
+        "empty_catalog_groups": { "type": "integer" },
         "unresolved_catalog_references": { "type": "integer" },
         "unused_dependency_overrides": { "type": "integer" },
         "misconfigured_dependency_overrides": { "type": "integer" }

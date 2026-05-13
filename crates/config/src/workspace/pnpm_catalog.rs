@@ -35,6 +35,11 @@ pub struct PnpmCatalogData {
     /// always appears first with `name = "default"` when present; named
     /// catalogs follow in YAML source order.
     pub catalogs: Vec<PnpmCatalog>,
+    /// Named catalogs under `catalogs:` that declare no package entries.
+    ///
+    /// The top-level `catalog:` map is intentionally not represented here:
+    /// some repos keep it as a stable hook even when currently empty.
+    pub empty_named_catalog_groups: Vec<PnpmCatalogGroup>,
 }
 
 /// A single catalog (the default or a named one).
@@ -56,6 +61,15 @@ pub struct PnpmCatalogEntry {
     pub line: u32,
 }
 
+/// A named catalog group under `catalogs:` with no package entries.
+#[derive(Debug, Clone)]
+pub struct PnpmCatalogGroup {
+    /// Catalog group name (e.g. `"react17"` for `catalogs.react17`).
+    pub name: String,
+    /// 1-based line number of the group header within the source file.
+    pub line: u32,
+}
+
 /// Parse the catalog sections of a `pnpm-workspace.yaml` file.
 ///
 /// Returns an empty `PnpmCatalogData` when the file has no catalog data, when
@@ -74,6 +88,7 @@ pub fn parse_pnpm_catalog_data(source: &str) -> PnpmCatalogData {
 
     let line_index = build_line_index(source);
     let mut catalogs = Vec::new();
+    let mut empty_named_catalog_groups = Vec::new();
 
     if let Some(default_value) = mapping.get("catalog")
         && let Some(default_map) = default_value.as_mapping()
@@ -94,20 +109,36 @@ pub fn parse_pnpm_catalog_data(source: &str) -> PnpmCatalogData {
             let Some(name) = name_value.as_str() else {
                 continue;
             };
-            let Some(catalog_map) = catalog_value.as_mapping() else {
-                continue;
-            };
-            let entries = collect_entries(catalog_map, &line_index, name);
-            if !entries.is_empty() {
-                catalogs.push(PnpmCatalog {
+            if let Some(catalog_map) = catalog_value.as_mapping() {
+                let entries = collect_entries(catalog_map, &line_index, name);
+                if entries.is_empty() {
+                    if let Some(line) = line_index.group_line_for(name) {
+                        empty_named_catalog_groups.push(PnpmCatalogGroup {
+                            name: name.to_string(),
+                            line,
+                        });
+                    }
+                } else {
+                    catalogs.push(PnpmCatalog {
+                        name: name.to_string(),
+                        entries,
+                    });
+                }
+            } else if catalog_value.is_null()
+                && let Some(line) = line_index.group_line_for(name)
+            {
+                empty_named_catalog_groups.push(PnpmCatalogGroup {
                     name: name.to_string(),
-                    entries,
+                    line,
                 });
             }
         }
     }
 
-    PnpmCatalogData { catalogs }
+    PnpmCatalogData {
+        catalogs,
+        empty_named_catalog_groups,
+    }
 }
 
 fn collect_entries(
@@ -134,6 +165,7 @@ fn collect_entries(
 /// key, or the named catalog key for entries under `catalogs.<name>:`.
 struct CatalogLineIndex {
     entries: Vec<((String, String), u32)>,
+    groups: Vec<(String, u32)>,
 }
 
 impl CatalogLineIndex {
@@ -141,6 +173,13 @@ impl CatalogLineIndex {
         self.entries
             .iter()
             .find(|((cat, pkg), _)| cat == catalog_name && pkg == package_name)
+            .map(|(_, line)| *line)
+    }
+
+    fn group_line_for(&self, catalog_name: &str) -> Option<u32> {
+        self.groups
+            .iter()
+            .find(|(name, _)| name == catalog_name)
             .map(|(_, line)| *line)
     }
 }
@@ -152,6 +191,7 @@ impl CatalogLineIndex {
 /// expected indentation level.
 fn build_line_index(source: &str) -> CatalogLineIndex {
     let mut entries = Vec::new();
+    let mut groups = Vec::new();
     let mut section: Section = Section::None;
     let mut named_catalog: Option<(String, usize)> = None;
 
@@ -204,6 +244,7 @@ fn build_line_index(source: &str) -> CatalogLineIndex {
                         }
                         _ => {
                             // New named catalog header (or first one seen)
+                            groups.push((name.clone(), line_no));
                             named_catalog = Some((name, indent));
                         }
                     }
@@ -212,7 +253,7 @@ fn build_line_index(source: &str) -> CatalogLineIndex {
         }
     }
 
-    CatalogLineIndex { entries }
+    CatalogLineIndex { entries, groups }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -351,6 +392,7 @@ mod tests {
         assert_eq!(data.catalogs[1].name, "ui");
         assert_eq!(data.catalogs[1].entries[0].package_name, "headlessui");
         assert_eq!(data.catalogs[1].entries[0].line, 6);
+        assert!(data.empty_named_catalog_groups.is_empty());
     }
 
     #[test]
@@ -399,6 +441,20 @@ mod tests {
         let yaml = "catalog: {}\n";
         let data = parse_pnpm_catalog_data(yaml);
         assert!(data.catalogs.is_empty());
+        assert!(data.empty_named_catalog_groups.is_empty());
+    }
+
+    #[test]
+    fn tracks_empty_named_catalog_groups() {
+        let yaml = "catalog:\n  react: ^18\n\ncatalogs:\n  react17: {}\n  legacy:\n    # retained note\n  vue3:\n    vue: ^3.4.0\n";
+        let data = parse_pnpm_catalog_data(yaml);
+        assert_eq!(data.catalogs.len(), 2);
+        let empty: Vec<_> = data
+            .empty_named_catalog_groups
+            .iter()
+            .map(|group| (group.name.as_str(), group.line))
+            .collect();
+        assert_eq!(empty, vec![("react17", 5), ("legacy", 6)]);
     }
 
     #[test]

@@ -2,11 +2,11 @@
 pub use fallow_types::results::{
     AnalysisResults, BoundaryViolation, CircularDependency, DependencyLocation,
     DependencyOverrideMisconfigReason, DependencyOverrideSource, DuplicateExport,
-    DuplicateLocation, EntryPointSummary, ExportUsage, ImportSite, MisconfiguredDependencyOverride,
-    PrivateTypeLeak, ReferenceLocation, StaleSuppression, SuppressionOrigin, TestOnlyDependency,
-    TypeOnlyDependency, UnlistedDependency, UnresolvedCatalogReference, UnresolvedImport,
-    UnusedCatalogEntry, UnusedDependency, UnusedDependencyOverride, UnusedExport, UnusedFile,
-    UnusedMember,
+    DuplicateLocation, EmptyCatalogGroup, EntryPointSummary, ExportUsage, ImportSite,
+    MisconfiguredDependencyOverride, PrivateTypeLeak, ReferenceLocation, StaleSuppression,
+    SuppressionOrigin, TestOnlyDependency, TypeOnlyDependency, UnlistedDependency,
+    UnresolvedCatalogReference, UnresolvedImport, UnusedCatalogEntry, UnusedDependency,
+    UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedMember,
 };
 
 #[cfg(test)]

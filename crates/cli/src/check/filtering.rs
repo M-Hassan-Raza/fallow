@@ -78,6 +78,7 @@ pub fn filter_to_workspaces(
     // Workspace scoping is asking "show me findings for this subset of packages";
     // catalog hygiene is a whole-project concern, so drop it when --workspace narrows.
     results.unused_catalog_entries.clear();
+    results.empty_catalog_groups.clear();
     // Unresolved catalog references are anchored at consumer package.json paths,
     // so they ARE workspace-scoped: retain only findings under the active set.
     results

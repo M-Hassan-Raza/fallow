@@ -18,6 +18,7 @@ test-only-dep:msw
 circular-dependency:src/a.ts:3:src/a.ts → src/b.ts → src/a.ts
 unused-catalog-entry:pnpm-workspace.yaml:6:default:is-even
 unused-catalog-entry:pnpm-workspace.yaml:12:legacy:old-thing
+empty-catalog-group:pnpm-workspace.yaml:10:react17
 unresolved-catalog-reference:packages/app/package.json:14:react17:old-react
 unused-dependency-override:pnpm-workspace.yaml:9:pnpm-workspace.yaml:axios
 misconfigured-dependency-override:package.json:3:package.json:@types/react@<<18

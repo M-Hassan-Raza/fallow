@@ -25,6 +25,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
     "boundary_violations": 0,
     "stale_suppressions": 0,
     "unused_catalog_entries": 0,
+    "empty_catalog_groups": 0,
     "unresolved_catalog_references": 0,
     "unused_dependency_overrides": 0,
     "misconfigured_dependency_overrides": 0
@@ -90,6 +91,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
   "boundary_violations": [],
   "stale_suppressions": [],
   "unused_catalog_entries": [],
+  "empty_catalog_groups": [],
   "unresolved_catalog_references": [],
   "unused_dependency_overrides": [],
   "misconfigured_dependency_overrides": []

@@ -350,6 +350,9 @@ pub fn filter_results_by_changed_files(
     results
         .unresolved_catalog_references
         .retain(|r| changed_files.contains(&r.path));
+    results
+        .empty_catalog_groups
+        .retain(|g| changed_files_contains_path(changed_files, &g.path));
 
     // Unused / misconfigured dependency overrides: anchored at the declaring
     // source file (pnpm-workspace.yaml or root package.json). Keep only
@@ -360,6 +363,11 @@ pub fn filter_results_by_changed_files(
     results
         .misconfigured_dependency_overrides
         .retain(|o| changed_files.contains(&o.path));
+}
+
+fn changed_files_contains_path(changed_files: &FxHashSet<PathBuf>, path: &Path) -> bool {
+    changed_files.contains(path)
+        || (path.is_relative() && changed_files.iter().any(|changed| changed.ends_with(path)))
 }
 
 /// Recompute duplication statistics after filtering.
@@ -435,7 +443,9 @@ pub fn filter_duplication_by_changed_files(
 mod tests {
     use super::*;
     use crate::duplicates::{CloneGroup, CloneInstance};
-    use crate::results::{BoundaryViolation, CircularDependency, UnusedExport, UnusedFile};
+    use crate::results::{
+        BoundaryViolation, CircularDependency, EmptyCatalogGroup, UnusedExport, UnusedFile,
+    };
 
     #[test]
     fn changed_files_error_describe_variants() {
@@ -650,6 +660,24 @@ mod tests {
 
         filter_results_by_changed_files(&mut results, &changed);
         assert!(results.boundary_violations.is_empty());
+    }
+
+    #[test]
+    fn filter_results_keeps_relative_empty_catalog_group_when_manifest_changed() {
+        let mut results = AnalysisResults::default();
+        results.empty_catalog_groups.push(EmptyCatalogGroup {
+            catalog_name: "legacy".into(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line: 4,
+        });
+
+        let mut changed: FxHashSet<PathBuf> = FxHashSet::default();
+        changed.insert(PathBuf::from("/repo/pnpm-workspace.yaml"));
+
+        filter_results_by_changed_files(&mut results, &changed);
+
+        assert_eq!(results.empty_catalog_groups.len(), 1);
+        assert_eq!(results.empty_catalog_groups[0].catalog_name, "legacy");
     }
 
     #[test]

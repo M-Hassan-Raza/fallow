@@ -44,6 +44,9 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
                 .unresolved_catalog_references
                 != Severity::Off
         });
+        results.empty_catalog_groups.retain(|g| {
+            config.resolve_rules_for_path(&g.path).empty_catalog_groups != Severity::Off
+        });
         results.unused_dependency_overrides.retain(|o| {
             config
                 .resolve_rules_for_path(&o.path)
@@ -119,6 +122,9 @@ pub fn apply_rules(results: &mut fallow_core::results::AnalysisResults, config: 
     if rules.unused_catalog_entries == Severity::Off {
         results.unused_catalog_entries.clear();
     }
+    if rules.empty_catalog_groups == Severity::Off {
+        results.empty_catalog_groups.clear();
+    }
     if rules.unresolved_catalog_references == Severity::Off {
         results.unresolved_catalog_references.clear();
     }
@@ -178,6 +184,9 @@ pub fn has_error_severity_issues(
                     .unresolved_catalog_references
                     == Severity::Error
             })
+            || results.empty_catalog_groups.iter().any(|g| {
+                config.resolve_rules_for_path(&g.path).empty_catalog_groups == Severity::Error
+            })
             || results.circular_dependencies.iter().any(|c| {
                 c.files.iter().any(|path| {
                     config.resolve_rules_for_path(path).circular_dependencies == Severity::Error
@@ -199,6 +208,8 @@ pub fn has_error_severity_issues(
                 && !results.stale_suppressions.is_empty())
             || (rules.unresolved_catalog_references == Severity::Error
                 && !results.unresolved_catalog_references.is_empty())
+            || (rules.empty_catalog_groups == Severity::Error
+                && !results.empty_catalog_groups.is_empty())
     };
 
     // Non-file-scoped issue types: always use base rules
@@ -221,6 +232,8 @@ pub fn has_error_severity_issues(
         || (rules.boundary_violation == Severity::Error && !results.boundary_violations.is_empty())
         || (rules.unused_catalog_entries == Severity::Error
             && !results.unused_catalog_entries.is_empty())
+        || (rules.empty_catalog_groups == Severity::Error
+            && !results.empty_catalog_groups.is_empty())
         || (rules.unused_dependency_overrides == Severity::Error
             && !results.unused_dependency_overrides.is_empty())
         || (rules.misconfigured_dependency_overrides == Severity::Error
@@ -285,6 +298,9 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     }
     if rules.unused_catalog_entries == Severity::Warn {
         rules.unused_catalog_entries = Severity::Error;
+    }
+    if rules.empty_catalog_groups == Severity::Warn {
+        rules.empty_catalog_groups = Severity::Error;
     }
     if rules.unresolved_catalog_references == Severity::Warn {
         rules.unresolved_catalog_references = Severity::Error;
@@ -497,6 +513,7 @@ mod tests {
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
             unused_catalog_entries: Severity::Off,
+            empty_catalog_groups: Severity::Off,
             unresolved_catalog_references: Severity::Off,
             unused_dependency_overrides: Severity::Off,
             misconfigured_dependency_overrides: Severity::Off,
@@ -609,6 +626,7 @@ mod tests {
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
+            empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
             unused_dependency_overrides: Severity::Warn,
             misconfigured_dependency_overrides: Severity::Error,
@@ -643,6 +661,7 @@ mod tests {
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
+            empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
             unused_dependency_overrides: Severity::Warn,
             misconfigured_dependency_overrides: Severity::Error,
@@ -957,6 +976,7 @@ mod tests {
             feature_flags: Severity::Warn,
             stale_suppressions: Severity::Warn,
             unused_catalog_entries: Severity::Warn,
+            empty_catalog_groups: Severity::Warn,
             unresolved_catalog_references: Severity::Error,
             unused_dependency_overrides: Severity::Warn,
             misconfigured_dependency_overrides: Severity::Error,
@@ -1005,6 +1025,7 @@ mod tests {
             feature_flags: Severity::Off,
             stale_suppressions: Severity::Off,
             unused_catalog_entries: Severity::Off,
+            empty_catalog_groups: Severity::Off,
             unresolved_catalog_references: Severity::Off,
             unused_dependency_overrides: Severity::Off,
             misconfigured_dependency_overrides: Severity::Off,

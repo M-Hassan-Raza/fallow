@@ -6,9 +6,9 @@ expression: redact_version(&json_str)
   "schema_version": 6,
   "version": "[VERSION]",
   "elapsed_ms": 42,
-  "total_issues": 19,
+  "total_issues": 20,
   "summary": {
-    "total_issues": 19,
+    "total_issues": 20,
     "unused_files": 1,
     "unused_exports": 1,
     "unused_types": 1,
@@ -25,6 +25,7 @@ expression: redact_version(&json_str)
     "boundary_violations": 0,
     "stale_suppressions": 0,
     "unused_catalog_entries": 2,
+    "empty_catalog_groups": 1,
     "unresolved_catalog_references": 1,
     "unused_dependency_overrides": 1,
     "misconfigured_dependency_overrides": 1
@@ -431,6 +432,27 @@ expression: redact_version(&json_str)
           "auto_fixable": false,
           "description": "Suppress with a YAML comment above the line",
           "comment": "# fallow-ignore-next-line unused-catalog-entry"
+        }
+      ]
+    }
+  ],
+  "empty_catalog_groups": [
+    {
+      "catalog_name": "react17",
+      "path": "pnpm-workspace.yaml",
+      "line": 10,
+      "actions": [
+        {
+          "type": "remove-empty-catalog-group",
+          "auto_fixable": true,
+          "description": "Remove the empty named catalog group from pnpm-workspace.yaml",
+          "note": "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored"
+        },
+        {
+          "type": "suppress-line",
+          "auto_fixable": false,
+          "description": "Suppress with a YAML comment above the line",
+          "comment": "# fallow-ignore-next-line empty-catalog-group"
         }
       ]
     }

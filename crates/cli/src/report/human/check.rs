@@ -578,6 +578,7 @@ fn build_dependencies_section(
         || !results.type_only_dependencies.is_empty()
         || !results.test_only_dependencies.is_empty()
         || !results.unused_catalog_entries.is_empty()
+        || !results.empty_catalog_groups.is_empty()
         || !results.unresolved_catalog_references.is_empty()
         || !results.unused_dependency_overrides.is_empty()
         || !results.misconfigured_dependency_overrides.is_empty();
@@ -658,6 +659,14 @@ fn build_dependencies_section(
         total_issues,
         root,
     );
+    push_empty_catalog_groups_section(
+        lines,
+        &results.empty_catalog_groups,
+        rules.empty_catalog_groups,
+        max_items,
+        total_issues,
+        root,
+    );
     push_unresolved_catalog_references_section(
         lines,
         &results.unresolved_catalog_references,
@@ -734,6 +743,44 @@ fn push_unused_catalog_entries_section(
                 out.push(row);
             }
             out
+        },
+    );
+}
+
+fn push_empty_catalog_groups_section(
+    lines: &mut Vec<String>,
+    groups: &[fallow_core::results::EmptyCatalogGroup],
+    severity: fallow_config::Severity,
+    max_items: usize,
+    total_issues: usize,
+    root: &Path,
+) {
+    if groups.is_empty() {
+        return;
+    }
+    let level = severity_to_level(severity);
+    build_human_section_ex(
+        lines,
+        groups,
+        "Empty catalog groups",
+        level,
+        max_items,
+        total_issues,
+        |group| {
+            let path_display = root.join(&group.path);
+            vec![format!(
+                "  {catalog}  {loc}",
+                catalog = group.catalog_name.bold(),
+                loc = format!(
+                    "{}:{}",
+                    path_display
+                        .strip_prefix(root)
+                        .unwrap_or(&path_display)
+                        .display(),
+                    group.line
+                )
+                .dimmed(),
+            )]
         },
     );
 }

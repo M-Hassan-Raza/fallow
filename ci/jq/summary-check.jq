@@ -50,6 +50,7 @@ else
     table_row("Test-only dependencies"; "test_only_dependencies"; "test-only-dependencies"),
     table_row("Stale suppressions"; "stale_suppressions"; "stale-suppressions"),
     table_row("Unused catalog entries"; "unused_catalog_entries"; "unused-catalog-entries"),
+    table_row("Empty catalog groups"; "empty_catalog_groups"; "empty-catalog-groups"),
     table_row("Unresolved catalog references"; "unresolved_catalog_references"; "unresolved-catalog-references"),
     table_row("Unused dependency overrides"; "unused_dependency_overrides"; "unused-dependency-overrides"),
     table_row("Misconfigured dependency overrides"; "misconfigured_dependency_overrides"; "misconfigured-dependency-overrides")
@@ -109,6 +110,9 @@ else
   section("Unused catalog entries"; "unused_catalog_entries";
     "pnpm catalog entries not referenced by any workspace package.\n\n| Entry | Catalog | Location | Hardcoded consumers |\n|-------|---------|----------|---------------------|\n";
     "| `\(.entry_name)` | `\(.catalog_name)` | `\(.path):\(.line)` | \(if ((.hardcoded_consumers // []) | length) > 0 then (.hardcoded_consumers | map("`\(.)`") | join(", ")) else "" end) |") +
+  section("Empty catalog groups"; "empty_catalog_groups";
+    "Named pnpm catalog groups with no entries.\n\n| Catalog | Location |\n|---------|----------|\n";
+    "| `\(.catalog_name)` | `\(.path):\(.line)` |") +
   section("Unresolved catalog references"; "unresolved_catalog_references";
     "Workspace `package.json` references to catalogs that do not declare the package. `pnpm install` will fail until each entry is added to its named catalog or the reference is switched.\n\n| Entry | Catalog | Location | Available in |\n|-------|---------|----------|--------------|\n";
     "| `\(.entry_name)` | `\(.catalog_name)` | `\(.path):\(.line)` | \(if ((.available_in_catalogs // []) | length) > 0 then (.available_in_catalogs | map("`\(.)`") | join(", ")) else "" end) |") +

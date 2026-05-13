@@ -280,6 +280,7 @@ pub fn build_json(
         "boundary_violations": results.boundary_violations.len(),
         "stale_suppressions": results.stale_suppressions.len(),
         "unused_catalog_entries": results.unused_catalog_entries.len(),
+        "empty_catalog_groups": results.empty_catalog_groups.len(),
         "unresolved_catalog_references": results.unresolved_catalog_references.len(),
         "unused_dependency_overrides": results.unused_dependency_overrides.len(),
         "misconfigured_dependency_overrides": results.misconfigured_dependency_overrides.len(),
@@ -519,6 +520,16 @@ fn actions_for_issue_type(key: &str) -> Option<ActionSpec> {
             ),
             suppress: SuppressKind::YamlComment,
             issue_kind: "unused-catalog-entry",
+        }),
+        "empty_catalog_groups" => Some(ActionSpec {
+            fix_type: "remove-empty-catalog-group",
+            auto_fixable: true,
+            description: "Remove the empty named catalog group from pnpm-workspace.yaml",
+            note: Some(
+                "Only named groups under `catalogs:` are flagged; the top-level `catalog:` hook is intentionally ignored",
+            ),
+            suppress: SuppressKind::YamlComment,
+            issue_kind: "empty-catalog-group",
         }),
         // The primary fix for unresolved-catalog-references is computed in
         // build_actions because it discriminates on `available_in_catalogs`.

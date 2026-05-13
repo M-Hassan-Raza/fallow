@@ -57,6 +57,7 @@ struct AnalysisCompleteParams {
     boundary_violations: usize,
     stale_suppressions: usize,
     unused_catalog_entries: usize,
+    empty_catalog_groups: usize,
     unresolved_catalog_references: usize,
     unused_dependency_overrides: usize,
     misconfigured_dependency_overrides: usize,
@@ -176,6 +177,11 @@ const DIAGNOSTIC_ISSUE_TYPES: &[DiagnosticIssueType] = &[
         config_key: Some("unused-catalog-entries"),
         code: "unused-catalog-entry",
         label: "Unused Catalog Entries",
+    },
+    DiagnosticIssueType {
+        config_key: Some("empty-catalog-groups"),
+        code: "empty-catalog-group",
+        label: "Empty Catalog Groups",
     },
     DiagnosticIssueType {
         config_key: Some("unresolved-catalog-references"),
@@ -873,6 +879,7 @@ impl FallowLspServer {
                         boundary_violations: results.boundary_violations.len(),
                         stale_suppressions: results.stale_suppressions.len(),
                         unused_catalog_entries: results.unused_catalog_entries.len(),
+                        empty_catalog_groups: results.empty_catalog_groups.len(),
                         unresolved_catalog_references: results.unresolved_catalog_references.len(),
                         unused_dependency_overrides: results.unused_dependency_overrides.len(),
                         misconfigured_dependency_overrides: results
@@ -1172,6 +1179,9 @@ fn dedup_results(target: &mut AnalysisResults) {
     dedup_by_key_preserving_order(&mut target.unused_catalog_entries, |e| {
         (e.path.clone(), e.catalog_name.clone(), e.entry_name.clone())
     });
+    dedup_by_key_preserving_order(&mut target.empty_catalog_groups, |g| {
+        (g.path.clone(), g.catalog_name.clone())
+    });
     dedup_by_key_preserving_order(&mut target.unresolved_catalog_references, |f| {
         (
             f.path.clone(),
@@ -1260,6 +1270,9 @@ fn merge_results(target: &mut AnalysisResults, source: AnalysisResults) {
     target
         .unused_catalog_entries
         .extend(source.unused_catalog_entries);
+    target
+        .empty_catalog_groups
+        .extend(source.empty_catalog_groups);
     target
         .unresolved_catalog_references
         .extend(source.unresolved_catalog_references);

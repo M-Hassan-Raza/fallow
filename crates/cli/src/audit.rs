@@ -1304,6 +1304,28 @@ fn unused_member_key(
     )
 }
 
+fn unused_catalog_entry_key(
+    item: &fallow_core::results::UnusedCatalogEntry,
+    root: &Path,
+) -> String {
+    format!(
+        "unused-catalog-entry:{}:{}:{}:{}",
+        relative_key_path(&item.path, root),
+        item.line,
+        item.catalog_name,
+        item.entry_name
+    )
+}
+
+fn empty_catalog_group_key(item: &fallow_core::results::EmptyCatalogGroup, root: &Path) -> String {
+    format!(
+        "empty-catalog-group:{}:{}:{}",
+        relative_key_path(&item.path, root),
+        item.line,
+        item.catalog_name
+    )
+}
+
 fn dead_code_keys(
     results: &fallow_core::results::AnalysisResults,
     root: &Path,
@@ -1421,6 +1443,12 @@ fn dead_code_keys(
             item.catalog_name,
             item.entry_name
         ));
+    }
+    for item in &results.unused_catalog_entries {
+        keys.insert(unused_catalog_entry_key(item, root));
+    }
+    for item in &results.empty_catalog_groups {
+        keys.insert(empty_catalog_group_key(item, root));
     }
     for item in &results.unused_dependency_overrides {
         keys.insert(format!(
@@ -1570,6 +1598,12 @@ fn retain_introduced_dead_code(
             item.entry_name
         ))
     });
+    results
+        .unused_catalog_entries
+        .retain(|item| keep(unused_catalog_entry_key(item, root)));
+    results
+        .empty_catalog_groups
+        .retain(|item| keep(empty_catalog_group_key(item, root)));
     results.unused_dependency_overrides.retain(|item| {
         keep(format!(
             "unused-dependency-override:{}:{}:{}",
@@ -1835,6 +1869,22 @@ fn annotate_dead_code_json(
                 base,
             )
         }),
+    );
+    annotate_issue_array(
+        json,
+        "unused_catalog_entries",
+        results
+            .unused_catalog_entries
+            .iter()
+            .map(|item| issue_was_introduced(&unused_catalog_entry_key(item, root), base)),
+    );
+    annotate_issue_array(
+        json,
+        "empty_catalog_groups",
+        results
+            .empty_catalog_groups
+            .iter()
+            .map(|item| issue_was_introduced(&empty_catalog_group_key(item, root), base)),
     );
     annotate_issue_array(
         json,

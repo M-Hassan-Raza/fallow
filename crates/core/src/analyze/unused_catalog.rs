@@ -37,7 +37,7 @@ use fallow_config::{
     CompiledIgnoreCatalogReferenceRule, PackageJson, PnpmCatalogData, ResolvedConfig,
     WorkspaceInfo, parse_pnpm_catalog_data,
 };
-use fallow_types::results::{UnresolvedCatalogReference, UnusedCatalogEntry};
+use fallow_types::results::{EmptyCatalogGroup, UnresolvedCatalogReference, UnusedCatalogEntry};
 use rustc_hash::FxHashSet;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
@@ -103,6 +103,22 @@ pub fn find_unused_catalog_entries(state: &PnpmCatalogState) -> Vec<UnusedCatalo
     }
 
     findings
+}
+
+/// Emit one `EmptyCatalogGroup` for every named `catalogs.<name>:` group
+/// that has no package entries. The top-level default `catalog:` map is
+/// intentionally ignored.
+pub fn find_empty_catalog_groups(state: &PnpmCatalogState) -> Vec<EmptyCatalogGroup> {
+    state
+        .data
+        .empty_named_catalog_groups
+        .iter()
+        .map(|group| EmptyCatalogGroup {
+            catalog_name: group.name.clone(),
+            path: PathBuf::from(PNPM_WORKSPACE_FILE),
+            line: group.line,
+        })
+        .collect()
 }
 
 /// Emit one `UnresolvedCatalogReference` for every `catalog:` / `catalog:<name>`

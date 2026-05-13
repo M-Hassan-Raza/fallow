@@ -93,6 +93,9 @@ pub struct BaselineData {
     /// Unused pnpm catalog entries, keyed by `catalog_name:entry_name`.
     #[serde(default)]
     pub unused_catalog_entries: Vec<String>,
+    /// Empty pnpm catalog groups, keyed by `catalog_name`.
+    #[serde(default)]
+    pub empty_catalog_groups: Vec<String>,
     /// Unresolved catalog references, keyed by `path:line:catalog_name:entry_name`.
     #[serde(default)]
     pub unresolved_catalog_references: Vec<String>,
@@ -218,6 +221,11 @@ impl BaselineData {
                 .iter()
                 .map(|e| format!("{}:{}", e.catalog_name, e.entry_name))
                 .collect(),
+            empty_catalog_groups: results
+                .empty_catalog_groups
+                .iter()
+                .map(|g| g.catalog_name.clone())
+                .collect(),
             unresolved_catalog_references: results
                 .unresolved_catalog_references
                 .iter()
@@ -264,6 +272,7 @@ impl BaselineData {
             + self.boundary_violations.len()
             + self.stale_suppressions.len()
             + self.unused_catalog_entries.len()
+            + self.empty_catalog_groups.len()
             + self.unresolved_catalog_references.len()
             + self.unused_dependency_overrides.len()
             + self.misconfigured_dependency_overrides.len()
@@ -499,6 +508,15 @@ pub fn filter_new_issues(
         let key = format!("{}:{}", e.catalog_name, e.entry_name);
         !baseline_catalog.contains(key.as_str())
     });
+
+    let baseline_empty_catalog_groups: FxHashSet<&str> = baseline
+        .empty_catalog_groups
+        .iter()
+        .map(String::as_str)
+        .collect();
+    results
+        .empty_catalog_groups
+        .retain(|g| !baseline_empty_catalog_groups.contains(g.catalog_name.as_str()));
 
     let baseline_unresolved: FxHashSet<&str> = baseline
         .unresolved_catalog_references
@@ -1278,6 +1296,7 @@ mod tests {
             boundary_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
+            empty_catalog_groups: vec![],
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
@@ -1322,6 +1341,7 @@ mod tests {
             boundary_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
+            empty_catalog_groups: vec![],
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],
@@ -1353,6 +1373,7 @@ mod tests {
             boundary_violations: vec![],
             stale_suppressions: vec![],
             unused_catalog_entries: vec![],
+            empty_catalog_groups: vec![],
             unresolved_catalog_references: vec![],
             unused_dependency_overrides: vec![],
             misconfigured_dependency_overrides: vec![],

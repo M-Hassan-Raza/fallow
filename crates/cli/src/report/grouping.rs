@@ -316,8 +316,51 @@ pub fn group_analysis_results(
             .stale_suppressions
             .push(item.clone());
     }
+    group_workspace_config_issues(results, &mut groups, &mut key_for);
 
     finalize_groups(groups, group_owners, is_section_mode)
+}
+
+fn group_workspace_config_issues(
+    results: &AnalysisResults,
+    groups: &mut FxHashMap<String, AnalysisResults>,
+    mut key_for: impl FnMut(&Path) -> String,
+) {
+    for item in &results.unused_catalog_entries {
+        groups
+            .entry(key_for(&item.path))
+            .or_default()
+            .unused_catalog_entries
+            .push(item.clone());
+    }
+    for item in &results.empty_catalog_groups {
+        groups
+            .entry(key_for(&item.path))
+            .or_default()
+            .empty_catalog_groups
+            .push(item.clone());
+    }
+    for item in &results.unresolved_catalog_references {
+        groups
+            .entry(key_for(&item.path))
+            .or_default()
+            .unresolved_catalog_references
+            .push(item.clone());
+    }
+    for item in &results.unused_dependency_overrides {
+        groups
+            .entry(key_for(&item.path))
+            .or_default()
+            .unused_dependency_overrides
+            .push(item.clone());
+    }
+    for item in &results.misconfigured_dependency_overrides {
+        groups
+            .entry(key_for(&item.path))
+            .or_default()
+            .misconfigured_dependency_overrides
+            .push(item.clone());
+    }
 }
 
 /// Merge per-key results and owners into sorted `ResultGroup`s.

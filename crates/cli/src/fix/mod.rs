@@ -124,8 +124,16 @@ pub fn run_fix(opts: &FixOptions<'_>) -> ExitCode {
         &mut fixes,
     );
     had_write_error |= catalog_summary.write_error;
-    let catalog_applied = catalog_summary.applied;
-    let catalog_skipped = catalog_summary.skipped;
+    let empty_catalog_summary = catalog::apply_empty_catalog_group_fixes(
+        opts.root,
+        &results.empty_catalog_groups,
+        opts.output,
+        opts.dry_run,
+        &mut fixes,
+    );
+    had_write_error |= empty_catalog_summary.write_error;
+    let catalog_applied = catalog_summary.applied + empty_catalog_summary.applied;
+    let catalog_skipped = catalog_summary.skipped + empty_catalog_summary.skipped;
 
     if matches!(opts.output, OutputFormat::Json) {
         let applied_count = fixes

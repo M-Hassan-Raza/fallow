@@ -221,6 +221,8 @@ assert_contains "$OUT" "issues" "mentions issues"
 assert_contains "$OUT" "Unused" "lists unused categories"
 assert_contains "$OUT" "Imported elsewhere" "shows dependency workspace context column"
 assert_contains "$OUT" 'packages/client' "shows dependency workspace context value"
+assert_contains "$OUT" "Empty catalog groups" "shows empty catalog group row"
+assert_contains "$OUT" 'legacy' "shows empty catalog group name"
 
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/summary-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 assert_contains "$OUT_CLEAN" "No issues found" "clean: shows no issues"
@@ -522,6 +524,8 @@ assert_contains "$OUT" "file=" "has file references"
 assert_contains "$OUT" "title=" "has titles"
 assert_contains "$OUT" "Imported in other workspaces" "dependency annotation includes workspace context"
 assert_contains "$OUT" "Move this dependency to the consuming workspace package.json" "dependency annotation avoids unsafe remove hint"
+assert_contains "$OUT" "Empty catalog group" "annotation includes empty catalog group title"
+assert_contains "$OUT" "legacy" "annotation includes empty catalog group name"
 
 OUT_CLEAN=$(jq -r -f "$JQ_DIR/annotations-check.jq" "$FIXTURES/check-clean.json" 2>&1)
 [ -z "$OUT_CLEAN" ] && pass "clean: no annotations" || fail "clean: no annotations" "got output"

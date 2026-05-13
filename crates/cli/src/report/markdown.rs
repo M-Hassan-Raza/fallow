@@ -256,6 +256,19 @@ pub fn build_markdown(results: &AnalysisResults, root: &Path) -> String {
     );
     markdown_section(
         &mut out,
+        &results.empty_catalog_groups,
+        "Empty catalog groups",
+        |group| {
+            vec![format!(
+                "- `{}` `{}`:{}",
+                escape_backticks(&group.catalog_name),
+                rel(&group.path),
+                group.line,
+            )]
+        },
+    );
+    markdown_section(
+        &mut out,
         &results.unresolved_catalog_references,
         "Unresolved catalog references",
         |finding| {

@@ -137,6 +137,7 @@ else
       (if (.check.test_only_dependencies | length) > 0 then "| [Test-only dependencies](\(docs("test-only-dependencies"))) | \(.check.test_only_dependencies | length) |" else null end),
       (if (.check.stale_suppressions | length) > 0 then "| [Stale suppressions](\(docs("stale-suppressions"))) | \(.check.stale_suppressions | length) |" else null end),
       (if ((.check.unused_catalog_entries // []) | length) > 0 then "| [Unused catalog entries](\(docs("unused-catalog-entries"))) | \(.check.unused_catalog_entries | length) |" else null end),
+      (if ((.check.empty_catalog_groups // []) | length) > 0 then "| [Empty catalog groups](\(docs("empty-catalog-groups"))) | \(.check.empty_catalog_groups | length) |" else null end),
       (if ((.check.unresolved_catalog_references // []) | length) > 0 then "| [Unresolved catalog references](\(docs("unresolved-catalog-references"))) | \(.check.unresolved_catalog_references | length) |" else null end),
       (if ((.check.unused_dependency_overrides // []) | length) > 0 then "| [Unused dependency overrides](\(docs("unused-dependency-overrides"))) | \(.check.unused_dependency_overrides | length) |" else null end),
       (if ((.check.misconfigured_dependency_overrides // []) | length) > 0 then "| [Misconfigured dependency overrides](\(docs("misconfigured-dependency-overrides"))) | \(.check.misconfigured_dependency_overrides | length) |" else null end)

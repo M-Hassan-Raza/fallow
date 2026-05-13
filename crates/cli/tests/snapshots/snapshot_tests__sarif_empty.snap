@@ -248,6 +248,19 @@ expression: redact_sarif_version(&json_str)
               }
             },
             {
+              "id": "fallow/empty-catalog-group",
+              "shortDescription": {
+                "text": "Named catalog group in pnpm-workspace.yaml has no entries"
+              },
+              "fullDescription": {
+                "text": "A named group under `catalogs:` in pnpm-workspace.yaml has no package entries. Empty named groups are leftover catalog structure after the last entry is removed. The top-level `catalog:` map is intentionally ignored because some projects keep it as a stable hook."
+              },
+              "helpUri": "https://docs.fallow.tools/explanations/dead-code#empty-catalog-groups",
+              "defaultConfiguration": {
+                "level": "warning"
+              }
+            },
+            {
               "id": "fallow/unresolved-catalog-reference",
               "shortDescription": {
                 "text": "package.json references a catalog that does not declare the package"

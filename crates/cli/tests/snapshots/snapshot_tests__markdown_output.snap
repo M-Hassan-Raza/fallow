@@ -2,7 +2,7 @@
 source: crates/cli/tests/snapshot_tests.rs
 expression: output
 ---
-## Fallow: 19 issues found
+## Fallow: 20 issues found
 
 ### Unused files (1)
 
@@ -69,6 +69,10 @@ expression: output
 
 - `is-even` (`default`) `pnpm-workspace.yaml`:6
 - `old-thing` (`legacy`) `pnpm-workspace.yaml`:12 (hardcoded in `apps/web/package.json`)
+
+### Empty catalog groups (1)
+
+- `react17` `pnpm-workspace.yaml`:10
 
 ### Unresolved catalog references (1)
 
