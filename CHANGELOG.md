@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Detects empty named pnpm catalog groups in `pnpm-workspace.yaml` and auto-fixes them via `fallow fix` or an LSP quick-fix.** When `fallow fix` removes the last entry from a named catalog group, the v2.73.0 fixer rewrites the header to `catalogs.<name>: {}` so pnpm stays happy, but the named-catalog placeholder lingers in the file as lint-rot in long-lived monorepos. The new `empty-catalog-group` rule (default `warn`) flags every named group under `catalogs:` that has no package entries, with severity `warn` because removing them is a hygiene cleanup rather than a correctness fix. The top-level `catalog:` map is intentionally never flagged because users keep it as a stable hook. `fallow fix` deletes only the named `catalogs.<name>:` header line and leaves comments plus the parent `catalogs:` block intact, mirroring the conservative comment-preservation policy of the catalog-entry fixer. Multi-document YAML files (`---` separators) are rejected with a skip record; the post-edit content is reparsed via `serde_yaml_ng` before persisting. Findings render in all six report formats (human, JSON, SARIF `fallow/empty-catalog-group`, compact, markdown, CodeClimate), the LSP emits a matching `WARNING` diagnostic, and a `Remove empty catalog group \`<name>\`` quick-fix code action is offered for each finding with anchored key-prefix matching so sibling headers with shared prefixes (`react17` vs `react18`) cannot be deleted by mistake. The MCP `analyze` tool accepts `issue_types: ["empty-catalog-groups"]`, the GitHub Action and GitLab CI jq scripts surface the new field in summary tables and emit `::warning` annotations, and `fallow explain empty-catalog-group` opens with the rationale and a fixed example. Suppression is via YAML comment (`# fallow-ignore-next-line empty-catalog-group`) or rule severity (`empty-catalog-groups: "off"`). New `IssueKind::EmptyCatalogGroup` (discriminant 25); new `EmptyCatalogGroup` struct on `AnalysisResults`. (Closes [#359](https://github.com/fallow-rs/fallow/issues/359))
+
+### Fixed
+
+- **The audit `--gate new-only` flow now attributes `unused-catalog-entries` and `empty-catalog-groups` findings as introduced vs inherited.** Both finding types were missing from `dead_code_keys`, `retain_introduced_dead_code`, and `annotate_dead_code_json`, so the audit verdict counted them as pre-existing baseline even when freshly added in the head commit. The keys now include line number and catalog name so a fresh entry in the same group is correctly classified as introduced; a new `audit_empty_catalog_group_changed_manifest_is_introduced` integration test locks the behavior in.
+
 ## [2.73.0] - 2026-05-13
 
 ### Fixed

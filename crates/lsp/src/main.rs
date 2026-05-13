@@ -578,6 +578,13 @@ impl LanguageServer for FallowLspServer {
                 &params.range,
                 &file_lines,
             ));
+            actions.extend(code_actions::build_remove_empty_catalog_group_actions(
+                results,
+                &root,
+                uri,
+                &params.range,
+                &file_lines,
+            ));
         }
 
         if actions.is_empty() {

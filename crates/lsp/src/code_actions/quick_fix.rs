@@ -292,6 +292,135 @@ pub fn build_remove_catalog_entry_actions(
     actions
 }
 
+/// Build quick-fix code actions for empty pnpm catalog groups (delete the
+/// named `catalogs.<name>:` header line).
+///
+/// Mirrors `build_remove_catalog_entry_actions` but covers the case where
+/// the catalog group itself has no entries to delete: a single bare header
+/// line under `catalogs:`. The deletion is one line; no parent rewrite is
+/// needed (the parent `catalogs:` map keeps its other named-catalog
+/// siblings, or, if this was the only one, the user can remove the
+/// remaining `catalogs:` header by hand). Same conservative policy as the
+/// CLI `fallow fix` path in `crates/cli/src/fix/catalog.rs`.
+///
+/// The default catalog (top-level `catalog:`) is intentionally never
+/// flagged by the detector, so this function never offers to delete it.
+///
+/// `file_lines` is the caller-supplied content of `pnpm-workspace.yaml`;
+/// passing the buffer in mirrors the sibling so the deletion range
+/// matches what the user sees in their editor when there are unsaved
+/// edits.
+#[expect(
+    clippy::disallowed_types,
+    reason = "WorkspaceEdit.changes is typed as std::collections::HashMap by tower-lsp"
+)]
+pub fn build_remove_empty_catalog_group_actions(
+    results: &AnalysisResults,
+    root: &Path,
+    uri: &Url,
+    cursor_range: &Range,
+    file_lines: &[&str],
+) -> Vec<CodeActionOrCommand> {
+    let mut actions = Vec::new();
+
+    if file_lines.is_empty() {
+        return actions;
+    }
+
+    for group in &results.empty_catalog_groups {
+        let Ok(group_uri) = Url::from_file_path(root.join(&group.path)) else {
+            continue;
+        };
+        if group_uri != *uri {
+            continue;
+        }
+
+        let group_line = group.line.saturating_sub(1);
+        if group_line < cursor_range.start.line || group_line > cursor_range.end.line {
+            continue;
+        }
+
+        let start_idx = group_line as usize;
+        if start_idx >= file_lines.len() {
+            continue;
+        }
+        // Anchored key match against the catalog name. Without this a
+        // sibling header with a shared prefix (`react17` vs `react18`)
+        // could be deleted by a stale finding.
+        if !line_matches_catalog_key(file_lines[start_idx], &group.catalog_name) {
+            continue;
+        }
+
+        let title = format!("Remove empty catalog group `{}`", group.catalog_name);
+
+        let mut changes = HashMap::new();
+        // Single-line deletion: empty groups have no children to span.
+        // start of start_idx to start of start_idx+1 absorbs the newline
+        // at the boundary so no blank line is left behind.
+        let edits = vec![TextEdit {
+            range: Range {
+                start: Position {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "line index is bounded by source size"
+                    )]
+                    line: start_idx as u32,
+                    character: 0,
+                },
+                end: Position {
+                    #[expect(
+                        clippy::cast_possible_truncation,
+                        reason = "line index is bounded by source size"
+                    )]
+                    line: (start_idx + 1) as u32,
+                    character: 0,
+                },
+            },
+            new_text: String::new(),
+        }];
+        changes.insert(uri.clone(), edits);
+
+        // Reconstruct the published diagnostic so VS Code's "Fix all in
+        // file" source action can tie this edit back to the existing
+        // diagnostic. Message wording matches
+        // `crates/lsp/src/diagnostics/unused.rs::push_empty_catalog_group_diagnostics`.
+        let diagnostic_message = format!(
+            "Empty catalog group: '{}' has no entries",
+            group.catalog_name
+        );
+
+        actions.push(CodeActionOrCommand::CodeAction(CodeAction {
+            title,
+            kind: Some(CodeActionKind::QUICKFIX),
+            edit: Some(WorkspaceEdit {
+                changes: Some(changes),
+                ..Default::default()
+            }),
+            diagnostics: Some(vec![Diagnostic {
+                range: Range {
+                    start: Position {
+                        line: group_line,
+                        character: 0,
+                    },
+                    end: Position {
+                        line: group_line,
+                        character: u32::MAX,
+                    },
+                },
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("empty-catalog-group".to_string())),
+                message: diagnostic_message,
+                tags: Some(vec![DiagnosticTag::UNNECESSARY]),
+                ..Default::default()
+            }]),
+            ..Default::default()
+        }));
+    }
+
+    actions
+}
+
 /// Anchored match for a catalog key on its declared line. Handles
 /// unquoted (`react:`), double-quoted (`"@scope/foo":`), and single-quoted
 /// (`'react':`) key forms; rejects substring matches in values or in
@@ -1530,5 +1659,214 @@ mod tests {
         let lines: Vec<&str> = content.split('\n').collect();
         // start at index 1 (`  react:`); should consume 3 more lines.
         assert_eq!(compute_catalog_deletion_end(&lines, 1), 4);
+    }
+
+    // -----------------------------------------------------------------------
+    // build_remove_empty_catalog_group_actions
+    // -----------------------------------------------------------------------
+
+    use fallow_core::results::EmptyCatalogGroup;
+
+    fn make_empty_group(name: &str, line: u32) -> EmptyCatalogGroup {
+        EmptyCatalogGroup {
+            catalog_name: name.to_string(),
+            path: PathBuf::from("pnpm-workspace.yaml"),
+            line,
+        }
+    }
+
+    #[test]
+    fn empty_catalog_group_action_deletes_single_header_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("legacy", 3));
+
+        // Three lines: `catalogs:`, `  react17:` (sibling, populated), `  legacy:` (empty).
+        let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
+        let actions = build_remove_empty_catalog_group_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(2, 2),
+            &lines,
+        );
+
+        assert_eq!(actions.len(), 1, "expected one action for legacy");
+        let ca = unwrap_code_action(&actions[0]);
+        assert_eq!(ca.title, "Remove empty catalog group `legacy`");
+        assert_eq!(ca.kind, Some(CodeActionKind::QUICKFIX));
+
+        // WorkspaceEdit has exactly one TextEdit covering [line 2, line 3).
+        let edit = ca.edit.as_ref().unwrap();
+        let changes = edit.changes.as_ref().unwrap();
+        let edits = changes.get(&uri).unwrap();
+        assert_eq!(edits.len(), 1, "empty groups need only one TextEdit");
+        assert_eq!(edits[0].range.start.line, 2);
+        assert_eq!(edits[0].range.start.character, 0);
+        assert_eq!(edits[0].range.end.line, 3);
+        assert_eq!(edits[0].range.end.character, 0);
+        assert_eq!(edits[0].new_text, "");
+
+        // The action's reconstructed diagnostic must match the published
+        // shape so VS Code's "Fix all in file" can correlate them.
+        let diag = &ca.diagnostics.as_ref().unwrap()[0];
+        assert_eq!(diag.severity, Some(DiagnosticSeverity::WARNING));
+        assert_eq!(diag.source, Some("fallow".to_string()));
+        assert_eq!(
+            diag.code,
+            Some(NumberOrString::String("empty-catalog-group".to_string()))
+        );
+        assert_eq!(diag.message, "Empty catalog group: 'legacy' has no entries");
+        assert_eq!(diag.tags, Some(vec![DiagnosticTag::UNNECESSARY]));
+    }
+
+    #[test]
+    fn empty_catalog_group_action_skips_when_uri_mismatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let other_uri = Url::from_file_path(dir.path().join("not-the-workspace.yaml")).unwrap();
+
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("legacy", 3));
+
+        let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
+        let actions = build_remove_empty_catalog_group_actions(
+            &results,
+            dir.path(),
+            &other_uri,
+            &make_range(0, 100),
+            &lines,
+        );
+        assert!(actions.is_empty(), "must not offer fix for unrelated URI");
+    }
+
+    #[test]
+    fn empty_catalog_group_action_skips_when_outside_cursor_range() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("legacy", 3));
+
+        let lines = vec!["catalogs:", "  react17: {}", "  legacy:"];
+        // Cursor on line 0 (`catalogs:`), finding is on line 2.
+        let actions = build_remove_empty_catalog_group_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(0, 0),
+            &lines,
+        );
+        assert!(
+            actions.is_empty(),
+            "must not offer fix when cursor is outside the finding's line"
+        );
+    }
+
+    #[test]
+    fn empty_catalog_group_action_skips_when_prefix_collision() {
+        // Stale finding for `react17` but the line now reads `react18:`.
+        // The anchored key match must reject the prefix-collision so the
+        // wrong header is never deleted.
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("react17", 2));
+
+        let lines = vec!["catalogs:", "  react18:"];
+        let actions = build_remove_empty_catalog_group_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
+        assert!(
+            actions.is_empty(),
+            "anchored match must reject `react17` finding when line says `react18:`"
+        );
+    }
+
+    #[test]
+    fn empty_catalog_group_action_handles_quoted_names() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("@scope/legacy", 2));
+
+        let lines = vec!["catalogs:", "  \"@scope/legacy\":"];
+        let actions = build_remove_empty_catalog_group_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(1, 1),
+            &lines,
+        );
+        assert_eq!(actions.len(), 1, "quoted catalog names must match");
+        let ca = unwrap_code_action(&actions[0]);
+        assert!(ca.title.contains("@scope/legacy"));
+    }
+
+    #[test]
+    fn empty_catalog_group_action_handles_multiple_findings() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("react17", 2));
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("legacy", 3));
+
+        let lines = vec!["catalogs:", "  react17:", "  legacy:"];
+        let actions = build_remove_empty_catalog_group_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(0, 100),
+            &lines,
+        );
+        assert_eq!(actions.len(), 2);
+        let titles: Vec<&str> = actions
+            .iter()
+            .map(|a| unwrap_code_action(a).title.as_str())
+            .collect();
+        assert!(titles.iter().any(|t| t.contains("react17")));
+        assert!(titles.iter().any(|t| t.contains("legacy")));
+    }
+
+    #[test]
+    fn empty_catalog_group_action_short_circuits_on_empty_file_lines() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = workspace_yaml_uri(&dir);
+
+        let mut results = AnalysisResults::default();
+        results
+            .empty_catalog_groups
+            .push(make_empty_group("legacy", 3));
+
+        let actions = build_remove_empty_catalog_group_actions(
+            &results,
+            dir.path(),
+            &uri,
+            &make_range(0, 100),
+            &[],
+        );
+        assert!(actions.is_empty());
     }
 }
