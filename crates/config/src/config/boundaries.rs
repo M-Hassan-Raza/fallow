@@ -1,5 +1,7 @@
 //! Architecture boundary zone and rule definitions.
 
+use std::path::Path;
+
 use globset::Glob;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -55,6 +57,7 @@ impl BoundaryPreset {
         BoundaryZone {
             name: name.to_owned(),
             patterns: vec![format!("{source_root}/{name}/**")],
+            auto_discover: vec![],
             root: None,
         }
     }
@@ -116,7 +119,18 @@ impl BoundaryPreset {
     fn bulletproof_config(source_root: &str) -> (Vec<BoundaryZone>, Vec<BoundaryRule>) {
         let zones = vec![
             Self::zone("app", source_root),
-            Self::zone("features", source_root),
+            BoundaryZone {
+                // `features` is a logical group only: auto-discovered child
+                // zones (`features/<name>`) classify the actual files. Leaving
+                // `patterns` empty keeps top-level files in `src/features/`
+                // (typically a barrel like `src/features/index.ts`) unclassified
+                // so the barrel can re-export children without a cross-zone
+                // `features → features/<child>` false positive.
+                name: "features".to_owned(),
+                patterns: vec![],
+                auto_discover: vec![format!("{source_root}/features")],
+                root: None,
+            },
             BoundaryZone {
                 name: "shared".to_owned(),
                 patterns: [
@@ -134,6 +148,7 @@ impl BoundaryPreset {
                 .iter()
                 .map(|dir| format!("{source_root}/{dir}/**"))
                 .collect(),
+                auto_discover: vec![],
                 root: None,
             },
             Self::zone("server", source_root),
@@ -212,7 +227,18 @@ pub struct BoundaryZone {
     pub name: String,
     /// Glob patterns (relative to project root) that define zone membership.
     /// A file belongs to the first zone whose pattern matches.
+    #[serde(default)]
     pub patterns: Vec<String>,
+    /// Directories whose immediate child directories should become separate
+    /// zones under this logical group.
+    ///
+    /// For example, `{ "name": "features", "autoDiscover": ["src/features"] }`
+    /// creates zones such as `features/auth` and `features/billing`, each with
+    /// a pattern for its own subtree. Rules that reference `features` expand to
+    /// every discovered child zone. If `patterns` is also set, the parent zone
+    /// remains as a fallback after discovered child zones.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub auto_discover: Vec<String>,
     /// Optional subtree scope for monorepo per-package boundaries.
     ///
     /// When set, the zone's `patterns` are matched against paths *relative*
@@ -351,6 +377,88 @@ impl BoundaryConfig {
         self.rules = merged_rules;
     }
 
+    /// Expand auto-discovered boundary groups into concrete child zones.
+    ///
+    /// A zone with `autoDiscover: ["src/features"]` discovers the immediate
+    /// child directories below `src/features` and emits child zones named
+    /// `zone_name/child`. Rules that reference the logical parent are expanded
+    /// to all discovered children. If the parent also has explicit `patterns`,
+    /// it is kept after the children as a fallback so child directories remain
+    /// isolated by first-match classification.
+    pub fn expand_auto_discover(&mut self, project_root: &Path) {
+        if self.zones.iter().all(|zone| zone.auto_discover.is_empty()) {
+            return;
+        }
+
+        let original_zones = std::mem::take(&mut self.zones);
+        let mut expanded_zones = Vec::new();
+        let mut group_expansions: rustc_hash::FxHashMap<String, Vec<String>> =
+            rustc_hash::FxHashMap::default();
+
+        for mut zone in original_zones {
+            if zone.auto_discover.is_empty() {
+                expanded_zones.push(zone);
+                continue;
+            }
+
+            let group_name = zone.name.clone();
+            let discovered_zones = discover_child_zones(project_root, &zone);
+            let mut expanded_names: Vec<String> = discovered_zones
+                .iter()
+                .map(|child| child.name.clone())
+                .collect();
+            expanded_zones.extend(discovered_zones);
+
+            if !zone.patterns.is_empty() {
+                expanded_names.push(group_name.clone());
+                zone.auto_discover.clear();
+                expanded_zones.push(zone);
+            }
+
+            if !expanded_names.is_empty() {
+                group_expansions
+                    .entry(group_name)
+                    .or_default()
+                    .extend(expanded_names);
+            }
+        }
+
+        self.zones = expanded_zones;
+        if group_expansions.is_empty() {
+            return;
+        }
+
+        let original_rules = std::mem::take(&mut self.rules);
+        let mut generated_rules = Vec::new();
+        let mut explicit_rules = Vec::new();
+        for rule in original_rules {
+            let allow = expand_rule_allow(&rule.allow, &group_expansions);
+
+            if let Some(from_zones) = group_expansions.get(&rule.from) {
+                for from in from_zones {
+                    let expanded_rule = BoundaryRule {
+                        from: from.clone(),
+                        allow: allow.clone(),
+                    };
+                    if from == &rule.from {
+                        explicit_rules.push(expanded_rule);
+                    } else {
+                        generated_rules.push(expanded_rule);
+                    }
+                }
+            } else {
+                explicit_rules.push(BoundaryRule {
+                    from: rule.from,
+                    allow,
+                });
+            }
+        }
+
+        let mut expanded_rules = dedupe_rules_keep_last(generated_rules);
+        expanded_rules.extend(dedupe_rules_keep_last(explicit_rules));
+        self.rules = dedupe_rules_keep_last(expanded_rules);
+    }
+
     /// Return the preset name if one is configured but not yet expanded.
     #[must_use]
     pub fn preset_name(&self) -> Option<&str> {
@@ -481,6 +589,132 @@ fn normalize_zone_root(raw: &str) -> String {
     }
 }
 
+fn normalize_auto_discover_dir(raw: &str) -> Option<String> {
+    let with_slashes = raw.replace('\\', "/");
+    let trimmed = with_slashes.trim_start_matches("./").trim_end_matches('/');
+    if trimmed.starts_with('/') || trimmed.split('/').any(|part| part == "..") {
+        None
+    } else if trimmed == "." {
+        Some(String::new())
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
+fn join_relative_path(prefix: &str, suffix: &str) -> String {
+    match (prefix.is_empty(), suffix.is_empty()) {
+        (true, true) => String::new(),
+        (true, false) => suffix.to_owned(),
+        (false, true) => prefix.trim_end_matches('/').to_owned(),
+        (false, false) => format!("{}/{}", prefix.trim_end_matches('/'), suffix),
+    }
+}
+
+fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> Vec<BoundaryZone> {
+    let mut zones_by_name: rustc_hash::FxHashMap<String, BoundaryZone> =
+        rustc_hash::FxHashMap::default();
+    let normalized_root = zone
+        .root
+        .as_deref()
+        .map(normalize_zone_root)
+        .unwrap_or_default();
+
+    for raw_dir in &zone.auto_discover {
+        let Some(discover_dir) = normalize_auto_discover_dir(raw_dir) else {
+            tracing::warn!(
+                "invalid boundary autoDiscover path '{}' in zone '{}': paths must be project-relative and must not contain '..'",
+                raw_dir,
+                zone.name
+            );
+            continue;
+        };
+
+        let fs_relative = join_relative_path(&normalized_root, &discover_dir);
+        let absolute_dir = if fs_relative.is_empty() {
+            project_root.to_path_buf()
+        } else {
+            project_root.join(&fs_relative)
+        };
+        let Ok(entries) = std::fs::read_dir(&absolute_dir) else {
+            tracing::warn!(
+                "boundary zone '{}' autoDiscover path '{}' did not resolve to a readable directory",
+                zone.name,
+                raw_dir
+            );
+            continue;
+        };
+
+        let mut children: Vec<_> = entries
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_type().is_ok_and(|file_type| file_type.is_dir()))
+            .collect();
+        children.sort_by_key(|entry| entry.file_name());
+
+        for child in children {
+            let child_name = child.file_name().to_string_lossy().to_string();
+            if child_name.is_empty() {
+                continue;
+            }
+
+            let zone_name = format!("{}/{}", zone.name, child_name);
+            let child_pattern = format!("{}/**", join_relative_path(&discover_dir, &child_name));
+            let entry = zones_by_name
+                .entry(zone_name.clone())
+                .or_insert_with(|| BoundaryZone {
+                    name: zone_name,
+                    patterns: vec![],
+                    auto_discover: vec![],
+                    root: zone.root.clone(),
+                });
+            if !entry
+                .patterns
+                .iter()
+                .any(|pattern| pattern == &child_pattern)
+            {
+                entry.patterns.push(child_pattern);
+            }
+        }
+    }
+
+    let mut zones: Vec<_> = zones_by_name.into_values().collect();
+    zones.sort_by(|a, b| a.name.cmp(&b.name));
+    zones
+}
+
+fn expand_rule_allow(
+    allow: &[String],
+    group_expansions: &rustc_hash::FxHashMap<String, Vec<String>>,
+) -> Vec<String> {
+    let mut expanded = Vec::new();
+    for zone in allow {
+        if let Some(expansion) = group_expansions.get(zone) {
+            expanded.extend(expansion.iter().cloned());
+        } else {
+            expanded.push(zone.clone());
+        }
+    }
+    dedupe_preserving_order(expanded)
+}
+
+fn dedupe_preserving_order(values: Vec<String>) -> Vec<String> {
+    let mut seen = rustc_hash::FxHashSet::default();
+    values
+        .into_iter()
+        .filter(|value| seen.insert(value.clone()))
+        .collect()
+}
+
+fn dedupe_rules_keep_last(rules: Vec<BoundaryRule>) -> Vec<BoundaryRule> {
+    let mut seen = rustc_hash::FxHashSet::default();
+    let mut deduped: Vec<_> = rules
+        .into_iter()
+        .rev()
+        .filter(|rule| seen.insert(rule.from.clone()))
+        .collect();
+    deduped.reverse();
+    deduped
+}
+
 impl ResolvedBoundaryConfig {
     /// Whether any boundaries are configured.
     #[must_use]
@@ -592,6 +826,139 @@ allow = ["db"]
     }
 
     #[test]
+    fn auto_discover_expands_child_zones_and_parent_rules() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![
+                BoundaryZone {
+                    name: "app".to_string(),
+                    patterns: vec!["src/app/**".to_string()],
+                    auto_discover: vec![],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/features".to_string()],
+                    root: None,
+                },
+            ],
+            rules: vec![
+                BoundaryRule {
+                    from: "app".to_string(),
+                    allow: vec!["features".to_string()],
+                },
+                BoundaryRule {
+                    from: "features".to_string(),
+                    allow: vec![],
+                },
+            ],
+        };
+
+        config.expand_auto_discover(temp.path());
+
+        let zone_names: Vec<_> = config.zones.iter().map(|zone| zone.name.as_str()).collect();
+        assert_eq!(zone_names, vec!["app", "features/auth", "features/billing"]);
+        assert_eq!(
+            config.zones[1].patterns,
+            vec!["src/features/auth/**".to_string()]
+        );
+        assert_eq!(
+            config.zones[2].patterns,
+            vec!["src/features/billing/**".to_string()]
+        );
+        let app_rule = config
+            .rules
+            .iter()
+            .find(|rule| rule.from == "app")
+            .expect("app rule should be preserved");
+        assert_eq!(
+            app_rule.allow,
+            vec!["features/auth".to_string(), "features/billing".to_string()]
+        );
+        assert!(
+            config
+                .rules
+                .iter()
+                .any(|rule| rule.from == "features/auth" && rule.allow.is_empty())
+        );
+        assert!(
+            config
+                .rules
+                .iter()
+                .any(|rule| rule.from == "features/billing" && rule.allow.is_empty())
+        );
+        assert!(config.validate_zone_references().is_empty());
+    }
+
+    #[test]
+    fn auto_discover_explicit_child_rule_wins_over_generated_parent_rule() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+        for explicit_child_first in [true, false] {
+            let explicit_child_rule = BoundaryRule {
+                from: "features/auth".to_string(),
+                allow: vec!["shared".to_string(), "features/billing".to_string()],
+            };
+            let parent_rule = BoundaryRule {
+                from: "features".to_string(),
+                allow: vec!["shared".to_string()],
+            };
+            let rules = if explicit_child_first {
+                vec![explicit_child_rule, parent_rule]
+            } else {
+                vec![parent_rule, explicit_child_rule]
+            };
+
+            let mut config = BoundaryConfig {
+                preset: None,
+                zones: vec![
+                    BoundaryZone {
+                        name: "features".to_string(),
+                        patterns: vec![],
+                        auto_discover: vec!["src/features".to_string()],
+                        root: None,
+                    },
+                    BoundaryZone {
+                        name: "shared".to_string(),
+                        patterns: vec!["src/shared/**".to_string()],
+                        auto_discover: vec![],
+                        root: None,
+                    },
+                ],
+                rules,
+            };
+
+            config.expand_auto_discover(temp.path());
+
+            let auth_rule = config
+                .rules
+                .iter()
+                .find(|rule| rule.from == "features/auth")
+                .expect("explicit child rule should remain");
+            assert_eq!(
+                auth_rule.allow,
+                vec!["shared".to_string(), "features/billing".to_string()],
+                "explicit child rule should win regardless of rule order"
+            );
+
+            let billing_rule = config
+                .rules
+                .iter()
+                .find(|rule| rule.from == "features/billing")
+                .expect("parent rule should still generate sibling child rule");
+            assert_eq!(billing_rule.allow, vec!["shared".to_string()]);
+            assert!(config.validate_zone_references().is_empty());
+        }
+    }
+
+    #[test]
     fn validate_zone_references_valid() {
         let config = BoundaryConfig {
             preset: None,
@@ -599,11 +966,13 @@ allow = ["db"]
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -622,6 +991,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec![],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![BoundaryRule {
@@ -641,6 +1011,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec![],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![BoundaryRule {
@@ -661,11 +1032,13 @@ allow = ["db"]
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/components/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -688,11 +1061,13 @@ allow = ["db"]
                 BoundaryZone {
                     name: "specific".to_string(),
                     patterns: vec!["src/shared/db-utils/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec!["src/shared/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -716,6 +1091,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec![],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![BoundaryRule {
@@ -735,11 +1111,13 @@ allow = ["db"]
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -757,16 +1135,19 @@ allow = ["db"]
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -788,11 +1169,13 @@ allow = ["db"]
                 BoundaryZone {
                     name: "isolated".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "other".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -814,11 +1197,13 @@ allow = ["db"]
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/**".to_string()],
+                    auto_discover: vec![],
                     root: Some("packages/app/".to_string()),
                 },
                 BoundaryZone {
                     name: "domain".to_string(),
                     patterns: vec!["src/**".to_string()],
+                    auto_discover: vec![],
                     root: Some("packages/core/".to_string()),
                 },
             ],
@@ -853,6 +1238,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/**".to_string()],
+                auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
             }],
             rules: vec![],
@@ -883,11 +1269,13 @@ allow = ["db"]
                 BoundaryZone {
                     name: "no-slash".to_string(),
                     patterns: vec!["src/**".to_string()],
+                    auto_discover: vec![],
                     root: Some("packages/app".to_string()),
                 },
                 BoundaryZone {
                     name: "dot-prefixed".to_string(),
                     patterns: vec!["src/**".to_string()],
+                    auto_discover: vec![],
                     root: Some("./packages/lib/".to_string()),
                 },
             ],
@@ -913,6 +1301,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["packages/app/src/**".to_string()],
+                auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
             }],
             rules: vec![],
@@ -945,6 +1334,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["./packages/app/src/**".to_string()],
+                auto_discover: vec![],
                 root: Some("packages/app".to_string()),
             }],
             rules: vec![],
@@ -960,6 +1350,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/**".to_string()],
+                auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
             }],
             rules: vec![],
@@ -990,6 +1381,7 @@ allow = ["db"]
                 zones: vec![BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/**".to_string(), "lib/**".to_string()],
+                    auto_discover: vec![],
                     root: Some(raw_root.to_string()),
                 }],
                 rules: vec![],
@@ -1217,6 +1609,10 @@ allow = ["db"]
 
     #[test]
     fn expand_bulletproof_then_resolve_classifies() {
+        // `expand()` alone (without `expand_auto_discover`) does not produce
+        // the per-feature child zones, so the `features` group is empty and
+        // top-level `src/features/...` files are unclassified. Sibling
+        // `app` / `shared` / `server` zones still classify normally.
         let mut config = BoundaryConfig {
             preset: Some(BoundaryPreset::Bulletproof),
             zones: vec![],
@@ -1230,7 +1626,8 @@ allow = ["db"]
         );
         assert_eq!(
             resolved.classify_zone("src/features/auth/hooks/useAuth.ts"),
-            Some("features")
+            None,
+            "without expand_auto_discover, src/features/... is unclassified"
         );
         assert_eq!(
             resolved.classify_zone("src/components/Button/Button.tsx"),
@@ -1250,6 +1647,46 @@ allow = ["db"]
         assert!(!resolved.is_import_allowed("features", "app"));
         assert!(!resolved.is_import_allowed("shared", "features"));
         assert!(!resolved.is_import_allowed("server", "features"));
+    }
+
+    /// Regression for the bulletproof barrel pattern: a top-level
+    /// `src/features/index.ts` barrel re-exporting child features must NOT
+    /// trigger `features → features/<child>` boundary violations. The fix is
+    /// to keep the bulletproof `features` zone pattern-free so the barrel is
+    /// unclassified (unrestricted) while child zones still enforce sibling
+    /// isolation.
+    #[test]
+    fn bulletproof_features_barrel_is_unclassified() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: Some(BoundaryPreset::Bulletproof),
+            zones: vec![],
+            rules: vec![],
+        };
+        config.expand("src");
+        config.expand_auto_discover(temp.path());
+        let resolved = config.resolve();
+
+        // Top-level barrel inside src/features stays unclassified.
+        assert_eq!(
+            resolved.classify_zone("src/features/index.ts"),
+            None,
+            "src/features/index.ts barrel must be unclassified to allow re-exporting children"
+        );
+        // Discovered child zones still classify normally.
+        assert_eq!(
+            resolved.classify_zone("src/features/auth/login.ts"),
+            Some("features/auth")
+        );
+        assert_eq!(
+            resolved.classify_zone("src/features/billing/invoice.ts"),
+            Some("features/billing")
+        );
+        // Sibling-feature import is still a cross-zone violation.
+        assert!(!resolved.is_import_allowed("features/auth", "features/billing"));
     }
 
     #[test]
@@ -1273,6 +1710,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "domain".to_string(),
                 patterns: vec!["src/core/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![],
@@ -1291,6 +1729,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "shared".to_string(),
                 patterns: vec!["src/shared/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![],
@@ -1328,6 +1767,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![],
@@ -1416,6 +1856,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![],
@@ -1448,6 +1889,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec![],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![],
@@ -1468,6 +1910,7 @@ allow = ["db"]
                     "src/pages/**".to_string(),
                     "src/views/**".to_string(),
                 ],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![],
@@ -1494,6 +1937,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec![],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![
@@ -1537,16 +1981,19 @@ allow = ["db"]
                 BoundaryZone {
                     name: "a".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "b".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "c".to_string(),
                     patterns: vec![],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -1599,6 +2046,7 @@ allow = ["db"]
             zones: vec![BoundaryZone {
                 name: "broken".to_string(),
                 patterns: vec!["[invalid".to_string()],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![],

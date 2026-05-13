@@ -1063,6 +1063,14 @@
           "type": "array",
           "items": {
             "type": "string"
+          },
+          "default": []
+        },
+        "autoDiscover": {
+          "description": "Directories whose immediate child directories should become separate\nzones under this logical group.\n\nFor example, `{ \"name\": \"features\", \"autoDiscover\": [\"src/features\"] }`\ncreates zones such as `features/auth` and `features/billing`, each with\na pattern for its own subtree. Rules that reference `features` expand to\nevery discovered child zone. If `patterns` is also set, the parent zone\nremains as a fallback after discovered child zones.",
+          "type": "array",
+          "items": {
+            "type": "string"
           }
         },
         "root": {
@@ -1074,8 +1082,7 @@
         }
       },
       "required": [
-        "name",
-        "patterns"
+        "name"
       ]
     },
     "BoundaryRule": {

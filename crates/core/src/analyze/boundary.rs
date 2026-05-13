@@ -238,11 +238,13 @@ mod tests {
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/ui/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec!["src/shared/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -273,16 +275,19 @@ mod tests {
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/ui/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec!["src/shared/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],
@@ -310,6 +315,7 @@ mod tests {
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![BoundaryRule {
@@ -338,6 +344,7 @@ mod tests {
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             }],
             rules: vec![BoundaryRule {
@@ -364,11 +371,13 @@ mod tests {
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/ui/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
+                    auto_discover: vec![],
                     root: None,
                 },
             ],

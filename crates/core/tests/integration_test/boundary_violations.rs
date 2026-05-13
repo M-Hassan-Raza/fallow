@@ -9,10 +9,18 @@ fn create_boundary_config(
     root: std::path::PathBuf,
     boundaries: BoundaryConfig,
 ) -> fallow_config::ResolvedConfig {
+    create_boundary_config_with_entry(root, boundaries, "src/ui/App.ts")
+}
+
+fn create_boundary_config_with_entry(
+    root: std::path::PathBuf,
+    boundaries: BoundaryConfig,
+    entry: &str,
+) -> fallow_config::ResolvedConfig {
     FallowConfig {
         schema: None,
         extends: vec![],
-        entry: vec!["src/ui/App.ts".to_string()],
+        entry: vec![entry.to_string()],
         ignore_patterns: vec![],
         framework: vec![],
         workspaces: None,
@@ -54,16 +62,19 @@ fn detects_boundary_violation() {
             BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             },
             BoundaryZone {
                 name: "db".to_string(),
                 patterns: vec!["src/db/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             },
             BoundaryZone {
                 name: "shared".to_string(),
                 patterns: vec!["src/shared/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             },
         ],
@@ -136,11 +147,13 @@ fn no_violations_when_rule_is_off() {
             BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             },
             BoundaryZone {
                 name: "db".to_string(),
                 patterns: vec!["src/db/**".to_string()],
+                auto_discover: vec![],
                 root: None,
             },
         ],
@@ -270,11 +283,13 @@ fn root_field_classifies_per_subtree() {
             BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/**".to_string()],
+                auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
             },
             BoundaryZone {
                 name: "domain".to_string(),
                 patterns: vec!["src/**".to_string()],
+                auto_discover: vec![],
                 root: Some("packages/core/".to_string()),
             },
         ],
@@ -381,6 +396,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         zones: vec![BoundaryZone {
             name: "ui".to_string(),
             patterns: vec!["packages/*/src/**".to_string()],
+            auto_discover: vec![],
             root: None,
         }],
         rules: vec![BoundaryRule {
@@ -435,11 +451,13 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
             BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/**".to_string()],
+                auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
             },
             BoundaryZone {
                 name: "domain".to_string(),
                 patterns: vec!["src/**".to_string()],
+                auto_discover: vec![],
                 root: Some("packages/core/".to_string()),
             },
         ],
@@ -491,6 +509,77 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
     let v = &scoped_results.boundary_violations[0];
     assert_eq!(v.from_zone, "ui");
     assert_eq!(v.to_zone, "domain");
+}
+
+#[test]
+fn auto_discover_isolates_child_boundary_zones() {
+    let root = fixture_path("boundary-auto-discover");
+    let boundaries = BoundaryConfig {
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "app".to_string(),
+                patterns: vec!["src/app/**".to_string()],
+                auto_discover: vec![],
+                root: None,
+            },
+            BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                root: None,
+            },
+            BoundaryZone {
+                name: "shared".to_string(),
+                patterns: vec!["src/shared/**".to_string()],
+                auto_discover: vec![],
+                root: None,
+            },
+        ],
+        rules: vec![
+            BoundaryRule {
+                from: "app".to_string(),
+                allow: vec!["features".to_string(), "shared".to_string()],
+            },
+            BoundaryRule {
+                from: "features".to_string(),
+                allow: vec!["shared".to_string()],
+            },
+        ],
+    };
+    let config = create_boundary_config_with_entry(root, boundaries, "src/app/page.ts");
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        results.boundary_violations.len(),
+        1,
+        "expected only the cross-feature import to violate boundaries, got: {:?}",
+        results
+            .boundary_violations
+            .iter()
+            .map(|v| format!("{} -> {}", v.from_zone, v.to_zone))
+            .collect::<Vec<_>>()
+    );
+
+    let v = &results.boundary_violations[0];
+    assert_eq!(v.from_zone, "features/auth");
+    assert_eq!(v.to_zone, "features/billing");
+    assert!(
+        v.from_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/features/auth/login.ts"),
+        "from_path should end with src/features/auth/login.ts, got: {}",
+        v.from_path.display()
+    );
+    assert!(
+        v.to_path
+            .to_string_lossy()
+            .replace('\\', "/")
+            .ends_with("src/features/billing/invoice.ts"),
+        "to_path should end with src/features/billing/invoice.ts, got: {}",
+        v.to_path.display()
+    );
 }
 
 #[test]
@@ -557,7 +646,7 @@ fn bulletproof_preset_detects_violation() {
     );
 
     let v = &results.boundary_violations[0];
-    assert_eq!(v.from_zone, "features");
+    assert_eq!(v.from_zone, "features/auth");
     assert_eq!(v.to_zone, "app");
     assert!(
         v.from_path

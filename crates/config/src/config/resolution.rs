@@ -354,6 +354,7 @@ impl FallowConfig {
             }
             boundaries.expand(&source_root);
         }
+        boundaries.expand_auto_discover(&root);
 
         // Validate and compile architecture boundary config
         let validation_errors = boundaries.validate_zone_references();
@@ -1495,6 +1496,7 @@ mod tests {
         config.boundaries.zones = vec![BoundaryZone {
             name: "domain".to_string(),
             patterns: vec!["src/core/**".to_string()],
+            auto_discover: vec![],
             root: None,
         }];
         let resolved = config.resolve(

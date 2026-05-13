@@ -486,6 +486,25 @@ Architecture boundary presets enforce import rules between layers with zero manu
 { "boundaries": { "preset": "bulletproof" } } // or: layered, hexagonal, feature-sliced
 ```
 
+For custom feature-module boundaries, `autoDiscover` turns each immediate child
+directory into its own zone while rules still reference the logical parent:
+
+```jsonc
+{
+  "boundaries": {
+    "zones": [
+      { "name": "app", "patterns": ["src/app/**"] },
+      { "name": "features", "autoDiscover": ["src/features"] },
+      { "name": "shared", "patterns": ["src/shared/**"] }
+    ],
+    "rules": [
+      { "from": "app", "allow": ["features", "shared"] },
+      { "from": "features", "allow": ["shared"] }
+    ]
+  }
+}
+```
+
 Run `fallow list --boundaries` to inspect the expanded rules. TOML also supported (`fallow init --toml`). The init command auto-detects your project structure (monorepo layout, frameworks, existing config) and generates a tailored config. It also adds `.fallow/` to your `.gitignore` (cache and local data). Scaffold a pre-commit `fallow audit` hook with `fallow hooks install --target git`; the hook uses the current branch upstream as its base and falls back to `--branch` (or the detected default branch) when no upstream is set. For agent gates, use `fallow hooks install --target agent`. Migrating from knip or jscpd? Run `fallow migrate`.
 
 See the [full configuration reference](https://docs.fallow.tools/configuration/overview) for all options.

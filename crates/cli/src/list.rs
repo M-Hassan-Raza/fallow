@@ -308,7 +308,9 @@ fn compute_boundary_data(
                             .strip_prefix(&config.root)
                             .ok()
                             .map(|p| p.to_string_lossy().replace('\\', "/"));
-                        rel.is_some_and(|p| zone.matchers.iter().any(|m| m.is_match(&p)))
+                        rel.is_some_and(|p| {
+                            boundaries.classify_zone(&p) == Some(zone.name.as_str())
+                        })
                     })
                     .count()
             });
