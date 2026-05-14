@@ -171,7 +171,7 @@ fn sample_results(root: &Path) -> AnalysisResults {
             path: root.join("pnpm-workspace.yaml"),
             line: 9,
             hint: Some(
-                "May be an intentional pin for a transitive CVE that no workspace package depends on directly"
+                "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth"
                     .to_string(),
             ),
         },

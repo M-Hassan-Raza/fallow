@@ -88,7 +88,8 @@ pub struct AnalysisResults {
     /// Workspace package.json references to pnpm catalogs that don't declare the package.
     #[serde(default)]
     pub unresolved_catalog_references: Vec<UnresolvedCatalogReference>,
-    /// Entries in pnpm `overrides:` / `pnpm.overrides` that no workspace package depends on.
+    /// Entries in pnpm `overrides:` / `pnpm.overrides` whose target package is not
+    /// declared by any workspace package and not resolved in pnpm-lock.yaml.
     #[serde(default)]
     pub unused_dependency_overrides: Vec<UnusedDependencyOverride>,
     /// Entries in pnpm `overrides:` / `pnpm.overrides` whose key or value cannot be parsed.
@@ -677,9 +678,9 @@ impl std::fmt::Display for DependencyOverrideSource {
 
 /// An entry in pnpm's `overrides:` map (or the legacy `pnpm.overrides` in
 /// `package.json`) whose target package is not declared in any workspace
-/// `package.json`. Conservative static algorithm: no lockfile read, so this
-/// can produce false negatives for overrides targeting purely-transitive
-/// packages (e.g. CVE-fix overrides). The `hint` field flags that case.
+/// `package.json` and is not present in `pnpm-lock.yaml`. Projects without a
+/// readable lockfile fall back to package manifest checks; the `hint` field
+/// flags that conservative mode.
 #[derive(Debug, Clone, Serialize)]
 pub struct UnusedDependencyOverride {
     /// The full original override key as written in the source (e.g.
@@ -710,11 +711,10 @@ pub struct UnusedDependencyOverride {
     pub path: PathBuf,
     /// 1-based line number of the entry within the source file.
     pub line: u32,
-    /// Soft hint for cases the conservative algorithm cannot disambiguate.
+    /// Soft hint reminding consumers to verify the override before removal.
     /// Emitted on every unused-override finding (both bare-target and
-    /// parent-chain shapes) so consumers know the result may be a false
-    /// positive against a transitive dependency (CVE-fix / canary-aliasing
-    /// pattern).
+    /// parent-chain shapes) because projects without a readable lockfile still
+    /// use the conservative package-manifest fallback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
 }

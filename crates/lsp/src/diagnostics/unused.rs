@@ -391,7 +391,7 @@ fn push_dependency_override_diagnostics(
         };
         let line = finding.line.saturating_sub(1);
         let mut message = format!(
-            "Unused dependency override: `{}` forces `{}` to `{}` but no workspace package depends on it",
+            "Unused dependency override: `{}` forces `{}` to `{}` but it is not declared by any workspace package or resolved in pnpm-lock.yaml",
             finding.raw_key, finding.target_package, finding.version_range,
         );
         if let Some(hint) = &finding.hint {

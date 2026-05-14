@@ -126,7 +126,7 @@ empty_catalog_groups?: EmptyCatalogGroup[]
  */
 unresolved_catalog_references?: UnresolvedCatalogReference[]
 /**
- * Entries in pnpm-workspace.yaml's overrides: section, or package.json's pnpm.overrides block, whose target package no workspace package depends on. Default severity is warn because some entries are intentional pins for transitive CVEs; the hint field flags the cases the conservative algorithm cannot disambiguate.
+ * Entries in pnpm-workspace.yaml's overrides: section, or package.json's pnpm.overrides block, whose target package is not declared by any workspace package and is not present in pnpm-lock.yaml. Default severity is warn because projects without a readable lockfile fall back to manifest-only checks; the hint field flags those conservative cases.
  */
 unused_dependency_overrides?: UnusedDependencyOverride[]
 /**
@@ -691,7 +691,7 @@ path: string
  */
 line: number
 /**
- * Soft hint for cases the conservative algorithm cannot disambiguate (e.g. a transitive CVE pin not visible to static analysis). Omitted when absent.
+ * Soft hint reminding consumers to verify the override before removal. Present because projects without a readable lockfile use the conservative package-manifest fallback. Omitted when absent.
  */
 hint?: string
 actions?: IssueAction[]

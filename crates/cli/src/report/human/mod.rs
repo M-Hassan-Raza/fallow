@@ -133,7 +133,7 @@ fn section_footer_text(title: &str) -> Option<(&'static str, &'static str)> {
             "https://docs.fallow.tools/explanations/dead-code#unresolved-catalog-references",
         )),
         "Unused dependency overrides" => Some((
-            "pnpm `overrides:` entries forcing a version no workspace package depends on (may be intentional pin for a transitive CVE)",
+            "pnpm `overrides:` entries whose target package is not declared by any workspace package or resolved in pnpm-lock.yaml",
             "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
         )),
         "Misconfigured dependency overrides" => Some((

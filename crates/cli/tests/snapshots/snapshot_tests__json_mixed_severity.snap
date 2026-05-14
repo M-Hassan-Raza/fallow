@@ -505,7 +505,7 @@ expression: redact_version(&json_str)
       "source": "pnpm-workspace.yaml",
       "path": "pnpm-workspace.yaml",
       "line": 9,
-      "hint": "May be an intentional pin for a transitive CVE that no workspace package depends on directly",
+      "hint": "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth",
       "actions": [
         {
           "type": "remove-dependency-override",

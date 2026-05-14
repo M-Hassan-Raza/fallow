@@ -66,7 +66,7 @@ expression: json_str
       "path": "pnpm-workspace.yaml",
       "line": 9,
       "side": "RIGHT",
-      "body": "**warn** `fallow/unused-dependency-override`: Override \\`axios\\` forces version \\`^1.6.0\\` but no workspace package depends on \\`axios\\` \\(May be an intentional pin for a transitive CVE that no workspace package depends on directly\\)\n\n<!-- fallow-fingerprint: 9e455c649fd184fe -->",
+      "body": "**warn** `fallow/unused-dependency-override`: Override \\`axios\\` forces version \\`^1.6.0\\` but \\`axios\\` is not declared by any workspace package or resolved in pnpm-lock.yaml \\(may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth\\)\n\n<!-- fallow-fingerprint: 9e455c649fd184fe -->",
       "fingerprint": "9e455c649fd184fe"
     },
     {

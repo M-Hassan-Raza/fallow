@@ -455,7 +455,7 @@ fn sarif_unused_dependency_override_fields(
     level: &'static str,
 ) -> SarifFields {
     let mut message = format!(
-        "Override `{}` forces version `{}` but no workspace package depends on `{}`",
+        "Override `{}` forces version `{}` but `{}` is not declared by any workspace package or resolved in pnpm-lock.yaml",
         finding.raw_key, finding.version_range, finding.target_package,
     );
     if let Some(hint) = &finding.hint {
@@ -708,7 +708,7 @@ fn build_sarif_rules(rules: &RulesConfig) -> Vec<serde_json::Value> {
         ),
         (
             "fallow/unused-dependency-override",
-            "pnpm dependency override forces a version no workspace package depends on",
+            "pnpm dependency override target is not declared or lockfile-resolved",
             rules.unused_dependency_overrides,
         ),
         (

@@ -15,7 +15,7 @@
 //! Workspace member dep sets: `app` declares `react` + `axios`;
 //! `lib` declares `@types/react`.
 
-use std::path::PathBuf;
+use std::{fs, path::PathBuf};
 
 use fallow_config::{
     FallowConfig, IgnoreDependencyOverrideRule, OutputFormat, RulesConfig, Severity,
@@ -91,6 +91,61 @@ fn target_with_version_selector_is_resolved() {
     assert!(
         !any_types_react,
         "@types/react@<18 should resolve target=@types/react which IS declared; flagged: {:?}",
+        results.unused_dependency_overrides
+    );
+}
+
+#[test]
+fn transitive_only_targets_in_pnpm_lockfile_are_used() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "issue-371-transitive-overrides",
+  "private": true,
+  "version": "0.0.0",
+  "pnpm": {
+    "overrides": {
+      "postcss": ">=8.5.10",
+      "lodash": ">=4.18.0",
+      "@babel/runtime": ">=7.26.10"
+    }
+  }
+}"#,
+    )
+    .expect("write root package.json");
+    fs::write(
+        root.join("pnpm-lock.yaml"),
+        r"lockfileVersion: '9.0'
+
+packages:
+  postcss@8.5.10:
+    resolution: {integrity: sha512-postcss}
+  lodash@4.17.21:
+    resolution: {integrity: sha512-lodash}
+
+snapshots:
+  postcss@8.5.10: {}
+  lodash@4.17.21: {}
+",
+    )
+    .expect("write pnpm lockfile");
+
+    let config =
+        FallowConfig::default().resolve(root.to_path_buf(), OutputFormat::Human, 4, true, true);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let actual: FxHashSet<&str> = results
+        .unused_dependency_overrides
+        .iter()
+        .map(|finding| finding.target_package.as_str())
+        .collect();
+
+    assert_eq!(
+        actual,
+        FxHashSet::from_iter(["@babel/runtime"]),
+        "lockfile-resolved transitive packages should not be reported as unused; got {:?}",
         results.unused_dependency_overrides
     );
 }
@@ -199,7 +254,6 @@ fn unused_overrides_carry_transitive_hint_on_every_shape() {
     // Both bare-target AND parent-chain unused findings must carry the
     // transitive-CVE hint so agents can de-prioritize. Synthesize a tempdir
     // with one of each shape and confirm the hint fires on both.
-    use std::fs;
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     fs::write(

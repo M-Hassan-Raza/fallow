@@ -276,10 +276,10 @@ expression: redact_sarif_version(&json_str)
             {
               "id": "fallow/unused-dependency-override",
               "shortDescription": {
-                "text": "pnpm.overrides entry forces a version no workspace package depends on"
+                "text": "pnpm.overrides entry targets a package not declared or resolved"
               },
               "fullDescription": {
-                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, that no workspace package depends on (either directly or as the parent in a parent>child override). Override entries linger after their target package is removed from the dependency tree. Bare-target overrides (`axios: ^1.6.0` without a parent matcher) may still be intentional pins for transitive CVEs not visible to static analysis; the `cve_hint` field flags those for review. To fix: delete the entry, or scope it under a real parent if it pins a transitive. See also: fallow/misconfigured-dependency-override."
+                "text": "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, whose target package is not declared by any workspace package and is not present in `pnpm-lock.yaml`. Override entries linger after their target package leaves the resolved dependency tree. For projects without a readable lockfile, fallow falls back to workspace package.json manifests and keeps a `hint` so transitive CVE pins can be reviewed before removal. To fix: delete the entry, refresh `pnpm-lock.yaml` if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override."
               },
               "helpUri": "https://docs.fallow.tools/explanations/dead-code#unused-dependency-overrides",
               "defaultConfiguration": {

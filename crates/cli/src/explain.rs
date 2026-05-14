@@ -212,8 +212,8 @@ pub const CHECK_RULES: &[RuleDef] = &[
         id: "fallow/unused-dependency-override",
         category: "Dependencies",
         name: "Unused pnpm dependency override",
-        short: "pnpm.overrides entry forces a version no workspace package depends on",
-        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, that no workspace package depends on (either directly or as the parent in a parent>child override). Override entries linger after their target package is removed from the dependency tree. Bare-target overrides (`axios: ^1.6.0` without a parent matcher) may still be intentional pins for transitive CVEs not visible to static analysis; the `cve_hint` field flags those for review. To fix: delete the entry, or scope it under a real parent if it pins a transitive. See also: fallow/misconfigured-dependency-override.",
+        short: "pnpm.overrides entry targets a package not declared or resolved",
+        full: "An entry in `pnpm-workspace.yaml`'s `overrides:` section, or the root `package.json`'s `pnpm.overrides` block, whose target package is not declared by any workspace package and is not present in `pnpm-lock.yaml`. Override entries linger after their target package leaves the resolved dependency tree. For projects without a readable lockfile, fallow falls back to workspace package.json manifests and keeps a `hint` so transitive CVE pins can be reviewed before removal. To fix: delete the entry, refresh `pnpm-lock.yaml` if it is stale, or add the entry to `ignoreDependencyOverrides` when the override is intentionally retained. See also: fallow/misconfigured-dependency-override.",
         docs_path: "explanations/dead-code#unused-dependency-overrides",
     },
     RuleDef {
@@ -419,8 +419,8 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
             how_to_fix: "If `available_in_catalogs` is non-empty, change the reference to one of those catalogs (e.g. `catalog:react18`). Otherwise add the package to the named catalog in pnpm-workspace.yaml, or remove the catalog reference and pin a hardcoded version. For staged migrations where the catalog edit lands separately, add the (package, catalog, consumer) triple to `ignoreCatalogReferences` in your fallow config.",
         },
         "fallow/unused-dependency-override" => RuleGuide {
-            example: "pnpm-workspace.yaml declares `overrides: { axios: ^1.6.0 }`, but no workspace package.json depends on `axios` (directly or transitively as a declared parent in `react>axios: ...`).",
-            how_to_fix: "Delete the entry from `pnpm-workspace.yaml` or `package.json#pnpm.overrides`. If the entry exists to pin a transitive dependency for a CVE fix, scope it under a real parent (`real-pkg>axios: ^1.6.0`) so the parent-chain rule recognises it, or add the entry to `ignoreDependencyOverrides` in your fallow config to silence the finding while keeping the override.",
+            example: "pnpm-workspace.yaml declares `overrides: { axios: ^1.6.0 }`, but no workspace package.json declares `axios` and `pnpm-lock.yaml` does not resolve it.",
+            how_to_fix: "Delete the entry from `pnpm-workspace.yaml` or `package.json#pnpm.overrides`. If the finding is caused by a stale or missing lockfile, refresh `pnpm-lock.yaml` and rerun fallow. If the override is intentionally retained, add it to `ignoreDependencyOverrides` in your fallow config.",
         },
         "fallow/misconfigured-dependency-override" => RuleGuide {
             example: "pnpm-workspace.yaml declares `overrides: { \"@types/react@<<18\": \"18.0.0\" }`. The doubled `<<` is not a valid pnpm version selector and pnpm will reject the workspace at install time.",

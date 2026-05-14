@@ -80,7 +80,7 @@ expression: output
 
 ### Unused dependency overrides (1)
 
-- `axios` -> `^1.6.0` (`pnpm-workspace.yaml`) `pnpm-workspace.yaml`:9 (hint: May be an intentional pin for a transitive CVE that no workspace package depends on directly)
+- `axios` -> `^1.6.0` (`pnpm-workspace.yaml`) `pnpm-workspace.yaml`:9 (hint: may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth)
 
 ### Misconfigured dependency overrides (1)
 

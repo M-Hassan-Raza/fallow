@@ -9,12 +9,9 @@
 //! Two findings are emitted:
 //!
 //! 1. **`unused-dependency-overrides`**: an override whose target package is
-//!    not declared in any workspace `package.json` dep section. Conservative
-//!    static algorithm: the v1 detector does not read `pnpm-lock.yaml`, so
-//!    overrides targeting purely-transitive packages (a common CVE-fix /
-//!    canary-aliasing pattern) can produce false positives. Every unused
-//!    finding (bare-target AND parent-chain) carries a `hint` flagging the
-//!    transitive-dependency possibility so consumers can de-prioritize.
+//!    absent from both workspace `package.json` dep sections and
+//!    `pnpm-lock.yaml`. Overrides targeting resolved transitive packages are
+//!    treated as used because CVE-fix pins often exist only in the lockfile.
 //!
 //! 2. **`misconfigured-dependency-overrides`**: an override whose key cannot
 //!    be parsed or whose value is empty. `pnpm install` refuses to honor
@@ -26,9 +23,10 @@
 //! comment syntax.
 //!
 //! Parent-chain semantics: `react>react-dom` is reported as unused only when
-//! BOTH `react` AND `react-dom` are absent from every workspace `package.json`.
-//! This matches the common CVE-fix pattern where the parent is declared and
-//! the override forces a transitive version inside that parent's subtree.
+//! BOTH `react` AND `react-dom` are absent from every workspace `package.json`
+//! and `pnpm-lock.yaml`. This matches the common CVE-fix pattern where the
+//! parent is declared and the override forces a transitive version inside that
+//! parent's subtree.
 
 use fallow_config::{
     CompiledIgnoreDependencyOverrideRule, PackageJson, PnpmOverrideData, ResolvedConfig,
@@ -42,11 +40,18 @@ use fallow_types::results::{
 use rustc_hash::FxHashSet;
 
 const PNPM_WORKSPACE_FILE: &str = "pnpm-workspace.yaml";
+const PNPM_LOCK_FILE: &str = "pnpm-lock.yaml";
 const ROOT_PACKAGE_JSON: &str = "package.json";
 const SOURCE_LABEL_YAML: &str = "pnpm-workspace.yaml";
 const SOURCE_LABEL_JSON: &str = "package.json";
 const HINT_MAY_BE_TRANSITIVE: &str =
     "may target a transitive dependency; pnpm install --frozen-lockfile is the ground truth";
+const LOCKFILE_DEPENDENCY_SECTIONS: &[&str] = &[
+    "dependencies",
+    "optionalDependencies",
+    "devDependencies",
+    "peerDependencies",
+];
 
 /// Combined override state across both sources, plus the set of packages
 /// declared in any workspace `package.json` dep section.
@@ -61,6 +66,9 @@ pub struct PnpmOverrideState {
     /// `peerDependencies` / `optionalDependencies` of any workspace
     /// `package.json` (root + members).
     declared_packages: FxHashSet<String>,
+    /// Every package name found in `pnpm-lock.yaml` package/snapshot keys or
+    /// dependency sections. Includes transitive dependencies resolved by pnpm.
+    lockfile_packages: FxHashSet<String>,
 }
 
 /// Read both override sources and walk workspace `package.json` files to build
@@ -90,11 +98,13 @@ pub fn gather_pnpm_override_state(
     }
 
     let declared_packages = collect_declared_packages(config, workspaces);
+    let lockfile_packages = collect_lockfile_packages(config);
 
     Some(PnpmOverrideState {
         workspace_yaml_data,
         package_json_data,
         declared_packages,
+        lockfile_packages,
     })
 }
 
@@ -136,9 +146,97 @@ fn collect_declared_packages(
     set
 }
 
+/// Parse `pnpm-lock.yaml` and collect package names from resolved package keys
+/// plus dependency maps. Malformed or missing lockfiles degrade to an empty
+/// set, preserving the package.json-only fallback for projects without pnpm.
+fn collect_lockfile_packages(config: &ResolvedConfig) -> FxHashSet<String> {
+    let lock_path = config.root.join(PNPM_LOCK_FILE);
+    let Ok(raw_source) = std::fs::read_to_string(lock_path) else {
+        return FxHashSet::default();
+    };
+
+    collect_pnpm_lock_packages(&raw_source)
+}
+
+fn collect_pnpm_lock_packages(source: &str) -> FxHashSet<String> {
+    let Ok(value) = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(source) else {
+        return FxHashSet::default();
+    };
+
+    let mut packages = FxHashSet::default();
+    let Some(root) = value.as_mapping() else {
+        return packages;
+    };
+
+    for section in ["packages", "snapshots"] {
+        let Some(mapping) = root.get(section).and_then(serde_yaml_ng::Value::as_mapping) else {
+            continue;
+        };
+        for key in mapping.keys().filter_map(serde_yaml_ng::Value::as_str) {
+            if let Some(package_name) = package_name_from_lock_key(key) {
+                packages.insert(package_name);
+            }
+        }
+    }
+
+    collect_dependency_map_names(&value, &mut packages);
+    packages
+}
+
+fn collect_dependency_map_names(value: &serde_yaml_ng::Value, packages: &mut FxHashSet<String>) {
+    match value {
+        serde_yaml_ng::Value::Mapping(mapping) => {
+            for (key, child) in mapping {
+                if key
+                    .as_str()
+                    .is_some_and(|name| LOCKFILE_DEPENDENCY_SECTIONS.contains(&name))
+                    && let Some(dependencies) = child.as_mapping()
+                {
+                    for package_name in dependencies.keys().filter_map(serde_yaml_ng::Value::as_str)
+                    {
+                        packages.insert(package_name.to_string());
+                    }
+                }
+                collect_dependency_map_names(child, packages);
+            }
+        }
+        serde_yaml_ng::Value::Sequence(items) => {
+            for item in items {
+                collect_dependency_map_names(item, packages);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn package_name_from_lock_key(raw_key: &str) -> Option<String> {
+    let key = raw_key.trim().trim_start_matches('/');
+    if key.is_empty() {
+        return None;
+    }
+
+    if key.starts_with('@') {
+        let scope_end = key.find('/')?;
+        let package_segment = &key[scope_end + 1..];
+        let name_end = package_segment
+            .find(['@', '/', '('])
+            .unwrap_or(package_segment.len());
+        if name_end == 0 {
+            return None;
+        }
+        return Some(key[..scope_end + 1 + name_end].to_string());
+    }
+
+    let name_end = key.find(['@', '/', '(']).unwrap_or(key.len());
+    if name_end == 0 {
+        return None;
+    }
+    Some(key[..name_end].to_string())
+}
+
 /// Emit one `UnusedDependencyOverride` for every parseable override whose
 /// target package (and parent, when present) is not declared in any workspace
-/// `package.json`.
+/// `package.json` or resolved in `pnpm-lock.yaml`.
 #[must_use]
 pub fn find_unused_dependency_overrides(
     state: &PnpmOverrideState,
@@ -152,6 +250,7 @@ pub fn find_unused_dependency_overrides(
         DependencyOverrideSource::PnpmWorkspaceYaml,
         &yaml_path,
         &state.declared_packages,
+        &state.lockfile_packages,
         &config.compiled_ignore_dependency_overrides,
         &mut findings,
     );
@@ -160,6 +259,7 @@ pub fn find_unused_dependency_overrides(
         DependencyOverrideSource::PnpmPackageJson,
         &json_path,
         &state.declared_packages,
+        &state.lockfile_packages,
         &config.compiled_ignore_dependency_overrides,
         &mut findings,
     );
@@ -171,6 +271,7 @@ fn collect_unused_from_source(
     source: DependencyOverrideSource,
     source_path: &std::path::Path,
     declared: &FxHashSet<String>,
+    resolved: &FxHashSet<String>,
     ignore_rules: &[CompiledIgnoreDependencyOverrideRule],
     findings: &mut Vec<UnusedDependencyOverride>,
 ) {
@@ -186,15 +287,21 @@ fn collect_unused_from_source(
             continue;
         }
 
-        // Parent-chain semantics: if EITHER parent OR target is declared,
-        // consider the override used. This covers the common CVE-fix pattern
-        // (parent declared, target transitive).
+        // Parent-chain semantics: if EITHER parent OR target is declared or
+        // present in the resolved lockfile, consider the override used. This
+        // covers CVE-fix pins where only the transitive target is lockfile-
+        // visible.
         let target_declared = declared.contains(&parsed.target_package);
+        let target_resolved = resolved.contains(&parsed.target_package);
         let parent_declared = parsed
             .parent_package
             .as_ref()
             .is_some_and(|p| declared.contains(p));
-        if target_declared || parent_declared {
+        let parent_resolved = parsed
+            .parent_package
+            .as_ref()
+            .is_some_and(|p| resolved.contains(p));
+        if target_declared || target_resolved || parent_declared || parent_resolved {
             continue;
         }
 
@@ -206,11 +313,8 @@ fn collect_unused_from_source(
             continue;
         }
 
-        // Every unused override (bare-target AND parent-chain) is a potential
-        // transitive-dependency override, the CVE-fix / canary-aliasing pattern
-        // the conservative static algorithm cannot disambiguate without a
-        // lockfile. Emit the hint on every finding so agents can de-prioritize
-        // and human readers know to verify against `pnpm install`.
+        // The lockfile-aware check degrades to package.json-only when the
+        // lockfile is missing or malformed, so keep the conservative hint.
         let hint = Some(HINT_MAY_BE_TRANSITIVE.to_string());
 
         findings.push(UnusedDependencyOverride {

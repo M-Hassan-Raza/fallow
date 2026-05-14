@@ -55,8 +55,8 @@ pub struct AnalyzeParams {
     /// catalog groups with no entries), unresolved-catalog-references
     /// (consumer references catalogs that do not declare the package; broken
     /// config that pnpm install will reject), unused-dependency-overrides
-    /// (pnpm.overrides forces a version no workspace package depends on; may be
-    /// an intentional transitive CVE pin), misconfigured-dependency-overrides
+    /// (pnpm.overrides targets a package no workspace package declares and
+    /// pnpm-lock.yaml does not resolve), misconfigured-dependency-overrides
     /// (pnpm.overrides key/value is unparsable; pnpm install will reject).
     pub issue_types: Option<Vec<String>>,
 
