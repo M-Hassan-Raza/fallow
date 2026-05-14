@@ -665,3 +665,84 @@ fn bulletproof_preset_detects_violation() {
         v.to_path.display()
     );
 }
+
+/// Regression for the Bulletproof preset trade-off documented on
+/// `BoundaryPreset::Bulletproof`. The preset deliberately leaves the
+/// `features` zone's `patterns` empty so top-level files inside `src/features/`
+/// (a barrel like `src/features/index.ts`, or shared utilities like
+/// `src/features/types.ts`) stay unclassified and unrestricted. This test
+/// pins that behavior:
+///
+/// 1. `src/features/index.ts` (the barrel) re-exports `auth/login` and
+///    `types`. Under the preset the barrel must NOT classify as `features`,
+///    otherwise it would surface `features -> features/auth` violations.
+/// 2. `src/features/types.ts` imports `src/app/page`. Under the preset
+///    `types.ts` must NOT classify as `features`, otherwise it would surface
+///    a `features -> app` violation.
+///
+/// If a future change adds `patterns: ["src/features/**"]` (or similar) back
+/// to the preset's `features` zone, both of these turn into false-positive
+/// violations and this test fails with a useful count.
+#[test]
+fn bulletproof_top_level_features_file_is_unrestricted() {
+    let root = fixture_path("boundary-bulletproof-toplevel");
+    let boundaries = BoundaryConfig {
+        preset: Some(BoundaryPreset::Bulletproof),
+        zones: vec![],
+        rules: vec![],
+    };
+    let config = FallowConfig {
+        schema: None,
+        extends: vec![],
+        entry: vec!["src/app/page.ts".to_string()],
+        ignore_patterns: vec![],
+        framework: vec![],
+        workspaces: None,
+        ignore_dependencies: vec![],
+        ignore_exports: vec![],
+        ignore_catalog_references: vec![],
+        ignore_dependency_overrides: vec![],
+        ignore_exports_used_in_file: fallow_config::IgnoreExportsUsedInFileConfig::default(),
+        used_class_members: vec![],
+        duplicates: DuplicatesConfig::default(),
+        health: HealthConfig::default(),
+        rules: RulesConfig {
+            boundary_violation: Severity::Error,
+            ..RulesConfig::default()
+        },
+        boundaries,
+        production: false.into(),
+        plugins: vec![],
+        dynamically_loaded: vec![],
+        overrides: vec![],
+        regression: None,
+        audit: fallow_config::AuditConfig::default(),
+        codeowners: None,
+        public_packages: vec![],
+        flags: FlagsConfig::default(),
+        resolve: ResolveConfig::default(),
+        sealed: false,
+        include_entry_exports: false,
+    }
+    .resolve(root, OutputFormat::Human, 4, true, true);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        results.boundary_violations.len(),
+        0,
+        "Bulletproof preset must leave top-level src/features/ files unclassified \
+         so barrel re-exports and shared utilities do not produce false positives. \
+         Got: {:?}",
+        results
+            .boundary_violations
+            .iter()
+            .map(|v| format!(
+                "{} ({}) -> {} ({})",
+                v.from_zone,
+                v.from_path.display(),
+                v.to_zone,
+                v.to_path.display()
+            ))
+            .collect::<Vec<_>>()
+    );
+}

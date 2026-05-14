@@ -1,10 +1,28 @@
 //! Architecture boundary zone and rule definitions.
 
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 
 use globset::Glob;
+use rustc_hash::FxHashSet;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+
+/// Process-local dedup state for the
+/// `patterns + autoDiscover` footgun warning. Keyed on the offending zone
+/// name. The warn fires once per (process, zone name) so long-running hosts
+/// (`fallow watch`, the LSP, the NAPI worker, the MCP server) do not spam
+/// the same diagnostic on every re-analysis. Restart re-arms the warning.
+static AUTO_DISCOVER_PATTERNS_WARN_SEEN: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+
+/// Returns `true` if the warn for `zone_name` has not yet fired in this
+/// process, `false` if it has already fired. A poisoned mutex falls back to
+/// "would fire" so the user still sees one diagnostic per session.
+fn record_auto_discover_patterns_warn_seen(zone_name: &str) -> bool {
+    let seen = AUTO_DISCOVER_PATTERNS_WARN_SEEN.get_or_init(|| Mutex::new(FxHashSet::default()));
+    seen.lock()
+        .map_or(true, |mut set| set.insert(zone_name.to_owned()))
+}
 
 /// Built-in architecture presets.
 ///
@@ -33,8 +51,17 @@ pub enum BoundaryPreset {
     /// Each layer may only import from layers below it.
     FeatureSliced,
     /// Bulletproof React: app → features → shared + server.
-    /// Feature modules are isolated from each other; shared utilities and server
-    /// infrastructure form the base layers.
+    /// Feature modules are isolated from each other via `autoDiscover`: every
+    /// immediate child of `src/features/` becomes its own `features/<name>` zone,
+    /// and cross-feature imports are reported as boundary violations.
+    ///
+    /// **Trade-off (intentional):** top-level files in `src/features/` (e.g.
+    /// `src/features/index.ts` barrel, `src/features/types.ts`) do NOT match any
+    /// child pattern and are unclassified, meaning they are unrestricted by the
+    /// preset. This is deliberate so feature barrels can re-export children
+    /// without producing false-positive `features → features/<child>` violations.
+    /// To classify top-level files strictly, override the `features` zone with
+    /// an explicit user definition that includes a `patterns` field.
     Bulletproof,
 }
 
@@ -227,7 +254,7 @@ pub struct BoundaryZone {
     pub name: String,
     /// Glob patterns (relative to project root) that define zone membership.
     /// A file belongs to the first zone whose pattern matches.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub patterns: Vec<String>,
     /// Directories whose immediate child directories should become separate
     /// zones under this logical group.
@@ -410,6 +437,23 @@ impl BoundaryConfig {
             expanded_zones.extend(discovered_zones);
 
             if !zone.patterns.is_empty() {
+                // Footgun: top-level files inside the auto-discover directory
+                // (e.g. a `src/features/index.ts` barrel) fall back to the
+                // parent zone, and the parent rule's allow list typically does
+                // not include the discovered child zones, so re-exports from
+                // the barrel surface as `parent -> parent/<child>` false
+                // positives. The Bulletproof preset deliberately leaves
+                // `patterns` empty for this reason.
+                if record_auto_discover_patterns_warn_seen(&group_name) {
+                    tracing::warn!(
+                        "boundary zone '{group_name}' sets BOTH `patterns` and `autoDiscover`. \
+                         Top-level files matching the parent pattern fall back to zone '{group_name}' \
+                         and may produce false-positive cross-zone violations when they re-export \
+                         auto-discovered children (e.g. a `{group_name}/index.ts` barrel). \
+                         Drop `patterns` to leave top-level files unclassified, or define explicit \
+                         allow rules that include the discovered child zones."
+                    );
+                }
                 expanded_names.push(group_name.clone());
                 zone.auto_discover.clear();
                 expanded_zones.push(zone);

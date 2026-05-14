@@ -354,6 +354,11 @@ impl FallowConfig {
             }
             boundaries.expand(&source_root);
         }
+        // MUST run AFTER `expand` and BEFORE `validate_zone_references`. Presets
+        // like Bulletproof emit a rule whose `from` is the logical group name
+        // (`features`) that auto-discovery later replaces with concrete child
+        // zones (`features/auth`, `features/billing`). Moving validation above
+        // expansion makes the preset look like it references undefined zones.
         boundaries.expand_auto_discover(&root);
 
         // Validate and compile architecture boundary config
