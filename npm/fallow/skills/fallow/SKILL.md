@@ -95,12 +95,13 @@ cargo install fallow-cli        # build from source
 | Unlisted dependencies | `--unlisted-deps` | Used packages missing from package.json. In monorepos, importing a workspace package from a workspace whose own `package.json` does not list it is reported here too; self-references stay allowed without requiring a package to depend on itself. |
 | Duplicate exports | `--duplicate-exports` | Same symbol exported from multiple modules |
 | Circular dependencies | `--circular-deps` | Import cycles in the module graph |
-| Boundary violations | `--boundary-violations` | Imports crossing architecture zone boundaries. Presets: `layered`, `hexagonal`, `feature-sliced`, `bulletproof` |
+| Boundary violations | `--boundary-violations` | Imports crossing architecture zone boundaries. Presets: `layered`, `hexagonal`, `feature-sliced`, `bulletproof`; `autoDiscover` can create one zone per feature directory |
 | Stale suppressions | `--stale-suppressions` | `fallow-ignore` comments or `@expected-unused` JSDoc tags that no longer match any issue |
 | Test-only dependencies | n/a | Production deps only imported from test files (should be devDependencies) |
 | Unused pnpm catalog entries | `--unused-catalog-entries` | `pnpm-workspace.yaml` entries no workspace package.json references via `catalog:` (default `warn`) |
+| Empty pnpm catalog groups | `--empty-catalog-groups` | Named `catalogs.<name>:` groups in `pnpm-workspace.yaml` with no entries. Top-level `catalog:` placeholders are ignored. Default `warn`. |
 | Unresolved pnpm catalog references | `--unresolved-catalog-references` | `package.json` references to `catalog:` / `catalog:<name>` whose catalog does not declare the package; `pnpm install` would fail. Default `error`. Suppress via `ignoreCatalogReferences: [{ package, catalog?, consumer? }]` in fallow config (package.json has no comment syntax). |
-| Unused pnpm dependency overrides | `--unused-dependency-overrides` | `pnpm-workspace.yaml#overrides` / `package.json#pnpm.overrides` entries forcing a version no workspace package depends on. Default `warn`; the `hint` field flags entries that may be intentional pins for transitive CVEs. Suppress via `ignoreDependencyOverrides: [{ package, source? }]` in fallow config. |
+| Unused pnpm dependency overrides | `--unused-dependency-overrides` | `pnpm-workspace.yaml#overrides` / `package.json#pnpm.overrides` entries whose target package is not declared by any workspace `package.json` and is not present in `pnpm-lock.yaml`. Default `warn`. When the lockfile is missing or unreadable the check degrades to a manifest-only fallback and every finding carries a `hint` reminding consumers to verify before removal. Suppress via `ignoreDependencyOverrides: [{ package, source? }]` in fallow config. |
 | Misconfigured pnpm dependency overrides | `--misconfigured-dependency-overrides` | `pnpm.overrides` entries whose key is unparsable (empty, dangling separators, malformed selectors) or value is missing/empty. `pnpm install` would fail. Default `error`. Suppression: same `ignoreDependencyOverrides` config rule. |
 
 ## MCP Tools

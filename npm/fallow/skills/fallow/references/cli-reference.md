@@ -72,6 +72,11 @@ Analyzes the project for unused files, exports, dependencies, types, members, an
 | `--circular-deps` | Circular dependencies |
 | `--boundary-violations` | Boundary violations (imports crossing architecture zone boundaries) |
 | `--stale-suppressions` | Stale suppression comments or `@expected-unused` JSDoc tags |
+| `--unused-catalog-entries` | Unused pnpm catalog entries |
+| `--empty-catalog-groups` | Empty named pnpm catalog groups |
+| `--unresolved-catalog-references` | Package references to missing pnpm catalog entries |
+| `--unused-dependency-overrides` | Unused pnpm dependency overrides |
+| `--misconfigured-dependency-overrides` | Malformed pnpm dependency overrides |
 
 ### Examples
 
@@ -432,7 +437,7 @@ fallow health --format json --quiet --trend
 ```json
 {
   "schema_version": 3,
-  "version": "2.73.0",
+  "version": "2.74.0",
   "elapsed_ms": 32,
   "summary": {
     "files_analyzed": 482,
@@ -818,7 +823,7 @@ fallow audit \
 ```json
 {
   "schema_version": 3,
-  "version": "2.73.0",
+  "version": "2.74.0",
   "command": "audit",
   "verdict": "fail",
   "changed_files_count": 12,
@@ -891,7 +896,7 @@ fallow flags --format json --quiet --workspace my-package
 ```json
 {
   "schema_version": 3,
-  "version": "2.73.0",
+  "version": "2.74.0",
   "elapsed_ms": 116,
   "feature_flags": [],
   "total_flags": 0
@@ -1310,7 +1315,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 ```json
 {
   "schema_version": 3,
-  "version": "2.73.0",
+  "version": "2.74.0",
   "elapsed_ms": 45,
   "total_issues": 12,
   "entry_points": {
@@ -1457,7 +1462,7 @@ When `--baseline` is used in combined output, the JSON includes a `baseline_delt
 ```json
 {
   "schema_version": 3,
-  "version": "2.73.0",
+  "version": "2.74.0",
   "elapsed_ms": 82,
   "total_clones": 15,
   "total_lines_duplicated": 230,
@@ -1501,7 +1506,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
 {
   "check": {
     "schema_version": 3,
-    "version": "2.73.0",
+    "version": "2.74.0",
     "elapsed_ms": 45,
     "total_issues": 12,
     "unused_files": [],
@@ -1523,7 +1528,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
   },
   "dupes": {
     "schema_version": 3,
-    "version": "2.73.0",
+    "version": "2.74.0",
     "elapsed_ms": 82,
     "total_clones": 15,
     "total_lines_duplicated": 230,
@@ -1532,7 +1537,7 @@ When running `fallow` with no subcommand (all analyses), the JSON output combine
   },
   "health": {
     "schema_version": 3,
-    "version": "2.73.0",
+    "version": "2.74.0",
     "elapsed_ms": 32,
     "summary": {},
     "findings": [],
@@ -1614,10 +1619,20 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
     "ignorePatterns": ["**/*.generated.ts"]
   },
 
-  // Architecture boundaries (preset or custom zones/rules)
+  // Architecture boundaries (preset, custom zones/rules, or auto-discovered feature zones)
   // Presets: "layered", "hexagonal", "feature-sliced", "bulletproof"
   "boundaries": {
     "preset": "bulletproof"
+    // Or:
+    // "zones": [
+    //   { "name": "app", "patterns": ["src/app/**"] },
+    //   { "name": "features", "autoDiscover": ["src/features"] },
+    //   { "name": "shared", "patterns": ["src/shared/**"] }
+    // ],
+    // "rules": [
+    //   { "from": "app", "allow": ["features", "shared"] },
+    //   { "from": "features", "allow": ["shared"] }
+    // ]
   },
 
   // Production mode
