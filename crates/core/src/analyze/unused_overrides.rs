@@ -421,3 +421,133 @@ const fn source_label_for(source: DependencyOverrideSource) -> &'static str {
         DependencyOverrideSource::PnpmPackageJson => SOURCE_LABEL_JSON,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lock_key_bare_package_with_version() {
+        assert_eq!(
+            package_name_from_lock_key("react@18.3.1"),
+            Some("react".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_scoped_package_with_version() {
+        assert_eq!(
+            package_name_from_lock_key("@types/react@18.2.0"),
+            Some("@types/react".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_scoped_package_with_peer_suffix() {
+        assert_eq!(
+            package_name_from_lock_key("@scope/pkg@1.0.0(peer@2.0.0)"),
+            Some("@scope/pkg".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_pnpm6_leading_slash() {
+        assert_eq!(
+            package_name_from_lock_key("/react@18.3.1"),
+            Some("react".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_pnpm6_leading_slash_scoped() {
+        assert_eq!(
+            package_name_from_lock_key("/@types/react@18.2.0"),
+            Some("@types/react".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_no_version() {
+        assert_eq!(
+            package_name_from_lock_key("react"),
+            Some("react".to_string())
+        );
+        assert_eq!(
+            package_name_from_lock_key("@scope/pkg"),
+            Some("@scope/pkg".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_npm_alias() {
+        // `debug@npm:obug@^1.0.2` keys must resolve to the consumer-facing name
+        // because the override matcher keys on that name, not on the alias.
+        assert_eq!(
+            package_name_from_lock_key("debug@npm:obug@^1.0.2"),
+            Some("debug".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_paren_only_suffix() {
+        assert_eq!(
+            package_name_from_lock_key("react(peer@2)"),
+            Some("react".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_whitespace_is_trimmed() {
+        assert_eq!(
+            package_name_from_lock_key("   react@1.0.0   "),
+            Some("react".to_string())
+        );
+    }
+
+    #[test]
+    fn lock_key_empty_returns_none() {
+        assert_eq!(package_name_from_lock_key(""), None);
+        assert_eq!(package_name_from_lock_key("   "), None);
+        assert_eq!(package_name_from_lock_key("/"), None);
+    }
+
+    #[test]
+    fn lock_key_malformed_scope_returns_none() {
+        assert_eq!(package_name_from_lock_key("@scope"), None);
+        assert_eq!(package_name_from_lock_key("@scope/"), None);
+    }
+
+    #[test]
+    fn collect_lock_packages_handles_lockfile_v9_shape() {
+        let source = "lockfileVersion: '9.0'\n\
+                      \n\
+                      importers:\n  \
+                        .:\n    \
+                          dependencies:\n      \
+                            react:\n        specifier: ^18.0.0\n        version: 18.3.1\n\
+                      \n\
+                      packages:\n  \
+                        react@18.3.1:\n    resolution: {integrity: sha512-r}\n  \
+                        postcss@8.5.10:\n    resolution: {integrity: sha512-p}\n\
+                      \n\
+                      snapshots:\n  \
+                        react@18.3.1:\n    dependencies:\n      loose-envify: 1.4.0\n  \
+                        postcss@8.5.10: {}\n  \
+                        loose-envify@1.4.0: {}\n";
+        let packages = collect_pnpm_lock_packages(source);
+        assert!(packages.contains("react"));
+        assert!(packages.contains("postcss"));
+        assert!(packages.contains("loose-envify"));
+    }
+
+    #[test]
+    fn collect_lock_packages_malformed_yields_empty() {
+        let packages = collect_pnpm_lock_packages("lockfileVersion: '9.0\n  this: [[[");
+        assert!(packages.is_empty());
+    }
+
+    #[test]
+    fn collect_lock_packages_empty_yields_empty() {
+        assert!(collect_pnpm_lock_packages("").is_empty());
+    }
+}
