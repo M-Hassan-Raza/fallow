@@ -84,6 +84,103 @@ fn health_rejects_relative_coverage_root() {
 }
 
 #[test]
+fn health_istanbul_matches_multiline_typed_async_arrow_signature() {
+    let dir = tempdir().unwrap();
+    write_file(
+        &dir.path().join("package.json"),
+        r#"{"name":"issue-370-coverage","type":"module"}"#,
+    );
+    let source_path = dir.path().join("src/actor.ts");
+    write_file(
+        &source_path,
+        "type AnyLocator = unknown;
+const resolveLocator = null as unknown as (locator: AnyLocator) => Promise<HTMLElement | HTMLElement[] | null>;
+const isMissingElementError = null as unknown as (error: unknown) => boolean;
+export const elementsFrom = async (
+  locator: AnyLocator,
+  options?: { missingAsEmpty?: boolean },
+): Promise<HTMLElement[]> => {
+  try {
+    const result = await resolveLocator(locator);
+    if (Array.isArray(result)) return result;
+    return result ? [result] : [];
+  } catch (error) {
+    if (options?.missingAsEmpty === true && isMissingElementError(error)) return [];
+    throw error;
+  }
+};
+",
+    );
+    let coverage_path = dir.path().join("coverage/coverage-final.json");
+    let mut coverage = serde_json::Map::new();
+    coverage.insert(
+        source_path.to_string_lossy().into_owned(),
+        serde_json::json!({
+            "path": source_path.to_string_lossy().into_owned(),
+            "statementMap": {},
+            "fnMap": {
+                "0": {
+                    "name": "(anonymous_0)",
+                    "line": 7,
+                    "decl": {
+                        "start": { "line": 4, "column": 28 },
+                        "end": { "line": 7, "column": 26 }
+                    },
+                    "loc": {
+                        "start": { "line": 7, "column": 27 },
+                        "end": { "line": 16, "column": 1 }
+                    }
+                }
+            },
+            "branchMap": {},
+            "s": {},
+            "f": { "0": 642 },
+            "b": {}
+        }),
+    );
+    write_file(
+        &coverage_path,
+        &serde_json::to_string(&coverage).expect("serialize coverage"),
+    );
+
+    let output = run_fallow_in_root(
+        "health",
+        dir.path(),
+        &[
+            "--complexity",
+            "--coverage",
+            "coverage/coverage-final.json",
+            "--max-cyclomatic",
+            "9999",
+            "--max-cognitive",
+            "9999",
+            "--max-crap",
+            "1",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(
+        output.code, 1,
+        "low CRAP threshold should surface the covered function"
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["summary"]["istanbul_matched"].as_u64(), Some(1));
+
+    let findings = json["findings"].as_array().expect("findings array");
+    let finding = findings
+        .iter()
+        .find(|finding| finding["name"] == "elementsFrom")
+        .unwrap_or_else(|| panic!("expected elementsFrom finding, got: {findings:#?}"));
+
+    assert_eq!(finding["line"].as_u64(), Some(4));
+    assert_eq!(finding["coverage_pct"].as_f64(), Some(100.0));
+    assert_eq!(finding["coverage_tier"].as_str(), Some("high"));
+    assert_eq!(finding["crap"].as_f64(), Some(7.0));
+}
+
+#[test]
 fn health_json_has_findings() {
     let output = run_fallow(
         "health",

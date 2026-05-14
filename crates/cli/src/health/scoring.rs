@@ -461,16 +461,25 @@ fn crap_formula(cc: f64, coverage_pct: f64) -> f64 {
     cc * cc * uncovered * uncovered * uncovered + cc
 }
 
+/// Maximum column drift tolerated when the anonymous-by-position fallback
+/// matches a candidate on a nearby line. Wide enough to accept curried arrows
+/// and chained callbacks that share a leading indent, tight enough to reject
+/// `function foo()` at column 0 when the only candidate is a multiline-arrow
+/// declaration alias at the typical `const x = async (` column.
+const ANONYMOUS_FALLBACK_MAX_COLUMN_DRIFT: u32 = 16;
+
 /// Pre-processed per-function coverage data for a single file,
 /// derived from Istanbul `coverage-final.json`.
 pub(super) struct IstanbulFileCoverage {
-    /// Per-function coverage percentages, keyed by (name, line, col).
-    /// Line is 1-based, matching both fallow's `FunctionComplexity.line`
-    /// and Istanbul's effective declaration line (`FnEntry.line` when
-    /// present, otherwise `FnEntry.decl.start.line`). Col is 0-based,
-    /// matching both fallow's `FunctionComplexity.col` and Istanbul's
-    /// `Position::column`. Including col in the key disambiguates curried
-    /// arrows like `(x) => (y) => {...}` where two functions share a line.
+    /// Per-function coverage percentages, keyed by (name, line, col). Lines
+    /// are 1-based and columns are 0-based, matching both fallow's
+    /// `FunctionComplexity` positions and Istanbul `Position`s.
+    ///
+    /// Istanbul producers are not consistent about `FnEntry.line`: some use
+    /// the declaration line, while others use the body start. The loader
+    /// therefore indexes both the producer's effective line and
+    /// `decl.start`, so multiline TypeScript signatures still match the
+    /// function start that fallow extracts.
     functions: rustc_hash::FxHashMap<(String, u32, u32), f64>,
 }
 
@@ -489,9 +498,8 @@ impl IstanbulFileCoverage {
     /// Step 3 covers arrow-function exports where fallow extracts the binding
     /// identifier (`const myHandler = () => {...}` yields `myHandler`) while
     /// Istanbul records the function as anonymous. `load_istanbul_coverage`
-    /// normalizes missing `FnEntry.line` values to `decl.start.line` so
-    /// standard Istanbul producers still participate in this fallback. See
-    /// issues #155, #166, and #181.
+    /// indexes declaration aliases so standard Istanbul producers still
+    /// participate in this fallback. See issues #155, #166, #181, and #370.
     pub(super) fn lookup(&self, name: &str, line: u32, col: u32) -> Option<f64> {
         // 1. Exact match.
         if let Some(&pct) = self.functions.get(&(name.to_string(), line, col)) {
@@ -510,9 +518,12 @@ impl IstanbulFileCoverage {
             return Some(pct);
         }
         // 3. Anonymous-by-position fallback: among `(anonymous_N)` entries
-        // within ±2 lines, pick the one whose (line, col) is closest. If two
-        // candidates tie on distance, the match is genuinely ambiguous and
-        // we bail rather than silently attribute the wrong coverage.
+        // within ±2 lines, pick the one whose (line, col) is closest. Nearby
+        // lines must also be reasonably close by column so declaration-line
+        // aliases do not match unrelated signatures just because they sit
+        // above a multiline arrow. If two candidates tie on distance, the
+        // match is genuinely ambiguous and we bail rather than silently
+        // attribute the wrong coverage.
         let mut nearest_distance: Option<(u32, u32)> = None;
         let mut nearest_pct: Option<f64> = None;
         let mut tied = false;
@@ -524,6 +535,9 @@ impl IstanbulFileCoverage {
                 continue;
             }
             let dist = (l.abs_diff(line), c.abs_diff(col));
+            if dist.0 > 0 && dist.1 > ANONYMOUS_FALLBACK_MAX_COLUMN_DRIFT {
+                continue;
+            }
             match nearest_distance {
                 None => {
                     nearest_distance = Some(dist);
@@ -663,20 +677,32 @@ pub(super) fn load_istanbul_coverage(
         let mut functions = rustc_hash::FxHashMap::default();
         for (fn_id, fn_entry) in &file_cov.fn_map {
             let coverage_pct = compute_function_statement_coverage(file_cov, fn_id, fn_entry);
-            functions.insert(
-                (
-                    fn_entry.name.clone(),
-                    effective_istanbul_fn_line(fn_entry),
-                    effective_istanbul_fn_col(fn_entry),
-                ),
-                coverage_pct,
-            );
+            insert_istanbul_function_coverage(&mut functions, fn_entry, coverage_pct);
         }
 
         files.insert(canonical, IstanbulFileCoverage { functions });
     }
 
     Ok(IstanbulCoverage { files })
+}
+
+fn insert_istanbul_function_coverage(
+    functions: &mut rustc_hash::FxHashMap<(String, u32, u32), f64>,
+    fn_entry: &oxc_coverage_instrument::FnEntry,
+    coverage_pct: f64,
+) {
+    let name = fn_entry.name.clone();
+    let primary = (
+        name.clone(),
+        effective_istanbul_fn_line(fn_entry),
+        effective_istanbul_fn_col(fn_entry),
+    );
+    functions.insert(primary.clone(), coverage_pct);
+
+    let declaration = (name, fn_entry.decl.start.line, fn_entry.decl.start.column);
+    if declaration != primary {
+        functions.entry(declaration).or_insert(coverage_pct);
+    }
 }
 
 fn effective_istanbul_fn_line(fn_entry: &oxc_coverage_instrument::FnEntry) -> u32 {
@@ -3401,7 +3427,7 @@ mod tests {
     }
 
     #[test]
-    fn load_istanbul_coverage_prefers_explicit_fn_line_over_decl_line() {
+    fn load_istanbul_coverage_indexes_explicit_and_decl_lines() {
         let temp = tempfile::TempDir::new().unwrap();
         let source_path = temp.path().join("src/handler.ts");
         std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
@@ -3434,10 +3460,52 @@ mod tests {
         let canonical_source = dunce::canonicalize(&source_path).unwrap();
         let file_coverage = coverage.get(&canonical_source).unwrap();
 
-        // Preserve the explicit line from `oxc_coverage_instrument` output so
-        // we do not regress the precise-name fast path for existing producers.
+        // Preserve the explicit line from `oxc_coverage_instrument` output,
+        // but also index `decl.start` for Istanbul producers whose `line`
+        // points at the body of a multiline signature.
         assert_eq!(file_coverage.lookup("handleClick", 40, 0), Some(100.0));
-        assert!(file_coverage.lookup("handleClick", 22, 0).is_none());
+        assert_eq!(file_coverage.lookup("handleClick", 22, 13), Some(100.0));
+    }
+
+    #[test]
+    fn load_istanbul_coverage_matches_multiline_async_arrow_decl_alias() {
+        let temp = tempfile::TempDir::new().unwrap();
+        let source_path = temp.path().join("src/actor.ts");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &source_path,
+            "export const elementsFrom = async (\n  locator: AnyLocator,\n  options?: { missingAsEmpty?: boolean },\n): Promise<HTMLElement[]> => {\n  return [];\n};\n",
+        )
+        .unwrap();
+
+        let coverage_path = temp.path().join("coverage-final.json");
+        write_single_file_istanbul_fixture(
+            &coverage_path,
+            &source_path,
+            &serde_json::json!({
+                "0": {
+                    "name": "(anonymous_0)",
+                    "line": 4,
+                    "decl": {
+                        "start": { "line": 1, "column": 28 },
+                        "end": { "line": 4, "column": 26 }
+                    },
+                    "loc": {
+                        "start": { "line": 4, "column": 27 },
+                        "end": { "line": 6, "column": 1 }
+                    }
+                }
+            }),
+            &serde_json::json!({
+                "0": 642
+            }),
+        );
+
+        let coverage = load_istanbul_coverage(&coverage_path, None, None).unwrap();
+        let canonical_source = dunce::canonicalize(&source_path).unwrap();
+        let file_coverage = coverage.get(&canonical_source).unwrap();
+
+        assert_eq!(file_coverage.lookup("elementsFrom", 1, 28), Some(100.0));
     }
 
     // --- IstanbulFileCoverage::lookup ---
@@ -3514,6 +3582,15 @@ mod tests {
         // one anonymous entry within ±2 lines, so fall back to it.
         assert!((fc.lookup("myHandler", 28, 0).unwrap() - 75.0).abs() < f64::EPSILON);
         assert!((fc.lookup("myHandler", 30, 0).unwrap() - 75.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn istanbul_lookup_anonymous_fallback_rejects_nearby_far_column() {
+        let mut functions = rustc_hash::FxHashMap::default();
+        functions.insert(("(anonymous_0)".to_string(), 4, 28), 75.0);
+        let fc = IstanbulFileCoverage { functions };
+
+        assert!(fc.lookup("declaredHelper", 3, 0).is_none());
     }
 
     #[test]
