@@ -1154,56 +1154,13 @@ fn remap_script_with_source_map(
 fn line_offsets_for_script(
     script: &fallow_v8_coverage::ScriptCoverage,
     entry: &SourceMapCacheEntry,
-) -> Option<Vec<u32>> {
+) -> Option<fallow_v8_coverage::LineOffsetTable> {
     if let Some(path) = file_url_to_path(&script.url)
         && let Ok(source) = fs::read_to_string(path)
     {
-        return Some(build_line_offsets_from_source(&source));
+        return Some(fallow_v8_coverage::LineOffsetTable::from_source(&source));
     }
-    build_line_offsets_from_lengths(&entry.line_lengths)
-}
-
-fn build_line_offsets_from_source(source: &str) -> Vec<u32> {
-    let mut line_starts = Vec::with_capacity(source.lines().count().saturating_add(1));
-    line_starts.push(0);
-    let bytes = source.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\n' => {
-                line_starts.push((i + 1) as u32);
-                i += 1;
-            }
-            b'\r' => {
-                let next = if bytes.get(i + 1) == Some(&b'\n') {
-                    i + 2
-                } else {
-                    i + 1
-                };
-                line_starts.push(next as u32);
-                i = next;
-            }
-            _ => i += 1,
-        }
-    }
-    line_starts
-}
-
-fn build_line_offsets_from_lengths(line_lengths: &[u32]) -> Option<Vec<u32>> {
-    if line_lengths.is_empty() {
-        return None;
-    }
-    let mut line_starts = Vec::with_capacity(line_lengths.len());
-    line_starts.push(0);
-    let mut offset = 0u32;
-    for length in line_lengths
-        .iter()
-        .take(line_lengths.len().saturating_sub(1))
-    {
-        offset = offset.saturating_add(*length).saturating_add(1);
-        line_starts.push(offset);
-    }
-    Some(line_starts)
+    fallow_v8_coverage::LineOffsetTable::from_v8_line_lengths(&entry.line_lengths)
 }
 
 fn remap_function(
@@ -1211,7 +1168,7 @@ fn remap_function(
     function: &fallow_v8_coverage::FunctionCoverage,
     entry: &SourceMapCacheEntry,
     sourcemap: &SourceMap,
-    line_offsets: &[u32],
+    line_offsets: &fallow_v8_coverage::LineOffsetTable,
 ) -> Option<RemappedFunction> {
     let outer = function.ranges.first().copied()?;
     let start = offset_to_position(line_offsets, outer.start_offset);
@@ -1268,15 +1225,14 @@ fn remap_function(
     })
 }
 
-fn offset_to_position(line_offsets: &[u32], byte_offset: u32) -> Position {
-    let line_index = match line_offsets.binary_search(&byte_offset) {
-        Ok(exact) => exact,
-        Err(insertion_point) => insertion_point.saturating_sub(1),
-    };
-    let line_start = line_offsets[line_index];
+fn offset_to_position(
+    line_offsets: &fallow_v8_coverage::LineOffsetTable,
+    source_offset: u32,
+) -> Position {
+    let pos = line_offsets.position(source_offset);
     Position {
-        line: line_index as u32 + 1,
-        column: byte_offset.saturating_sub(line_start),
+        line: pos.line,
+        column: pos.column,
     }
 }
 
@@ -2760,6 +2716,85 @@ mod tests {
             "expected remapped file key {key}"
         );
         assert_eq!(parsed[&key]["path"], key);
+        assert_eq!(parsed[&key]["fnMap"]["0"]["name"], "alpha");
+        assert_eq!(parsed[&key]["fnMap"]["0"]["line"], 1);
+        assert_eq!(parsed[&key]["f"]["0"], 3);
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn remaps_v8_offsets_as_utf16_source_positions() {
+        let root = make_temp_dir("coverage-remap-utf16");
+        let src_dir = root.join("src");
+        let dist_dir = root.join("dist");
+        std::fs::create_dir_all(&src_dir)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", src_dir.display()));
+        std::fs::create_dir_all(&dist_dir)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", dist_dir.display()));
+
+        let original = src_dir.join("app.ts");
+        std::fs::write(&original, "export function alpha() {}\n")
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", original.display()));
+
+        let generated = "const smile = \"😀\";\nfunction alpha() {}\n";
+        let generated_path = dist_dir.join("bundle.js");
+        std::fs::write(&generated_path, generated)
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", generated_path.display()));
+        let function_byte_offset = generated
+            .find("function")
+            .expect("generated source should contain function");
+        let function_v8_offset = generated[..function_byte_offset].encode_utf16().count() as u32;
+        assert_ne!(function_v8_offset, function_byte_offset as u32);
+
+        let v8_file = root.join("coverage-v8.json");
+        let v8_json = serde_json::json!({
+            "result": [{
+                "scriptId": "1",
+                "url": file_url(&generated_path),
+                "functions": [{
+                    "functionName": "alpha",
+                    "ranges": [{"startOffset": function_v8_offset, "endOffset": function_v8_offset + 19, "count": 3}],
+                    "isBlockCoverage": false
+                }]
+            }],
+            "source-map-cache": {
+                file_url(&generated_path): {
+                    "url": "bundle.js.map",
+                    "data": {
+                        "version": 3,
+                        "sources": ["../src/app.ts"],
+                        "names": [],
+                        "mappings": ";AAAA"
+                    },
+                    "lineLengths": [20, 19]
+                }
+            }
+        });
+        std::fs::write(&v8_file, serde_json::to_vec(&v8_json).unwrap())
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", v8_file.display()));
+
+        let prepared = prepare_coverage_sources(&v8_file)
+            .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
+
+        assert_eq!(prepared.sources.len(), 1);
+        let CoverageSource::Istanbul { path } = &prepared.sources[0] else {
+            panic!("expected remapped istanbul coverage source");
+        };
+        let output = std::fs::read_to_string(path)
+            .unwrap_or_else(|err| panic!("failed to read remapped coverage {path}: {err}"));
+        let parsed: serde_json::Value = serde_json::from_str(&output)
+            .unwrap_or_else(|err| panic!("failed to parse remapped coverage: {err}"));
+        let key = dunce::canonicalize(&original)
+            .unwrap_or_else(|err| panic!("failed to canonicalize {}: {err}", original.display()))
+            .to_string_lossy()
+            .into_owned();
+
+        assert!(
+            parsed.get(&key).is_some(),
+            "expected remapped file key {key}"
+        );
         assert_eq!(parsed[&key]["fnMap"]["0"]["name"], "alpha");
         assert_eq!(parsed[&key]["fnMap"]["0"]["line"], 1);
         assert_eq!(parsed[&key]["f"]["0"], 3);

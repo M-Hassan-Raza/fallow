@@ -133,17 +133,21 @@ where
     Ok(Option::<u32>::deserialize(deserializer)?.unwrap_or(0))
 }
 
-// -- Byte-offset to line/column mapper -------------------------------------
+// -- V8 offset to line/column mapper ---------------------------------------
 
-/// Pre-computed line-start byte-offset table for converting V8 byte offsets
-/// into Istanbul line/column positions in O(log n) per lookup.
+/// Pre-computed line-start table for converting V8 source offsets into
+/// Istanbul line/column positions in O(log n) per lookup.
+///
+/// V8 reports offsets in JavaScript source positions: UTF-16 code units, not
+/// UTF-8 bytes. Istanbul columns use the same 0-indexed source-position model,
+/// so this table stores line starts in UTF-16 units.
 ///
 /// The source is consumed once at construction; subsequent lookups are
 /// allocation-free.
 #[derive(Debug)]
 pub struct LineOffsetTable {
-    /// Byte offset of the first character of each line. `line_starts[0]` is
-    /// always `0` (the start of the file).
+    /// UTF-16 offset of the first character of each line. `line_starts[0]`
+    /// is always `0` (the start of the file).
     line_starts: Vec<u32>,
 }
 
@@ -154,44 +158,67 @@ impl LineOffsetTable {
     pub fn from_source(source: &str) -> Self {
         let mut line_starts = Vec::with_capacity(source.lines().count() + 1);
         line_starts.push(0);
-        let bytes = source.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            match bytes[i] {
-                b'\n' => {
-                    line_starts.push((i + 1) as u32);
-                    i += 1;
+        let mut offset = 0u32;
+        let mut chars = source.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\n' => {
+                    offset = offset.saturating_add(1);
+                    line_starts.push(offset);
                 }
-                b'\r' => {
-                    let next_offset = if bytes.get(i + 1) == Some(&b'\n') {
-                        i + 2
-                    } else {
-                        i + 1
-                    };
-                    line_starts.push(next_offset as u32);
-                    i = next_offset;
+                '\r' => {
+                    offset = offset.saturating_add(1);
+                    if chars.peek() == Some(&'\n') {
+                        chars.next();
+                        offset = offset.saturating_add(1);
+                    }
+                    line_starts.push(offset);
                 }
-                _ => i += 1,
+                _ => offset = offset.saturating_add(ch.len_utf16() as u32),
             }
         }
         Self { line_starts }
     }
 
-    /// Convert a byte offset to a 1-indexed line + 0-indexed column.
+    /// Build a table from V8's `source-map-cache.lineLengths` data.
+    ///
+    /// `lineLengths` are already measured in JavaScript source positions. The
+    /// cache does not carry line-ending widths, so this preserves the existing
+    /// Node fallback behavior and advances one source position between lines.
+    #[must_use]
+    pub fn from_v8_line_lengths(line_lengths: &[u32]) -> Option<Self> {
+        if line_lengths.is_empty() {
+            return None;
+        }
+
+        let mut line_starts = Vec::with_capacity(line_lengths.len());
+        line_starts.push(0);
+        let mut offset = 0u32;
+        for length in line_lengths
+            .iter()
+            .take(line_lengths.len().saturating_sub(1))
+        {
+            offset = offset.saturating_add(*length).saturating_add(1);
+            line_starts.push(offset);
+        }
+        Some(Self { line_starts })
+    }
+
+    /// Convert a V8 source offset to a 1-indexed line + 0-indexed column.
     ///
     /// Offsets at or past the end of the source clamp to the last line +
     /// remaining column.
     #[must_use]
-    pub fn position(&self, byte_offset: u32) -> IstanbulPosition {
-        // Binary search for the last line_start <= byte_offset.
-        let line_zero_indexed = match self.line_starts.binary_search(&byte_offset) {
+    pub fn position(&self, source_offset: u32) -> IstanbulPosition {
+        // Binary search for the last line_start <= source_offset.
+        let line_zero_indexed = match self.line_starts.binary_search(&source_offset) {
             Ok(exact) => exact,
             Err(insertion_point) => insertion_point.saturating_sub(1),
         };
         let line_start = self.line_starts[line_zero_indexed];
         IstanbulPosition {
             line: (line_zero_indexed as u32) + 1,
-            column: byte_offset.saturating_sub(line_start),
+            column: source_offset.saturating_sub(line_start),
         }
     }
 }
@@ -288,6 +315,34 @@ mod tests {
         let table = LineOffsetTable::from_source("a\rbb");
         assert_eq!(table.position(2).line, 2);
         assert_eq!(table.position(2).column, 0);
+    }
+
+    #[test]
+    fn line_table_uses_utf16_offsets_for_non_ascii_source() {
+        let source = "const smile = \"😀\";\nfunction after_emoji() {}\n";
+        let function_byte_offset = source
+            .find("function")
+            .expect("test source should contain function");
+        let function_v8_offset = source[..function_byte_offset].encode_utf16().count() as u32;
+
+        assert_ne!(function_v8_offset, function_byte_offset as u32);
+
+        let table = LineOffsetTable::from_source(source);
+        let pos = table.position(function_v8_offset);
+
+        assert_eq!(pos.line, 2);
+        assert_eq!(pos.column, 0);
+    }
+
+    #[test]
+    fn line_table_builds_from_v8_line_lengths() {
+        let table = LineOffsetTable::from_v8_line_lengths(&[20, 12])
+            .expect("line lengths should build table");
+
+        assert_eq!(table.position(20).line, 1);
+        assert_eq!(table.position(20).column, 20);
+        assert_eq!(table.position(21).line, 2);
+        assert_eq!(table.position(21).column, 0);
     }
 
     #[test]
