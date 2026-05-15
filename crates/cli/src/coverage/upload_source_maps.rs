@@ -171,6 +171,11 @@ fn parse_repo_name_from_url(url: &str) -> Option<String> {
         .trim_end_matches('/')
         .trim_end_matches(".git")
         .trim_end_matches('/');
+    if !stripped_suffix.contains(':')
+        && let Some(project_id) = take_last_two_segments(stripped_suffix)
+    {
+        return Some(project_id);
+    }
     if let Some((_, path)) = stripped_suffix.split_once(':')
         && let Some(project_id) = take_last_two_segments(path)
     {
@@ -748,6 +753,10 @@ mod tests {
         assert_eq!(
             parse_repo_name_from_url("ssh://git@gitlab.com/acme/team/widgets"),
             Some("team/widgets".to_owned())
+        );
+        assert_eq!(
+            parse_repo_name_from_url("acme/widgets"),
+            Some("acme/widgets".to_owned())
         );
     }
 
