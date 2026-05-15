@@ -111,6 +111,11 @@ struct RemappedFunction {
     hits: u32,
 }
 
+struct RemappedScript {
+    functions: Vec<RemappedFunction>,
+    residual_script: Option<fallow_v8_coverage::ScriptCoverage>,
+}
+
 #[derive(Debug, Clone)]
 struct AccumulatedFunction {
     entry: FnEntry,
@@ -1077,7 +1082,10 @@ fn preprocess_v8_coverage_file(
             residual_scripts.push(script);
             continue;
         };
-        merge_remapped_functions(&mut remapped_files, mapped);
+        merge_remapped_functions(&mut remapped_files, mapped.functions);
+        if let Some(residual_script) = mapped.residual_script {
+            residual_scripts.push(residual_script);
+        }
     }
 
     if remapped_files.is_empty() {
@@ -1138,17 +1146,33 @@ fn ensure_temp_dir(temp_dir: &mut Option<TempDir>) -> Result<&Path, String> {
 fn remap_script_with_source_map(
     script: &fallow_v8_coverage::ScriptCoverage,
     entry: &SourceMapCacheEntry,
-) -> Option<Vec<RemappedFunction>> {
+) -> Option<RemappedScript> {
     let sourcemap = SourceMap::from_json(&entry.data.to_string()).ok()?;
     let offsets = line_offsets_for_script(script, entry)?;
     let mut remapped = Vec::new();
+    let mut residual_functions = Vec::new();
 
     for function in &script.functions {
-        let mapped = remap_function(script, function, entry, &sourcemap, &offsets)?;
-        remapped.push(mapped);
+        match remap_function(script, function, entry, &sourcemap, &offsets) {
+            Some(mapped) => remapped.push(mapped),
+            None => residual_functions.push(function.clone()),
+        }
     }
 
-    (!remapped.is_empty()).then_some(remapped)
+    if remapped.is_empty() {
+        return None;
+    }
+
+    let residual_script = (!residual_functions.is_empty()).then(|| {
+        let mut script = script.clone();
+        script.functions = residual_functions;
+        script
+    });
+
+    Some(RemappedScript {
+        functions: remapped,
+        residual_script,
+    })
 }
 
 fn line_offsets_for_script(
@@ -2804,7 +2828,7 @@ mod tests {
     }
 
     #[test]
-    fn falls_back_to_raw_v8_when_any_function_in_script_cannot_be_remapped() {
+    fn keeps_mapped_functions_when_other_functions_cannot_be_remapped() {
         let root = make_temp_dir("coverage-remap-partial");
         let src_dir = root.join("src");
         let dist_dir = root.join("dist");
@@ -2854,11 +2878,42 @@ mod tests {
         let prepared = prepare_coverage_sources(&v8_file)
             .unwrap_or_else(|err| panic!("failed to preprocess coverage: {err}"));
 
-        assert_eq!(prepared.sources.len(), 1);
-        assert!(matches!(
-            &prepared.sources[0],
-            CoverageSource::V8 { path } if path.ends_with("coverage-v8.json")
-        ));
+        assert_eq!(prepared.sources.len(), 2);
+        let CoverageSource::Istanbul {
+            path: remapped_path,
+        } = &prepared.sources[0]
+        else {
+            panic!("expected remapped istanbul coverage source");
+        };
+        let remapped_output = std::fs::read_to_string(remapped_path).unwrap_or_else(|err| {
+            panic!("failed to read remapped coverage {remapped_path}: {err}")
+        });
+        let remapped: serde_json::Value = serde_json::from_str(&remapped_output)
+            .unwrap_or_else(|err| panic!("failed to parse remapped coverage: {err}"));
+        let key = dunce::canonicalize(&original)
+            .unwrap_or_else(|err| panic!("failed to canonicalize {}: {err}", original.display()))
+            .to_string_lossy()
+            .into_owned();
+
+        assert_eq!(remapped[&key]["fnMap"]["0"]["name"], "alpha");
+        assert_eq!(remapped[&key]["f"]["0"], 3);
+
+        let CoverageSource::V8 {
+            path: residual_path,
+        } = &prepared.sources[1]
+        else {
+            panic!("expected residual v8 coverage source");
+        };
+        let residual_output = std::fs::read_to_string(residual_path).unwrap_or_else(|err| {
+            panic!("failed to read residual coverage {residual_path}: {err}")
+        });
+        let residual: serde_json::Value = serde_json::from_str(&residual_output)
+            .unwrap_or_else(|err| panic!("failed to parse residual coverage: {err}"));
+        let residual_functions = residual["result"][0]["functions"]
+            .as_array()
+            .expect("residual functions array");
+        assert_eq!(residual_functions.len(), 1);
+        assert_eq!(residual_functions[0]["functionName"], "broken");
 
         std::fs::remove_dir_all(&root)
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
