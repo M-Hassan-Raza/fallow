@@ -166,16 +166,37 @@ fn git_origin_repo_name(root: &Path) -> Option<String> {
 }
 
 fn parse_repo_name_from_url(url: &str) -> Option<String> {
-    let trimmed = url.trim().trim_end_matches(".git").trim_end_matches('/');
-    let last = trimmed
-        .rsplit(['/', ':'])
-        .find(|segment| !segment.trim().is_empty())?;
-    let repo = last.trim();
-    if repo.is_empty() {
-        None
-    } else {
-        Some(repo.to_owned())
+    let stripped_suffix = url
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .trim_end_matches('/');
+    if let Some((_, path)) = stripped_suffix.split_once(':')
+        && let Some(project_id) = take_last_two_segments(path)
+    {
+        return Some(project_id);
     }
+    if let Some(path_part) = stripped_suffix.split("://").nth(1)
+        && let Some((_, tail)) = path_part.split_once('/')
+        && let Some(project_id) = take_last_two_segments(tail)
+    {
+        return Some(project_id);
+    }
+    None
+}
+
+fn take_last_two_segments(path: &str) -> Option<String> {
+    let mut parts: Vec<&str> = path
+        .trim_end_matches('/')
+        .split('/')
+        .filter(|segment| !segment.trim().is_empty())
+        .collect();
+    if parts.len() < 2 {
+        return None;
+    }
+    let repo = parts.pop()?.trim();
+    let owner = parts.pop()?.trim();
+    (!owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}"))
 }
 
 fn validate_repo_name(repo: &str) -> Result<&str, UploadSourceMapsError> {
@@ -718,15 +739,15 @@ mod tests {
     fn parses_repo_name_from_common_urls() {
         assert_eq!(
             parse_repo_name_from_url("https://github.com/acme/widgets.git"),
-            Some("widgets".to_owned())
+            Some("acme/widgets".to_owned())
         );
         assert_eq!(
             parse_repo_name_from_url("git@github.com:acme/widgets.git"),
-            Some("widgets".to_owned())
+            Some("acme/widgets".to_owned())
         );
         assert_eq!(
             parse_repo_name_from_url("ssh://git@gitlab.com/acme/team/widgets"),
-            Some("widgets".to_owned())
+            Some("team/widgets".to_owned())
         );
     }
 
