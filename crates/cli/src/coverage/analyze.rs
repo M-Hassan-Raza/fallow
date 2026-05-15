@@ -832,7 +832,7 @@ fn match_cloud_function(
     static_index: &StaticIndex,
 ) -> Option<StaticFunctionInfo> {
     let path = normalize_runtime_path(Path::new(&function.file_path));
-    let line = function.start_line.or(function.line_number).unwrap_or(0);
+    let line = function.start_line.or(function.line_number)?;
     if let Some(info) =
         static_index
             .by_key
@@ -843,17 +843,54 @@ fn match_cloud_function(
     static_index
         .by_path_name
         .get(&(path, function.function_name.clone()))
-        .and_then(|candidates| {
-            candidates
-                .iter()
-                .find(|candidate| {
-                    let end = function.end_line.unwrap_or(candidate.end_line);
-                    candidate.start_line.abs_diff(line) <= 5
-                        && candidate.end_line.abs_diff(end) <= 5
-                })
-                .cloned()
-                .or_else(|| candidates.first().cloned())
-        })
+        .and_then(|candidates| nearest_cloud_candidate(candidates, line, function.end_line))
+}
+
+fn nearest_cloud_candidate(
+    candidates: &[StaticFunctionInfo],
+    start_line: u32,
+    end_line: Option<u32>,
+) -> Option<StaticFunctionInfo> {
+    let mut best: Option<(&StaticFunctionInfo, (u32, u32))> = None;
+    let mut tied = false;
+
+    for candidate in candidates {
+        let start_delta = candidate.start_line.abs_diff(start_line);
+        if start_delta > 5 {
+            continue;
+        }
+        let end_delta = match end_line {
+            Some(line) => {
+                let delta = candidate.end_line.abs_diff(line);
+                if delta > 5 {
+                    continue;
+                }
+                delta
+            }
+            None => 0,
+        };
+        let distance = (start_delta, end_delta);
+        match best {
+            None => {
+                best = Some((candidate, distance));
+                tied = false;
+            }
+            Some((_, current)) if distance < current => {
+                best = Some((candidate, distance));
+                tied = false;
+            }
+            Some((_, current)) if distance == current => {
+                tied = true;
+            }
+            Some(_) => {}
+        }
+    }
+
+    if tied {
+        None
+    } else {
+        best.map(|(candidate, _)| candidate.clone())
+    }
 }
 
 fn normalize_runtime_path(path: &Path) -> String {
@@ -1153,6 +1190,46 @@ mod tests {
     }
 
     #[test]
+    fn cloud_match_rejects_same_name_when_line_does_not_match() {
+        let static_index = static_index_with(vec![
+            static_info("src/api.ts", "handler", 10, 20),
+            static_info("src/api.ts", "handler", 80, 90),
+        ]);
+        let function = cloud_function("src/api.ts", "handler", Some(40), Some(40), Some(50));
+
+        assert!(match_cloud_function(&function, &static_index).is_none());
+    }
+
+    #[test]
+    fn cloud_match_allows_small_line_drift() {
+        let static_index = static_index_with(vec![static_info("src/api.ts", "handler", 10, 20)]);
+        let function = cloud_function("src/api.ts", "handler", Some(12), Some(12), Some(22));
+
+        let matched = match_cloud_function(&function, &static_index).expect("nearby line matches");
+        assert_eq!(matched.start_line, 10);
+        assert_eq!(matched.end_line, 20);
+    }
+
+    #[test]
+    fn cloud_match_requires_line_data_for_fuzzy_match() {
+        let static_index = static_index_with(vec![static_info("src/api.ts", "handler", 10, 20)]);
+        let function = cloud_function("src/api.ts", "handler", None, None, Some(20));
+
+        assert!(match_cloud_function(&function, &static_index).is_none());
+    }
+
+    #[test]
+    fn cloud_match_rejects_ambiguous_fuzzy_match() {
+        let static_index = static_index_with(vec![
+            static_info("src/api.ts", "handler", 10, 20),
+            static_info("src/api.ts", "handler", 14, 20),
+        ]);
+        let function = cloud_function("src/api.ts", "handler", Some(12), Some(12), Some(20));
+
+        assert!(match_cloud_function(&function, &static_index).is_none());
+    }
+
+    #[test]
     fn cloud_never_called_static_used_emits_review_runtime_action() {
         let actions = runtime_actions(RuntimeCoverageVerdict::ReviewRequired);
         assert_eq!(actions.len(), 1);
@@ -1353,6 +1430,57 @@ mod tests {
                 deployments_observed: 0,
             },
             actions: vec![],
+        }
+    }
+
+    fn static_info(path: &str, name: &str, start_line: u32, end_line: u32) -> StaticFunctionInfo {
+        StaticFunctionInfo {
+            path: PathBuf::from(path),
+            name: name.to_owned(),
+            start_line,
+            end_line,
+            static_used: false,
+            test_covered: false,
+            cyclomatic: 1,
+            caller_count: 0,
+            owner_count: None,
+        }
+    }
+
+    fn static_index_with(functions: Vec<StaticFunctionInfo>) -> StaticIndex {
+        let mut static_index = StaticIndex::default();
+        for function in functions {
+            let path = normalize_runtime_path(&function.path);
+            static_index.by_key.insert(
+                (path.clone(), function.name.clone(), function.start_line),
+                function.clone(),
+            );
+            static_index
+                .by_path_name
+                .entry((path, function.name.clone()))
+                .or_default()
+                .push(function);
+        }
+        static_index
+    }
+
+    fn cloud_function(
+        path: &str,
+        name: &str,
+        line_number: Option<u32>,
+        start_line: Option<u32>,
+        end_line: Option<u32>,
+    ) -> CloudRuntimeFunction {
+        CloudRuntimeFunction {
+            file_path: path.to_owned(),
+            function_name: name.to_owned(),
+            line_number,
+            start_line,
+            end_line,
+            hit_count: Some(0),
+            tracking_state: CloudTrackingState::NeverCalled,
+            deployments_observed: 1,
+            untracked_reason: None,
         }
     }
 
