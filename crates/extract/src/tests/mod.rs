@@ -102,3 +102,35 @@ fn parses_gts_with_multi_template_blocks() {
         "default export should be extracted",
     );
 }
+
+/// Regression test for issue #379: a `.gts` file that uses the canonical
+/// template-only-component shape (`export default <template>...</template>`
+/// with no `const` wrapper) must still parse the import statement and the
+/// default export.
+///
+/// Before the keyword-aware `is_expression_position` fix, the previous
+/// non-whitespace byte before `<template>` was `t` (end of `default`),
+/// which fell through to blank-out and left `export default ;`, a
+/// TypeScript syntax error that made oxc bail and drop every import.
+#[test]
+fn parses_gts_with_standalone_default_template() {
+    let source = "import Icon from 'my-app/components/icon';\n\
+                  \n\
+                  export default <template>\n  <span class=\"badge\"><Icon /> badge</span>\n</template>\n";
+
+    let info = parse_source_to_module(FileId(0), Path::new("badge.gts"), source, 0, false);
+
+    assert_eq!(
+        info.imports.len(),
+        1,
+        "import statement should be extracted; got {:?}",
+        info.imports.iter().map(|i| &i.source).collect::<Vec<_>>()
+    );
+    assert_eq!(info.imports[0].source, "my-app/components/icon");
+    assert!(
+        info.exports
+            .iter()
+            .any(|e| matches!(e.name, fallow_types::extract::ExportName::Default)),
+        "default export should be extracted",
+    );
+}

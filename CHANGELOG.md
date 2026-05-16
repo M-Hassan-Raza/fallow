@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Standalone `export default <template>...</template>` in `.gts` files now extracts imports and the default export.** The v2.75.0 multi-template fix only treated single-byte expression delimiters (`=`, `,`, `(`, `?`, `:`) as expression position, so the canonical template-only-component shape (no `const` wrapper) fell through to blank-out, leaving `export default ;`, a TypeScript syntax error that made oxc bail and drop every import in the file. The stripper now also walks back through identifier bytes and matches against the expression-prefix keyword set `{default, return, throw, yield, await, new}`, with full-identifier comparison so user bindings like `mydefault` or `$return` do not false-positive. `CACHE_VERSION` bumped 78 to 79 so the fix takes effect on warm caches. (Closes [#379](https://github.com/fallow-rs/fallow/issues/379).)
+
 ## [2.75.0] - 2026-05-16
 
 ### Added

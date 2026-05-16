@@ -115,24 +115,63 @@ pub fn strip_glimmer_templates(source: &str) -> Option<String> {
 
 /// Return `true` when the byte at `pos` opens a template in JS/TS expression
 /// position. Heuristic: walk back over whitespace and check the previous
-/// non-whitespace byte against a small set of expression-only delimiters.
+/// non-whitespace byte against a small set of expression-only delimiters,
+/// then fall back to checking whether the byte ends an expression-prefix
+/// keyword (`default`, `return`, `throw`, `yield`, `await`, `new`).
 ///
 /// Covered shapes:
 /// - assignment / declaration initializer: `const x = <template>...`
 /// - argument: `foo(<template>...)`, `decorator(<template>...)`
 /// - sequence expression: `(a, <template>...)`
 /// - ternary: `cond ? <template>... : <template>...`
+/// - standalone default export: `export default <template>...`
+/// - return / throw / yield / await / new: `return <template>...`
 ///
 /// Class-body templates land on `{`, `;`, or `}` (after a prior method
 /// body), none of which appear in the set, so they fall through to the
-/// blank-out branch.
+/// blank-out branch. Identifier-byte lookback collects the FULL identifier
+/// ending at `pos` and only matches against the keyword set, so a user
+/// binding like `mydefault` or `$return` falls through correctly.
 fn is_expression_position(bytes: &[u8], pos: usize) -> bool {
-    let prev = bytes[..pos]
-        .iter()
-        .rev()
-        .copied()
-        .find(|b| !matches!(*b, b' ' | b'\t' | b'\n' | b'\r'));
-    matches!(prev, Some(b'=' | b',' | b'(' | b'?' | b':'))
+    let mut idx = pos;
+    while idx > 0 && matches!(bytes[idx - 1], b' ' | b'\t' | b'\n' | b'\r') {
+        idx -= 1;
+    }
+    if idx == 0 {
+        return false;
+    }
+    let prev = bytes[idx - 1];
+    if matches!(prev, b'=' | b',' | b'(' | b'?' | b':') {
+        return true;
+    }
+    if !is_identifier_byte(prev) {
+        return false;
+    }
+    let ident = prev_identifier(bytes, idx);
+    matches!(
+        ident,
+        b"default" | b"return" | b"throw" | b"yield" | b"await" | b"new"
+    )
+}
+
+/// Return `true` for bytes that can appear inside an ASCII JS/TS identifier.
+/// Includes `$` because it is a legal identifier byte in JS; widening the
+/// walk-back boundary to `$` means user identifiers like `$default` collect
+/// the full `$default` rather than the suffix `default`, avoiding a false
+/// positive against the keyword set.
+fn is_identifier_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_' || b == b'$'
+}
+
+/// Collect the identifier ending at `end` by walking back while the bytes
+/// are identifier bytes. Returns the identifier slice, which may be empty
+/// if `bytes[end - 1]` is not an identifier byte.
+fn prev_identifier(bytes: &[u8], end: usize) -> &[u8] {
+    let mut start = end;
+    while start > 0 && is_identifier_byte(bytes[start - 1]) {
+        start -= 1;
+    }
+    &bytes[start..end]
 }
 
 #[cfg(test)]
@@ -239,6 +278,61 @@ mod tests {
         // Previous non-whitespace byte is `(`: expression form.
         assert!(stripped.contains("@Some((`"));
         assert!(stripped.contains("`))"));
+        assert_eq!(stripped.len(), source.len());
+    }
+
+    /// Regression for issue #379: `export default <template>...</template>`
+    /// (no const wrapper) is the canonical template-only-component shape.
+    /// Without keyword lookback, the previous non-whitespace byte `t` from
+    /// `default` falls through to blank-out, leaving `export default ;`
+    /// which is a TypeScript syntax error.
+    #[test]
+    fn handles_template_after_export_default() {
+        let source =
+            "import Icon from './icon';\nexport default <template>\n  <Icon />\n</template>\n";
+        let stripped = strip_glimmer_templates(source).expect("template should be stripped");
+
+        assert!(stripped.contains("import Icon from './icon';"));
+        assert!(stripped.contains("export default (`"));
+        assert!(stripped.contains("`)"));
+        assert!(!stripped.contains("<template>"));
+        assert_eq!(stripped.len(), source.len());
+    }
+
+    #[test]
+    fn handles_template_after_return_keyword() {
+        let source = "function build() {\n  return <template>hi</template>;\n}\n";
+        let stripped = strip_glimmer_templates(source).expect("template should be stripped");
+
+        assert!(stripped.contains("return (`"));
+        assert!(stripped.contains("`);"));
+        assert_eq!(stripped.len(), source.len());
+    }
+
+    #[test]
+    fn handles_template_after_throw_keyword() {
+        let source = "function fail() {\n  throw <template>x</template>;\n}\n";
+        let stripped = strip_glimmer_templates(source).expect("template should be stripped");
+
+        assert!(stripped.contains("throw (`"));
+        assert!(stripped.contains("`);"));
+        assert_eq!(stripped.len(), source.len());
+    }
+
+    /// User identifiers that happen to end with a keyword suffix must NOT
+    /// trigger expression-form stripping. The walk-back collects the FULL
+    /// identifier (`mydefault`), which does not match the keyword set, so
+    /// the stripper falls through to blank-out.
+    #[test]
+    fn identifier_ending_in_keyword_suffix_falls_through_to_blank() {
+        // Not valid JS as written, but exercises the walk-back logic:
+        // previous identifier is `mydefault`, not `default`, so we must
+        // NOT enter expression form.
+        let source = "mydefault <template>x</template>\n";
+        let stripped = strip_glimmer_templates(source).expect("template should be stripped");
+
+        assert!(!stripped.contains("(`"));
+        assert!(!stripped.contains("<template>"));
         assert_eq!(stripped.len(), source.len());
     }
 }
