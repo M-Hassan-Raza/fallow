@@ -47,3 +47,58 @@ fn parses_glimmer_typescript_as_typescript() {
             .any(|export| export.name.matches_str("ServiceRef"))
     );
 }
+
+/// Regression test for issue #375: a `.gts` file containing both a
+/// module-level template expression (assigned to const) and a class-body
+/// template must still parse all imports and the default export.
+///
+/// Before the context-aware stripping fix, the module-level template was
+/// blanked to spaces, leaving `const Wrapper: TOC<...> = ;` which is a
+/// TypeScript syntax error. oxc bailed and returned zero imports, causing
+/// every referenced component to be reported as unused.
+#[test]
+fn parses_gts_with_multi_template_blocks() {
+    let source = "import type {TOC} from '@ember/component/template-only';\n\
+                  import Component from '@glimmer/component';\n\
+                  import BillingInfo from 'my-app/components/billing-info';\n\
+                  \n\
+                  const Wrapper: TOC<{ Blocks: { default: [] } }> = <template>\n  <div class=\"wrapper\">{{yield}}</div>\n</template>;\n\
+                  \n\
+                  export default class InvoiceDetails extends Component {\n  <template>\n    <Wrapper>\n      <BillingInfo />\n    </Wrapper>\n  </template>\n}\n";
+
+    let info = parse_source_to_module(
+        FileId(0),
+        Path::new("invoice-details.gts"),
+        source,
+        0,
+        false,
+    );
+
+    assert_eq!(
+        info.imports.len(),
+        3,
+        "all three import statements should be extracted; got {:?}",
+        info.imports.iter().map(|i| &i.source).collect::<Vec<_>>()
+    );
+    assert!(
+        info.imports
+            .iter()
+            .any(|i| i.source == "@ember/component/template-only"),
+    );
+    assert!(
+        info.imports
+            .iter()
+            .any(|i| i.source == "@glimmer/component")
+    );
+    assert!(
+        info.imports
+            .iter()
+            .any(|i| i.source == "my-app/components/billing-info"),
+    );
+    assert!(
+        info.exports
+            .iter()
+            .any(|e| matches!(e.name, fallow_types::extract::ExportName::Default)),
+        "default export should be extracted",
+    );
+}
