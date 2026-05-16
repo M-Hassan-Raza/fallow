@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`vi.mock()` without a factory no longer surfaces a phantom `unresolved-import` pointing at a `__mocks__/` path the user never wrote.** Fallow synthesises a `<dir>/__mocks__/<file>` dynamic import next to every `vi.mock('./foo')` call so vitest's optional manual-mock convention credits the sibling when it does exist. When the sibling did NOT exist on disk, the synthesised path flowed through to `unresolved-imports` as if the user had typed it, producing findings like `@/utils/__mocks__/exportElementAsPng` for projects that rely on vitest's in-memory auto-mocking. The synthesised entry is now marked speculative and the resolver drops it silently when the target can't be found; the credit path is unchanged (a `__mocks__/<file>` that DOES exist on disk is still credited as referenced). Marking is plumbed through the extract cache (`CACHE_VERSION` 76 -> 77) so the change takes effect even on warm caches. (Closes [#378](https://github.com/fallow-rs/fallow/issues/378). Thanks [@cloud-walker](https://github.com/cloud-walker) for the report.)
+
 ## [2.74.0] - 2026-05-14
 
 ### Added
