@@ -359,7 +359,14 @@ impl FallowConfig {
         // (`features`) that auto-discovery later replaces with concrete child
         // zones (`features/auth`, `features/billing`). Moving validation above
         // expansion makes the preset look like it references undefined zones.
-        boundaries.expand_auto_discover(&root);
+        //
+        // The returned `logical_groups` records the pre-expansion parent
+        // identity (name, children, the user's verbatim `autoDiscover` paths,
+        // the authored rule, and discovery status). It is stashed onto
+        // `ResolvedBoundaryConfig` further down so `fallow list --boundaries
+        // --format json` can surface the user's grouping intent even after
+        // the parent name is flattened out of `zones[]`. Closes issue #373.
+        let logical_groups = boundaries.expand_auto_discover(&root);
 
         // Validate and compile architecture boundary config
         let validation_errors = boundaries.validate_zone_references();
@@ -372,7 +379,11 @@ impl FallowConfig {
         for message in boundaries.validate_root_prefixes() {
             tracing::error!("{message}");
         }
-        let boundaries = boundaries.resolve();
+        let mut boundaries = boundaries.resolve();
+        // `expand_auto_discover` is the only producer of `logical_groups`;
+        // `resolve()` has no view of the pre-expansion state and leaves the
+        // field empty. Stitch it back together here.
+        boundaries.logical_groups = logical_groups;
 
         // Pre-compile override glob matchers
         let overrides = self

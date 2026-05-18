@@ -22,7 +22,7 @@ MCP server exposing fallow analysis as tools for AI agents. Stdio transport, wra
 - `fix_preview` - dry-run auto-fix (`fallow fix --dry-run --format json`)
 - `fix_apply` - apply auto-fixes (`fallow fix --yes --format json`), destructive
 - `project_info` - project metadata (`fallow list --format json`), supports section params (`entry_points`, `files`, `plugins`, `boundaries`)
-- `list_boundaries` - architecture boundary zones and rules (`fallow list --boundaries --format json`)
+- `list_boundaries` - architecture boundary zones, access rules, and pre-expansion `autoDiscover` `logical_groups[]` carrying the user-authored parent name + verbatim paths + status enum + summed file_count (`fallow list --boundaries --format json`). Use when the agent needs the user's grouping intent, not just the expanded child zones.
 - `feature_flags` - detect feature flag patterns (`fallow flags --format json`), supports `flag_type`, `confidence`, `dead_code_only` params
 - `trace_export` - trace why an export is used/unused (`fallow dead-code --trace FILE:EXPORT_NAME --format json`). Required `file` and `export_name` params. Returns file reachability, entry-point status, direct references, re-export chains, and a reason summary. Use before deleting a supposedly-unused export.
 - `trace_file` - trace all graph edges for a file (`fallow dead-code --trace-file PATH --format json`). Required `file` param. Returns reachability, entry-point status, exports, imports-from, imported-by, and re-exports. Use to decide whether a file is isolated, barrel-only, or imported by live entry points.

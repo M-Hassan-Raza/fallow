@@ -870,3 +870,130 @@ pub enum GroupByMode {
     /// Group by GitLab CODEOWNERS `[Section]` header name.
     Section,
 }
+
+// ── list --boundaries --format json envelope ────────────────────────
+//
+// The runtime path builds the wire shape via `serde_json::json!` in
+// `crates/cli/src/list.rs::boundary_data_to_json`; the typed structs below
+// exist so the drift gate can lock the schema shape against Rust source
+// (mirrors the established `CodeClimateOutput` / `ReviewEnvelopeOutput`
+// pattern). A follow-up that swaps the runtime builder over to typed
+// construction can land independently.
+
+/// Envelope emitted by `fallow list --boundaries --format json`. Surfaces
+/// the architecture boundary zones, rules, and (issue #373) the user's
+/// pre-expansion `autoDiscover` logical groups so consumers can render
+/// grouping intent that `expand_auto_discover` would otherwise flatten out
+/// of `zones[]`.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow list --boundaries --format json")
+)]
+pub struct ListBoundariesOutput {
+    /// The boundaries section. The list command can also emit `files`,
+    /// `plugins`, `entry_points` siblings under additional flags; those
+    /// shapes are not part of this envelope today.
+    pub boundaries: BoundariesListing,
+}
+
+/// `boundaries` block carried by [`ListBoundariesOutput`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundariesListing {
+    /// `false` when the project has no `boundaries` configured; `true`
+    /// otherwise. When `false` every array below is empty and every count
+    /// is `0` (parity is enforced so consumers can read the counts without
+    /// first branching on this flag).
+    pub configured: bool,
+    /// Length of [`Self::zones`]; emitted alongside the array for parity
+    /// with `rule_count` / `logical_group_count`.
+    pub zone_count: usize,
+    /// Boundary zones after preset and `autoDiscover` expansion.
+    pub zones: Vec<BoundariesListZone>,
+    /// Length of [`Self::rules`].
+    pub rule_count: usize,
+    /// Boundary import rules, each `from -> allow[]`.
+    pub rules: Vec<BoundariesListRule>,
+    /// Length of [`Self::logical_groups`]. Always present (issue #373).
+    pub logical_group_count: usize,
+    /// Pre-expansion `autoDiscover` groups carrying the user-authored parent
+    /// name and grouping intent (issue #373).
+    pub logical_groups: Vec<BoundariesListLogicalGroup>,
+}
+
+/// A boundary zone after preset and `autoDiscover` expansion. Each entry
+/// classifies files into a single zone via glob patterns.
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundariesListZone {
+    /// Zone identifier as referenced in rules (e.g. `app`, `features/auth`).
+    pub name: String,
+    /// Compiled glob patterns. Children of an `autoDiscover` parent each
+    /// carry a single pattern like `src/features/auth/**`.
+    pub patterns: Vec<String>,
+    /// Number of discovered files classified into this zone.
+    pub file_count: usize,
+}
+
+/// A boundary import rule, expanded to operate on concrete child zone
+/// names after `autoDiscover` flattening. The user's pre-expansion rule
+/// (keyed on the logical parent name, if any) is preserved on the
+/// corresponding [`BoundariesListLogicalGroup::authored_rule`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundariesListRule {
+    /// Source zone the rule applies to.
+    pub from: String,
+    /// Target zones [`Self::from`] is allowed to import from. Self-imports
+    /// are always allowed implicitly.
+    pub allow: Vec<String>,
+}
+
+/// A pre-expansion `autoDiscover` logical group surfaced for observability
+/// (issue #373). Captured during `expand_auto_discover` so consumers can
+/// see the user-authored parent name and grouping intent after expansion
+/// would otherwise flatten it out of [`BoundariesListing::zones`].
+#[derive(Debug, Clone, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct BoundariesListLogicalGroup {
+    /// Logical parent zone name as authored by the user.
+    pub name: String,
+    /// Discovered child zone names in stable directory-sorted order.
+    pub children: Vec<String>,
+    /// Verbatim `autoDiscover` strings from the user's config (not
+    /// normalized) so round-trip tooling can match byte-for-byte.
+    pub auto_discover: Vec<String>,
+    /// Why [`Self::children`] is what it is.
+    pub status: fallow_config::LogicalGroupStatus,
+    /// Position of the parent zone in the user's pre-expansion `zones[]`.
+    pub source_zone_index: usize,
+    /// Sum of `file_count` across [`Self::children`] plus the fallback
+    /// zone's `file_count` when present.
+    pub file_count: usize,
+    /// Pre-expansion rule keyed on the parent name, when the user wrote
+    /// one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authored_rule: Option<fallow_config::AuthoredRule>,
+    /// When the parent zone also carried explicit `patterns`, it stayed in
+    /// [`BoundariesListing::zones`] as a fallback classifier; this is its
+    /// name. Equal to [`Self::name`] when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_zone: Option<String>,
+    /// Parent zone indices merged into this group when the user declared
+    /// the same parent name multiple times.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merged_from: Option<Vec<usize>>,
+    /// Echo of the parent zone's `root` (subtree scope) as the user wrote
+    /// it. `None` when the parent had no `root` field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_zone_root: Option<String>,
+    /// Parallel to [`Self::children`]: for child at index `i`, the index
+    /// into [`Self::auto_discover`] of the path that produced it. Empty
+    /// when only one path was authored (every child trivially maps to
+    /// index 0). `serde(default)` keeps the schema's `required` array in
+    /// step with the runtime's `skip_serializing_if` behavior.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_source_indices: Vec<usize>,
+}

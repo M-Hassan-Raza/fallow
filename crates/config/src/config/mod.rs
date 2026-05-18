@@ -10,8 +10,8 @@ mod rules;
 mod used_class_members;
 
 pub use boundaries::{
-    BoundaryConfig, BoundaryPreset, BoundaryRule, BoundaryZone, ResolvedBoundaryConfig,
-    ResolvedBoundaryRule, ResolvedZone,
+    AuthoredRule, BoundaryConfig, BoundaryPreset, BoundaryRule, BoundaryZone, LogicalGroup,
+    LogicalGroupStatus, ResolvedBoundaryConfig, ResolvedBoundaryRule, ResolvedZone,
 };
 pub use duplicates_config::{
     DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,

@@ -231,7 +231,7 @@ impl FallowMcp {
     }
 
     #[tool(
-        description = "List architecture boundary zones and access rules configured for the project. Returns zone definitions (name, glob patterns, matched file count) and access rules (which zones may import from which). If boundaries are not configured, returns {\"configured\": false}; in that case, boundary violation checks will find no issues and can be skipped. Use this to understand the project's architecture constraints before running analysis.",
+        description = "List architecture boundary zones and access rules configured for the project. Returns zone definitions (name, glob patterns, matched file count), access rules (which zones may import from which), and `logical_groups[]` (one entry per pre-expansion `autoDiscover` zone, surfacing the user-authored parent name, verbatim `auto_discover` paths, discovered `children`, `status` (`ok` / `empty` / `invalid_path`), `source_zone_index`, summed `file_count`, optional `authored_rule`, optional `fallback_zone` cross-reference for the Bulletproof case, optional `merged_from` when the parent name was declared multiple times, optional `original_zone_root` echo for monorepo subtree scopes, and optional `child_source_indices` attribution when multiple paths were authored). If boundaries are not configured, returns {\"configured\": false}; in that case, boundary violation checks will find no issues and can be skipped. Use this to understand the project's architecture constraints before running analysis.",
         annotations(read_only_hint = true, open_world_hint = true)
     )]
     async fn list_boundaries(

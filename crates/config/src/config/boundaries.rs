@@ -296,6 +296,121 @@ pub struct ResolvedBoundaryConfig {
     pub zones: Vec<ResolvedZone>,
     /// Rules indexed by source zone name.
     pub rules: Vec<ResolvedBoundaryRule>,
+    /// Pre-expansion logical groups captured during `expand_auto_discover`,
+    /// preserved here for observability (`fallow list --boundaries --format
+    /// json`). One entry per `autoDiscover`-bearing zone in user-declaration
+    /// order. Empty unless the user (or a preset) wrote at least one
+    /// `autoDiscover`. See [`LogicalGroup`] for the per-entry shape.
+    pub logical_groups: Vec<LogicalGroup>,
+}
+
+/// A user-declared zone that fanned out into one or more child zones via
+/// `autoDiscover`. Surfaced verbatim through `fallow list --boundaries
+/// --format json` so consumers (config UIs, Sankey renderers, agent-driven
+/// config tooling, dashboards) can reconstruct the original grouping intent
+/// after expansion has flattened the parent name out of `zones[]`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub struct LogicalGroup {
+    /// Logical parent zone name as authored by the user (e.g. `"features"`).
+    pub name: String,
+    /// Discovered child zone names in stable directory-sorted order
+    /// (e.g. `["features/auth", "features/billing"]`). Empty when the parent
+    /// directory was empty or unreadable; `status` discriminates the two.
+    pub children: Vec<String>,
+    /// The exact `autoDiscover` strings the user wrote, preserved verbatim
+    /// (no normalization). Round-trip tooling depends on byte-exact match
+    /// against the user's config source.
+    pub auto_discover: Vec<String>,
+    /// Pre-expansion rule keyed on this parent zone name, captured before
+    /// `expand_auto_discover` rewrote it into per-child rules. `None` when
+    /// the user wrote no rule for the parent (the children are then
+    /// unrestricted unless a per-child rule exists).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authored_rule: Option<AuthoredRule>,
+    /// When the parent zone also carried explicit `patterns`, it stayed in
+    /// `zones[]` after expansion as a fallback classifier. This is its name
+    /// (always equal to [`Self::name`]). `None` when the parent had no
+    /// patterns and was dropped from `zones[]` entirely. Lets consumers wire
+    /// the logical-group entry to its zone twin without name-matching
+    /// heuristics.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fallback_zone: Option<String>,
+    /// Position of the parent zone in the user's pre-expansion `zones[]`
+    /// array. Enables byte-accurate config patches by agent tooling without
+    /// re-parsing the user's config source.
+    pub source_zone_index: usize,
+    /// Why [`Self::children`] is what it is.
+    pub status: LogicalGroupStatus,
+    /// Parent zone indices whose declarations were merged into this group
+    /// because they shared a name (`{ name: "features", autoDiscover: [...] }`
+    /// declared twice). `None` on the common case (single declaration);
+    /// `Some([i, j, ...])` when at least two declarations were merged. The
+    /// FIRST entry equals [`Self::source_zone_index`]; subsequent entries are
+    /// the positions of the additional declarations in user-declaration order.
+    /// Surfaced in JSON so consumers (config-edit agents, config-hygiene
+    /// dashboards) can detect duplicates that `tracing::warn!` would otherwise
+    /// hide from `--format json` consumption.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merged_from: Option<Vec<usize>>,
+    /// The parent zone's `root` (subtree scope) as the user authored it,
+    /// echoed onto the logical group so monorepo-aware tooling can tell
+    /// whether `root` was set on the parent (and inherited by every
+    /// discovered child) or set per-child. `None` when the parent had no
+    /// `root` field. The string is verbatim from the user's config (not
+    /// the post-`normalize_zone_root` form) for byte-exact round-trip.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_zone_root: Option<String>,
+    /// For each entry in [`Self::children`], the index into
+    /// [`Self::auto_discover`] of the path that produced it (or the FIRST
+    /// path that produced it when multiple `autoDiscover` entries each yield
+    /// the same child name). Empty when only one `autoDiscover` path was
+    /// authored (every child trivially maps to index 0); populated only when
+    /// the parent has two or more `autoDiscover` entries so consumers can
+    /// attribute children to specific source directories. The length equals
+    /// `children.len()` when populated.
+    ///
+    /// `#[serde(default)]` pairs with `skip_serializing_if` so the JSON
+    /// runtime omits this field on the common single-path case AND the
+    /// derived schema marks it optional (schemars 1 promotes any field with a
+    /// `serde(default)` attribute out of `required`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_source_indices: Vec<usize>,
+}
+
+/// Discovery outcome for a [`LogicalGroup`]. Discriminates "no children" into
+/// "the directory exists and is empty" versus "at least one `autoDiscover`
+/// path was invalid or unreadable", so consumers can render an actionable
+/// hint instead of "0 children, mystery".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum LogicalGroupStatus {
+    /// At least one child zone was discovered.
+    Ok,
+    /// Every `autoDiscover` path resolved to a readable directory, but
+    /// none contained child directories.
+    Empty,
+    /// At least one `autoDiscover` path was malformed (contained `..`,
+    /// absolute) or did not resolve to a readable directory, and zero
+    /// children were discovered across all paths. When a mix of invalid and
+    /// valid paths produces children, status is [`Self::Ok`] instead.
+    InvalidPath,
+}
+
+/// Pre-expansion `from`-rule preserved on a [`LogicalGroup`]. Surfaces the
+/// user's original intent (`{ from: "features", allow: ["shared"] }`) even
+/// after `expand_auto_discover` rewrote it into per-child rules
+/// (`features/auth -> shared`, `features/billing -> shared`).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct AuthoredRule {
+    /// Pre-expansion `allow` list as the user wrote it.
+    pub allow: Vec<String>,
+    /// Pre-expansion `allowTypeOnly` list as the user wrote it. Omitted
+    /// from JSON output when empty; `serde(default)` keeps the derived
+    /// schema in lock-step (schemars 1 marks any field with a
+    /// `serde(default)` attribute as non-required).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow_type_only: Vec<String>,
 }
 
 /// A zone with pre-compiled glob matchers.
@@ -406,102 +521,302 @@ impl BoundaryConfig {
     /// automatically allows its discovered children so top-level barrels can
     /// re-export child modules without relaxing sibling isolation on the child
     /// rules.
-    pub fn expand_auto_discover(&mut self, project_root: &Path) {
+    ///
+    /// Returns one [`LogicalGroup`] per pre-expansion zone that carried a
+    /// non-empty `autoDiscover`, in user-declaration order. The caller (the
+    /// resolution pipeline) stashes the result onto
+    /// [`ResolvedBoundaryConfig::logical_groups`] for `fallow list
+    /// --boundaries --format json` to render. Discarding the return is fine
+    /// for callers that only need the expansion side effect (classification);
+    /// the data is regenerated on the next run.
+    ///
+    /// Duplicate parent zone name behavior: when two `BoundaryZone`
+    /// declarations share a name and both carry `autoDiscover`, their
+    /// discovered children merge into a single `LogicalGroup` whose
+    /// `auto_discover` concatenates both source path lists in declaration
+    /// order. This mirrors the existing rule-side merge behavior (both rules
+    /// expand to the same union of child names). A `tracing::warn!` surfaces
+    /// the duplicate at config-load time so the user can deduplicate the
+    /// source; the merged behavior is a soft default rather than a hard
+    /// rejection so existing configs continue to load.
+    pub fn expand_auto_discover(&mut self, project_root: &Path) -> Vec<LogicalGroup> {
         if self.zones.iter().all(|zone| zone.auto_discover.is_empty()) {
-            return;
+            return Vec::new();
         }
 
         let original_zones = std::mem::take(&mut self.zones);
         let mut expanded_zones = Vec::new();
         let mut group_expansions: rustc_hash::FxHashMap<String, Vec<String>> =
             rustc_hash::FxHashMap::default();
+        // Preserves user-declaration order: `FxHashMap` iteration is not
+        // insertion-ordered, and consumers (snapshot tests, diff-based
+        // dashboards) depend on stable JSON output across runs.
+        let mut group_drafts: Vec<LogicalGroupDraft> = Vec::new();
 
-        for mut zone in original_zones {
+        for (source_zone_index, mut zone) in original_zones.into_iter().enumerate() {
             if zone.auto_discover.is_empty() {
                 expanded_zones.push(zone);
                 continue;
             }
 
             let group_name = zone.name.clone();
-            let discovered_zones = discover_child_zones(project_root, &zone);
+            // Capture the user's verbatim `autoDiscover` strings before
+            // discovery normalizes them; round-trip tooling depends on
+            // byte-exact match against the source.
+            let raw_auto_discover = zone.auto_discover.clone();
+            let original_zone_root = zone.root.clone();
+            let DiscoveryOutcome {
+                zones: discovered_zones,
+                source_indices: discovered_source_indices,
+                had_invalid_path,
+            } = discover_child_zones(project_root, &zone);
+            let discovered_count = discovered_zones.len();
             let mut expanded_names: Vec<String> = discovered_zones
                 .iter()
                 .map(|child| child.name.clone())
                 .collect();
-            expanded_zones.extend(discovered_zones);
+            let child_names_only = expanded_names.clone();
+            for child_zone in discovered_zones {
+                merge_zone_by_name(&mut expanded_zones, child_zone);
+            }
 
-            if !zone.patterns.is_empty() {
+            let fallback_zone = if zone.patterns.is_empty() {
+                None
+            } else {
                 expanded_names.push(group_name.clone());
                 zone.auto_discover.clear();
-                expanded_zones.push(zone);
-            }
+                merge_zone_by_name(&mut expanded_zones, zone);
+                Some(group_name.clone())
+            };
 
             if !expanded_names.is_empty() {
                 group_expansions
-                    .entry(group_name)
+                    .entry(group_name.clone())
                     .or_default()
                     .extend(expanded_names);
             }
-        }
 
-        self.zones = expanded_zones;
-        if group_expansions.is_empty() {
-            return;
-        }
-
-        let original_rules = std::mem::take(&mut self.rules);
-        let mut generated_rules = Vec::new();
-        let mut explicit_rules = Vec::new();
-        for rule in original_rules {
-            let allow = expand_rule_allow(&rule.allow, &group_expansions);
-            let allow_type_only = expand_rule_allow(&rule.allow_type_only, &group_expansions);
-
-            if let Some(from_zones) = group_expansions.get(&rule.from) {
-                for from in from_zones {
-                    let (allow, allow_type_only) = if from == &rule.from {
-                        (
-                            expand_parent_fallback_allow(&allow, from_zones, &rule.from),
-                            allow_type_only.clone(),
-                        )
-                    } else {
-                        (
-                            expand_generated_child_allow(
-                                &rule.allow,
-                                &group_expansions,
-                                &rule.from,
-                            ),
-                            expand_generated_child_allow(
-                                &rule.allow_type_only,
-                                &group_expansions,
-                                &rule.from,
-                            ),
-                        )
-                    };
-                    let expanded_rule = BoundaryRule {
-                        from: from.clone(),
-                        allow,
-                        allow_type_only,
-                    };
-                    if from == &rule.from {
-                        explicit_rules.push(expanded_rule);
-                    } else {
-                        generated_rules.push(expanded_rule);
-                    }
-                }
+            let status = if discovered_count > 0 {
+                LogicalGroupStatus::Ok
+            } else if had_invalid_path {
+                LogicalGroupStatus::InvalidPath
             } else {
-                explicit_rules.push(BoundaryRule {
-                    from: rule.from,
-                    allow,
-                    allow_type_only,
+                LogicalGroupStatus::Empty
+            };
+
+            // Merge into existing draft if the user declared the same parent
+            // name twice. Concatenates `auto_discover`, dedupes `children`
+            // against the existing set so a duplicate declaration discovering
+            // the same child does not double-count via `file_count` lookup,
+            // preserves the FIRST `source_zone_index` and `original_zone_root`,
+            // shifts the new batch's `child_source_indices` by the existing
+            // `auto_discover.len()` so they continue to address the
+            // post-concatenation array (and drops indices for children
+            // already present, since attribution belongs to the first
+            // producer), and appends the new `source_zone_index` to
+            // `merged_from` so the duplicate is visible in JSON output.
+            if let Some(existing) = group_drafts.iter_mut().find(|d| d.name == group_name) {
+                tracing::warn!(
+                    "boundary zone '{}' is declared multiple times with autoDiscover; merging discovered children",
+                    group_name
+                );
+                let auto_discover_offset = existing.auto_discover.len();
+                existing.auto_discover.extend(raw_auto_discover);
+                let existing_children: rustc_hash::FxHashSet<String> =
+                    existing.children.iter().cloned().collect();
+                for (idx, name) in child_names_only.iter().enumerate() {
+                    if existing_children.contains(name) {
+                        continue;
+                    }
+                    existing.children.push(name.clone());
+                    existing
+                        .child_source_indices
+                        .push(discovered_source_indices[idx] + auto_discover_offset);
+                }
+                if existing.fallback_zone.is_none() {
+                    existing.fallback_zone = fallback_zone;
+                }
+                existing.status = merge_status(existing.status, status);
+                let chain = existing
+                    .merged_from
+                    .get_or_insert_with(|| vec![existing.source_zone_index]);
+                chain.push(source_zone_index);
+            } else {
+                group_drafts.push(LogicalGroupDraft {
+                    name: group_name,
+                    children: child_names_only,
+                    auto_discover: raw_auto_discover,
+                    fallback_zone,
+                    source_zone_index,
+                    status,
+                    merged_from: None,
+                    original_zone_root,
+                    child_source_indices: discovered_source_indices,
                 });
             }
         }
 
-        let mut expanded_rules = dedupe_rules_keep_last(generated_rules);
-        expanded_rules.extend(dedupe_rules_keep_last(explicit_rules));
-        self.rules = dedupe_rules_keep_last(expanded_rules);
+        self.zones = expanded_zones;
+
+        // Index draft names so we can look up the authored rule per logical
+        // group regardless of whether the group produced any children.
+        // Groups whose discovery was Empty / InvalidPath contribute NO entry
+        // to `group_expansions` (no children means no rule expansion), but
+        // their authored rule still belongs on the surfaced LogicalGroup so
+        // consumers see the user's intent even when discovery turned up
+        // empty.
+        let draft_names: rustc_hash::FxHashSet<&str> =
+            group_drafts.iter().map(|d| d.name.as_str()).collect();
+
+        // Capture authored rules BEFORE `original_rules` is consumed below.
+        // The match-up is by `rule.from == group_name`; the last matching
+        // rule wins to mirror `dedupe_rules_keep_last` semantics.
+        let original_rules = std::mem::take(&mut self.rules);
+        let authored_rules: rustc_hash::FxHashMap<&str, AuthoredRule> = original_rules
+            .iter()
+            .filter(|rule| draft_names.contains(rule.from.as_str()))
+            .map(|rule| {
+                (
+                    rule.from.as_str(),
+                    AuthoredRule {
+                        allow: rule.allow.clone(),
+                        allow_type_only: rule.allow_type_only.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        let logical_groups: Vec<LogicalGroup> = group_drafts
+            .into_iter()
+            .map(|draft| {
+                // `child_source_indices` is only signal-bearing when the
+                // parent has two or more `auto_discover` paths; with one
+                // path every child trivially has index 0. Skip the noise
+                // on the common case so the JSON stays tight; the field
+                // is `#[serde(skip_serializing_if = "Vec::is_empty")]`.
+                let child_source_indices = if draft.auto_discover.len() > 1 {
+                    draft.child_source_indices
+                } else {
+                    Vec::new()
+                };
+                LogicalGroup {
+                    authored_rule: authored_rules.get(draft.name.as_str()).cloned(),
+                    name: draft.name,
+                    children: draft.children,
+                    auto_discover: draft.auto_discover,
+                    fallback_zone: draft.fallback_zone,
+                    source_zone_index: draft.source_zone_index,
+                    status: draft.status,
+                    merged_from: draft.merged_from,
+                    original_zone_root: draft.original_zone_root,
+                    child_source_indices,
+                }
+            })
+            .collect();
+
+        if group_expansions.is_empty() {
+            // No groups produced any children, so rule expansion is a no-op;
+            // restore the rules verbatim. `logical_groups` still carries the
+            // Empty / InvalidPath drafts so consumers can render the user's
+            // grouping intent and act on the "discovery turned up nothing"
+            // signal.
+            self.rules = original_rules;
+            return logical_groups;
+        }
+
+        self.rules = expand_rules_for_groups(original_rules, &group_expansions);
+        logical_groups
+    }
+}
+
+/// Merge a discovered (or fallback) zone into the post-expansion zones
+/// vector by name. A naive `expanded_zones.push(zone)` duplicates entries
+/// when the user declared the same parent name twice (each iteration of the
+/// outer expansion loop re-runs discovery on its own `autoDiscover` paths
+/// and would push the same child names again, producing duplicates in
+/// `zones[]` AND triggering the `file_count` summation in
+/// `compute_boundary_data` to double-count each child). Merging by name
+/// keeps `zones[]` unique and unifies the patterns from both declarations
+/// on the same `BoundaryZone`. Existing patterns are preserved verbatim;
+/// only NEW patterns are appended.
+fn merge_zone_by_name(expanded_zones: &mut Vec<BoundaryZone>, zone: BoundaryZone) {
+    if let Some(existing) = expanded_zones.iter_mut().find(|z| z.name == zone.name) {
+        for pattern in zone.patterns {
+            if !existing.patterns.contains(&pattern) {
+                existing.patterns.push(pattern);
+            }
+        }
+    } else {
+        expanded_zones.push(zone);
+    }
+}
+
+/// Rewrite the user's pre-expansion rules to reference the discovered child
+/// zones in place of the logical parent. Three rule shapes are produced:
+///
+/// 1. Rules whose `from` is the parent group expand into one explicit rule
+///    per child (or one for the parent fallback when the parent kept its
+///    `patterns`).
+/// 2. Rules whose `allow` references a group expand to allow every child
+///    of that group.
+/// 3. Rules untouched by group expansion pass through unchanged.
+///
+/// Extracted out of [`BoundaryConfig::expand_auto_discover`] so the
+/// orchestrator stays under the SIG unit-size threshold; the body itself
+/// is unchanged from the pre-#373 inline form.
+fn expand_rules_for_groups(
+    original_rules: Vec<BoundaryRule>,
+    group_expansions: &rustc_hash::FxHashMap<String, Vec<String>>,
+) -> Vec<BoundaryRule> {
+    let mut generated_rules = Vec::new();
+    let mut explicit_rules = Vec::new();
+    for rule in original_rules {
+        let allow = expand_rule_allow(&rule.allow, group_expansions);
+        let allow_type_only = expand_rule_allow(&rule.allow_type_only, group_expansions);
+
+        if let Some(from_zones) = group_expansions.get(&rule.from) {
+            for from in from_zones {
+                let (allow, allow_type_only) = if from == &rule.from {
+                    (
+                        expand_parent_fallback_allow(&allow, from_zones, &rule.from),
+                        allow_type_only.clone(),
+                    )
+                } else {
+                    (
+                        expand_generated_child_allow(&rule.allow, group_expansions, &rule.from),
+                        expand_generated_child_allow(
+                            &rule.allow_type_only,
+                            group_expansions,
+                            &rule.from,
+                        ),
+                    )
+                };
+                let expanded_rule = BoundaryRule {
+                    from: from.clone(),
+                    allow,
+                    allow_type_only,
+                };
+                if from == &rule.from {
+                    explicit_rules.push(expanded_rule);
+                } else {
+                    generated_rules.push(expanded_rule);
+                }
+            }
+        } else {
+            explicit_rules.push(BoundaryRule {
+                from: rule.from,
+                allow,
+                allow_type_only,
+            });
+        }
     }
 
+    let mut expanded_rules = dedupe_rules_keep_last(generated_rules);
+    expanded_rules.extend(dedupe_rules_keep_last(explicit_rules));
+    dedupe_rules_keep_last(expanded_rules)
+}
+
+impl BoundaryConfig {
     /// Return the preset name if one is configured but not yet expanded.
     #[must_use]
     pub fn preset_name(&self) -> Option<&str> {
@@ -622,7 +937,16 @@ impl BoundaryConfig {
             })
             .collect();
 
-        ResolvedBoundaryConfig { zones, rules }
+        ResolvedBoundaryConfig {
+            zones,
+            rules,
+            // `expand_auto_discover` is the only producer; the resolution
+            // pipeline (`crates/config/src/config/resolution.rs`) assigns the
+            // returned `Vec<LogicalGroup>` onto the resolved boundaries after
+            // `resolve()` runs. `resolve()` itself has no view of the
+            // pre-expansion state, so it leaves the field empty here.
+            logical_groups: Vec::new(),
+        }
     }
 }
 
@@ -664,22 +988,82 @@ fn join_relative_path(prefix: &str, suffix: &str) -> String {
     }
 }
 
-fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> Vec<BoundaryZone> {
+/// Discovery result for a single auto-discover zone. Carries the discovered
+/// child `BoundaryZone`s, a flag for "at least one `autoDiscover` path was
+/// malformed or unreadable" (distinguishes [`LogicalGroupStatus::InvalidPath`]
+/// from [`LogicalGroupStatus::Empty`]), and parallel-to-zones
+/// `source_indices` recording which `autoDiscover` entry produced each child
+/// (FIRST producer wins when two paths yield the same child name).
+struct DiscoveryOutcome {
+    zones: Vec<BoundaryZone>,
+    source_indices: Vec<usize>,
+    had_invalid_path: bool,
+}
+
+/// Intermediate accumulator for a [`LogicalGroup`] before its
+/// [`AuthoredRule`] is resolved (rules are not consumed until after the zone
+/// loop completes, so the rule lookup happens in a second pass).
+struct LogicalGroupDraft {
+    name: String,
+    children: Vec<String>,
+    auto_discover: Vec<String>,
+    fallback_zone: Option<String>,
+    source_zone_index: usize,
+    status: LogicalGroupStatus,
+    /// `None` until a second declaration with the same `name` is merged in;
+    /// then `Some(vec![first_index, ..])` with one entry per merged
+    /// declaration in user-declaration order.
+    merged_from: Option<Vec<usize>>,
+    /// Echo of the parent zone's `root` field as the user authored it
+    /// (verbatim, not normalized). On duplicate-merge, the FIRST declaration
+    /// wins (consistent with `source_zone_index`).
+    original_zone_root: Option<String>,
+    /// Parallel to `children`: for child at index `i`, the index into
+    /// `auto_discover` of the path that produced it (FIRST producer wins on
+    /// collisions). When merging duplicate parent declarations, indices from
+    /// the second batch are shifted by the first batch's `auto_discover.len()`
+    /// so they continue to address the concatenated `auto_discover` array.
+    child_source_indices: Vec<usize>,
+}
+
+/// Merge two `LogicalGroupStatus` values when a duplicate parent zone name
+/// is encountered: `Ok` wins (at least one child was discovered),
+/// `InvalidPath` beats `Empty` (a malformed/unreadable path is a louder
+/// signal than "no subdirs"), and otherwise we keep the existing status.
+const fn merge_status(existing: LogicalGroupStatus, new: LogicalGroupStatus) -> LogicalGroupStatus {
+    match (existing, new) {
+        (LogicalGroupStatus::Ok, _) | (_, LogicalGroupStatus::Ok) => LogicalGroupStatus::Ok,
+        (LogicalGroupStatus::InvalidPath, _) | (_, LogicalGroupStatus::InvalidPath) => {
+            LogicalGroupStatus::InvalidPath
+        }
+        (LogicalGroupStatus::Empty, LogicalGroupStatus::Empty) => LogicalGroupStatus::Empty,
+    }
+}
+
+fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> DiscoveryOutcome {
     let mut zones_by_name: rustc_hash::FxHashMap<String, BoundaryZone> =
+        rustc_hash::FxHashMap::default();
+    // Tracks which `autoDiscover` path index FIRST produced each child zone
+    // name. When two paths yield the same child name, the first producer
+    // wins (the merged `BoundaryZone` accumulates patterns from both but
+    // attribution stays stable).
+    let mut first_source_index: rustc_hash::FxHashMap<String, usize> =
         rustc_hash::FxHashMap::default();
     let normalized_root = zone
         .root
         .as_deref()
         .map(normalize_zone_root)
         .unwrap_or_default();
+    let mut had_invalid_path = false;
 
-    for raw_dir in &zone.auto_discover {
+    for (source_index, raw_dir) in zone.auto_discover.iter().enumerate() {
         let Some(discover_dir) = normalize_auto_discover_dir(raw_dir) else {
             tracing::warn!(
                 "invalid boundary autoDiscover path '{}' in zone '{}': paths must be project-relative and must not contain '..'",
                 raw_dir,
                 zone.name
             );
+            had_invalid_path = true;
             continue;
         };
 
@@ -695,6 +1079,7 @@ fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> Vec<Boundar
                 zone.name,
                 raw_dir
             );
+            had_invalid_path = true;
             continue;
         };
 
@@ -715,7 +1100,7 @@ fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> Vec<Boundar
             let entry = zones_by_name
                 .entry(zone_name.clone())
                 .or_insert_with(|| BoundaryZone {
-                    name: zone_name,
+                    name: zone_name.clone(),
                     patterns: vec![],
                     auto_discover: vec![],
                     root: zone.root.clone(),
@@ -727,12 +1112,30 @@ fn discover_child_zones(project_root: &Path, zone: &BoundaryZone) -> Vec<Boundar
             {
                 entry.patterns.push(child_pattern);
             }
+            first_source_index.entry(zone_name).or_insert(source_index);
         }
     }
 
     let mut zones: Vec<_> = zones_by_name.into_values().collect();
     zones.sort_by(|a, b| a.name.cmp(&b.name));
-    zones
+    let source_indices: Vec<usize> = zones
+        .iter()
+        .map(|z| {
+            // Every entry inserted into `zones_by_name` was also inserted
+            // into `first_source_index` in the same loop body, so this lookup
+            // is infallible. Fall back to 0 defensively for any future
+            // refactor that decouples the two maps.
+            first_source_index
+                .get(z.name.as_str())
+                .copied()
+                .unwrap_or(0)
+        })
+        .collect();
+    DiscoveryOutcome {
+        zones,
+        source_indices,
+        had_invalid_path,
+    }
 }
 
 fn expand_rule_allow(
@@ -809,9 +1212,16 @@ fn dedupe_rules_keep_last(rules: Vec<BoundaryRule>) -> Vec<BoundaryRule> {
 
 impl ResolvedBoundaryConfig {
     /// Whether any boundaries are configured.
+    ///
+    /// Considers `logical_groups` too: when every `autoDiscover` zone
+    /// produced zero children, `zones` is empty but the user authored a
+    /// boundaries section that should still be surfaced (so `fallow list
+    /// --boundaries` can render the `Empty` / `InvalidPath` status to the
+    /// user). Without this, the whole boundaries block silently disappears
+    /// from the output the moment discovery finds nothing.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.zones.is_empty()
+        self.zones.is_empty() && self.logical_groups.is_empty()
     }
 
     /// Classify a file path into a zone. Returns the first matching zone name.
@@ -1169,6 +1579,553 @@ allow = ["db"]
             assert_eq!(billing_rule.allow, vec!["shared".to_string()]);
             assert!(config.validate_zone_references().is_empty());
         }
+    }
+
+    // ── LogicalGroup return value (issue #373) ──────────────────
+
+    #[test]
+    fn logical_groups_returned_for_simple_auto_discover_zone() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![
+                BoundaryZone {
+                    name: "app".to_string(),
+                    patterns: vec!["src/app/**".to_string()],
+                    auto_discover: vec![],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/features".to_string()],
+                    root: None,
+                },
+            ],
+            rules: vec![BoundaryRule {
+                from: "features".to_string(),
+                allow: vec!["app".to_string()],
+                allow_type_only: vec![],
+            }],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        let g = &groups[0];
+        assert_eq!(g.name, "features");
+        assert_eq!(g.children, vec!["features/auth", "features/billing"]);
+        assert_eq!(g.auto_discover, vec!["src/features"]);
+        assert_eq!(g.source_zone_index, 1);
+        assert_eq!(g.status, LogicalGroupStatus::Ok);
+        // Parent had no explicit patterns → not retained as fallback.
+        assert!(g.fallback_zone.is_none());
+        let rule = g
+            .authored_rule
+            .as_ref()
+            .expect("authored rule preserved verbatim");
+        assert_eq!(rule.allow, vec!["app"]);
+        assert!(rule.allow_type_only.is_empty());
+    }
+
+    #[test]
+    fn logical_groups_preserve_verbatim_auto_discover_strings() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                // Trailing slash + leading `./` are normalized during discovery
+                // but the logical group must echo the user's literal string so
+                // round-trip config tooling does not introduce spurious diffs.
+                auto_discover: vec!["./src/features/".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].auto_discover, vec!["./src/features/"]);
+        assert_eq!(groups[0].children, vec!["features/auth"]);
+    }
+
+    #[test]
+    fn logical_groups_bulletproof_keeps_fallback_zone_cross_reference() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                // Bulletproof shape: parent carries BOTH patterns AND
+                // autoDiscover, so the parent stays in zones[] as a fallback
+                // classifier while ALSO becoming a logical group.
+                name: "features".to_string(),
+                patterns: vec!["src/features/**".to_string()],
+                auto_discover: vec!["src/features".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].fallback_zone.as_deref(), Some("features"));
+        // Parent zone is still present in zones[] as the fallback classifier.
+        assert!(config.zones.iter().any(|z| z.name == "features"));
+    }
+
+    #[test]
+    fn logical_groups_status_empty_when_no_child_dirs() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features")).unwrap();
+        // No child subdirs created.
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].status, LogicalGroupStatus::Empty);
+        assert!(groups[0].children.is_empty());
+    }
+
+    #[test]
+    fn logical_groups_status_invalid_path_when_dir_missing() {
+        let temp = tempfile::tempdir().unwrap();
+        // src/features intentionally not created.
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].status, LogicalGroupStatus::InvalidPath);
+        assert!(groups[0].children.is_empty());
+    }
+
+    #[test]
+    fn logical_groups_status_ok_wins_over_invalid_when_mixed() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        // src/modules intentionally not created (invalid path).
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        // One path produced children → status is Ok even though another path
+        // was invalid. The InvalidPath warning still surfaces via tracing.
+        assert_eq!(groups[0].status, LogicalGroupStatus::Ok);
+        assert_eq!(groups[0].children, vec!["features/auth"]);
+    }
+
+    #[test]
+    fn logical_groups_preserve_declaration_order() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/zeta/a")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/alpha/a")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/mid/a")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![
+                BoundaryZone {
+                    name: "zeta".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/zeta".to_string()],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "alpha".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/alpha".to_string()],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "mid".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/mid".to_string()],
+                    root: None,
+                },
+            ],
+            rules: vec![],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        // Insertion order is preserved; not alphabetized.
+        let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+        assert_eq!(names, vec!["zeta", "alpha", "mid"]);
+    }
+
+    #[test]
+    fn logical_groups_merged_from_records_duplicate_indices() {
+        // The single-declaration path leaves merged_from None; the
+        // duplicate-merge path populates it with every contributing index.
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/features".to_string()],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "other".to_string(),
+                    patterns: vec!["src/other/**".to_string()],
+                    auto_discover: vec![],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/extra".to_string()],
+                    root: None,
+                },
+            ],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        // merged_from holds both contributing zone indices in declaration
+        // order: position 0 and position 2 (the "other" zone at position 1
+        // is unrelated).
+        assert_eq!(groups[0].merged_from.as_deref(), Some(&[0_usize, 2][..]));
+        // The first index also wins source_zone_index.
+        assert_eq!(groups[0].source_zone_index, 0);
+    }
+
+    #[test]
+    fn logical_groups_merged_from_none_on_single_declaration() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        // Common case: no duplicate, no merged_from.
+        assert!(groups[0].merged_from.is_none());
+    }
+
+    #[test]
+    fn logical_groups_echo_original_zone_root() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("packages/app/src/features/auth")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                // Monorepo subtree scope on the parent; should round-trip
+                // verbatim to logical_groups[0].original_zone_root so
+                // patcher tools can distinguish parent-set vs per-child root.
+                root: Some("packages/app/".to_string()),
+            }],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(
+            groups[0].original_zone_root.as_deref(),
+            Some("packages/app/")
+        );
+    }
+
+    #[test]
+    fn logical_groups_original_zone_root_none_when_unset() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        assert!(groups[0].original_zone_root.is_none());
+    }
+
+    #[test]
+    fn logical_groups_child_source_indices_populated_for_multi_path() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/modules/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                // Two paths: each produces one child. Children are
+                // alphabetically sorted across paths, so auth (from index 0)
+                // sorts before billing (from index 1).
+                auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(
+            groups[0].children,
+            vec!["features/auth", "features/billing"]
+        );
+        assert_eq!(groups[0].child_source_indices, vec![0, 1]);
+    }
+
+    #[test]
+    fn logical_groups_child_source_indices_empty_for_single_path() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        // With one path, every child trivially has source index 0. The
+        // helper field is suppressed (empty Vec) so the JSON stays tight
+        // on the common case.
+        assert!(groups[0].child_source_indices.is_empty());
+    }
+
+    #[test]
+    fn logical_groups_child_source_indices_after_duplicate_merge_shifted() {
+        // When two parent declarations merge, the child indices from the
+        // SECOND batch must be shifted by the FIRST batch's
+        // auto_discover.len() so they continue to address the
+        // post-concatenation `auto_discover` array correctly.
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/features".to_string()],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/extra".to_string()],
+                    root: None,
+                },
+            ],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        // Merged auto_discover has 2 entries; index 0 = src/features,
+        // index 1 = src/extra. The features/billing child came from the
+        // second batch's first path, which post-shift is index 1.
+        assert_eq!(groups[0].auto_discover, vec!["src/features", "src/extra"]);
+        let auth_idx = groups[0]
+            .children
+            .iter()
+            .position(|c| c == "features/auth")
+            .unwrap();
+        let billing_idx = groups[0]
+            .children
+            .iter()
+            .position(|c| c == "features/billing")
+            .unwrap();
+        assert_eq!(groups[0].child_source_indices[auth_idx], 0);
+        assert_eq!(groups[0].child_source_indices[billing_idx], 1);
+    }
+
+    #[test]
+    fn logical_groups_merge_duplicate_parent_zone_declarations() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/features".to_string()],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/extra".to_string()],
+                    root: None,
+                },
+            ],
+            rules: vec![],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        // The two declarations merge into a single logical group with
+        // concatenated auto_discover paths and children.
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].name, "features");
+        assert_eq!(groups[0].auto_discover, vec!["src/features", "src/extra"]);
+        assert!(groups[0].children.iter().any(|c| c == "features/auth"));
+        assert!(groups[0].children.iter().any(|c| c == "features/billing"));
+        assert_eq!(groups[0].source_zone_index, 0);
+    }
+
+    #[test]
+    fn logical_groups_duplicate_identical_declarations_no_double_count() {
+        // Regression for codex parallel review (post-impl pass): two
+        // identical `features` declarations with the same `autoDiscover`
+        // path used to emit duplicate `zones[]` entries, duplicate
+        // `children[]`, and double-counted `file_count` (4 for 2 real
+        // files). `merge_zone_by_name` keeps `zones[]` unique by name and
+        // the merge logic dedupes children against the existing set.
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/features".to_string()],
+                    root: None,
+                },
+                BoundaryZone {
+                    name: "features".to_string(),
+                    patterns: vec![],
+                    auto_discover: vec!["src/features".to_string()],
+                    root: None,
+                },
+            ],
+            rules: vec![],
+        };
+
+        let groups = config.expand_auto_discover(temp.path());
+        assert_eq!(groups.len(), 1);
+        // zones[] must NOT contain duplicates of features/auth or
+        // features/billing.
+        let zone_names: Vec<&str> = config.zones.iter().map(|z| z.name.as_str()).collect();
+        assert_eq!(zone_names, vec!["features/auth", "features/billing"]);
+        // children[] must NOT contain duplicates.
+        assert_eq!(
+            groups[0].children,
+            vec!["features/auth", "features/billing"]
+        );
+        // auto_discover preserves both verbatim (the duplicate is visible
+        // via merged_from + the warning, but the path list itself
+        // concatenates).
+        assert_eq!(
+            groups[0].auto_discover,
+            vec!["src/features", "src/features"]
+        );
+        // merged_from records both zone indices.
+        assert_eq!(groups[0].merged_from.as_deref(), Some(&[0_usize, 1][..]));
+    }
+
+    #[test]
+    fn logical_groups_empty_when_no_auto_discover_present() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/components/**".to_string()],
+                auto_discover: vec![],
+                root: None,
+            }],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn logical_groups_propagate_through_resolve() {
+        // End-to-end: data populated by expand_auto_discover survives a
+        // round trip through `BoundaryConfig::resolve()` so consumers of
+        // `ResolvedBoundaryConfig.logical_groups` see the same content.
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+        let mut config = BoundaryConfig {
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                root: None,
+            }],
+            rules: vec![],
+        };
+        let groups = config.expand_auto_discover(temp.path());
+        let mut resolved = config.resolve();
+        // `resolve()` itself does not have access to the pre-expansion state;
+        // the resolution pipeline stitches the groups back on. Mirror that
+        // here so the test exercises the same shape consumers see.
+        resolved.logical_groups = groups;
+        assert_eq!(resolved.logical_groups.len(), 1);
+        assert_eq!(resolved.logical_groups[0].name, "features");
+        assert_eq!(resolved.logical_groups[0].children, vec!["features/auth"]);
     }
 
     #[test]
@@ -2107,6 +3064,33 @@ allow = ["db"]
             rules: vec![],
         };
         let resolved = config.resolve();
+        assert!(!resolved.is_empty());
+    }
+
+    #[test]
+    fn resolved_boundary_config_with_only_logical_groups_not_empty() {
+        // Regression for issue #373 smoke: a config whose every autoDiscover
+        // zone produced zero children ends up with empty `zones[]` but a
+        // populated `logical_groups[]`. The boundaries section must still
+        // surface so `fallow list --boundaries` can render the Empty /
+        // InvalidPath status (otherwise the whole block silently disappears
+        // and the user has no signal that discovery turned up nothing).
+        let resolved = ResolvedBoundaryConfig {
+            zones: vec![],
+            rules: vec![],
+            logical_groups: vec![LogicalGroup {
+                name: "features".to_string(),
+                children: vec![],
+                auto_discover: vec!["src/features".to_string()],
+                authored_rule: None,
+                fallback_zone: None,
+                source_zone_index: 0,
+                status: LogicalGroupStatus::Empty,
+                merged_from: None,
+                original_zone_root: None,
+                child_source_indices: vec![],
+            }],
+        };
         assert!(!resolved.is_empty());
     }
 

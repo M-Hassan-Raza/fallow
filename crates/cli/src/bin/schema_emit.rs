@@ -42,17 +42,19 @@ use fallow_cli::health_types::{
     UntestedExport, UntestedFile, VitalSigns, VitalSignsCounts,
 };
 use fallow_cli::output_envelope::{
-    AuditCommand, AuditOutput, CheckGroupedEntry, CheckGroupedOutput, CheckOutput,
-    CodeClimateIssue, CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation,
-    CodeClimateOutput, CodeClimateSeverity, CombinedOutput, CoverageSetupFileToEdit,
-    CoverageSetupFramework, CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
+    AuditCommand, AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
+    BoundariesListing, CheckGroupedEntry, CheckGroupedOutput, CheckOutput, CodeClimateIssue,
+    CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation, CodeClimateOutput,
+    CodeClimateSeverity, CombinedOutput, CoverageSetupFileToEdit, CoverageSetupFramework,
+    CoverageSetupMember, CoverageSetupOutput, CoverageSetupPackageManager,
     CoverageSetupRuntimeTarget, CoverageSetupSchemaVersion, CoverageSetupSnippet, DupesOutput,
     ExplainOutput, GitHubReviewComment, GitHubReviewSide, GitLabReviewComment,
     GitLabReviewPosition, GitLabReviewPositionType, GroupByMode, HealthOutput,
-    ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta,
-    ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider, ReviewReconcileOutput,
-    ReviewReconcileSchema,
+    ListBoundariesOutput, ReviewCheckConclusion, ReviewComment, ReviewEnvelopeEvent,
+    ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema, ReviewProvider,
+    ReviewReconcileOutput, ReviewReconcileSchema,
 };
+use fallow_config::{AuthoredRule, LogicalGroup, LogicalGroupStatus};
 use fallow_core::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
     RefactoringKind, RefactoringSuggestion,
@@ -303,6 +305,19 @@ pub(crate) fn derived_definition_names() -> &'static [&'static str] {
         "HealthOutput",
         "ReviewEnvelopeOutput",
         "ReviewReconcileOutput",
+        // crates/cli/src/output_envelope.rs - list --boundaries envelope
+        // and building blocks (issue #373).
+        "BoundariesListLogicalGroup",
+        "BoundariesListRule",
+        "BoundariesListZone",
+        "BoundariesListing",
+        "ListBoundariesOutput",
+        // crates/config/src/config/boundaries.rs - referenced by
+        // BoundariesListLogicalGroup and also surfaced on the resolved
+        // boundary config for in-process consumers.
+        "AuthoredRule",
+        "LogicalGroup",
+        "LogicalGroupStatus",
     ]
 }
 
@@ -597,6 +612,8 @@ fn derived_definitions() -> Map<String, Value> {
     let _ = generator.subschema_for::<ReviewReconcileOutput>();
     let _ = generator.subschema_for::<ReviewReconcileSchema>();
 
+    register_list_boundaries_definitions(&mut generator);
+
     // Per-finding action wrapper types (crates/types/src/output_health.rs).
     let _ = generator.subschema_for::<HealthFindingAction>();
     let _ = generator.subschema_for::<HealthFindingActionType>();
@@ -616,6 +633,22 @@ fn derived_definitions() -> Map<String, Value> {
     // no-op today; passing `true` keeps the output stable if a future settings
     // change adds one.
     generator.take_definitions(true)
+}
+
+/// Register the `fallow list --boundaries --format json` envelope and its
+/// building blocks. Extracted from [`derived_definitions`] to keep the
+/// orchestrator under the SIG unit-size threshold; the pre-expansion
+/// logical-group types live in `fallow_config` (issue #373) and ride along
+/// via `JsonSchema` so the committed schema's `$ref`s resolve.
+fn register_list_boundaries_definitions(generator: &mut schemars::SchemaGenerator) {
+    let _ = generator.subschema_for::<ListBoundariesOutput>();
+    let _ = generator.subschema_for::<BoundariesListing>();
+    let _ = generator.subschema_for::<BoundariesListZone>();
+    let _ = generator.subschema_for::<BoundariesListRule>();
+    let _ = generator.subschema_for::<BoundariesListLogicalGroup>();
+    let _ = generator.subschema_for::<LogicalGroup>();
+    let _ = generator.subschema_for::<LogicalGroupStatus>();
+    let _ = generator.subschema_for::<AuthoredRule>();
 }
 
 /// Merge derived definitions back into the hand-written schema document.
