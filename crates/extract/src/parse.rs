@@ -80,6 +80,7 @@ pub fn parse_source_to_module(
     // Extract imports/exports even if there are parse errors
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
+    extractor.resolve_pending_local_export_specifiers();
 
     // Track unused imports plus whether each binding is referenced as a type,
     // a runtime value, or both.
@@ -129,6 +130,7 @@ pub fn parse_source_to_module(
         let retry_return = Parser::new(&allocator2, parser_source, jsx_type).parse();
         let mut retry_extractor = ModuleInfoExtractor::new();
         retry_extractor.visit_program(&retry_return.program);
+        retry_extractor.resolve_pending_local_export_specifiers();
         let retry_total = retry_extractor.exports.len()
             + retry_extractor.imports.len()
             + retry_extractor.re_exports.len();

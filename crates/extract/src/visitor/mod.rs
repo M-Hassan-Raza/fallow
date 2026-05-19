@@ -232,7 +232,7 @@ impl ModuleInfoExtractor {
         self.local_declaration_names.insert(name.to_string());
     }
 
-    fn resolve_pending_local_export_specifiers(&mut self) {
+    pub(crate) fn resolve_pending_local_export_specifiers(&mut self) {
         let pending = std::mem::take(&mut self.pending_local_export_specifiers);
         for spec in pending {
             let matching_import = if self.local_declaration_names.contains(&spec.local_name) {
