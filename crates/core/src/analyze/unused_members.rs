@@ -404,6 +404,15 @@ fn push_export_key(keys: &mut Vec<ExportKey>, key: ExportKey) {
     }
 }
 
+fn export_key_with_origins(graph: &ModuleGraph, key: &ExportKey) -> Vec<ExportKey> {
+    let mut keys = Vec::new();
+    push_export_key(&mut keys, key.clone());
+    for origin in walk_re_export_origins(graph, key.file_id, key.export_name.as_str()) {
+        push_export_key(&mut keys, origin);
+    }
+    keys
+}
+
 fn parse_playwright_fixture_sentinel<'a>(
     object: &'a str,
     prefix: &str,
@@ -441,13 +450,8 @@ fn build_playwright_fixture_targets(
                     .entry(fixture_name.to_string())
                     .or_default();
                 for target_key in target_keys {
-                    push_export_key(fixture_targets, target_key.clone());
-                    for origin in walk_re_export_origins(
-                        graph,
-                        target_key.file_id,
-                        target_key.export_name.as_str(),
-                    ) {
-                        push_export_key(fixture_targets, origin);
+                    for key in export_key_with_origins(graph, target_key) {
+                        push_export_key(fixture_targets, key);
                     }
                 }
             }
@@ -518,13 +522,8 @@ fn build_instance_export_targets(
             let instance_key = ExportKey::new(resolved.file_id, instance_export_name);
             let instance_targets = targets_by_instance.entry(instance_key).or_default();
             for target_key in target_keys {
-                push_export_key(instance_targets, target_key.clone());
-                for origin in walk_re_export_origins(
-                    graph,
-                    target_key.file_id,
-                    target_key.export_name.as_str(),
-                ) {
-                    push_export_key(instance_targets, origin);
+                for key in export_key_with_origins(graph, target_key) {
+                    push_export_key(instance_targets, key);
                 }
             }
         }
@@ -597,13 +596,8 @@ fn build_typed_instance_binding_targets(
                 };
                 let targets = member_targets.entry(member_name.clone()).or_default();
                 for seed_key in seed_keys {
-                    push_export_key(targets, seed_key.clone());
-                    for origin in walk_re_export_origins(
-                        graph,
-                        seed_key.file_id,
-                        seed_key.export_name.as_str(),
-                    ) {
-                        push_export_key(targets, origin);
+                    for key in export_key_with_origins(graph, seed_key) {
+                        push_export_key(targets, key);
                     }
                 }
             }
@@ -619,10 +613,7 @@ fn chained_typed_instance_targets(
     seed_key: &ExportKey,
     segments: &[&str],
 ) -> Vec<ExportKey> {
-    let mut current = vec![seed_key.clone()];
-    for origin in walk_re_export_origins(graph, seed_key.file_id, seed_key.export_name.as_str()) {
-        push_export_key(&mut current, origin);
-    }
+    let mut current = export_key_with_origins(graph, seed_key);
 
     for segment in segments {
         let mut next = Vec::new();
@@ -928,6 +919,7 @@ fn propagate_fluent_chain_accesses(
 /// `extends` clause (resolved through the importing module's
 /// `local_to_export_keys`). Output is deduplicated per-parent.
 fn build_parent_to_children(
+    graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
 ) -> FxHashMap<ExportKey, Vec<ExportKey>> {
     let mut parent_to_children: FxHashMap<ExportKey, Vec<ExportKey>> = FxHashMap::default();
@@ -943,9 +935,11 @@ fn build_parent_to_children(
                 let child_key = ExportKey::new(resolved.file_id, export.name.to_string());
 
                 for parent_key in parent_keys {
-                    let children = parent_to_children.entry(parent_key.clone()).or_default();
-                    if !children.contains(&child_key) {
-                        children.push(child_key.clone());
+                    for resolved_parent_key in export_key_with_origins(graph, parent_key) {
+                        let children = parent_to_children.entry(resolved_parent_key).or_default();
+                        if !children.contains(&child_key) {
+                            children.push(child_key.clone());
+                        }
                     }
                 }
             }
@@ -969,11 +963,12 @@ fn build_parent_to_children(
 /// Self-access propagations are computed on a snapshot first and applied after
 /// the external-access loop so the mutable borrows stay disjoint.
 fn propagate_class_inheritance(
+    graph: &ModuleGraph,
     resolved_modules: &[ResolvedModule],
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
     self_accessed_members: &mut FxHashMap<FileId, FxHashSet<String>>,
 ) {
-    let parent_to_children = build_parent_to_children(resolved_modules);
+    let parent_to_children = build_parent_to_children(graph, resolved_modules);
     if parent_to_children.is_empty() {
         return;
     }
@@ -1089,11 +1084,13 @@ pub fn find_unused_members(
                     continue;
                 };
                 for interface_key in interface_keys {
-                    let implementers = interface_to_implementers
-                        .entry(interface_key.clone())
-                        .or_default();
-                    if !implementers.contains(&implementer_key) {
-                        implementers.push(implementer_key.clone());
+                    for resolved_interface_key in export_key_with_origins(graph, interface_key) {
+                        let implementers = interface_to_implementers
+                            .entry(resolved_interface_key)
+                            .or_default();
+                        if !implementers.contains(&implementer_key) {
+                            implementers.push(implementer_key.clone());
+                        }
                     }
                 }
             }
@@ -1333,6 +1330,7 @@ pub fn find_unused_members(
     }
 
     propagate_class_inheritance(
+        graph,
         resolved_modules,
         &mut accessed_members,
         &mut self_accessed_members,

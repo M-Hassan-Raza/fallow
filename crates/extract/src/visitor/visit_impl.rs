@@ -30,8 +30,8 @@ use super::helpers::{
     ts_import_type_qualifier_root,
 };
 use super::{
-    ModuleInfoExtractor, SideEffectRegistrationTarget, try_extract_arrow_wrapped_import,
-    try_extract_dynamic_import, try_extract_import_then_callback,
+    ModuleInfoExtractor, PendingLocalExportSpecifier, SideEffectRegistrationTarget,
+    try_extract_arrow_wrapped_import, try_extract_dynamic_import, try_extract_import_then_callback,
     try_extract_property_callback_import, try_extract_require,
 };
 
@@ -1013,8 +1013,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     fn visit_declaration(&mut self, decl: &Declaration<'a>) {
         if self.block_depth == 0 && self.function_depth == 0 && self.namespace_depth == 0 {
             match decl {
+                Declaration::VariableDeclaration(var) => {
+                    for declarator in &var.declarations {
+                        for id in declarator.id.get_binding_identifiers() {
+                            self.record_local_declaration_name(&id.name);
+                        }
+                    }
+                }
                 Declaration::ClassDeclaration(class) => {
                     if let Some(id) = class.id.as_ref() {
+                        self.record_local_declaration_name(&id.name);
                         self.record_local_type_declaration(&id.name, id.span);
                         let is_angular = has_angular_class_decorator(class);
                         let instance_bindings =
@@ -1032,26 +1040,31 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 }
                 Declaration::FunctionDeclaration(function) => {
                     if let Some(id) = function.id.as_ref() {
+                        self.record_local_declaration_name(&id.name);
                         let refs = Self::collect_function_signature_refs(function);
                         self.record_local_signature_refs(&id.name, refs);
                     }
                 }
                 Declaration::TSTypeAliasDeclaration(alias) => {
+                    self.record_local_declaration_name(&alias.id.name);
                     self.record_local_type_declaration(&alias.id.name, alias.id.span);
                     self.record_playwright_fixture_type_alias(alias);
                     let refs = Self::collect_type_alias_signature_refs(alias);
                     self.record_local_signature_refs(&alias.id.name, refs);
                 }
                 Declaration::TSInterfaceDeclaration(iface) => {
+                    self.record_local_declaration_name(&iface.id.name);
                     self.record_local_type_declaration(&iface.id.name, iface.id.span);
                     let refs = Self::collect_interface_signature_refs(iface);
                     self.record_local_signature_refs(&iface.id.name, refs);
                 }
                 Declaration::TSEnumDeclaration(enumd) => {
+                    self.record_local_declaration_name(&enumd.id.name);
                     self.record_local_type_declaration(&enumd.id.name, enumd.id.span);
                 }
                 Declaration::TSModuleDeclaration(module) => {
                     if let TSModuleDeclarationName::Identifier(id) = &module.id {
+                        self.record_local_declaration_name(&id.name);
                         self.record_local_type_declaration(&id.name, id.span);
                     }
                 }
@@ -1174,53 +1187,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 let local_name_str = spec.local.name().as_str();
                 let spec_type_only = is_type_only || spec.export_kind.is_type();
 
-                // "Import then re-export" pattern: `import { X } from './a'; export { X };`
-                // is semantically equivalent to `export { X } from './a';`. Without this
-                // detection, we would emit an ExportInfo that (1) collides with the
-                // original export in duplicate-export detection and (2) is never reached
-                // by re-export chain propagation, causing false unused-export reports.
-                //
-                // Order-sensitive: relies on imports being visited before exports in
-                // source order. The reverse (`export { X }; import { X } from './a';`)
-                // is valid JS but vanishingly rare and falls back to local export.
-                let matching_import = self.imports.iter().find(|imp| {
-                    imp.local_name == local_name_str
-                        && matches!(
-                            imp.imported_name,
-                            ImportedName::Named(_) | ImportedName::Default
-                        )
-                });
-
-                if let Some(import) = matching_import {
-                    let imported_name_str = match &import.imported_name {
-                        ImportedName::Named(name) => name.clone(),
-                        ImportedName::Default => "default".to_string(),
-                        // The matches! guard above filters Namespace/SideEffect, so
-                        // this arm is unreachable. Crash loudly if the guard is ever
-                        // widened without updating this match.
-                        ImportedName::Namespace | ImportedName::SideEffect => {
-                            unreachable!("filtered by matches! guard above")
-                        }
-                    };
-                    self.re_exports.push(ReExportInfo {
-                        source: import.source.clone(),
-                        imported_name: imported_name_str,
+                self.pending_local_export_specifiers
+                    .push(PendingLocalExportSpecifier {
+                        local_name: local_name_str.to_string(),
                         exported_name: spec.exported.name().to_string(),
-                        is_type_only: spec_type_only || import.is_type_only,
-                        span: spec.span,
-                    });
-                } else {
-                    self.exports.push(ExportInfo {
-                        name: ExportName::Named(spec.exported.name().to_string()),
-                        local_name: Some(spec.local.name().to_string()),
                         is_type_only: spec_type_only,
-                        visibility: VisibilityTag::None,
                         span: spec.span,
-                        members: vec![],
-                        is_side_effect_used: false,
-                        super_class: None,
                     });
-                }
             }
         }
 

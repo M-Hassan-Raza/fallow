@@ -42,6 +42,14 @@ struct ObjectBindingCandidate {
     source_name: String,
 }
 
+#[derive(Debug, Clone)]
+struct PendingLocalExportSpecifier {
+    local_name: String,
+    exported_name: String,
+    is_type_only: bool,
+    span: Span,
+}
+
 /// Captured at variable-declarator visit time for `const <local_name> = <callee_object>.<callee_method>()`.
 /// Resolved at finalize against this module's imports and class declarations.
 /// See issue #346.
@@ -125,6 +133,12 @@ pub(crate) struct ModuleInfoExtractor {
     /// Object literal aliases resolved after the full AST walk so later import
     /// declarations can still seed namespace bindings.
     object_binding_candidates: Vec<ObjectBindingCandidate>,
+    /// Module-scope declarations keyed by local binding name. Used to keep
+    /// delayed `export { X }` specifiers local when a real local `X` exists.
+    local_declaration_names: FxHashSet<String>,
+    /// Local `export { X }` specifiers resolved after the full AST walk so
+    /// import-forwarding barrels are recognized independent of source order.
+    pending_local_export_specifiers: Vec<PendingLocalExportSpecifier>,
     /// Nesting depth inside `TSModuleDeclaration` (namespace) bodies.
     /// When > 0, inner `export` declarations are collected as namespace members
     /// instead of being extracted as top-level module exports.
@@ -212,6 +226,55 @@ impl ModuleInfoExtractor {
 
     pub(crate) fn binding_target_names(&self) -> &FxHashMap<String, String> {
         &self.binding_target_names
+    }
+
+    pub(crate) fn record_local_declaration_name(&mut self, name: &str) {
+        self.local_declaration_names.insert(name.to_string());
+    }
+
+    fn resolve_pending_local_export_specifiers(&mut self) {
+        let pending = std::mem::take(&mut self.pending_local_export_specifiers);
+        for spec in pending {
+            let matching_import = if self.local_declaration_names.contains(&spec.local_name) {
+                None
+            } else {
+                self.imports.iter().find(|import| {
+                    import.local_name == spec.local_name
+                        && matches!(
+                            import.imported_name,
+                            ImportedName::Named(_) | ImportedName::Default
+                        )
+                })
+            };
+
+            if let Some(import) = matching_import {
+                let imported_name = match &import.imported_name {
+                    ImportedName::Named(name) => name.clone(),
+                    ImportedName::Default => "default".to_string(),
+                    ImportedName::Namespace | ImportedName::SideEffect => {
+                        unreachable!("filtered by matches! guard above")
+                    }
+                };
+                self.re_exports.push(ReExportInfo {
+                    source: import.source.clone(),
+                    imported_name,
+                    exported_name: spec.exported_name,
+                    is_type_only: spec.is_type_only || import.is_type_only,
+                    span: spec.span,
+                });
+            } else {
+                self.exports.push(ExportInfo {
+                    name: ExportName::Named(spec.exported_name),
+                    local_name: Some(spec.local_name),
+                    is_type_only: spec.is_type_only,
+                    visibility: VisibilityTag::None,
+                    span: spec.span,
+                    members: vec![],
+                    is_side_effect_used: false,
+                    super_class: None,
+                });
+            }
+        }
     }
 
     fn is_lit_custom_element_decorator(&self, decorator: &LitCustomElementDecorator) -> bool {
@@ -595,6 +658,7 @@ impl ModuleInfoExtractor {
         content_hash: u64,
         suppressions: Vec<Suppression>,
     ) -> ModuleInfo {
+        self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();
@@ -649,6 +713,7 @@ impl ModuleInfoExtractor {
              Angular content here, plumb inline_template_findings into the \
              merge step before relying on this assertion"
         );
+        self.resolve_pending_local_export_specifiers();
         self.enrich_local_class_exports();
         self.record_exported_instance_bindings();
         self.resolve_object_binding_candidates();

@@ -92,6 +92,38 @@ fn barrel_re_export_propagates_to_source_module() {
 }
 
 #[test]
+fn source_order_independent_import_forwarding_is_re_export() {
+    let root = fixture_path("source-order-re-export");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert!(
+        results.duplicate_exports.is_empty(),
+        "import-forwarding barrels should not emit duplicate exports when export appears before import: {:?}",
+        results
+            .duplicate_exports
+            .iter()
+            .map(|duplicate| duplicate.export.export_name.as_str())
+            .collect::<Vec<_>>()
+    );
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|export| export.export.export_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_export_names.contains(&"used"),
+        "used should propagate through the source-order-independent barrel, found: {unused_export_names:?}"
+    );
+    assert!(
+        unused_export_names.contains(&"unused"),
+        "genuinely unused source exports should still be reported, found: {unused_export_names:?}"
+    );
+}
+
+#[test]
 fn barrel_exports_detects_unused_re_export_bar() {
     // In the existing barrel-exports fixture, `bar` is re-exported from barrel
     // but nobody imports `bar` from the barrel.

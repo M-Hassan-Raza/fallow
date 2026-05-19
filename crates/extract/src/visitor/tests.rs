@@ -3281,8 +3281,28 @@ fn import_then_export_same_name_is_re_export() {
 }
 
 #[test]
+fn export_then_import_same_name_is_re_export() {
+    let info = parse("export { Foo };\nimport { Foo } from './types';");
+    assert_eq!(info.imports.len(), 1);
+    assert_eq!(info.re_exports.len(), 1);
+    assert_eq!(info.exports.len(), 0);
+    assert_eq!(info.re_exports[0].source, "./types");
+    assert_eq!(info.re_exports[0].imported_name, "Foo");
+    assert_eq!(info.re_exports[0].exported_name, "Foo");
+    assert!(!info.re_exports[0].is_type_only);
+}
+
+#[test]
 fn import_type_then_export_type_is_type_only_re_export() {
     let info = parse("import type { Foo } from './types';\nexport type { Foo };");
+    assert_eq!(info.re_exports.len(), 1);
+    assert_eq!(info.exports.len(), 0);
+    assert!(info.re_exports[0].is_type_only);
+}
+
+#[test]
+fn export_type_then_import_type_is_type_only_re_export() {
+    let info = parse("export type { Foo };\nimport type { Foo } from './types';");
     assert_eq!(info.re_exports.len(), 1);
     assert_eq!(info.exports.len(), 0);
     assert!(info.re_exports[0].is_type_only);
@@ -3323,9 +3343,28 @@ fn import_then_export_with_rename_is_re_export_with_alias() {
 }
 
 #[test]
+fn export_then_import_with_rename_is_re_export_with_alias() {
+    let info = parse("export { X as Y };\nimport { X } from './a';");
+    assert_eq!(info.re_exports.len(), 1);
+    assert_eq!(info.exports.len(), 0);
+    assert_eq!(info.re_exports[0].imported_name, "X");
+    assert_eq!(info.re_exports[0].exported_name, "Y");
+}
+
+#[test]
 fn default_import_then_export_is_re_export_of_default() {
     // `import D from './a'; export { D };` re-exports the remote default.
     let info = parse("import D from './a';\nexport { D };");
+    assert_eq!(info.re_exports.len(), 1);
+    assert_eq!(info.exports.len(), 0);
+    assert_eq!(info.re_exports[0].source, "./a");
+    assert_eq!(info.re_exports[0].imported_name, "default");
+    assert_eq!(info.re_exports[0].exported_name, "D");
+}
+
+#[test]
+fn default_export_then_import_is_re_export_of_default() {
+    let info = parse("export { D };\nimport D from './a';");
     assert_eq!(info.re_exports.len(), 1);
     assert_eq!(info.exports.len(), 0);
     assert_eq!(info.re_exports[0].source, "./a");
@@ -3342,6 +3381,23 @@ fn mixed_export_splits_into_local_and_re_export() {
     assert_eq!(info.exports.len(), 1);
     assert_eq!(info.re_exports[0].imported_name, "X");
     assert_eq!(info.exports[0].name, ExportName::Named("Y".to_string()));
+}
+
+#[test]
+fn mixed_export_splits_after_later_import() {
+    let info = parse("const Y = 1;\nexport { X, Y };\nimport { X } from './a';");
+    assert_eq!(info.re_exports.len(), 1);
+    assert_eq!(info.exports.len(), 1);
+    assert_eq!(info.re_exports[0].imported_name, "X");
+    assert_eq!(info.exports[0].name, ExportName::Named("Y".to_string()));
+}
+
+#[test]
+fn local_declaration_keeps_export_local_despite_later_import_collision() {
+    let info = parse("const X = 1;\nexport { X };\nimport { X } from './a';");
+    assert_eq!(info.re_exports.len(), 0);
+    assert_eq!(info.exports.len(), 1);
+    assert_eq!(info.exports[0].name, ExportName::Named("X".to_string()));
 }
 
 #[test]
