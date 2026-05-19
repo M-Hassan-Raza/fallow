@@ -13,14 +13,22 @@
  * (`CheckOutput`, `DupesOutput`, `CombinedOutput`).
  */
 
+// Bare-name backwards-compat aliases (`UnusedExport`, `CloneGroup`, ...) and
+// per-alias rationale live in the generated `output-contract.d.ts` under the
+// `// Backwards-compat aliases` section. They are sourced from the same
+// `export type { ... }` block below so the published `fallow/types` subpath
+// carries the v2.x stable surface. Public-consumer policy:
+// `docs/backwards-compatibility.md`.
 export type {
   AddToConfigAction,
   AttributedCloneGroup,
   AttributedCloneGroupFinding,
   AuditOutput,
+  BoundaryViolation,
   BoundaryViolationFinding,
   CheckOutput,
   CheckSummary,
+  CircularDependency,
   CircularDependencyFinding,
   CloneFamily,
   CloneFamilyAction,
@@ -31,94 +39,55 @@ export type {
   CloneInstance,
   CombinedOutput,
   CoverageAnalyzeOutput,
+  DuplicateExport,
   DuplicateExportFinding,
   DuplicateLocation,
   DupesOutput,
   DupesReportPayload,
   DuplicationReport,
   DuplicationStats,
+  EmptyCatalogGroup,
   EmptyCatalogGroupFinding,
   EntryPoints,
   FixAction as SuggestionFixAction,
   HealthOutput,
   ImportSite,
   IssueAction,
+  MisconfiguredDependencyOverride,
   MisconfiguredDependencyOverrideFinding,
+  PrivateTypeLeak,
   PrivateTypeLeakFinding,
   RefactoringSuggestion,
   StaleSuppression,
   SuppressFileAction,
   SuppressLineAction,
+  TestOnlyDependency,
   TestOnlyDependencyFinding,
+  TypeOnlyDependency,
   TypeOnlyDependencyFinding,
+  UnlistedDependency,
   UnlistedDependencyFinding,
+  UnresolvedCatalogReference,
   UnresolvedCatalogReferenceFinding,
+  UnresolvedImport,
   UnresolvedImportFinding,
+  UnusedCatalogEntry,
   UnusedCatalogEntryFinding,
   UnusedClassMemberFinding,
+  UnusedDependency,
   UnusedDependencyFinding,
+  UnusedDependencyOverride,
   UnusedDependencyOverrideFinding,
   UnusedDevDependencyFinding,
   UnusedEnumMemberFinding,
+  UnusedExport,
   UnusedExportFinding,
+  UnusedFile,
   UnusedFileFinding,
+  UnusedMember,
   UnusedOptionalDependencyFinding,
   UnusedTypeFinding,
 } from "./generated/output-contract.js";
-
-// Backwards-compat aliases for downstream consumers that import the
-// pre-#384-item-1 bare type names. The wire shape is byte-identical: each
-// wrapper flattens the bare finding's fields and adds `actions` plus
-// optional `introduced`. New code should prefer the `*Finding` names above.
-//
-// Dupes wrappers (`CloneGroup`, `CloneFamily`, `AttributedCloneGroup`,
-// `DuplicationReport`) are aliased upstream in the generated
-// `output-contract.d.ts` via `editors/vscode/scripts/codegen-types.mjs`'s
-// `FLATTEN_DEDUPED_ALIASES` table, so they're re-exported from the
-// `export type {...}` block above rather than redeclared here.
-import type {
-  BoundaryViolationFinding,
-  CircularDependencyFinding,
-  DuplicateExportFinding,
-  EmptyCatalogGroupFinding,
-  MisconfiguredDependencyOverrideFinding,
-  PrivateTypeLeakFinding,
-  TestOnlyDependencyFinding,
-  TypeOnlyDependencyFinding,
-  UnlistedDependencyFinding,
-  UnresolvedCatalogReferenceFinding,
-  UnresolvedImportFinding,
-  UnusedCatalogEntryFinding,
-  UnusedClassMemberFinding,
-  UnusedDependencyFinding,
-  UnusedDependencyOverrideFinding,
-  UnusedDevDependencyFinding,
-  UnusedEnumMemberFinding,
-  UnusedExportFinding,
-  UnusedFileFinding,
-  UnusedOptionalDependencyFinding,
-} from "./generated/output-contract.js";
-export type BoundaryViolation = BoundaryViolationFinding;
-export type CircularDependency = CircularDependencyFinding;
-export type DuplicateExport = DuplicateExportFinding;
-export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
-export type MisconfiguredDependencyOverride =
-  MisconfiguredDependencyOverrideFinding;
-export type PrivateTypeLeak = PrivateTypeLeakFinding;
-export type TestOnlyDependency = TestOnlyDependencyFinding;
-export type TypeOnlyDependency = TypeOnlyDependencyFinding;
-export type UnlistedDependency = UnlistedDependencyFinding;
-export type UnresolvedCatalogReference = UnresolvedCatalogReferenceFinding;
-export type UnresolvedImport = UnresolvedImportFinding;
-export type UnusedCatalogEntry = UnusedCatalogEntryFinding;
-export type UnusedDependency =
-  | UnusedDependencyFinding
-  | UnusedDevDependencyFinding
-  | UnusedOptionalDependencyFinding;
-export type UnusedDependencyOverride = UnusedDependencyOverrideFinding;
-export type UnusedExport = UnusedExportFinding;
-export type UnusedFile = UnusedFileFinding;
-export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding;
 
 export type { CheckOutput as FallowCheckResult } from "./generated/output-contract.js";
 // The VS Code extension reads dupes only via the combined invocation

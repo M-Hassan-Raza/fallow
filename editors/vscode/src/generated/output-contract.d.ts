@@ -5358,6 +5358,34 @@ export type HotspotEntry = Omit<HotspotFinding, "actions">;
  */
 export type RefactoringTarget = Omit<RefactoringTargetFinding, "actions">;
 
+//
+// =============================================================================
+// Backwards-compat aliases
+// =============================================================================
+//
+// The aliases below map pre-#384 / #408 / #409 bare names to their typed
+// envelope wrappers. The wire shape is byte-identical: each wrapper flattens
+// the bare finding's fields via `#[serde(flatten)]` and adds `actions[]`
+// (and, where the wrapper participates in `fallow audit` attribution, the
+// optional `introduced` flag). Per-alias rationale lives in each alias's
+// JSDoc below.
+//
+// Why these aliases exist: `json-schema-to-typescript` drops the orphan
+// inner definitions for `#[serde(flatten)]` wrappers (even with
+// `unreachableDefinitions: true`), so the bare names disappear from this
+// generated `.d.ts` without an explicit alias. External consumers that
+// import the bare names from `fallow/types` would break at upgrade time
+// otherwise.
+//
+// Stability commitment: these aliases ship as part of fallow's v2.x stable
+// surface. They are scheduled for removal alongside the kind-tagged
+// `FallowOutput` major bump (see https://github.com/fallow-rs/fallow/issues/413),
+// with a one-minor-cycle deprecation window (`@deprecated` JSDoc +
+// CHANGELOG headline) preceding the removal. New code should prefer the
+// `*Finding` wrapper names. Full public-consumer policy:
+// https://github.com/fallow-rs/fallow/blob/main/docs/backwards-compatibility.md
+//
+
 /**
  * Backwards-compat alias for the pre-#409 bare clone-group name.
  * jstt dedupes the bare interface because every field is fully
@@ -5407,3 +5435,175 @@ export type AttributedCloneGroup = AttributedCloneGroupFinding;
  * prefer `DupesReportPayload`.
  */
 export type DuplicationReport = DupesReportPayload;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `BoundaryViolation` name.
+ * The wire shape is byte-identical: `BoundaryViolationFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `BoundaryViolation` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `BoundaryViolationFinding`.
+ */
+export type BoundaryViolation = BoundaryViolationFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `CircularDependency` name.
+ * The wire shape is byte-identical: `CircularDependencyFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `CircularDependency` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `CircularDependencyFinding`.
+ */
+export type CircularDependency = CircularDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `DuplicateExport` name.
+ * The wire shape is byte-identical: `DuplicateExportFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `DuplicateExport` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `DuplicateExportFinding`.
+ */
+export type DuplicateExport = DuplicateExportFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `EmptyCatalogGroup` name.
+ * The wire shape is byte-identical: `EmptyCatalogGroupFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `EmptyCatalogGroup` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `EmptyCatalogGroupFinding`.
+ */
+export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `MisconfiguredDependencyOverride` name.
+ * The wire shape is byte-identical: `MisconfiguredDependencyOverrideFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `MisconfiguredDependencyOverride` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `MisconfiguredDependencyOverrideFinding`.
+ */
+export type MisconfiguredDependencyOverride = MisconfiguredDependencyOverrideFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `PrivateTypeLeak` name.
+ * The wire shape is byte-identical: `PrivateTypeLeakFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `PrivateTypeLeak` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `PrivateTypeLeakFinding`.
+ */
+export type PrivateTypeLeak = PrivateTypeLeakFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `TestOnlyDependency` name.
+ * The wire shape is byte-identical: `TestOnlyDependencyFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `TestOnlyDependency` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `TestOnlyDependencyFinding`.
+ */
+export type TestOnlyDependency = TestOnlyDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `TypeOnlyDependency` name.
+ * The wire shape is byte-identical: `TypeOnlyDependencyFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `TypeOnlyDependency` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `TypeOnlyDependencyFinding`.
+ */
+export type TypeOnlyDependency = TypeOnlyDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnlistedDependency` name.
+ * The wire shape is byte-identical: `UnlistedDependencyFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnlistedDependency` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnlistedDependencyFinding`.
+ */
+export type UnlistedDependency = UnlistedDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnresolvedCatalogReference` name.
+ * The wire shape is byte-identical: `UnresolvedCatalogReferenceFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnresolvedCatalogReference` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnresolvedCatalogReferenceFinding`.
+ */
+export type UnresolvedCatalogReference = UnresolvedCatalogReferenceFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnresolvedImport` name.
+ * The wire shape is byte-identical: `UnresolvedImportFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnresolvedImport` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnresolvedImportFinding`.
+ */
+export type UnresolvedImport = UnresolvedImportFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnusedCatalogEntry` name.
+ * The wire shape is byte-identical: `UnusedCatalogEntryFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnusedCatalogEntry` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnusedCatalogEntryFinding`.
+ */
+export type UnusedCatalogEntry = UnusedCatalogEntryFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnusedDependencyOverride` name.
+ * The wire shape is byte-identical: `UnusedDependencyOverrideFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnusedDependencyOverride` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnusedDependencyOverrideFinding`.
+ */
+export type UnusedDependencyOverride = UnusedDependencyOverrideFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnusedExport` name.
+ * The wire shape is byte-identical: `UnusedExportFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnusedExport` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnusedExportFinding`.
+ */
+export type UnusedExport = UnusedExportFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnusedFile` name.
+ * The wire shape is byte-identical: `UnusedFileFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `UnusedFile` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `UnusedFileFinding`.
+ */
+export type UnusedFile = UnusedFileFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnusedDependency` union name.
+ * Maps to the union of typed wrappers (`UnusedDependencyFinding`, `UnusedDevDependencyFinding`, `UnusedOptionalDependencyFinding`)
+ * that replaced the pre-migration bare union. The wire shape per variant
+ * is byte-identical (each wrapper flattens its bare payload and adds
+ * `actions[]` plus optional `introduced`). Consumers that imported
+ * `UnusedDependency` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should narrow on the specific wrapper variant.
+ */
+export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFinding | UnusedOptionalDependencyFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `UnusedMember` union name.
+ * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`)
+ * that replaced the pre-migration bare union. The wire shape per variant
+ * is byte-identical (each wrapper flattens its bare payload and adds
+ * `actions[]` plus optional `introduced`). Consumers that imported
+ * `UnusedMember` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should narrow on the specific wrapper variant.
+ */
+export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding;

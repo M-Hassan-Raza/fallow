@@ -51,6 +51,14 @@ if (!validate(fallowOutput)) {
 
 For TypeScript types generated from the schema, see `npm/fallow/types/output-contract.d.ts` (mirrored to `editors/vscode/src/generated/output-contract.d.ts`). Both are regenerated from `docs/output-schema.json` via `cd editors/vscode && pnpm run codegen:types`.
 
+#### TypeScript bare-name backwards-compat aliases
+
+The schema-derive ladder ([#384](https://github.com/fallow-rs/fallow/issues/384), [#408](https://github.com/fallow-rs/fallow/issues/408), [#409](https://github.com/fallow-rs/fallow/issues/409)) wrapped every bare finding type in a `*Finding` envelope (`UnusedExport` to `UnusedExportFinding`, `CloneGroup` to `CloneGroupFinding`, etc.). The wrappers flatten the bare finding's fields via Rust's `#[serde(flatten)]` and add `actions[]` (and, where the wrapper participates in `fallow audit` attribution, the optional `introduced` flag), so the JSON wire shape is byte-identical.
+
+`json-schema-to-typescript` drops the orphan inner definitions when every field is subsumed by a flattening parent (even with `unreachableDefinitions: true`), so the bare names disappear from the generated `.d.ts` unless they are aliased back explicitly. The npm-published `fallow/types` subpath (`npm/fallow/types/output-contract.d.ts`) carries an alias for every wrapper so external consumers importing the bare names continue to compile. The full list lives at the end of the generated file under the `// Backwards-compat aliases` section, with per-alias JSDoc explaining the migration history.
+
+**Stability commitment**: the bare-name aliases are part of fallow's v2.x stable surface. They are scheduled for removal alongside the kind-tagged `FallowOutput` major bump ([#413](https://github.com/fallow-rs/fallow/issues/413)). The removal will be preceded by one minor release that adds `@deprecated` JSDoc to each alias and a CHANGELOG headline announcing the timeline. New code that consumes fallow's JSON output should import the `*Finding` wrapper names directly so the major bump is a no-op for the consumer.
+
 ### CLI interface
 
 - **Subcommands**: `dead-code` (legacy alias: `check`), `dupes`, `health`, `audit`, `explain`, `fix`, `watch`, `init`, `hooks`, `setup-hooks`, `migrate`, `list`, `schema`, `config-schema`, `plugin-schema`, `config`, `coverage`, `license`, `ci`

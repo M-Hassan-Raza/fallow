@@ -317,6 +317,137 @@ const FLATTEN_DEDUPED_ALIASES = [
 ];
 
 /**
+ * Bare-name backwards-compat aliases for the dead-code findings wrapped by
+ * the #384 schema-derive ladder. Each maps the pre-wrapper bare name to its
+ * `*Finding` envelope. jstt drops the orphan inner definitions because every
+ * field is subsumed by the flattening wrapper, so external `fallow/types`
+ * consumers importing the bare names would break at upgrade time without
+ * these aliases. The published v2.x stable surface guarantees the bare
+ * names; the kind-tagged `FallowOutput` major bump (#413) will remove them
+ * after one minor cycle of `@deprecated` JSDoc.
+ *
+ * Generated under the same "Backwards-compat aliases" section as the
+ * `FLATTEN_DEDUPED_ALIASES` dupes / health-secondary entries.
+ */
+const BARE_DEAD_CODE_ALIASES = [
+  { name: "BoundaryViolation", parent: "BoundaryViolationFinding" },
+  { name: "CircularDependency", parent: "CircularDependencyFinding" },
+  { name: "DuplicateExport", parent: "DuplicateExportFinding" },
+  { name: "EmptyCatalogGroup", parent: "EmptyCatalogGroupFinding" },
+  {
+    name: "MisconfiguredDependencyOverride",
+    parent: "MisconfiguredDependencyOverrideFinding",
+  },
+  { name: "PrivateTypeLeak", parent: "PrivateTypeLeakFinding" },
+  { name: "TestOnlyDependency", parent: "TestOnlyDependencyFinding" },
+  { name: "TypeOnlyDependency", parent: "TypeOnlyDependencyFinding" },
+  { name: "UnlistedDependency", parent: "UnlistedDependencyFinding" },
+  {
+    name: "UnresolvedCatalogReference",
+    parent: "UnresolvedCatalogReferenceFinding",
+  },
+  { name: "UnresolvedImport", parent: "UnresolvedImportFinding" },
+  { name: "UnusedCatalogEntry", parent: "UnusedCatalogEntryFinding" },
+  {
+    name: "UnusedDependencyOverride",
+    parent: "UnusedDependencyOverrideFinding",
+  },
+  { name: "UnusedExport", parent: "UnusedExportFinding" },
+  { name: "UnusedFile", parent: "UnusedFileFinding" },
+];
+
+/**
+ * Bare-name union aliases for the dead-code findings whose pre-wrapper
+ * shape was a union of multiple `*Finding` types (e.g. pre-#384
+ * `UnusedDependency` covered the production / dev / optional dep variants).
+ * The wire shape is unchanged; the bare names exist for the same
+ * `json-schema-to-typescript` orphan reason as `BARE_DEAD_CODE_ALIASES`.
+ */
+const BARE_DEAD_CODE_UNION_ALIASES = [
+  {
+    name: "UnusedDependency",
+    parents: [
+      "UnusedDependencyFinding",
+      "UnusedDevDependencyFinding",
+      "UnusedOptionalDependencyFinding",
+    ],
+  },
+  {
+    name: "UnusedMember",
+    parents: ["UnusedClassMemberFinding", "UnusedEnumMemberFinding"],
+  },
+];
+
+/**
+ * Header emitted above the appended aliases so the published
+ * `npm/fallow/types/output-contract.d.ts` (and the extension-internal
+ * mirror) carry the alias policy inline. Public-consumer reference lives
+ * in `docs/backwards-compatibility.md`; this block is the in-file
+ * shorthand for npm consumers grepping their `node_modules`.
+ */
+const BACKWARDS_COMPAT_ALIASES_HEADER = `
+//
+// =============================================================================
+// Backwards-compat aliases
+// =============================================================================
+//
+// The aliases below map pre-#384 / #408 / #409 bare names to their typed
+// envelope wrappers. The wire shape is byte-identical: each wrapper flattens
+// the bare finding's fields via \`#[serde(flatten)]\` and adds \`actions[]\`
+// (and, where the wrapper participates in \`fallow audit\` attribution, the
+// optional \`introduced\` flag). Per-alias rationale lives in each alias's
+// JSDoc below.
+//
+// Why these aliases exist: \`json-schema-to-typescript\` drops the orphan
+// inner definitions for \`#[serde(flatten)]\` wrappers (even with
+// \`unreachableDefinitions: true\`), so the bare names disappear from this
+// generated \`.d.ts\` without an explicit alias. External consumers that
+// import the bare names from \`fallow/types\` would break at upgrade time
+// otherwise.
+//
+// Stability commitment: these aliases ship as part of fallow's v2.x stable
+// surface. They are scheduled for removal alongside the kind-tagged
+// \`FallowOutput\` major bump (see https://github.com/fallow-rs/fallow/issues/413),
+// with a one-minor-cycle deprecation window (\`@deprecated\` JSDoc +
+// CHANGELOG headline) preceding the removal. New code should prefer the
+// \`*Finding\` wrapper names. Full public-consumer policy:
+// https://github.com/fallow-rs/fallow/blob/main/docs/backwards-compatibility.md
+//
+`;
+
+/**
+ * Build the JSDoc description for a uniform `BARE_DEAD_CODE_ALIASES` entry
+ * (`X = XFinding`). Kept terse because each alias has the same rationale:
+ * #384 wrapped the bare finding and jstt drops the orphan.
+ */
+function bareDeadCodeAliasDescription(name, parent) {
+  return (
+    `Backwards-compat alias for the pre-#384 bare \`${name}\` name.\n` +
+    ` * The wire shape is byte-identical: \`${parent}\` flattens the bare\n` +
+    ` * finding's fields via \`#[serde(flatten)]\` and adds \`actions[]\` plus\n` +
+    ` * the optional audit-mode \`introduced\` flag. Consumers that imported\n` +
+    ` * \`${name}\` from \`fallow/types\` pre-migration continue to work via\n` +
+    ` * this alias; new code should prefer \`${parent}\`.`
+  );
+}
+
+/**
+ * Build the JSDoc description for a `BARE_DEAD_CODE_UNION_ALIASES` entry
+ * (`X = A | B | ...`). Same rationale as the single-parent template.
+ */
+function bareDeadCodeUnionAliasDescription(name, parents) {
+  return (
+    `Backwards-compat alias for the pre-#384 bare \`${name}\` union name.\n` +
+    ` * Maps to the union of typed wrappers (${parents.map((p) => `\`${p}\``).join(", ")})\n` +
+    ` * that replaced the pre-migration bare union. The wire shape per variant\n` +
+    ` * is byte-identical (each wrapper flattens its bare payload and adds\n` +
+    ` * \`actions[]\` plus optional \`introduced\`). Consumers that imported\n` +
+    ` * \`${name}\` from \`fallow/types\` pre-migration continue to work via\n` +
+    ` * this alias; new code should narrow on the specific wrapper variant.`
+  );
+}
+
+/**
  * Append aliases for serde-flattened inner types that jstt dedupes (see
  * `FLATTEN_DEDUPED_ALIASES` for the full rationale and extension recipe).
  *
@@ -329,13 +460,40 @@ const FLATTEN_DEDUPED_ALIASES = [
  */
 function appendDedupedFlattenAliases(contents) {
   let out = contents;
+  let backwardsCompatHeaderEmitted = false;
   for (const alias of FLATTEN_DEDUPED_ALIASES) {
+    const isBackwardsCompat = alias.description.startsWith(
+      "Backwards-compat alias",
+    );
+    if (isBackwardsCompat && !backwardsCompatHeaderEmitted) {
+      out += BACKWARDS_COMPAT_ALIASES_HEADER;
+      backwardsCompatHeaderEmitted = true;
+    }
     const rhs = alias.wrapperOnlyFields.length === 0
       ? alias.parent
       : `Omit<${alias.parent}, ${alias.wrapperOnlyFields
           .map((field) => `"${field}"`)
           .join(" | ")}>`;
     out += `\n/**\n * ${alias.description}\n */\nexport type ${alias.name} = ${rhs};\n`;
+  }
+  // Emit the BARE_DEAD_CODE_* tables under the same "Backwards-compat
+  // aliases" section header. If FLATTEN_DEDUPED_ALIASES had no
+  // backwards-compat entries, drop the header here so the section still
+  // gets one explanatory block before the first dead-code alias.
+  if (!backwardsCompatHeaderEmitted) {
+    out += BACKWARDS_COMPAT_ALIASES_HEADER;
+    backwardsCompatHeaderEmitted = true;
+  }
+  for (const alias of BARE_DEAD_CODE_ALIASES) {
+    const description = bareDeadCodeAliasDescription(alias.name, alias.parent);
+    out += `\n/**\n * ${description}\n */\nexport type ${alias.name} = ${alias.parent};\n`;
+  }
+  for (const alias of BARE_DEAD_CODE_UNION_ALIASES) {
+    const description = bareDeadCodeUnionAliasDescription(
+      alias.name,
+      alias.parents,
+    );
+    out += `\n/**\n * ${description}\n */\nexport type ${alias.name} = ${alias.parents.join(" | ")};\n`;
   }
   return out;
 }
@@ -362,22 +520,33 @@ function appendDedupedFlattenAliases(contents) {
  * deliberately narrower so the failure surfaces at codegen time first.
  */
 function assertAliasesEmitted(contents) {
-  for (const alias of FLATTEN_DEDUPED_ALIASES) {
-    const aliasRe = new RegExp(`^export type ${alias.name}\\b`, "m");
+  const assertAlias = (name, parents, table) => {
+    const aliasRe = new RegExp(`^export type ${name}\\b`, "m");
     if (!aliasRe.test(contents)) {
       throw new Error(
-        `assertAliasesEmitted: expected \`export type ${alias.name}\` in generated output. ` +
-          `If jstt now emits this type natively or it was renamed, update FLATTEN_DEDUPED_ALIASES.`,
+        `assertAliasesEmitted: expected \`export type ${name}\` in generated output. ` +
+          `If jstt now emits this type natively or it was renamed, update ${table}.`,
       );
     }
-    const parentRe = new RegExp(`^export interface ${alias.parent}\\b`, "m");
-    if (!parentRe.test(contents)) {
-      throw new Error(
-        `assertAliasesEmitted: expected \`export interface ${alias.parent}\` (parent of ${alias.name}) in generated output. ` +
-          `The alias \`Omit<${alias.parent}, ...>\` would fail to resolve without it. ` +
-          `Did ${alias.parent} get renamed or dedupe-suppressed?`,
-      );
+    for (const parent of parents) {
+      const parentRe = new RegExp(`^export interface ${parent}\\b`, "m");
+      if (!parentRe.test(contents)) {
+        throw new Error(
+          `assertAliasesEmitted: expected \`export interface ${parent}\` (parent of ${name}) in generated output. ` +
+            `The alias for \`${name}\` would fail to resolve without it. ` +
+            `Did ${parent} get renamed or dedupe-suppressed?`,
+        );
+      }
     }
+  };
+  for (const alias of FLATTEN_DEDUPED_ALIASES) {
+    assertAlias(alias.name, [alias.parent], "FLATTEN_DEDUPED_ALIASES");
+  }
+  for (const alias of BARE_DEAD_CODE_ALIASES) {
+    assertAlias(alias.name, [alias.parent], "BARE_DEAD_CODE_ALIASES");
+  }
+  for (const alias of BARE_DEAD_CODE_UNION_ALIASES) {
+    assertAlias(alias.name, alias.parents, "BARE_DEAD_CODE_UNION_ALIASES");
   }
 }
 
