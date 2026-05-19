@@ -2996,23 +2996,14 @@ mod tests {
     ///
     /// The allow-list mirrors the `HAND_MAINTAINED_ALLOW_LIST` pattern
     /// in `crates/cli/src/bin/schema_emit.rs`: each entry pairs a name
-    /// with the issue that retires it. After #408 + #409 land, the
-    /// allow-list MUST be empty; any further addition needs an issue
-    /// reference in the same commit. The gate also asserts no STALE
-    /// entries, so removing a function without removing its allow-list
-    /// entry fails the test and forces the cleanup commit.
+    /// with the issue that retires it. It is empty today; any addition
+    /// needs an issue reference in the same commit. The gate also
+    /// asserts no STALE entries, so removing a function without
+    /// removing its allow-list entry fails the test and forces the
+    /// cleanup commit.
     #[test]
     fn no_new_post_pass_helpers_in_json_rs() {
-        const POST_PASS_ALLOW_LIST: &[(&str, &str)] = &[
-            (
-                "inject_health_post_pass_actions",
-                "retired by #408 (typed HotspotFinding + RefactoringTargetFinding wrappers)",
-            ),
-            (
-                "inject_dupes_actions",
-                "retired by #409 (typed CloneFamily / CloneGroup / AttributedCloneGroup wrappers)",
-            ),
-        ];
+        const POST_PASS_ALLOW_LIST: &[(&str, &str)] = &[];
         let source_path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("src")
             .join("report")
