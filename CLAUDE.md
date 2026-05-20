@@ -2,6 +2,8 @@
 
 Fallow is codebase intelligence for TypeScript and JavaScript. The free static layer finds unused files, exports, dependencies, types, enum members, class members, unresolved imports, unlisted deps, duplicate exports, circular dependencies, boundary violations, code duplication, and complexity hotspots, plus opt-in API hygiene checks such as private type leaks. A paid runtime intelligence layer (Fallow Runtime) adds production execution evidence (hot and cold paths, runtime-backed review, runtime-weighted health, stale-flag evidence, trends, alerts). Rust alternative to [knip](https://github.com/webpro-nl/knip) built on the Oxc parser ecosystem.
 
+For shared domain vocabulary, term definitions, and flagged ambiguities: see @CONTEXT.md. For the feature-workflow chain (when /fallow-implement, /panel-review, /user-panel, /fallow-review are invoked and how the .plans/ artefact threads them together): see @.claude/rules/workflow.md.
+
 ## Project structure
 
 ```
@@ -99,7 +101,7 @@ Documented as Architecture Decision Records in [`decisions/`](decisions/). Key d
 - `npm/fallow/skills/` is a vendored copy of `~/Sites/fallow-skills/`; refresh happens at release time, not manually
 - Edit fallow skills in `~/Sites/fallow-skills/fallow/skills/fallow/`, never in the symlinked `~/.agents/skills/fallow/`
 - GitHub org: `fallow-rs/fallow` (use `gh ... --repo fallow-rs/fallow`); never `bartwaardenburg/fallow`
-- `fallow check` is dead-code only; bare `fallow` runs the full pipeline (dead-code + dupes + health)
+- `fallow dead-code` is dead-code only (legacy alias `check` still works); bare `fallow` runs the full pipeline (dead-code + dupes + health)
 
 ## Worktree / parallel-agent rules
 

@@ -80,5 +80,9 @@ editors/vscode/LICENSE
 .codex/
 AGENTS.md
 
+# In-flight feature plans written by /fallow-implement and re-read by /panel-review,
+# the implementation phase, and /fallow-review. Transient; promoted concepts go to decisions/.
+.plans/
+
 # Crash-handover markers from sdk-cli automation
 /HANDOVER-CRASH-*.md
