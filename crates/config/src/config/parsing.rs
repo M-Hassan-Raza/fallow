@@ -658,6 +658,124 @@ pub(super) fn resolve_extends(
     resolve_extends_file(path, visited, depth)
 }
 
+/// Collect every unknown key under `rules` or `overrides[].rules` in a merged
+/// config value (issue #467, phase 1).
+///
+/// Today `RulesConfig` / `PartialRulesConfig` carry serde aliases but NOT
+/// `deny_unknown_fields`, so typos like `unsued-files` are silently dropped and
+/// the user's intent is lost. This pass walks the merged value before
+/// deserialization and surfaces every unknown key, with a Levenshtein-distance
+/// suggestion when the typo is close to a known name.
+///
+/// Returns the findings so the caller can render them; tests can assert
+/// against the list without subscribing to tracing output.
+///
+/// Phase 2 (a future minor release) flips both structs to
+/// `#[serde(deny_unknown_fields)]` and the warning becomes a hard error.
+pub(super) fn collect_unknown_rule_keys(
+    merged: &serde_json::Value,
+) -> Vec<super::rules::UnknownRuleKey> {
+    use super::rules::find_unknown_rule_keys;
+
+    let mut findings = Vec::new();
+
+    if let Some(rules) = merged.get("rules") {
+        findings.extend(find_unknown_rule_keys(rules, "rules"));
+    }
+
+    if let Some(overrides) = merged.get("overrides").and_then(|v| v.as_array()) {
+        for (i, entry) in overrides.iter().enumerate() {
+            if let Some(rules) = entry.get("rules") {
+                let context = format!("overrides[{i}].rules");
+                findings.extend(find_unknown_rule_keys(rules, &context));
+            }
+        }
+    }
+
+    findings
+}
+
+thread_local! {
+    /// Per-thread capture of unknown-rule findings, for the wiring regression
+    /// test in this module. Each test installs a fresh capture via
+    /// [`capture_unknown_rule_warnings`], runs `FallowConfig::load`, and reads
+    /// back the findings. Thread-local so parallel test execution does not
+    /// race; bypassed entirely in production code (`UnknownRuleCapture::None`).
+    #[cfg(test)]
+    static UNKNOWN_RULE_CAPTURE: std::cell::RefCell<Option<Vec<super::rules::UnknownRuleKey>>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Install a thread-local capture buffer and run `body`. Returns the findings
+/// emitted by every `warn_on_unknown_rule_keys` call within `body`'s call tree
+/// on the current thread, in order. Test-only.
+#[cfg(test)]
+pub(super) fn capture_unknown_rule_warnings<F: FnOnce() -> R, R>(
+    body: F,
+) -> (R, Vec<super::rules::UnknownRuleKey>) {
+    UNKNOWN_RULE_CAPTURE.with(|cell| {
+        *cell.borrow_mut() = Some(Vec::new());
+    });
+    let result = body();
+    let findings = UNKNOWN_RULE_CAPTURE.with(|cell| cell.borrow_mut().take().unwrap_or_default());
+    (result, findings)
+}
+
+/// Emit a `tracing::warn!` per finding from [`collect_unknown_rule_keys`].
+///
+/// `config_path` is the file the merged value originated from; it appears in
+/// the warning text AND in the dedupe key so two different config files with
+/// the same typo each warn once instead of the second one being silenced.
+///
+/// Deduplicates within the process: `FallowConfig::load` runs multiple times
+/// per analysis (combined mode runs check + dupes + health, each through the
+/// same config load path), so without a dedupe the same typo emits 3+ warnings
+/// per run.
+fn warn_on_unknown_rule_keys(config_path: &Path, merged: &serde_json::Value) {
+    use std::sync::{Mutex, OnceLock};
+
+    static WARNED: OnceLock<Mutex<FxHashSet<String>>> = OnceLock::new();
+    let warned = WARNED.get_or_init(|| Mutex::new(FxHashSet::default()));
+
+    let path_display = config_path.display().to_string();
+
+    for finding in collect_unknown_rule_keys(merged) {
+        let dedupe_key = format!("{path_display}::{}::{}", finding.context, finding.key);
+        // On a poisoned mutex, fall through and emit anyway: over-warning is
+        // strictly better than swallowing a typo silently.
+        if let Ok(mut set) = warned.lock()
+            && !set.insert(dedupe_key)
+        {
+            continue;
+        }
+
+        #[cfg(test)]
+        UNKNOWN_RULE_CAPTURE.with(|cell| {
+            if let Some(buf) = cell.borrow_mut().as_mut() {
+                buf.push(finding.clone());
+            }
+        });
+
+        if let Some(suggestion) = finding.suggestion {
+            tracing::warn!(
+                "unknown rule '{key}' in {context} of {path} (did you mean '{suggestion}'?); \
+                 the rule will be ignored. A future release will reject unknown rule names.",
+                key = finding.key,
+                context = finding.context,
+                path = path_display,
+            );
+        } else {
+            tracing::warn!(
+                "unknown rule '{key}' in {context} of {path}; the rule will be ignored. \
+                 A future release will reject unknown rule names.",
+                key = finding.key,
+                context = finding.context,
+                path = path_display,
+            );
+        }
+    }
+}
+
 impl FallowConfig {
     /// Load config from a fallow config file (TOML or JSON/JSONC).
     ///
@@ -683,6 +801,8 @@ impl FallowConfig {
     pub fn load(path: &Path) -> Result<Self, miette::Report> {
         let mut visited = FxHashSet::default();
         let merged = resolve_extends(path, &mut visited, 0)?;
+
+        warn_on_unknown_rule_keys(path, &merged);
 
         let config: Self = serde_json::from_value(merged).map_err(|e| {
             miette::miette!(
@@ -3136,5 +3256,140 @@ minTokens = 100
             err_msg.contains("local path or npm:"),
             "Expected remediation hint, got: {err_msg}"
         );
+    }
+
+    // ── Unknown-rule-name detection wiring (issue #467 phase 1) ──────
+
+    #[test]
+    fn collect_unknown_rule_keys_flags_top_level_typo() {
+        let merged = serde_json::json!({
+            "rules": {
+                "unsued-files": "warn",
+                "unused-exports": "off"
+            }
+        });
+        let findings = collect_unknown_rule_keys(&merged);
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].context, "rules");
+        assert_eq!(findings[0].key, "unsued-files");
+        assert_eq!(findings[0].suggestion, Some("unused-files"));
+    }
+
+    #[test]
+    fn collect_unknown_rule_keys_flags_overrides_typo() {
+        let merged = serde_json::json!({
+            "overrides": [
+                {
+                    "files": ["src/**/*.ts"],
+                    "rules": {
+                        "unsued-files": "warn"
+                    }
+                },
+                {
+                    "files": ["tests/**/*.ts"],
+                    "rules": {
+                        "circular-dependnecy": "off"
+                    }
+                }
+            ]
+        });
+        let findings = collect_unknown_rule_keys(&merged);
+        assert_eq!(findings.len(), 2);
+        assert_eq!(findings[0].context, "overrides[0].rules");
+        assert_eq!(findings[1].context, "overrides[1].rules");
+        assert_eq!(findings[1].suggestion, Some("circular-dependency"));
+    }
+
+    #[test]
+    fn collect_unknown_rule_keys_empty_for_valid_config() {
+        let merged = serde_json::json!({
+            "rules": {
+                "unused-files": "warn",
+                "unused-file": "off",
+                "circular-dependency": "off",
+                "boundary-violations": "warn"
+            },
+            "overrides": [
+                {
+                    "files": ["src/**"],
+                    "rules": {
+                        "unused-exports": "warn"
+                    }
+                }
+            ]
+        });
+        let findings = collect_unknown_rule_keys(&merged);
+        assert!(
+            findings.is_empty(),
+            "valid rule names and aliases must not be flagged: {findings:?}"
+        );
+    }
+
+    #[test]
+    fn collect_unknown_rule_keys_ignores_missing_rules_section() {
+        let merged = serde_json::json!({
+            "entry": ["src/main.ts"]
+        });
+        let findings = collect_unknown_rule_keys(&merged);
+        assert!(findings.is_empty());
+    }
+
+    #[test]
+    fn load_wires_warn_on_unknown_rule_keys_into_load_path() {
+        // Wiring regression test: asserts FallowConfig::load actually invokes
+        // the warn pass on the merged value. If a future refactor removes the
+        // `warn_on_unknown_rule_keys` line from `load`, the helper tests still
+        // pass but this capture-based assertion fails because no finding is
+        // pushed onto the thread-local buffer.
+        //
+        // Uses a thread-local capture (not a process-global counter) so that
+        // parallel test execution does not race; each test thread has its own
+        // capture buffer. Uses a unique typo per test invocation so the
+        // process-wide dedupe set does not suppress the finding if another
+        // test happens to load a config with the same typo earlier.
+        let dir = test_dir("wiring");
+        let path = dir.path().join(".fallowrc.json");
+        let typo = format!(
+            "wiring-probe-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        );
+        std::fs::write(&path, format!(r#"{{"rules": {{"{typo}": "warn"}}}}"#)).unwrap();
+
+        let (config_res, captured) = capture_unknown_rule_warnings(|| FallowConfig::load(&path));
+
+        assert!(
+            config_res.is_ok(),
+            "load should succeed in phase 1: {:?}",
+            config_res.err()
+        );
+        assert_eq!(
+            captured.len(),
+            1,
+            "FallowConfig::load must invoke warn_on_unknown_rule_keys exactly once for one new unknown key, got: {captured:?}"
+        );
+        assert_eq!(captured[0].key, typo);
+        assert_eq!(captured[0].context, "rules");
+    }
+
+    #[test]
+    fn load_with_misspelled_rule_succeeds_and_ignores_typo() {
+        // Phase 1 contract: load succeeds, typo'd rule is silently dropped
+        // (falls back to default severity). Phase 2 will turn this into a
+        // hard error.
+        let dir = test_dir("misspelled-rule");
+        std::fs::write(
+            dir.path().join(".fallowrc.json"),
+            r#"{"rules": {"unsued-files": "warn"}}"#,
+        )
+        .unwrap();
+
+        let config = FallowConfig::load(&dir.path().join(".fallowrc.json"))
+            .expect("load should succeed in phase 1");
+
+        // Typo'd rule had no effect; unused_files stays at its default (Error).
+        assert_eq!(config.rules.unused_files, Severity::Error);
     }
 }
