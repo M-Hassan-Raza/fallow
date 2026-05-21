@@ -550,7 +550,7 @@ export type GitLabReviewPositionType = "text"
 /**
  * Schema-version discriminator for the review envelope.
  */
-export type ReviewEnvelopeSchema = "fallow-review-envelope/v1"
+export type ReviewEnvelopeSchema = ("fallow-review-envelope/v1" | "fallow-review-envelope/v2")
 /**
  * Review-envelope provider tag.
  */
@@ -4305,15 +4305,74 @@ export interface ReviewEnvelopeOutput {
  */
 event?: (ReviewEnvelopeEvent | null)
 /**
- * Review summary body (rendered above per-line comments).
+ * Review summary body (rendered above per-line comments). Deprecated in
+ * v2 envelopes: prefer [`summary.body`](`ReviewEnvelopeSummary::body`),
+ * which is byte-identical to this field but carries a stable
+ * fingerprint for reconciliation. Kept on v2 emit so v1 consumers that
+ * only look at `body` keep working.
  */
 body: string
+summary?: ReviewEnvelopeSummary
 /**
  * Per-line comments. Each is either a [`GitHubReviewComment`] or a
  * [`GitLabReviewComment`] depending on `meta.provider`.
  */
 comments: ReviewComment[]
+/**
+ * Regex consumers run against every existing PR/MR comment body to
+ * extract a fallow-emitted fingerprint marker. Capture group 1 is the
+ * fingerprint string (a bare 16-char hex hash for single-finding
+ * comments, or `<kind>:<16-char-hex>` for compositions such as
+ * `merged:` for same-line collapsed comments).
+ *
+ * The pattern is anchored with `^` / `$` and relies on multiline
+ * matching to anchor at line boundaries inside a multi-line comment
+ * body. Multiline is NOT baked into the pattern via `(?m)` (which
+ * JavaScript RegExp rejects as `Invalid group`); instead the consumer
+ * passes [`Self::marker_regex_flags`] as the flags argument to its
+ * regex engine. JavaScript: `new RegExp(env.marker_regex,
+ * env.marker_regex_flags)`. Rust: `regex::RegexBuilder::new(pat)
+ * .multi_line(flags.contains('m')).build()` (or any equivalent).
+ */
+marker_regex?: string
+/**
+ * Flags consumers pass alongside [`Self::marker_regex`] when
+ * constructing their regex engine. Currently always `"m"` (multiline
+ * so the anchored `^` / `$` match at every line boundary within a
+ * comment body). Emitting flags as a separate field instead of
+ * baking `(?m)` into the pattern keeps the wire compatible with
+ * JavaScript RegExp, which rejects inline flag groups outside a
+ * `(?flags:X)` grouping.
+ */
+marker_regex_flags?: string
 meta: ReviewEnvelopeMeta
+}
+/**
+ * Summary block on [`ReviewEnvelopeOutput`]. Always present on v2 emit;
+ * `serde(default)` keeps schemars from marking it required so a future
+ * Deserialize derivation against v1 historical input synthesizes an empty
+ * value rather than erroring.
+ */
+export interface ReviewEnvelopeSummary {
+/**
+ * Markdown body of the summary. Byte-identical to the legacy top-level
+ * [`ReviewEnvelopeOutput::body`] field; the duplication is intentional
+ * so v1 consumers see no behavior change.
+ */
+body: string
+/**
+ * FNV-1a 64-bit hash (16 lowercase hex chars) of the summary body
+ * BEFORE the trailing fallow-fingerprint marker line is appended.
+ * (Computing the hash from the post-marker body would be circular:
+ * the marker contains the fingerprint, so the fingerprint cannot
+ * depend on the marker.) To reproduce from [`Self::body`], strip the
+ * line matching [`ReviewEnvelopeOutput::marker_regex`] together with
+ * its leading separator newlines and hash the remainder. Stable
+ * across runs that produce the same summary content; consumers
+ * upsert the sticky summary comment by matching this fingerprint
+ * against the marker_regex extraction of every existing comment body.
+ */
+fingerprint: string
 }
 /**
  * GitHub pull-request review comment.
@@ -4335,8 +4394,30 @@ body: string
 /**
  * Stable fingerprint for the comment, used by `fallow ci
  * reconcile-review` to detect carryover comments across PR revisions.
+ * For single-finding comments the value is a bare 16-char hex FNV-1a
+ * hash. For merged comments (multiple findings on the same path:line)
+ * the value is `merged:<16-char hex>` over the sorted constituent
+ * fingerprints, so the identity shifts whenever constituent findings
+ * change membership. Bundled wrappers and `fallow ci reconcile-review`
+ * dedupe on this primary fingerprint only; consumers wanting
+ * update-in-place reconciliation (preserving reviewer reply threads
+ * across content changes) implement their own identity tracking via
+ * `marker_regex`.
  */
 fingerprint: string
+/**
+ * True when [`Self::body`] was truncated to fit a downstream provider's
+ * note-size budget (today: 65,536 bytes). The body retains the closing
+ * fallow-fingerprint marker so reconciliation continues to work after
+ * truncation.
+ *
+ * Co-presence invariant: `truncated == true` always implies the body
+ * contains an inline `<!-- fallow-truncated -->` HTML marker and the
+ * `> Body truncated by fallow.` blockquote breadcrumb, and vice versa.
+ * All three signals are emitted together; consumers may use any one
+ * (the typed boolean is the authoritative machine-readable signal).
+ */
+truncated?: boolean
 }
 /**
  * GitLab merge-request discussion comment.
@@ -4348,9 +4429,18 @@ export interface GitLabReviewComment {
 body: string
 position: GitLabReviewPosition
 /**
- * Stable fingerprint for the comment.
+ * Stable fingerprint for the comment. See
+ * [`GitHubReviewComment::fingerprint`] for the single vs `merged:`
+ * shape contract; semantics are identical across providers.
  */
 fingerprint: string
+/**
+ * True when [`Self::body`] was truncated to fit GitLab's note-size
+ * budget. See [`GitHubReviewComment::truncated`] for the full
+ * co-presence invariant with the inline HTML marker and human
+ * blockquote breadcrumb.
+ */
+truncated?: boolean
 }
 /**
  * `position` block inside [`GitLabReviewComment`]. Mirrors the GitLab

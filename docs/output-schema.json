@@ -4793,7 +4793,11 @@
         },
         "body": {
           "type": "string",
-          "description": "Review summary body (rendered above per-line comments)."
+          "description": "Review summary body (rendered above per-line comments). Deprecated in\nv2 envelopes: prefer [`summary.body`](`ReviewEnvelopeSummary::body`),\nwhich is byte-identical to this field but carries a stable\nfingerprint for reconciliation. Kept on v2 emit so v1 consumers that\nonly look at `body` keep working."
+        },
+        "summary": {
+          "description": "Sticky summary block (v2). Always present on v2 emit. Consumers\nreconcile a single sticky PR/MR summary comment by\n[`ReviewEnvelopeSummary::fingerprint`] matching, then upsert\n[`ReviewEnvelopeSummary::body`] in place. Synthesized empty when\ndeserializing v1 historical input.",
+          "$ref": "#/definitions/ReviewEnvelopeSummary"
         },
         "comments": {
           "type": "array",
@@ -4801,6 +4805,14 @@
             "$ref": "#/definitions/ReviewComment"
           },
           "description": "Per-line comments. Each is either a [`GitHubReviewComment`] or a\n[`GitLabReviewComment`] depending on `meta.provider`."
+        },
+        "marker_regex": {
+          "type": "string",
+          "description": "Regex consumers run against every existing PR/MR comment body to\nextract a fallow-emitted fingerprint marker. Capture group 1 is the\nfingerprint string (a bare 16-char hex hash for single-finding\ncomments, or `<kind>:<16-char-hex>` for compositions such as\n`merged:` for same-line collapsed comments).\n\nThe pattern is anchored with `^` / `$` and relies on multiline\nmatching to anchor at line boundaries inside a multi-line comment\nbody. Multiline is NOT baked into the pattern via `(?m)` (which\nJavaScript RegExp rejects as `Invalid group`); instead the consumer\npasses [`Self::marker_regex_flags`] as the flags argument to its\nregex engine. JavaScript: `new RegExp(env.marker_regex,\nenv.marker_regex_flags)`. Rust: `regex::RegexBuilder::new(pat)\n.multi_line(flags.contains('m')).build()` (or any equivalent)."
+        },
+        "marker_regex_flags": {
+          "type": "string",
+          "description": "Flags consumers pass alongside [`Self::marker_regex`] when\nconstructing their regex engine. Currently always `\"m\"` (multiline\nso the anchored `^` / `$` match at every line boundary within a\ncomment body). Emitting flags as a separate field instead of\nbaking `(?m)` into the pattern keeps the wire compatible with\nJavaScript RegExp, which rejects inline flag groups outside a\n`(?flags:X)` grouping."
         },
         "meta": {
           "description": "Envelope metadata block.",
@@ -4836,7 +4848,11 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable fingerprint for the comment, used by `fallow ci\nreconcile-review` to detect carryover comments across PR revisions."
+          "description": "Stable fingerprint for the comment, used by `fallow ci\nreconcile-review` to detect carryover comments across PR revisions.\nFor single-finding comments the value is a bare 16-char hex FNV-1a\nhash. For merged comments (multiple findings on the same path:line)\nthe value is `merged:<16-char hex>` over the sorted constituent\nfingerprints, so the identity shifts whenever constituent findings\nchange membership. Bundled wrappers and `fallow ci reconcile-review`\ndedupe on this primary fingerprint only; consumers wanting\nupdate-in-place reconciliation (preserving reviewer reply threads\nacross content changes) implement their own identity tracking via\n`marker_regex`."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when [`Self::body`] was truncated to fit a downstream provider's\nnote-size budget (today: 65,536 bytes). The body retains the closing\nfallow-fingerprint marker so reconciliation continues to work after\ntruncation.\n\nCo-presence invariant: `truncated == true` always implies the body\ncontains an inline `<!-- fallow-truncated -->` HTML marker and the\n`> Body truncated by fallow.` blockquote breadcrumb, and vice versa.\nAll three signals are emitted together; consumers may use any one\n(the typed boolean is the authoritative machine-readable signal)."
         }
       },
       "required": [
@@ -4861,7 +4877,11 @@
         },
         "fingerprint": {
           "type": "string",
-          "description": "Stable fingerprint for the comment."
+          "description": "Stable fingerprint for the comment. See\n[`GitHubReviewComment::fingerprint`] for the single vs `merged:`\nshape contract; semantics are identical across providers."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "True when [`Self::body`] was truncated to fit GitLab's note-size\nbudget. See [`GitHubReviewComment::truncated`] for the full\nco-presence invariant with the inline HTML marker and human\nblockquote breadcrumb."
         }
       },
       "required": [
@@ -6772,7 +6792,7 @@
       "type": "object",
       "properties": {
         "schema": {
-          "description": "Envelope schema marker, always `fallow-review-envelope/v1`.",
+          "description": "Envelope schema marker. v2 emit always tags\n`fallow-review-envelope/v2`; v1 is recognized on deserialize for\nbackward-compat with historical envelopes captured before the v2\nmigration.",
           "$ref": "#/definitions/ReviewEnvelopeSchema"
         },
         "provider": {
@@ -6802,7 +6822,12 @@
         {
           "type": "string",
           "const": "fallow-review-envelope/v1",
-          "description": "First release of the review envelope format."
+          "description": "First release of the review envelope format. Historical only; no v1\nemit path remains on the current code. Retained on the enum so a\nfuture Deserialize derive can still parse v1 captures (e.g. from\ncommitted snapshots predating the issue #528 migration) without\nerroring on an unknown variant."
+        },
+        {
+          "type": "string",
+          "const": "fallow-review-envelope/v2",
+          "description": "Issue #528 evolution. Adds (1) the [`ReviewEnvelopeOutput::summary`]\nblock, (2) [`ReviewEnvelopeOutput::marker_regex`], (3) same-line\n`(path, line)` merging in `comments[]` with a\n`merged:<16-char hash>` primary fingerprint over sorted constituent\nfingerprints (identity shifts whenever the set of constituents\nchanges, so the bundled skip-if-fingerprint-exists wrappers\ncorrectly re-post on content change), (4) UTF-8-safe body\ntruncation at the GitLab/GitHub note-size floor (65,536 bytes)\nwith paired `truncated: bool` + `<!-- fallow-truncated -->`\nsignals, (5) `:v2:`-namespaced marker shape\n(`<!-- fallow-fingerprint:v2: <fingerprint> -->`) preventing v1\nmarker collision and user-paste spoofing, and (6) diff-aware\n`position.old_path` for renamed files on GitLab."
         }
       ],
       "description": "Schema-version discriminator for the review envelope."
@@ -9204,6 +9229,24 @@
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
+    },
+    "ReviewEnvelopeSummary": {
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "string",
+          "description": "Markdown body of the summary. Byte-identical to the legacy top-level\n[`ReviewEnvelopeOutput::body`] field; the duplication is intentional\nso v1 consumers see no behavior change."
+        },
+        "fingerprint": {
+          "type": "string",
+          "description": "FNV-1a 64-bit hash (16 lowercase hex chars) of the summary body\nBEFORE the trailing fallow-fingerprint marker line is appended.\n(Computing the hash from the post-marker body would be circular:\nthe marker contains the fingerprint, so the fingerprint cannot\ndepend on the marker.) To reproduce from [`Self::body`], strip the\nline matching [`ReviewEnvelopeOutput::marker_regex`] together with\nits leading separator newlines and hash the remainder. Stable\nacross runs that produce the same summary content; consumers\nupsert the sticky summary comment by matching this fingerprint\nagainst the marker_regex extraction of every existing comment body."
+        }
+      },
+      "required": [
+        "body",
+        "fingerprint"
+      ],
+      "description": "Summary block on [`ReviewEnvelopeOutput`]. Always present on v2 emit;\n`serde(default)` keeps schemars from marking it required so a future\nDeserialize derivation against v1 historical input synthesizes an empty\nvalue rather than erroring."
     },
     "ReExportCycleFinding": {
       "type": "object",
