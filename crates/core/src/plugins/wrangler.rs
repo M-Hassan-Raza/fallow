@@ -57,7 +57,7 @@ fn extract_js_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec
     top_level
         .into_iter()
         .chain(env_entries)
-        .filter_map(|raw| normalize_main_path(&raw, config_path, root))
+        .filter_map(|raw| config_parser::normalize_config_path(&raw, config_path, root))
         .collect()
 }
 
@@ -68,7 +68,7 @@ fn extract_toml_main_entries(config_path: &Path, source: &str, root: &Path) -> V
 
     let mut entries = Vec::new();
     if let Some(raw) = value.get("main").and_then(toml::Value::as_str)
-        && let Some(path) = normalize_main_path(raw, config_path, root)
+        && let Some(path) = config_parser::normalize_config_path(raw, config_path, root)
     {
         entries.push(path);
     }
@@ -76,7 +76,7 @@ fn extract_toml_main_entries(config_path: &Path, source: &str, root: &Path) -> V
     if let Some(envs) = value.get("env").and_then(toml::Value::as_table) {
         for env in envs.values() {
             if let Some(raw) = env.get("main").and_then(toml::Value::as_str)
-                && let Some(path) = normalize_main_path(raw, config_path, root)
+                && let Some(path) = config_parser::normalize_config_path(raw, config_path, root)
             {
                 entries.push(path);
             }
@@ -84,10 +84,6 @@ fn extract_toml_main_entries(config_path: &Path, source: &str, root: &Path) -> V
     }
 
     entries
-}
-
-fn normalize_main_path(raw: &str, config_path: &Path, root: &Path) -> Option<String> {
-    config_parser::normalize_config_path(raw, config_path, root)
 }
 
 #[cfg(test)]

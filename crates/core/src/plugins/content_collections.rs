@@ -6,7 +6,7 @@ use super::Plugin;
 
 const ENABLERS: &[&str] = &["@content-collections/core"];
 
-const ENTRY_PATTERNS: &[&str] = &["content-collections.ts"];
+const ENTRY_PATTERNS: &[&str] = &["content-collections.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"];
 
 const TOOLING_DEPENDENCIES: &[&str] = &[
     "@content-collections/core",
@@ -33,7 +33,12 @@ mod tests {
     fn protects_root_config_and_tooling_packages() {
         let plugin = ContentCollectionsPlugin;
 
-        assert!(plugin.entry_patterns().contains(&"content-collections.ts"));
+        assert!(
+            plugin
+                .entry_patterns()
+                .contains(&"content-collections.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"),
+            "entry pattern must accept every JS/TS extension content-collections honors at runtime"
+        );
         assert!(
             plugin
                 .tooling_dependencies()
