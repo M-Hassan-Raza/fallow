@@ -350,13 +350,13 @@ pub struct CombinedOutput {
 pub struct CombinedMeta {
     /// Dead-code metadata from `crate::explain::check_meta()`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub check: Option<serde_json::Value>,
+    pub check: Option<Meta>,
     /// Duplication metadata from `crate::explain::dupes_meta()`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dupes: Option<serde_json::Value>,
+    pub dupes: Option<Meta>,
     /// Health metadata from `crate::explain::health_meta()`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub health: Option<serde_json::Value>,
+    pub health: Option<Meta>,
 }
 
 /// Singleton schema-version discriminator for [`CoverageAnalyzeOutput`].

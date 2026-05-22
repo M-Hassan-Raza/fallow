@@ -237,6 +237,9 @@ pub struct Meta {
     /// URL to the documentation page for this command.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub docs: Option<String>,
+    /// Per-field definitions for envelope fields and action payload fields.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub field_definitions: BTreeMap<String, String>,
     /// Per-metric definitions: name, description, range, interpretation.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metrics: BTreeMap<String, MetaMetric>,

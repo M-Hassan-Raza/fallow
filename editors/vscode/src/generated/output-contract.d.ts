@@ -2170,6 +2170,12 @@ export interface Meta {
  */
 docs?: (string | null)
 /**
+ * Per-field definitions for envelope fields and action payload fields.
+ */
+field_definitions?: {
+[k: string]: string
+}
+/**
  * Per-metric definitions: name, description, range, interpretation.
  */
 metrics?: {
@@ -5509,21 +5515,15 @@ export interface CombinedMeta {
 /**
  * Dead-code metadata from `crate::explain::check_meta()`.
  */
-check?: {
-[k: string]: unknown
-}
+check?: (Meta | null)
 /**
  * Duplication metadata from `crate::explain::dupes_meta()`.
  */
-dupes?: {
-[k: string]: unknown
-}
+dupes?: (Meta | null)
 /**
  * Health metadata from `crate::explain::health_meta()`.
  */
-health?: {
-[k: string]: unknown
-}
+health?: (Meta | null)
 }
 /**
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].

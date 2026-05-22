@@ -5137,6 +5137,13 @@
           ],
           "description": "URL to the documentation page for this command."
         },
+        "field_definitions": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Per-field definitions for envelope fields and action payload fields."
+        },
         "metrics": {
           "type": "object",
           "additionalProperties": {
@@ -9312,12 +9319,36 @@
       "type": "object",
       "properties": {
         "check": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "Dead-code metadata from `crate::explain::check_meta()`."
         },
         "dupes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "Duplication metadata from `crate::explain::dupes_meta()`."
         },
         "health": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Meta"
+            },
+            {
+              "type": "null"
+            }
+          ],
           "description": "Health metadata from `crate::explain::health_meta()`."
         }
       },
