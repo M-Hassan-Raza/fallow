@@ -31,7 +31,16 @@ use crate::MemberKind;
 /// built-in SDK providers (PostHog, Vercel Flags, Optimizely, Eppo, plus more
 /// ConfigCat surfaces) and Vercel `flag({ key: "..." })` object arguments, so
 /// pre-fix entries can carry stale `flag_uses`.
-pub(super) const CACHE_VERSION: u32 = 92;
+///
+/// Bumped to 93 for issue #589: Node `module.register()` loader calls now
+/// emit `DynamicImportInfo.destructured_names` populated with the loader-hook
+/// allowlist (current `initialize` / `resolve` / `load` / `globalPreload`
+/// plus legacy `getFormat` / `getSource` / `transformSource`) for every
+/// relative or `file:` specifier, including specifiers bound via
+/// `new URL(..., import.meta.url)`. Pre-fix entries carry empty
+/// `destructured_names` for the same source, so they would silently miss
+/// the named-export credit until the file is touched.
+pub(super) const CACHE_VERSION: u32 = 93;
 
 /// Duplication token cache version. Bump when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes.

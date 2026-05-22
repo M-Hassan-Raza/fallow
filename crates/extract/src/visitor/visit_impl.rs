@@ -167,8 +167,22 @@ fn node_module_register_specifier(call: &CallExpression<'_>) -> Option<String> {
     }
 }
 
-const NODE_MODULE_REGISTER_HOOK_EXPORTS: &[&str] =
-    &["initialize", "resolve", "load", "globalPreload"];
+/// Node `module.register()` invokes loader-hook exports reflectively. The
+/// allowlist covers the current Node 22+ hook set (`initialize`, `resolve`,
+/// `load`, `globalPreload`) plus the legacy hooks (`getFormat`, `getSource`,
+/// `transformSource`) that older Node versions still in the wild (16.x with
+/// `--experimental-loader`, downstream forks) invoke. Extra entries are
+/// inert: if the loader file does not export them, no symbol reference is
+/// recorded. See issue #589.
+const NODE_MODULE_REGISTER_HOOK_EXPORTS: &[&str] = &[
+    "initialize",
+    "resolve",
+    "load",
+    "globalPreload",
+    "getFormat",
+    "getSource",
+    "transformSource",
+];
 
 fn loader_hook_exports_for_source(source: &str) -> Vec<String> {
     if source.starts_with("./")
@@ -491,40 +505,22 @@ fn fixture_type_reference_name(ty: &TSType<'_>) -> Option<(String, Span)> {
 }
 
 impl ModuleInfoExtractor {
-    fn push_node_module_register_url_scope(&mut self) {
-        self.node_module_register_url_scopes
-            .push(FxHashMap::default());
-    }
-
-    fn pop_node_module_register_url_scope(&mut self) {
-        self.node_module_register_url_scopes.pop();
-        debug_assert!(
-            !self.node_module_register_url_scopes.is_empty(),
-            "node:module register URL scope stack must keep its module scope"
-        );
-        if self.node_module_register_url_scopes.is_empty() {
-            self.node_module_register_url_scopes
-                .push(FxHashMap::default());
-        }
-    }
-
     fn record_node_module_register_url_binding(&mut self, name: String, sources: Vec<String>) {
-        if self.node_module_register_url_scopes.is_empty() {
-            self.node_module_register_url_scopes
-                .push(FxHashMap::default());
+        let entry = self
+            .node_module_register_url_bindings
+            .entry(name)
+            .or_default();
+        for source in sources {
+            if !entry.contains(&source) {
+                entry.push(source);
+            }
         }
-        let scope = self
-            .node_module_register_url_scopes
-            .last_mut()
-            .expect("node:module register URL scope stack should be initialized");
-        scope.insert(name, sources);
     }
 
     fn node_module_register_url_binding(&self, name: &str) -> Vec<String> {
-        self.node_module_register_url_scopes
-            .iter()
-            .rev()
-            .find_map(|scope| scope.get(name).cloned())
+        self.node_module_register_url_bindings
+            .get(name)
+            .cloned()
             .unwrap_or_default()
     }
 
@@ -1222,9 +1218,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_block_statement(&mut self, stmt: &BlockStatement<'a>) {
         self.block_depth += 1;
-        self.push_node_module_register_url_scope();
         walk::walk_block_statement(self, stmt);
-        self.pop_node_module_register_url_scope();
         self.block_depth -= 1;
     }
 
@@ -1305,17 +1299,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         self.function_depth += 1;
-        self.push_node_module_register_url_scope();
         walk::walk_function(self, func, flags);
-        self.pop_node_module_register_url_scope();
         self.function_depth -= 1;
     }
 
     fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
         self.function_depth += 1;
-        self.push_node_module_register_url_scope();
         walk::walk_arrow_function_expression(self, expr);
-        self.pop_node_module_register_url_scope();
         self.function_depth -= 1;
     }
 

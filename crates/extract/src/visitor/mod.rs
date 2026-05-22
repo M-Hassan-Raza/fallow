@@ -200,11 +200,14 @@ pub(crate) struct ModuleInfoExtractor {
     /// the analyze layer decodes. Records that do not match either are
     /// dropped without effect. See issue #346.
     pub(crate) factory_call_candidates: Vec<FactoryCallCandidate>,
-    /// Scope-local bindings that resolve to one or more
+    /// Module-flat bindings that resolve to one or more
     /// `new URL('./loader', import.meta.url)` module specifiers. Used to connect
-    /// `node:module` `register(url)` calls back to loader-hook exports without
-    /// letting block/function-local names leak across lexical scopes.
-    pub(crate) node_module_register_url_scopes: Vec<FxHashMap<String, Vec<String>>>,
+    /// `node:module` `register(url)` calls back to loader-hook exports. Flat
+    /// (not scoped): when the same name is rebound in a nested block, both
+    /// targets accumulate. Over-crediting is the safe direction here; the worst
+    /// outcome is a few extra `DynamicImportInfo` entries whose sources resolve
+    /// (correct) or fail to resolve (no-op).
+    pub(crate) node_module_register_url_bindings: FxHashMap<String, Vec<String>>,
     /// Stack of class type-parameter constraint maps for classes currently
     /// being walked. Each frame maps a type parameter name to its constraint
     /// type (`TClient -> Some(BaseClient)` for `<TClient extends BaseClient>`)
@@ -233,10 +236,7 @@ pub(crate) struct ModuleInfoExtractor {
 
 impl ModuleInfoExtractor {
     pub(crate) fn new() -> Self {
-        Self {
-            node_module_register_url_scopes: vec![FxHashMap::default()],
-            ..Self::default()
-        }
+        Self::default()
     }
 
     pub(crate) fn record_local_class_export(

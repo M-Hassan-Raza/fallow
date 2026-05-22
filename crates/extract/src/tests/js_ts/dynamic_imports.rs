@@ -693,7 +693,15 @@ fn node_module_register_conditional_url_binding_credits_both_loader_targets() {
 }
 
 #[test]
-fn node_module_register_url_bindings_respect_shadowed_scopes() {
+fn node_module_register_url_bindings_accumulate_across_shadowing() {
+    // The visitor keeps a module-flat map from local name to every URL ever
+    // bound to that name. When `url` is re-declared inside a nested block the
+    // outer specifier is preserved (over-credit, not replaced), so every
+    // `register(url)` call in the module credits BOTH loader files. This is
+    // safe: over-credit produces extra `DynamicImportInfo` entries whose
+    // sources either resolve correctly or fail to resolve (no-op). Losing the
+    // outer binding would silently miss real loader hooks for the post-block
+    // call.
     let info = parse_source(
         "import { register } from 'node:module';\n\
          const url = new URL('./hooks/top-loader.ts', import.meta.url);\n\
@@ -715,7 +723,12 @@ fn node_module_register_url_bindings_respect_shadowed_scopes() {
 }
 
 #[test]
-fn node_module_register_does_not_credit_removed_legacy_loader_hooks() {
+fn node_module_register_credits_legacy_loader_hook_exports() {
+    // Issue #589: include the legacy hook names alongside the current ones.
+    // Node 16.x with --experimental-loader and downstream forks still invoke
+    // `getFormat` / `getSource` / `transformSource`; crediting them is inert
+    // when the loader does not export them and prevents a false `unused-export`
+    // finding when it does.
     let info = parse_source(
         "import { register } from 'node:module';\n\
          register('./hooks/json-loader.ts', import.meta.url);",
@@ -726,17 +739,23 @@ fn node_module_register_does_not_credit_removed_legacy_loader_hooks() {
         .find(|imp| imp.source == "./hooks/json-loader.ts" && !imp.destructured_names.is_empty())
         .expect("relative module.register specifier should credit loader hook exports");
 
-    for removed in [
-        "getFormat",
-        "getSource",
-        "transformSource",
-        "getGlobalPreload",
-    ] {
+    for legacy in ["getFormat", "getSource", "transformSource"] {
         assert!(
-            !loader.destructured_names.contains(&removed.to_string()),
-            "{removed} should not be credited as a module.register hook export"
+            loader.destructured_names.contains(&legacy.to_string()),
+            "{legacy} legacy hook should be credited so loader files that still \
+             export it survive `unused-export` detection. destructured_names={:?}",
+            loader.destructured_names
         );
     }
+
+    // `getGlobalPreload` was never a documented Node hook name (the documented
+    // form is `globalPreload`); confirm we are not inventing spurious names.
+    assert!(
+        !loader
+            .destructured_names
+            .contains(&"getGlobalPreload".to_string()),
+        "getGlobalPreload is not a hook name; do not credit it"
+    );
 }
 
 #[test]
