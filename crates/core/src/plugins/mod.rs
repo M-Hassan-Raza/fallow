@@ -65,6 +65,7 @@ const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
 
 #[cfg(test)]
 const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
+    "content-collections",
     "drizzle",
     "i18next",
     "knex",
@@ -974,6 +975,7 @@ mod capacitor;
 mod changesets;
 mod commitizen;
 mod commitlint;
+mod content_collections;
 mod convex;
 mod cspell;
 mod cucumber;

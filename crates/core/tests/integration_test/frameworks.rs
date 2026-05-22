@@ -1097,3 +1097,131 @@ fn nuxt_convention_exports_preserve_defaults_but_report_dead_helpers() {
         );
     }
 }
+
+#[test]
+fn wrangler_config_main_entries_keep_worker_files_alive() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::create_dir_all(root.join("worker")).expect("worker dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "wrangler-main-fixture",
+            "private": true,
+            "devDependencies": { "wrangler": "4.0.0" }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("wrangler.jsonc"),
+        r#"{
+            // Cloudflare Workers entry.
+            "main": "src/worker.tsx",
+            "env": {
+                "preview": { "main": "worker/entry.ts" }
+            }
+        }"#,
+    )
+    .expect("wrangler config");
+    std::fs::write(
+        root.join("src/worker.tsx"),
+        "export default { fetch() { return new Response('ok'); } };\n",
+    )
+    .expect("worker");
+    std::fs::write(
+        root.join("worker/entry.ts"),
+        "export default { fetch() { return new Response('preview'); } };\n",
+    )
+    .expect("preview worker");
+    std::fs::write(root.join("src/orphan.ts"), "export const orphan = true;\n").expect("orphan");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|file| {
+            file.file
+                .path
+                .strip_prefix(root)
+                .unwrap_or(&file.file.path)
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+
+    assert!(
+        !unused_files.iter().any(|path| path == "src/worker.tsx"),
+        "wrangler top-level main should be an entry point: {unused_files:?}"
+    );
+    assert!(
+        !unused_files.iter().any(|path| path == "worker/entry.ts"),
+        "wrangler env main should be an entry point: {unused_files:?}"
+    );
+    assert!(
+        unused_files.iter().any(|path| path == "src/orphan.ts"),
+        "plain orphan files should still be reported: {unused_files:?}"
+    );
+}
+
+#[test]
+fn content_collections_config_and_tooling_deps_are_used() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "content-collections-fixture",
+            "private": true,
+            "devDependencies": {
+                "@content-collections/core": "0.9.0",
+                "@content-collections/vite": "0.9.0",
+                "@content-collections/markdown": "0.9.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("content-collections.ts"),
+        "import { defineCollection, defineConfig } from '@content-collections/core';\n\
+         const posts = defineCollection({ name: 'posts', directory: 'posts', include: '*.md' });\n\
+         export default defineConfig({ collections: [posts] });\n",
+    )
+    .expect("content collections config");
+    std::fs::write(root.join("orphan.ts"), "export const orphan = true;\n").expect("orphan");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|file| file.file.path.file_name())
+        .filter_map(|file| file.to_str())
+        .map(String::from)
+        .collect();
+    let unused_dev_deps: Vec<&str> = results
+        .unused_dev_dependencies
+        .iter()
+        .map(|dep| dep.dep.package_name.as_str())
+        .collect();
+
+    assert!(
+        !unused_files.contains(&"content-collections.ts".to_string()),
+        "content-collections.ts should be framework-used: {unused_files:?}"
+    );
+    assert!(
+        unused_files.contains(&"orphan.ts".to_string()),
+        "unrelated files should still be reported: {unused_files:?}"
+    );
+    assert!(
+        !unused_dev_deps.contains(&"@content-collections/vite"),
+        "@content-collections/vite should be a tooling dependency: {unused_dev_deps:?}"
+    );
+    assert!(
+        !unused_dev_deps.contains(&"@content-collections/markdown"),
+        "@content-collections/markdown should be a tooling dependency: {unused_dev_deps:?}"
+    );
+}

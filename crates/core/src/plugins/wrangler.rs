@@ -3,15 +3,19 @@
 //! Detects Cloudflare Workers projects and marks worker entry points
 //! and config files.
 
-use super::Plugin;
+use std::path::Path;
+
+use super::{Plugin, PluginResult, config_parser};
 
 const ENABLERS: &[&str] = &["wrangler"];
 
 const ENTRY_PATTERNS: &[&str] = &[
-    "src/index.{ts,js}",
-    "src/worker.{ts,js}",
-    "functions/**/*.{ts,js}",
+    "src/index.{ts,tsx,js,jsx,mts,mjs}",
+    "src/worker.{ts,tsx,js,jsx,mts,mjs}",
+    "functions/**/*.{ts,tsx,js,jsx,mts,mjs}",
 ];
+
+const CONFIG_PATTERNS: &[&str] = &["wrangler.{toml,json,jsonc}"];
 
 const ALWAYS_USED: &[&str] = &["wrangler.toml", "wrangler.json", "wrangler.jsonc"];
 
@@ -21,6 +25,139 @@ define_plugin! {
     struct WranglerPlugin => "wrangler",
     enablers: ENABLERS,
     entry_patterns: ENTRY_PATTERNS,
+    config_patterns: CONFIG_PATTERNS,
     always_used: ALWAYS_USED,
     tooling_dependencies: TOOLING_DEPENDENCIES,
+    resolve_config(config_path, source, root) {
+        let mut result = PluginResult::default();
+        result.extend_entry_patterns(extract_main_entries(config_path, source, root));
+        result
+    },
+}
+
+fn extract_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
+    let extension = config_path.extension().and_then(|ext| ext.to_str());
+    let mut entries = match extension {
+        Some("toml") => extract_toml_main_entries(config_path, source, root),
+        _ => extract_js_main_entries(config_path, source, root),
+    };
+    entries.sort();
+    entries.dedup();
+    entries
+}
+
+fn extract_js_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
+    let top_level = config_parser::extract_config_path_string(source, config_path, &["main"]);
+    let env_entries = config_parser::extract_config_object_nested_strings(
+        source,
+        config_path,
+        &["env"],
+        &["main"],
+    );
+    top_level
+        .into_iter()
+        .chain(env_entries)
+        .filter_map(|raw| normalize_main_path(&raw, config_path, root))
+        .collect()
+}
+
+fn extract_toml_main_entries(config_path: &Path, source: &str, root: &Path) -> Vec<String> {
+    let Ok(value) = source.parse::<toml::Table>() else {
+        return Vec::new();
+    };
+
+    let mut entries = Vec::new();
+    if let Some(raw) = value.get("main").and_then(toml::Value::as_str)
+        && let Some(path) = normalize_main_path(raw, config_path, root)
+    {
+        entries.push(path);
+    }
+
+    if let Some(envs) = value.get("env").and_then(toml::Value::as_table) {
+        for env in envs.values() {
+            if let Some(raw) = env.get("main").and_then(toml::Value::as_str)
+                && let Some(path) = normalize_main_path(raw, config_path, root)
+            {
+                entries.push(path);
+            }
+        }
+    }
+
+    entries
+}
+
+fn normalize_main_path(raw: &str, config_path: &Path, root: &Path) -> Option<String> {
+    config_parser::normalize_config_path(raw, config_path, root)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn static_patterns_cover_worker_js_like_extensions() {
+        let plugin = WranglerPlugin;
+
+        assert!(
+            plugin
+                .entry_patterns()
+                .contains(&"src/worker.{ts,tsx,js,jsx,mts,mjs}")
+        );
+    }
+
+    #[test]
+    fn jsonc_config_main_entries_are_entry_patterns() {
+        let plugin = WranglerPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/repo/apps/site/wrangler.jsonc"),
+            r#"{
+                // top-level worker
+                "main": "src/worker.tsx",
+                "env": {
+                    "staging": { "main": "worker/entry.ts" }
+                }
+            }"#,
+            Path::new("/repo"),
+        );
+
+        let entries: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|entry| entry.pattern.as_str())
+            .collect();
+
+        assert!(entries.contains(&"apps/site/src/worker.tsx"));
+        assert!(entries.contains(&"apps/site/worker/entry.ts"));
+    }
+
+    #[test]
+    fn toml_config_main_entries_are_entry_patterns() {
+        let plugin = WranglerPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/repo/wrangler.toml"),
+            r#"
+                name = "demo"
+                main = "src/index.mts"
+
+                [env.production]
+                main = "src/production-worker.ts"
+            "#,
+            Path::new("/repo"),
+        );
+
+        let entries: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|entry| entry.pattern.as_str())
+            .collect();
+
+        assert!(
+            entries.contains(&"src/index.mts"),
+            "missing top-level main, entries={entries:?}"
+        );
+        assert!(
+            entries.contains(&"src/production-worker.ts"),
+            "missing env main, entries={entries:?}"
+        );
+    }
 }

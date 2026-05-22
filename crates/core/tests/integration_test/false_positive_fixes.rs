@@ -2125,3 +2125,72 @@ fn node_module_register_loader_is_credited_as_used_dependency() {
          not be flagged as unused. unused_dev={unused_dev:?}"
     );
 }
+
+#[test]
+fn node_module_register_new_url_loader_hooks_are_used_exports() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::create_dir_all(root.join("src/hooks")).expect("hooks dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "register-new-url-loader-fixture",
+            "private": true,
+            "main": "src/register.ts"
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("tsconfig.json"),
+        r#"{"compilerOptions":{"module":"esnext","moduleResolution":"bundler"},"include":["src/**/*"]}"#,
+    )
+    .expect("tsconfig");
+    std::fs::write(
+        root.join("src/register.ts"),
+        "import { register } from 'node:module';\n\
+         const loaderUrl = new URL('./hooks/json-loader.ts', import.meta.url);\n\
+         register(loaderUrl);\n",
+    )
+    .expect("register file");
+    std::fs::write(
+        root.join("src/hooks/json-loader.ts"),
+        "export async function load(url: string, context: unknown, nextLoad: Function) {\n\
+             return nextLoad(url, context);\n\
+         }\n\
+         export function helperOnlyForTests() { return true; }\n",
+    )
+    .expect("loader file");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_exports: Vec<(String, String)> = results
+        .unused_exports
+        .iter()
+        .map(|export| {
+            (
+                export
+                    .export
+                    .path
+                    .strip_prefix(root)
+                    .unwrap_or(&export.export.path)
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+                export.export.export_name.clone(),
+            )
+        })
+        .collect();
+
+    assert!(
+        !unused_exports
+            .iter()
+            .any(|(file, export)| file == "src/hooks/json-loader.ts" && export == "load"),
+        "Node calls registered loader hook exports reflectively: {unused_exports:?}"
+    );
+    assert!(
+        unused_exports.iter().any(|(file, export)| {
+            file == "src/hooks/json-loader.ts" && export == "helperOnlyForTests"
+        }),
+        "non-hook exports should still be reported: {unused_exports:?}"
+    );
+}
