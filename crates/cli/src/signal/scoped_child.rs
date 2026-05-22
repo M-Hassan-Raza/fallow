@@ -63,9 +63,9 @@ impl ScopedChild {
     /// `#[cfg(unix)]` to keep the public surface symmetric for embedders.
     #[cfg_attr(
         not(unix),
-        expect(
+        allow(
             dead_code,
-            reason = "only consumed by the cfg(unix) signal_test_helper in main.rs"
+            reason = "only consumed by the cfg(unix) signal_test_helper in main.rs; the lint does not consistently fire on Windows under -D warnings so allow is safer than expect"
         )
     )]
     pub fn id(&self) -> u32 {
