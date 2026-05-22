@@ -4,7 +4,21 @@
 
 use super::Plugin;
 
-const ENABLERS: &[&str] = &["@content-collections/core"];
+/// Detect Content Collections projects via any of the canonical packages
+/// users actually list in `dependencies` / `devDependencies`. The framework
+/// integrations (`vite`, `next`, `solid-start`, `remix-vite`, `qwik`,
+/// `vinxi`) are what most authors install at the top level; `core` arrives
+/// transitively in those setups, so an enabler restricted to `core` would
+/// miss real-world projects that only declare the integration package.
+const ENABLERS: &[&str] = &[
+    "@content-collections/core",
+    "@content-collections/vite",
+    "@content-collections/next",
+    "@content-collections/solid-start",
+    "@content-collections/remix-vite",
+    "@content-collections/qwik",
+    "@content-collections/vinxi",
+];
 
 const ENTRY_PATTERNS: &[&str] = &["content-collections.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"];
 
@@ -12,7 +26,9 @@ const TOOLING_DEPENDENCIES: &[&str] = &[
     "@content-collections/core",
     "@content-collections/vite",
     "@content-collections/next",
+    "@content-collections/solid-start",
     "@content-collections/remix-vite",
+    "@content-collections/qwik",
     "@content-collections/vinxi",
     "@content-collections/markdown",
     "@content-collections/mdx",
@@ -44,5 +60,24 @@ mod tests {
                 .tooling_dependencies()
                 .contains(&"@content-collections/vite")
         );
+    }
+
+    #[test]
+    fn framework_integrations_activate_the_plugin() {
+        let plugin = ContentCollectionsPlugin;
+
+        for framework_pkg in [
+            "@content-collections/vite",
+            "@content-collections/next",
+            "@content-collections/solid-start",
+            "@content-collections/remix-vite",
+            "@content-collections/qwik",
+            "@content-collections/vinxi",
+        ] {
+            assert!(
+                plugin.enablers().contains(&framework_pkg),
+                "{framework_pkg} should activate the plugin without requiring @content-collections/core to be a direct dep"
+            );
+        }
     }
 }

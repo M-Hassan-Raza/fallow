@@ -1270,6 +1270,48 @@ fn content_collections_mjs_config_is_used() {
 }
 
 #[test]
+fn content_collections_framework_integration_only_activates_plugin() {
+    // Real-world setups typically install only the framework integration
+    // (`@content-collections/vite`, `@content-collections/next`, etc.) at the
+    // top level; `@content-collections/core` arrives transitively. Verify the
+    // plugin still detects the project and credits the config file.
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+            "name": "content-collections-framework-only-fixture",
+            "private": true,
+            "devDependencies": {
+                "@content-collections/vite": "0.9.0"
+            }
+        }"#,
+    )
+    .expect("package json");
+    std::fs::write(
+        root.join("content-collections.ts"),
+        "export default { collections: [] };\n",
+    )
+    .expect("content collections config");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .filter_map(|file| file.file.path.file_name())
+        .filter_map(|file| file.to_str())
+        .map(String::from)
+        .collect();
+
+    assert!(
+        !unused_files.contains(&"content-collections.ts".to_string()),
+        "@content-collections/vite alone should activate the plugin: {unused_files:?}"
+    );
+}
+
+#[test]
 fn wrangler_plain_json_config_main_keeps_worker_alive() {
     // The JSONC branch is exercised by `wrangler_config_main_entries_keep_worker_files_alive`;
     // this pins the plain `.json` variant since the dispatch in `extract_main_entries`
