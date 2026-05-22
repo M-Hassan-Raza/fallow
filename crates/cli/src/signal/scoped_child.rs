@@ -133,6 +133,7 @@ pub fn output(command: &mut Command) -> io::Result<Output> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
     fn assert_deregistered(id: u64) {
         // The registry is private; deregister is idempotent so calling
         // it again is the cheapest way to assert "no longer present".

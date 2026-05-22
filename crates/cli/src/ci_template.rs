@@ -104,6 +104,10 @@ fn set_executable(path: &Path, executable: bool) -> std::io::Result<()> {
 }
 
 #[cfg(not(unix))]
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "Windows stub must match the Unix signature so the unconditional caller can `?`-propagate without #[cfg] branching"
+)]
 fn set_executable(_path: &Path, _executable: bool) -> std::io::Result<()> {
     Ok(())
 }
