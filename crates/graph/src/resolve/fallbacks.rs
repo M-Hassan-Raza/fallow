@@ -1069,7 +1069,7 @@ mod tests {
             name: name.map(str::to_string),
             package_json,
         };
-        let manifests = vec![manifest];
+        let manifests = [manifest];
         let mut raw_path_to_id = FxHashMap::default();
         for (path, file_id) in raw_files {
             raw_path_to_id.insert(path.as_path(), *file_id);
