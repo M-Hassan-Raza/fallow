@@ -1444,7 +1444,7 @@ mod tests {
         let src_path = root.join("src/feature.ts");
         let manifest = PackageManifestInfo {
             root: root.clone(),
-            canonical_root: root.clone(),
+            canonical_root: root,
             name: Some("pkg".to_string()),
             package_json: fallow_config::PackageJson::default(),
         };

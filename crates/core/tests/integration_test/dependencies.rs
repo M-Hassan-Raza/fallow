@@ -508,13 +508,13 @@ fn package_exports_array_fallback_resolves_self_package_source() {
     std::fs::create_dir_all(root.join("src")).expect("create src dir");
     std::fs::write(
         root.join("package.json"),
-        r##"{
+        r#"{
   "name": "self-array-fallback",
   "main": "src/index.ts",
   "exports": {
     "./feature": ["./dist/missing.js", "./src/feature.ts"]
   }
-}"##,
+}"#,
     )
     .expect("write package.json");
     std::fs::write(
