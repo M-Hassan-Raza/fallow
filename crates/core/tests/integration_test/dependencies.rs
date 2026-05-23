@@ -465,14 +465,14 @@ fn package_imports_array_fallback_resolves_reachable_target() {
   "name": "imports-array-fallback",
   "main": "src/index.ts",
   "imports": {
-    "#feature": ["./dist/missing.js", "./src/feature.ts"]
+    "#public/feature": ["./dist/missing.js", "./src/feature.ts"]
   }
 }"##,
     )
     .expect("write package.json");
     std::fs::write(
         root.join("src/index.ts"),
-        "import { feature } from '#feature';\nexport const value = feature();\n",
+        "import { feature } from '#public/feature';\nexport const value = feature();\n",
     )
     .expect("write index");
     std::fs::write(
@@ -489,7 +489,7 @@ fn package_imports_array_fallback_resolves_reachable_target() {
         .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
-        !unresolved_specifiers.contains(&"#feature"),
+        !unresolved_specifiers.contains(&"#public/feature"),
         "array fallback should resolve to the reachable target: {unresolved_specifiers:?}"
     );
     assert!(
@@ -512,14 +512,14 @@ fn package_exports_array_fallback_resolves_self_package_source() {
   "name": "self-array-fallback",
   "main": "src/index.ts",
   "exports": {
-    "./feature": ["./dist/missing.js", "./src/feature.ts"]
+    "./public-feature": ["./dist/missing.js", "./src/feature.ts"]
   }
 }"#,
     )
     .expect("write package.json");
     std::fs::write(
         root.join("src/index.ts"),
-        "import { feature } from 'self-array-fallback/feature';\nexport const value = feature();\n",
+        "import { feature } from 'self-array-fallback/public-feature';\nexport const value = feature();\n",
     )
     .expect("write index");
     std::fs::write(
@@ -536,7 +536,7 @@ fn package_exports_array_fallback_resolves_self_package_source() {
         .map(|u| u.import.specifier.as_str())
         .collect();
     assert!(
-        !unresolved_specifiers.contains(&"self-array-fallback/feature"),
+        !unresolved_specifiers.contains(&"self-array-fallback/public-feature"),
         "self-package exports array fallback should resolve: {unresolved_specifiers:?}"
     );
     assert!(
