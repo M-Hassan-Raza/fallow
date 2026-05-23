@@ -454,6 +454,53 @@ fn package_imports_external_targets_credit_dependency_usage() {
     );
 }
 
+#[test]
+fn package_imports_array_fallback_resolves_reachable_target() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r##"{
+  "name": "imports-array-fallback",
+  "main": "src/index.ts",
+  "imports": {
+    "#feature": ["./dist/missing.js", "./src/feature.ts"]
+  }
+}"##,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { feature } from '#feature';\nexport const value = feature();\n",
+    )
+    .expect("write index");
+    std::fs::write(
+        root.join("src/feature.ts"),
+        "export function feature() { return 'ok'; }\n",
+    )
+    .expect("write feature");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"#feature"),
+        "array fallback should resolve to the reachable target: {unresolved_specifiers:?}"
+    );
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("src/feature.ts")),
+        "array fallback target should be reachable"
+    );
+}
+
 // ── Issue #124: ignorePatterns applied to workspace package.json discovery ──
 
 #[test]
