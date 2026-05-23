@@ -80,15 +80,6 @@ pub enum ResolvedSourceEdge<'a> {
 }
 
 impl ResolvedSourceEdge<'_> {
-    /// Return the original source specifier.
-    #[must_use]
-    pub fn specifier(&self) -> &str {
-        match self {
-            Self::Import(import) => &import.info.source,
-            Self::ReExport(re_export) => &re_export.info.source,
-        }
-    }
-
     /// Return the resolved target.
     #[must_use]
     pub const fn target(&self) -> &ResolveResult {
