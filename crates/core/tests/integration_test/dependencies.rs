@@ -501,6 +501,53 @@ fn package_imports_array_fallback_resolves_reachable_target() {
     );
 }
 
+#[test]
+fn package_exports_array_fallback_resolves_self_package_source() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r##"{
+  "name": "self-array-fallback",
+  "main": "src/index.ts",
+  "exports": {
+    "./feature": ["./dist/missing.js", "./src/feature.ts"]
+  }
+}"##,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { feature } from 'self-array-fallback/feature';\nexport const value = feature();\n",
+    )
+    .expect("write index");
+    std::fs::write(
+        root.join("src/feature.ts"),
+        "export function feature() { return 'ok'; }\n",
+    )
+    .expect("write feature");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"self-array-fallback/feature"),
+        "self-package exports array fallback should resolve: {unresolved_specifiers:?}"
+    );
+    assert!(
+        !results
+            .unused_files
+            .iter()
+            .any(|f| f.file.path.ends_with("src/feature.ts")),
+        "self-package exports array fallback target should be reachable"
+    );
+}
+
 // ── Issue #124: ignorePatterns applied to workspace package.json discovery ──
 
 #[test]
