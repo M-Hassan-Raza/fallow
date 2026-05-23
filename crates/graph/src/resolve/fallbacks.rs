@@ -1056,6 +1056,48 @@ mod tests {
     use super::*;
     use rustc_hash::FxHashSet;
 
+    fn with_package_map_ctx(
+        root: PathBuf,
+        name: Option<&str>,
+        package_json: fallow_config::PackageJson,
+        raw_files: &[(PathBuf, FileId)],
+        f: impl FnOnce(&ResolveContext<'_>, &PackageManifestInfo, &Path),
+    ) {
+        let manifest = PackageManifestInfo {
+            root: root.clone(),
+            canonical_root: root,
+            name: name.map(str::to_string),
+            package_json,
+        };
+        let manifests = vec![manifest];
+        let mut raw_path_to_id = FxHashMap::default();
+        for (path, file_id) in raw_files {
+            raw_path_to_id.insert(path.as_path(), *file_id);
+        }
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+        let condition_names = conditions();
+        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
+        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+        let ctx = ResolveContext {
+            resolver: &resolver,
+            style_resolver: &resolver,
+            extensions: &[],
+            path_to_id: &path_to_id,
+            raw_path_to_id: &raw_path_to_id,
+            workspace_roots: &workspace_roots,
+            package_manifests: &manifests,
+            condition_names: &condition_names,
+            path_aliases: &[],
+            scss_include_paths: &[],
+            root: &manifests[0].root,
+            canonical_fallback: None,
+            tsconfig_warned: &tsconfig_warned,
+        };
+
+        f(&ctx, &manifests[0], &manifests[0].root);
+    }
+
     #[test]
     fn test_extract_package_name_from_node_modules_path_regular() {
         let path = PathBuf::from("/project/node_modules/react/index.js");
@@ -1405,170 +1447,93 @@ mod tests {
 
     #[test]
     fn package_map_non_relative_target_does_not_trigger_source_fallback() {
-        let root = PathBuf::from("/project");
-        let manifest = PackageManifestInfo {
-            root: root.clone(),
-            canonical_root: root,
-            name: Some("pkg".to_string()),
-            package_json: fallow_config::PackageJson::default(),
-        };
-        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
-        let raw_path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
-        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
-        let condition_names = conditions();
-        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
-        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
-        let ctx = ResolveContext {
-            resolver: &resolver,
-            style_resolver: &resolver,
-            extensions: &[],
-            path_to_id: &path_to_id,
-            raw_path_to_id: &raw_path_to_id,
-            workspace_roots: &workspace_roots,
-            package_manifests: std::slice::from_ref(&manifest),
-            condition_names: &condition_names,
-            path_aliases: &[],
-            scss_include_paths: &[],
-            root: &manifest.root,
-            canonical_fallback: None,
-            tsconfig_warned: &tsconfig_warned,
-        };
-
-        assert!(resolve_package_map_target(&ctx, &manifest, "lodash", None).is_none());
-        assert!(resolve_package_map_target(&ctx, &manifest, "../dist/index.js", None).is_none());
+        with_package_map_ctx(
+            PathBuf::from("/project"),
+            Some("pkg"),
+            fallow_config::PackageJson::default(),
+            &[],
+            |ctx, manifest, _| {
+                assert!(resolve_package_map_target(ctx, manifest, "lodash", None).is_none());
+                assert!(
+                    resolve_package_map_target(ctx, manifest, "../dist/index.js", None).is_none()
+                );
+            },
+        );
     }
 
     #[test]
     fn package_map_targets_use_first_reachable_target() {
         let root = PathBuf::from("/project");
         let src_path = root.join("src/feature.ts");
-        let manifest = PackageManifestInfo {
-            root: root.clone(),
-            canonical_root: root,
-            name: Some("pkg".to_string()),
-            package_json: fallow_config::PackageJson::default(),
-        };
-        let mut raw_path_to_id = FxHashMap::default();
-        raw_path_to_id.insert(src_path.as_path(), FileId(9));
-        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
-        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
-        let condition_names = conditions();
-        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
-        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
-        let ctx = ResolveContext {
-            resolver: &resolver,
-            style_resolver: &resolver,
-            extensions: &[],
-            path_to_id: &path_to_id,
-            raw_path_to_id: &raw_path_to_id,
-            workspace_roots: &workspace_roots,
-            package_manifests: std::slice::from_ref(&manifest),
-            condition_names: &condition_names,
-            path_aliases: &[],
-            scss_include_paths: &[],
-            root: &manifest.root,
-            canonical_fallback: None,
-            tsconfig_warned: &tsconfig_warned,
-        };
         let targets = vec![
             "./dist/missing.js".to_string(),
             "./src/feature.ts".to_string(),
         ];
 
-        assert_eq!(
-            resolve_package_map_targets(&ctx, &manifest, &targets, None),
-            Some(FileId(9))
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson::default(),
+            &[(src_path, FileId(9))],
+            |ctx, manifest, _| {
+                assert_eq!(
+                    resolve_package_map_targets(ctx, manifest, &targets, None),
+                    Some(FileId(9))
+                );
+            },
         );
     }
 
     #[test]
     fn package_imports_fallback_supports_external_package_targets() {
         let root = PathBuf::from("/project");
-        let manifest = PackageManifestInfo {
-            root: root.clone(),
-            canonical_root: root.clone(),
-            name: Some("pkg".to_string()),
-            package_json: fallow_config::PackageJson {
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson {
                 imports: Some(serde_json::json!({
                     "#pad": "left-pad",
                     "#scoped": "@scope/pkg/subpath"
                 })),
                 ..Default::default()
             },
-        };
-        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
-        let raw_path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
-        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
-        let condition_names = conditions();
-        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
-        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
-        let ctx = ResolveContext {
-            resolver: &resolver,
-            style_resolver: &resolver,
-            extensions: &[],
-            path_to_id: &path_to_id,
-            raw_path_to_id: &raw_path_to_id,
-            workspace_roots: &workspace_roots,
-            package_manifests: std::slice::from_ref(&manifest),
-            condition_names: &condition_names,
-            path_aliases: &[],
-            scss_include_paths: &[],
-            root: &manifest.root,
-            canonical_fallback: None,
-            tsconfig_warned: &tsconfig_warned,
-        };
+            &[],
+            |ctx, _, root| {
+                let pad = try_package_imports_fallback(ctx, &root.join("src/index.ts"), "#pad");
+                assert!(matches!(pad, Some(ResolveResult::NpmPackage(pkg)) if pkg == "left-pad"));
 
-        let pad = try_package_imports_fallback(&ctx, &root.join("src/index.ts"), "#pad");
-        assert!(matches!(pad, Some(ResolveResult::NpmPackage(pkg)) if pkg == "left-pad"));
-
-        let scoped = try_package_imports_fallback(&ctx, &root.join("src/index.ts"), "#scoped");
-        assert!(matches!(scoped, Some(ResolveResult::NpmPackage(pkg)) if pkg == "@scope/pkg"));
+                let scoped =
+                    try_package_imports_fallback(ctx, &root.join("src/index.ts"), "#scoped");
+                assert!(
+                    matches!(scoped, Some(ResolveResult::NpmPackage(pkg)) if pkg == "@scope/pkg")
+                );
+            },
+        );
     }
 
     #[test]
     fn package_imports_fallback_supports_unnamed_packages() {
         let root = PathBuf::from("/project");
         let src_path = root.join("src/runtime/task.ts");
-        let manifest = PackageManifestInfo {
-            root: root.clone(),
-            canonical_root: root.clone(),
-            name: None,
-            package_json: fallow_config::PackageJson {
+        with_package_map_ctx(
+            root,
+            None,
+            fallow_config::PackageJson {
                 imports: Some(serde_json::json!({
                     "#runtime/*": "./dist/runtime/*.mjs"
                 })),
                 ..Default::default()
             },
-        };
-        let mut raw_path_to_id = FxHashMap::default();
-        raw_path_to_id.insert(src_path.as_path(), FileId(7));
-        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
-        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
-        let condition_names = conditions();
-        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
-        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
-        let ctx = ResolveContext {
-            resolver: &resolver,
-            style_resolver: &resolver,
-            extensions: &[],
-            path_to_id: &path_to_id,
-            raw_path_to_id: &raw_path_to_id,
-            workspace_roots: &workspace_roots,
-            package_manifests: std::slice::from_ref(&manifest),
-            condition_names: &condition_names,
-            path_aliases: &[],
-            scss_include_paths: &[],
-            root: &manifest.root,
-            canonical_fallback: None,
-            tsconfig_warned: &tsconfig_warned,
-        };
-
-        let result =
-            try_package_imports_fallback(&ctx, &root.join("src/index.ts"), "#runtime/task");
-        assert!(matches!(
-            result,
-            Some(ResolveResult::InternalModule(FileId(7)))
-        ));
+            &[(src_path, FileId(7))],
+            |ctx, _, root| {
+                let result =
+                    try_package_imports_fallback(ctx, &root.join("src/index.ts"), "#runtime/task");
+                assert!(matches!(
+                    result,
+                    Some(ResolveResult::InternalModule(FileId(7)))
+                ));
+            },
+        );
     }
 
     #[test]
