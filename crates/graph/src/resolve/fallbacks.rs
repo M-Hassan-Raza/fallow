@@ -521,13 +521,13 @@ pub(super) fn try_package_imports_fallback(
     }
     let manifest = nearest_package_manifest(ctx.package_manifests, from_file)?;
     let imports = manifest.package_json.imports.as_ref()?;
-    let PackageMapTarget::Target(target) =
+    let PackageMapTarget::Targets(targets) =
         package_map_target(imports, specifier, ctx.condition_names)
     else {
         return None;
     };
     let source_subpath = package_import_source_subpath(manifest, specifier);
-    resolve_package_map_target(ctx, manifest, &target, source_subpath.as_deref()).map(|file_id| {
+    resolve_package_map_targets(ctx, manifest, &targets, source_subpath.as_deref()).map(|file_id| {
         match &manifest.name {
             Some(package_name) => ResolveResult::InternalPackageModule {
                 file_id,
@@ -542,7 +542,7 @@ pub(super) fn try_package_imports_fallback(
 enum PackageMapTarget {
     NoMatch,
     Blocked,
-    Target(String),
+    Targets(Vec<String>),
 }
 
 fn package_map_match_value(
@@ -551,7 +551,8 @@ fn package_map_match_value(
     capture: Option<&str>,
 ) -> PackageMapTarget {
     resolve_package_map_value(value, condition_names, capture)
-        .map_or(PackageMapTarget::Blocked, PackageMapTarget::Target)
+        .filter(|targets| !targets.is_empty())
+        .map_or(PackageMapTarget::Blocked, PackageMapTarget::Targets)
 }
 
 fn package_map_target(
@@ -602,26 +603,35 @@ fn resolve_package_map_value(
     value: &Value,
     condition_names: &[String],
     capture: Option<&str>,
-) -> Option<String> {
+) -> Option<Vec<String>> {
     match value {
-        Value::String(target) => Some(match capture {
+        Value::String(target) => Some(vec![match capture {
             Some(capture) => target.replace('*', capture),
             None => target.clone(),
-        }),
+        }]),
         Value::Object(map) => {
             for (condition, value) in map {
                 if (condition == "default"
                     || condition_names
                         .iter()
                         .any(|active_condition| active_condition == condition))
-                    && let Some(target) = resolve_package_map_value(value, condition_names, capture)
+                    && let Some(targets) =
+                        resolve_package_map_value(value, condition_names, capture)
                 {
-                    return Some(target);
+                    return Some(targets);
                 }
             }
             None
         }
-        Value::Array(_) | Value::Bool(_) | Value::Null | Value::Number(_) => None,
+        Value::Array(values) => {
+            let targets: Vec<String> = values
+                .iter()
+                .filter_map(|value| resolve_package_map_value(value, condition_names, capture))
+                .flatten()
+                .collect();
+            (!targets.is_empty()).then_some(targets)
+        }
+        Value::Bool(_) | Value::Null | Value::Number(_) => None,
     }
 }
 
@@ -696,6 +706,17 @@ fn resolve_package_map_target(
         .or_else(|| try_source_fallback(&target_path, ctx.raw_path_to_id))
         .or_else(|| try_source_fallback(&target_path, ctx.path_to_id))
         .or_else(|| source_subpath.and_then(|subpath| try_source_subpath(ctx, manifest, subpath)))
+}
+
+fn resolve_package_map_targets(
+    ctx: &ResolveContext<'_>,
+    manifest: &PackageManifestInfo,
+    targets: &[String],
+    source_subpath: Option<&Path>,
+) -> Option<FileId> {
+    targets
+        .iter()
+        .find_map(|target| resolve_package_map_target(ctx, manifest, target, source_subpath))
 }
 
 fn try_source_subpath(
@@ -914,11 +935,11 @@ pub(super) fn try_workspace_package_fallback(
         };
         if let Some(exports) = manifest.package_json.exports.as_ref() {
             match package_map_target(exports, &export_key, ctx.condition_names) {
-                PackageMapTarget::Target(target) => {
-                    if let Some(file_id) = resolve_package_map_target(
+                PackageMapTarget::Targets(targets) => {
+                    if let Some(file_id) = resolve_package_map_targets(
                         ctx,
                         manifest,
-                        &target,
+                        &targets,
                         Some(source_subpath.as_path()),
                     ) {
                         return Some(ResolveResult::InternalPackageModule {
@@ -1228,7 +1249,7 @@ mod tests {
         });
         assert_eq!(
             package_map_target(&map, "#nitro/runtime/task", &conditions()),
-            PackageMapTarget::Target("./dist/special/task.mjs".to_string())
+            PackageMapTarget::Targets(vec!["./dist/special/task.mjs".to_string()])
         );
     }
 
@@ -1239,7 +1260,7 @@ mod tests {
         });
         assert_eq!(
             package_map_target(&map, "#nitro/runtime/task", &conditions()),
-            PackageMapTarget::Target("./dist/runtime/internal/task.mjs".to_string())
+            PackageMapTarget::Targets(vec!["./dist/runtime/internal/task.mjs".to_string()])
         );
     }
 
@@ -1292,7 +1313,7 @@ mod tests {
         });
         assert_eq!(
             package_map_target(&map, "./query/react", &conditions()),
-            PackageMapTarget::Target("./dist/query/react/index.d.ts".to_string())
+            PackageMapTarget::Targets(vec!["./dist/query/react/index.d.ts".to_string()])
         );
     }
 
@@ -1306,7 +1327,7 @@ mod tests {
         });
         assert_eq!(
             package_map_target(&map, ".", &conditions()),
-            PackageMapTarget::Target("./dist/index.js".to_string())
+            PackageMapTarget::Targets(vec!["./dist/index.js".to_string()])
         );
     }
 
@@ -1320,20 +1341,23 @@ mod tests {
         });
         assert_eq!(
             package_map_target(&map, ".", &conditions()),
-            PackageMapTarget::Target("./dist/node.js".to_string())
+            PackageMapTarget::Targets(vec!["./dist/node.js".to_string()])
         );
     }
 
     #[test]
-    fn package_map_unsupported_shapes_are_skipped() {
+    fn package_map_arrays_preserve_fallback_order() {
         let map = serde_json::json!({
-            "#array": ["./dist/array.js"],
+            "#array": ["./dist/missing.js", "./src/array.ts"],
             "#null": null,
             "#false": false
         });
         assert_eq!(
             package_map_target(&map, "#array", &conditions()),
-            PackageMapTarget::Blocked
+            PackageMapTarget::Targets(vec![
+                "./dist/missing.js".to_string(),
+                "./src/array.ts".to_string()
+            ])
         );
         assert_eq!(
             package_map_target(&map, "#null", &conditions()),
@@ -1378,6 +1402,49 @@ mod tests {
 
         assert!(resolve_package_map_target(&ctx, &manifest, "lodash", None).is_none());
         assert!(resolve_package_map_target(&ctx, &manifest, "../dist/index.js", None).is_none());
+    }
+
+    #[test]
+    fn package_map_targets_use_first_reachable_target() {
+        let root = PathBuf::from("/project");
+        let src_path = root.join("src/feature.ts");
+        let manifest = PackageManifestInfo {
+            root: root.clone(),
+            canonical_root: root.clone(),
+            name: Some("pkg".to_string()),
+            package_json: fallow_config::PackageJson::default(),
+        };
+        let mut raw_path_to_id = FxHashMap::default();
+        raw_path_to_id.insert(src_path.as_path(), FileId(9));
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+        let condition_names = conditions();
+        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
+        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+        let ctx = ResolveContext {
+            resolver: &resolver,
+            style_resolver: &resolver,
+            extensions: &[],
+            path_to_id: &path_to_id,
+            raw_path_to_id: &raw_path_to_id,
+            workspace_roots: &workspace_roots,
+            package_manifests: std::slice::from_ref(&manifest),
+            condition_names: &condition_names,
+            path_aliases: &[],
+            scss_include_paths: &[],
+            root: &manifest.root,
+            canonical_fallback: None,
+            tsconfig_warned: &tsconfig_warned,
+        };
+        let targets = vec![
+            "./dist/missing.js".to_string(),
+            "./src/feature.ts".to_string(),
+        ];
+
+        assert_eq!(
+            resolve_package_map_targets(&ctx, &manifest, &targets, None),
+            Some(FileId(9))
+        );
     }
 
     #[test]
