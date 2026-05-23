@@ -401,6 +401,59 @@ fn package_imports_missing_dist_resolve_to_source() {
     );
 }
 
+#[test]
+fn package_imports_external_targets_credit_dependency_usage() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r##"{
+  "name": "imports-external-target",
+  "main": "src/index.ts",
+  "imports": {
+    "#pad": "left-pad"
+  },
+  "dependencies": {
+    "left-pad": "1.3.0",
+    "unused": "1.0.0"
+  }
+}"##,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import pad from '#pad';\nexport const value = pad('x', 2);\n",
+    )
+    .expect("write source");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved_specifiers: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|u| u.import.specifier.as_str())
+        .collect();
+    assert!(
+        !unresolved_specifiers.contains(&"#pad"),
+        "package imports external target should resolve: {unresolved_specifiers:?}"
+    );
+
+    let unused_dep_names: Vec<&str> = results
+        .unused_dependencies
+        .iter()
+        .map(|d| d.dep.package_name.as_str())
+        .collect();
+    assert!(
+        !unused_dep_names.contains(&"left-pad"),
+        "external target dependency should be credited as used: {unused_dep_names:?}"
+    );
+    assert!(
+        unused_dep_names.contains(&"unused"),
+        "unrelated dependency should still be reported unused: {unused_dep_names:?}"
+    );
+}
+
 // ── Issue #124: ignorePatterns applied to workspace package.json discovery ──
 
 #[test]

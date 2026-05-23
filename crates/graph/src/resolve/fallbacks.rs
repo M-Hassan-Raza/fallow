@@ -10,6 +10,7 @@ use serde_json::Value;
 
 use fallow_types::discover::FileId;
 
+use super::path_info::{extract_package_name, is_bare_specifier, is_valid_package_name};
 use super::types::{OUTPUT_DIRS, PackageManifestInfo, ResolveContext, ResolveResult, SOURCE_EXTS};
 
 /// Try resolving a specifier using plugin-provided path aliases.
@@ -527,15 +528,20 @@ pub(super) fn try_package_imports_fallback(
         return None;
     };
     let source_subpath = package_import_source_subpath(manifest, specifier);
-    resolve_package_map_targets(ctx, manifest, &targets, source_subpath.as_deref()).map(|file_id| {
-        match &manifest.name {
-            Some(package_name) => ResolveResult::InternalPackageModule {
-                file_id,
-                package_name: package_name.clone(),
+    resolve_package_import_targets(ctx, manifest, &targets, source_subpath.as_deref()).map(
+        |target| match target {
+            PackageImportTarget::Internal(file_id) => match &manifest.name {
+                Some(package_name) => ResolveResult::InternalPackageModule {
+                    file_id,
+                    package_name: package_name.clone(),
+                },
+                None => ResolveResult::InternalModule(file_id),
             },
-            None => ResolveResult::InternalModule(file_id),
-        }
-    })
+            PackageImportTarget::ExternalPackage(package_name) => {
+                ResolveResult::NpmPackage(package_name)
+            }
+        },
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -543,6 +549,11 @@ enum PackageMapTarget {
     NoMatch,
     Blocked,
     Targets(Vec<String>),
+}
+
+enum PackageImportTarget {
+    Internal(FileId),
+    ExternalPackage(String),
 }
 
 fn package_map_match_value(
@@ -717,6 +728,29 @@ fn resolve_package_map_targets(
     targets
         .iter()
         .find_map(|target| resolve_package_map_target(ctx, manifest, target, source_subpath))
+}
+
+fn resolve_package_import_targets(
+    ctx: &ResolveContext<'_>,
+    manifest: &PackageManifestInfo,
+    targets: &[String],
+    source_subpath: Option<&Path>,
+) -> Option<PackageImportTarget> {
+    targets.iter().find_map(|target| {
+        resolve_package_map_target(ctx, manifest, target, source_subpath)
+            .map(PackageImportTarget::Internal)
+            .or_else(|| {
+                package_import_external_target(target).map(PackageImportTarget::ExternalPackage)
+            })
+    })
+}
+
+fn package_import_external_target(target: &str) -> Option<String> {
+    if is_bare_specifier(target) && is_valid_package_name(target) {
+        Some(extract_package_name(target))
+    } else {
+        None
+    }
 }
 
 fn try_source_subpath(
@@ -1445,6 +1479,50 @@ mod tests {
             resolve_package_map_targets(&ctx, &manifest, &targets, None),
             Some(FileId(9))
         );
+    }
+
+    #[test]
+    fn package_imports_fallback_supports_external_package_targets() {
+        let root = PathBuf::from("/project");
+        let manifest = PackageManifestInfo {
+            root: root.clone(),
+            canonical_root: root.clone(),
+            name: Some("pkg".to_string()),
+            package_json: fallow_config::PackageJson {
+                imports: Some(serde_json::json!({
+                    "#pad": "left-pad",
+                    "#scoped": "@scope/pkg/subpath"
+                })),
+                ..Default::default()
+            },
+        };
+        let path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let raw_path_to_id: FxHashMap<&Path, FileId> = FxHashMap::default();
+        let workspace_roots: FxHashMap<&str, &Path> = FxHashMap::default();
+        let condition_names = conditions();
+        let resolver = oxc_resolver::Resolver::new(oxc_resolver::ResolveOptions::default());
+        let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
+        let ctx = ResolveContext {
+            resolver: &resolver,
+            style_resolver: &resolver,
+            extensions: &[],
+            path_to_id: &path_to_id,
+            raw_path_to_id: &raw_path_to_id,
+            workspace_roots: &workspace_roots,
+            package_manifests: std::slice::from_ref(&manifest),
+            condition_names: &condition_names,
+            path_aliases: &[],
+            scss_include_paths: &[],
+            root: &manifest.root,
+            canonical_fallback: None,
+            tsconfig_warned: &tsconfig_warned,
+        };
+
+        let pad = try_package_imports_fallback(&ctx, &root.join("src/index.ts"), "#pad");
+        assert!(matches!(pad, Some(ResolveResult::NpmPackage(pkg)) if pkg == "left-pad"));
+
+        let scoped = try_package_imports_fallback(&ctx, &root.join("src/index.ts"), "#scoped");
+        assert!(matches!(scoped, Some(ResolveResult::NpmPackage(pkg)) if pkg == "@scope/pkg"));
     }
 
     #[test]
