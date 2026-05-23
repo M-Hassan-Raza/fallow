@@ -940,8 +940,8 @@ pub fn find_unresolved_imports(
     let mut unresolved = Vec::new();
 
     for module in resolved_modules {
-        for import in module.all_resolved_imports() {
-            if let crate::resolve::ResolveResult::Unresolvable(spec) = &import.target {
+        for edge in module.all_resolved_source_edges() {
+            if let crate::resolve::ResolveResult::Unresolvable(spec) = edge.target() {
                 // Platform builtins are provided by the runtime, not the filesystem.
                 if is_builtin_module(spec) {
                     continue;
@@ -984,7 +984,7 @@ pub fn find_unresolved_imports(
                 // Skip build-time generated route type imports from framework plugins
                 // (e.g., React Router's `./+types/root`). Keep this type-only so
                 // missing runtime imports under the same directory remain visible.
-                if import.info.is_type_only
+                if edge.is_type_only()
                     && generated_type_prefixes
                         .iter()
                         .any(|prefix| spec.starts_with(prefix))
@@ -994,17 +994,18 @@ pub fn find_unresolved_imports(
                 let (line, col) = byte_offset_to_line_col(
                     line_offsets_by_file,
                     module.file_id,
-                    import.info.span.start,
+                    edge.span().start,
                 );
 
                 // Compute the column of the source string literal for precise LSP highlighting.
                 // Falls back to the import statement column when source_span is not available
                 // (e.g., synthetic CSS/SFC imports that use Span::default()).
-                let specifier_col = if import.info.source_span.end > import.info.source_span.start {
+                let source_span = edge.source_span();
+                let specifier_col = if source_span.end > source_span.start {
                     let (_, sc) = byte_offset_to_line_col(
                         line_offsets_by_file,
                         module.file_id,
-                        import.info.source_span.start,
+                        source_span.start,
                     );
                     sc
                 } else {

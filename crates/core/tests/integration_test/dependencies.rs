@@ -90,6 +90,14 @@ fn unresolved_imports_detected() {
         unresolved_specifiers.contains(&"./nonexistent"),
         "\"./nonexistent\" should be detected as unresolved import, found: {unresolved_specifiers:?}"
     );
+    assert!(
+        unresolved_specifiers.contains(&"./missing-re-export"),
+        "named re-export source should be detected as unresolved import, found: {unresolved_specifiers:?}"
+    );
+    assert!(
+        unresolved_specifiers.contains(&"./missing-star-re-export"),
+        "star re-export source should be detected as unresolved import, found: {unresolved_specifiers:?}"
+    );
 }
 
 // ── Unused devDependencies ─────────────────────────────────────
