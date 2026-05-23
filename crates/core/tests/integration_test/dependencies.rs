@@ -72,6 +72,37 @@ fn unlisted_dependencies_detected() {
     );
 }
 
+#[test]
+fn unlisted_re_export_dependency_reports_re_export_line() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{
+  "name": "unlisted-re-export",
+  "main": "src/index.ts"
+}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "export const local = 1;\nexport { default as pad } from 'left-pad';\n",
+    )
+    .expect("write source");
+
+    let config = create_config(root.to_path_buf());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let finding = results
+        .unlisted_dependencies
+        .iter()
+        .find(|dep| dep.dep.package_name == "left-pad")
+        .expect("left-pad re-export should be reported as unlisted");
+
+    assert_eq!(finding.dep.imported_from.len(), 1);
+    assert_eq!(finding.dep.imported_from[0].line, 2);
+}
+
 // ── Unresolved imports integration ─────────────────────────────
 
 #[test]

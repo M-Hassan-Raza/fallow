@@ -820,22 +820,20 @@ pub fn find_unlisted_dependencies(
         .map(|pr| pr.tooling_dependencies.iter().map(String::as_str).collect())
         .unwrap_or_default();
 
-    // Build a lookup from resolved modules so we can recover the import location when building
+    // Build a lookup from resolved modules so we can recover the source edge location when building
     // UnlistedDependency results. Keep both the collapsed npm package name and original source
     // specifier because `bun/foo` resolves to package `bun` but is not the builtin `bun` module.
     let mut import_spans_by_file: FxHashMap<FileId, Vec<(&str, &str, u32)>> = FxHashMap::default();
     for rm in resolved_modules {
-        for import in rm.all_resolved_imports() {
-            if let Some(name) = import.target.package_usage_name() {
+        for edge in rm.all_resolved_source_edges() {
+            if let Some(name) = edge.target().package_usage_name() {
                 import_spans_by_file.entry(rm.file_id).or_default().push((
                     name,
-                    import.info.source.as_str(),
-                    import.info.span.start,
+                    edge.source_specifier(),
+                    edge.span().start,
                 ));
             }
         }
-        // Re-exports don't have span info on ReExportInfo, so skip them here.
-        // The import span lookup will fall back to (1, 0) for re-export-only usages.
     }
 
     let ignore_deps: FxHashSet<&str> = config

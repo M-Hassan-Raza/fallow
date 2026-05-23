@@ -79,10 +79,19 @@ pub enum ResolvedSourceEdge<'a> {
     ReExport(&'a ResolvedReExport),
 }
 
-impl ResolvedSourceEdge<'_> {
+impl<'a> ResolvedSourceEdge<'a> {
+    /// Return the original source specifier.
+    #[must_use]
+    pub fn source_specifier(&self) -> &'a str {
+        match self {
+            Self::Import(import) => &import.info.source,
+            Self::ReExport(re_export) => &re_export.info.source,
+        }
+    }
+
     /// Return the resolved target.
     #[must_use]
-    pub const fn target(&self) -> &ResolveResult {
+    pub const fn target(&self) -> &'a ResolveResult {
         match self {
             Self::Import(import) => &import.target,
             Self::ReExport(re_export) => &re_export.target,
