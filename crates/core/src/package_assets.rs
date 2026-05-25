@@ -36,6 +36,7 @@ fn normalize_publish_entry(entry: &str) -> Option<String> {
 
     if normalized.is_empty()
         || normalized.starts_with('!')
+        || normalized.starts_with('/')
         || normalized.contains(':')
         || Path::new(&normalized).is_absolute()
         || has_parent_or_prefix_component(&normalized)
