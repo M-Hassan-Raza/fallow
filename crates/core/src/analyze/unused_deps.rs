@@ -718,7 +718,7 @@ fn has_types_package_for_file(
 
 /// Look up the import location (line, col) for a given package in a given file.
 ///
-/// Falls back to `(1, 0)` when no span is found (e.g. re-export-only usages).
+/// Falls back to `(1, 0)` when no source edge span is found.
 pub fn find_import_location(
     import_spans_by_file: &FxHashMap<FileId, Vec<(&str, &str, u32)>>,
     line_offsets_by_file: &LineOffsetsMap<'_>,

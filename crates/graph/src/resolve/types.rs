@@ -121,7 +121,7 @@ impl<'a> ResolvedSourceEdge<'a> {
     pub const fn source_span(&self) -> oxc_span::Span {
         match self {
             Self::Import(import) => import.info.source_span,
-            Self::ReExport(re_export) => re_export.info.span,
+            Self::ReExport(_) => oxc_span::Span::new(0, 0),
         }
     }
 }
