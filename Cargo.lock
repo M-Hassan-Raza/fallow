@@ -1021,6 +1021,7 @@ dependencies = [
 name = "fallow-v8-coverage"
 version = "2.81.0"
 dependencies = [
+ "proptest",
  "serde",
  "serde_json",
 ]

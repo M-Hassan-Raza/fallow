@@ -463,4 +463,129 @@ mod tests {
         assert_eq!(file.fn_map["0"].loc.end.column, 0);
         assert_eq!(file.f["0"], 9);
     }
+
+    /// Property tests for the byte-offset-to-line/column mapper.
+    ///
+    /// The `position` mapper backs every Istanbul range fallow emits for runtime
+    /// coverage, so its invariants are encoded as properties rather than relying
+    /// on hand-picked examples. The line-boundary tests build their input from
+    /// known line bodies and join them with a chosen ending, so the expected
+    /// offsets are computed independently of the char-walking construction loop.
+    mod proptests {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// A line body drawn from an alphabet that exercises the UTF-16 width
+        /// branch: ASCII (1 unit), `€` (1 unit / 3 UTF-8 bytes), and `😀` (a
+        /// surrogate pair, 2 units / 4 UTF-8 bytes). Never contains CR or LF, so
+        /// the only line breaks are the ones the harness inserts deliberately.
+        fn line_body() -> impl Strategy<Value = String> {
+            prop::collection::vec(prop::sample::select(vec!['a', 'b', ' ', '€', '😀']), 0..12)
+                .prop_map(|chars| chars.into_iter().collect())
+        }
+
+        /// UTF-16 length of a `str`, matching the units `LineOffsetTable` stores.
+        fn utf16_len(s: &str) -> u32 {
+            s.encode_utf16().count() as u32
+        }
+
+        proptest! {
+            /// `position` is monotonic: a non-decreasing offset never yields an
+            /// earlier `(line, column)`. Guards the `binary_search` Err-branch
+            /// `saturating_sub(1)` and the saturating column subtraction against
+            /// off-by-one regressions, for any source including past-end offsets.
+            #[test]
+            fn position_is_monotonic_in_offset(
+                source in prop::collection::vec(any::<char>(), 0..200)
+                    .prop_map(|chars| chars.into_iter().collect::<String>()),
+                a in any::<u32>(),
+                b in any::<u32>(),
+            ) {
+                let table = LineOffsetTable::from_source(&source);
+                let (lo, hi) = (a.min(b), a.max(b));
+                let p_lo = table.position(lo);
+                let p_hi = table.position(hi);
+                prop_assert!(p_lo.line >= 1, "line numbers are 1-indexed");
+                prop_assert!(
+                    (p_lo.line, p_lo.column) <= (p_hi.line, p_hi.column),
+                    "position({lo}) = {p_lo:?} should not exceed position({hi}) = {p_hi:?}",
+                );
+            }
+
+            /// Every true line boundary maps back to column 0 on the right line,
+            /// and offsets within a line recover their column. Input is assembled
+            /// from known bodies + ending, so the expectation is independent of
+            /// the mapper's own line-splitting logic.
+            #[test]
+            fn line_starts_and_columns_round_trip(
+                bodies in prop::collection::vec(line_body(), 1..8),
+                ending in prop::sample::select(vec!["\n", "\r\n", "\r"]),
+            ) {
+                let source = bodies.join(ending);
+                let table = LineOffsetTable::from_source(&source);
+                let ending_units = utf16_len(ending);
+
+                let mut line_start = 0u32;
+                for (index, body) in bodies.iter().enumerate() {
+                    let body_units = utf16_len(body);
+                    // Column 0 of each line lands on the line's first offset.
+                    let at_start = table.position(line_start);
+                    prop_assert_eq!(at_start.line, index as u32 + 1);
+                    prop_assert_eq!(at_start.column, 0);
+                    // Offsets inside the line (up to its width) recover the column.
+                    for column in 0..=body_units {
+                        let pos = table.position(line_start + column);
+                        prop_assert_eq!(pos.line, index as u32 + 1);
+                        prop_assert_eq!(pos.column, column);
+                    }
+                    line_start += body_units;
+                    if index + 1 < bodies.len() {
+                        line_start += ending_units;
+                    }
+                }
+            }
+
+            /// `from_v8_line_lengths` advances one source position per line. The
+            /// cumulative line starts are strictly increasing and each maps to
+            /// column 0 on its line; offsets within a non-final line recover the
+            /// column. Lengths are bounded so the cumulative offset never
+            /// saturates, keeping the reference model exact.
+            #[test]
+            fn v8_line_lengths_build_consistent_table(
+                lengths in prop::collection::vec(0u32..1000, 1..20),
+            ) {
+                let table = LineOffsetTable::from_v8_line_lengths(&lengths)
+                    .expect("non-empty lengths build a table");
+
+                // Reconstruct the expected line starts: +1 separator per line.
+                let mut starts = vec![0u32];
+                let mut acc = 0u32;
+                for length in &lengths[..lengths.len() - 1] {
+                    acc += length + 1;
+                    starts.push(acc);
+                }
+
+                let mut previous: Option<u32> = None;
+                for (index, &start) in starts.iter().enumerate() {
+                    if let Some(prev) = previous {
+                        prop_assert!(start > prev, "line starts must strictly increase");
+                    }
+                    previous = Some(start);
+
+                    let at_start = table.position(start);
+                    prop_assert_eq!(at_start.line, index as u32 + 1);
+                    prop_assert_eq!(at_start.column, 0);
+
+                    // Within a non-final line the recorded length bounds the columns.
+                    if index + 1 < lengths.len() {
+                        for column in 0..=lengths[index] {
+                            let pos = table.position(start + column);
+                            prop_assert_eq!(pos.line, index as u32 + 1);
+                            prop_assert_eq!(pos.column, column);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
