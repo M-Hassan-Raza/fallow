@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.82.0] - 2026-05-26
+
 ### Fixed
 
 - **Vite entry points declared with `resolve(__dirname, ...)` path helpers are no longer reported as unused.** Before, `build.rollupOptions.input` and `build.lib.entry` values written as path-helper calls (`resolve(__dirname, "src/app.ts")`, `path.resolve(...)`, `join(...)`, and the `import.meta.dirname` equivalents) were not evaluated by the config parser, so multi-entry Vite apps that declare their Rollup inputs this way surfaced those source files as `unused-files` until the user duplicated the entry list into a `.fallowrc` `entry` array. After, the shared config extractor evaluates these path-helper calls to project-relative entry patterns, dropping the leading `__dirname` / `import.meta.dirname` anchor; CSS entry inputs (`styles: resolve(__dirname, "src/index.css")`) are preserved like any other entry. The same path evaluation also lets `resolve.alias` replacements that use `import.meta.dirname` resolve. Because the extractor is shared, Webpack/Rspack/Rsbuild/Rolldown `entry`, Rollup `input`, Vitest `setupFiles`/`globalSetup`, and Drizzle `schema` benefit from the same evaluation. (Closes [#604](https://github.com/fallow-rs/fallow/issues/604).)
@@ -2587,7 +2589,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.81.0...HEAD
+[Unreleased]: https://github.com/fallow-rs/fallow/compare/v2.82.0...HEAD
+[2.82.0]: https://github.com/fallow-rs/fallow/compare/v2.81.0...v2.82.0
 [2.81.0]: https://github.com/fallow-rs/fallow/compare/v2.80.0...v2.81.0
 [2.80.0]: https://github.com/fallow-rs/fallow/compare/v2.79.0...v2.80.0
 [2.79.0]: https://github.com/fallow-rs/fallow/compare/v2.78.1...v2.79.0
