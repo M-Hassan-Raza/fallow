@@ -60,6 +60,7 @@ pub mod guard;
 pub mod health;
 pub mod list_inventory;
 pub mod module_graph;
+pub mod package_baselines;
 pub mod plugins;
 pub mod project_analysis;
 pub mod project_config;
