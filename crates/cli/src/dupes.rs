@@ -378,6 +378,21 @@ fn resolve_package_scope(
     .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))
 }
 
+fn resolve_package_scope_for_pre_discovered_files(
+    opts: &DupesOptions<'_>,
+    config: &ResolvedConfig,
+) -> Result<Option<fallow_engine::package_baselines::PackageChangeScope>, ExitCode> {
+    if !package_baselines_requested(opts, config) {
+        return Ok(None);
+    }
+    let (workspaces, _) = fallow_engine::discover::discover_workspace_packages_with_diagnostics(
+        &config.root,
+        &config.ignore_patterns,
+    )
+    .map_err(|err| emit_error(&format!("Workspace discovery error: {err}"), 2, opts.output))?;
+    resolve_package_scope(opts, config, &workspaces)
+}
+
 fn execute_dupes_inner(
     opts: &DupesOptions<'_>,
     pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
@@ -397,19 +412,7 @@ fn execute_dupes_inner(
     let mut workspace_diagnostics = Vec::new();
     let (mut report, default_ignore_skips, package_scope) = match pre_discovered {
         Some(files) => {
-            let package_scope = if package_baselines_requested(opts, &config) {
-                let (workspaces, _) =
-                    fallow_engine::discover::discover_workspace_packages_with_diagnostics(
-                        &config.root,
-                        &config.ignore_patterns,
-                    )
-                    .map_err(|err| {
-                        emit_error(&format!("Workspace discovery error: {err}"), 2, opts.output)
-                    })?;
-                resolve_package_scope(opts, &config, &workspaces)?
-            } else {
-                None
-            };
+            let package_scope = resolve_package_scope_for_pre_discovered_files(opts, &config)?;
             crate::requests::measure_changed_since_scope(&files);
             let (report, skips) = run_duplication_analysis(
                 opts,
@@ -447,6 +450,17 @@ fn execute_dupes_inner(
     };
 
     if let Some(trace_spec) = opts.trace {
+        if let Some(scope) = package_scope.as_ref() {
+            fallow_engine::duplicates::apply_scope(
+                &mut report,
+                &fallow_engine::duplicates::DuplicationScope {
+                    changes: Some(fallow_engine::duplicates::ChangedFileScope::Packages(scope)),
+                    diff: None,
+                    workspace_roots: None,
+                },
+                &config.root,
+            );
+        }
         // The trace view ran the full duplication analysis; record its find-state
         // for telemetry before the focused early-return so the Dupes workflow's
         // findings_present stays populated regardless of the output view (issue

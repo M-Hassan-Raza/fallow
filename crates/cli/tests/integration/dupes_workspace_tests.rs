@@ -135,6 +135,52 @@ fn package_baselines_scope_standalone_and_combined_dupes() {
 }
 
 #[test]
+fn clone_trace_respects_package_baselines() {
+    let tmp = build_dupes_fixture();
+    let root = tmp.path();
+    let root_arg = root.to_str().unwrap();
+    let unscoped = run_fallow_raw(&["dupes", "--root", root_arg, "--format", "json", "--quiet"]);
+    let fingerprint = parse_json(&unscoped)["clone_groups"][0]["fingerprint"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/ui":"HEAD","packages/api":"HEAD"}}}"#,
+    )
+    .unwrap();
+    let excluded = run_fallow_raw(&[
+        "dupes",
+        "--root",
+        root_arg,
+        "--trace",
+        &fingerprint,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(excluded.code, 2, "{}", excluded.stdout);
+
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/ui":"HEAD"}}}"#,
+    )
+    .unwrap();
+    let retained = run_fallow_raw(&[
+        "dupes",
+        "--root",
+        root_arg,
+        "--trace",
+        &fingerprint,
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(retained.code, 0, "{}", retained.stdout);
+}
+
+#[test]
 fn dupes_without_scope_finds_cross_package_clone() {
     let tmp = build_dupes_fixture();
     let out = run_fallow_raw(&[
