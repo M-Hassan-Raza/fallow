@@ -132,6 +132,17 @@ metadata such as `circularDependency: { cycleId, fileCount }`. Circular
 findings share a cycle identifier and use each import edge for their ranges;
 legacy results without edges retain the first-file fallback.
 
+When `workspaces.changedSince` is configured and no global editor ref was
+requested, the project resolves one typed package scope after workspace
+discovery. Dead-code findings, clone groups, and inline complexity use that
+same scope. Each published document receives its owning package's ref in
+`data.changedSince`; a document in an unlisted package or at the project root
+receives no ref. A cross-package finding can therefore appear in documents
+with different metadata. `fallow/analysisComplete` reports the configured
+`packageBaselines` in stable path order. A global editor ref keeps its existing
+applied or dropped status and suppresses package resolution, even when the
+global ref is invalid.
+
 `document_state::uri_is_stale` compares the captured disk-match state and
 version with the live document. A dirty initial buffer, a newer version, or a
 document closed during analysis prevents publication. A document opened during

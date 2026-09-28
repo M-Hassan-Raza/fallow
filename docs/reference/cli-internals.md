@@ -25,7 +25,26 @@ an exit code.
 A decision that more than one command or surface makes has one implementation.
 The scope filters are `fallow_engine::dead_code::apply_scope`,
 `fallow_engine::duplicates::apply_scope` and `fallow_engine::diff_scope`. The
-production mode of each analysis is
+per-package Git baseline resolver is `fallow_engine::package_baselines`;
+surfaces pass its typed scope into engine filters rather than assembling a
+synthetic changed-file list. An explicit global `--changed-since` takes
+precedence over `workspaces.changedSince`. The map uses exact, project-root-
+relative discovered workspace roots. The nearest workspace owns a file;
+unlisted workspaces and root files remain in full scope. Invalid keys, unknown
+workspaces, and invalid mapped refs fail the scoped analysis as input errors.
+Git refs are resolved once per distinct ref. Dependency-level findings retain
+their existing global behavior, while manifest-owned findings follow their
+owner path. The package map scopes `check`, `dead-code`, `dupes`, and their
+combined sections. Audit supplies its own changed-file scope and does not
+apply package refs.
+
+For example, `.fallowrc.json` can contain
+`"workspaces": { "changedSince": { "packages/web": "main" } }`. The map
+does not change standalone health or security reports. Machine-readable CLI
+reports currently carry the scoped findings but no package-ref provenance;
+the LSP publishes that provenance in `fallow/analysisComplete`.
+
+The production mode of each analysis is
 `fallow_engine::project_config::ProductionFlags`. The error-severity rule is
 `fallow_engine::error_severity`. The dead-code baseline loader is
 `fallow_engine::baseline::apply_dead_code_baseline`. The editor complexity lens

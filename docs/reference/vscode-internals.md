@@ -75,6 +75,13 @@ Do not duplicate the full setting list in durable prose.
   bump `editors/vscode/package.json` for a release.
 - `fallow/analysisComplete` notifications update editor status without requiring
   another CLI analysis. Keep this notification contract synchronized with LSP.
+- The status bar shows `package baselines` for a mixed package scope and lists
+  each workspace root and ref in its tooltip. A global `fallow.changedSince`
+  setting takes precedence, including when its ref is dropped. The Set Baseline
+  at HEAD command explains that its workspace-wide setting overrides package
+  refs before changing that setting. A CLI sidebar refresh retains the last
+  LSP package-scope status; health and security are separate reports with their
+  own scope controls.
 - CLI output buffers accommodate large monorepos; preserve the limits in
   `commands.ts` when changing subprocess handling.
 
