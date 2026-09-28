@@ -279,15 +279,58 @@ pub fn changed_files(root: &Path, git_ref: &str) -> Result<FxHashSet<PathBuf>, C
     try_get_changed_files(root, git_ref)
 }
 
+/// Resolve several refs against one working tree. The HEAD diff and untracked
+/// inventory do not depend on the ref, so a package-baseline run reads them
+/// once while still resolving each ref's committed diff independently.
+pub(crate) struct ChangedFilesBatch<'a> {
+    cwd: &'a Path,
+    toplevel: PathBuf,
+    working_tree: Option<FxHashSet<PathBuf>>,
+}
+
+impl<'a> ChangedFilesBatch<'a> {
+    pub(crate) fn new(cwd: &'a Path, first_ref: &str) -> Result<Self, ChangedFilesError> {
+        validate_git_ref(first_ref).map_err(ChangedFilesError::InvalidRef)?;
+        Ok(Self {
+            cwd,
+            toplevel: resolve_git_toplevel(cwd)?,
+            working_tree: None,
+        })
+    }
+
+    pub(crate) fn changed_files(
+        &mut self,
+        git_ref: &str,
+    ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+        let mut files = committed_changed_files(self.cwd, &self.toplevel, git_ref)?;
+        if self.working_tree.is_none() {
+            self.working_tree = Some(working_tree_changed_files(self.cwd, &self.toplevel)?);
+        }
+        if let Some(working_tree) = &self.working_tree {
+            files.extend(working_tree.iter().cloned());
+        }
+        Ok(files)
+    }
+}
+
 /// Get changed files and the git toplevel used to resolve them.
 pub fn try_get_changed_files_with_toplevel(
     cwd: &Path,
     toplevel: &Path,
     git_ref: &str,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
-    validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    let mut files = committed_changed_files(cwd, toplevel, git_ref)?;
+    files.extend(working_tree_changed_files(cwd, toplevel)?);
+    Ok(files)
+}
 
-    let mut files = collect_git_paths(
+fn committed_changed_files(
+    cwd: &Path,
+    toplevel: &Path,
+    git_ref: &str,
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
+    collect_git_paths(
         cwd,
         toplevel,
         &[
@@ -297,12 +340,14 @@ pub fn try_get_changed_files_with_toplevel(
             "--end-of-options",
             &format!("{git_ref}...HEAD"),
         ],
-    )?;
-    files.extend(collect_git_paths(
-        cwd,
-        toplevel,
-        &["diff", "--name-only", "-z", "HEAD"],
-    )?);
+    )
+}
+
+fn working_tree_changed_files(
+    cwd: &Path,
+    toplevel: &Path,
+) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
+    let mut files = collect_git_paths(cwd, toplevel, &["diff", "--name-only", "-z", "HEAD"])?;
     files.extend(collect_git_paths(
         cwd,
         toplevel,
@@ -1110,6 +1155,40 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let result = try_get_changed_files(temp.path(), "main");
         assert!(matches!(result, Err(ChangedFilesError::NotARepository)));
+    }
+
+    #[test]
+    fn batched_refs_match_independent_changed_file_scopes() {
+        let repo = tempfile::tempdir().expect("tempdir");
+        for args in [
+            &["init", "--quiet"][..],
+            &["config", "user.email", "test@example.com"][..],
+            &["config", "user.name", "Test User"][..],
+            &["config", "commit.gpgsign", "false"][..],
+        ] {
+            run_git(repo.path(), args);
+        }
+        for name in ["committed.ts", "staged.ts", "unstaged.ts"] {
+            std::fs::write(repo.path().join(name), "old\n").expect("initial file");
+        }
+        run_git(repo.path(), &["add", "."]);
+        run_git(repo.path(), &["commit", "--quiet", "-m", "base"]);
+        run_git(repo.path(), &["branch", "base"]);
+
+        std::fs::write(repo.path().join("committed.ts"), "new\n").expect("committed change");
+        run_git(repo.path(), &["add", "committed.ts"]);
+        run_git(repo.path(), &["commit", "--quiet", "-m", "change"]);
+        std::fs::write(repo.path().join("staged.ts"), "new\n").expect("staged change");
+        run_git(repo.path(), &["add", "staged.ts"]);
+        std::fs::write(repo.path().join("unstaged.ts"), "new\n").expect("unstaged change");
+        std::fs::write(repo.path().join("untracked.ts"), "new\n").expect("untracked file");
+
+        let mut batch = ChangedFilesBatch::new(repo.path(), "base").expect("batch");
+        for reference in ["base", "HEAD"] {
+            let batched = batch.changed_files(reference).expect("batched changes");
+            let independent = changed_files(repo.path(), reference).expect("independent changes");
+            assert_eq!(batched, independent, "{reference} scope changed");
+        }
     }
 
     #[cfg(unix)]

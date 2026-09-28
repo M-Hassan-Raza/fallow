@@ -8,7 +8,7 @@ use std::sync::Arc;
 use fallow_config::WorkspaceInfo;
 use rustc_hash::FxHashSet;
 
-use crate::changed_files::{ChangedFilesError, ChangedPathScope};
+use crate::changed_files::{ChangedFilesBatch, ChangedFilesError, ChangedPathScope};
 
 /// Failure to resolve an authored workspace baseline.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,23 +177,45 @@ impl PackageChangeScope {
             validated.push((key, reference, path));
         }
 
+        let configured_owners: BTreeMap<PathBuf, &str> = validated
+            .iter()
+            .map(|(_, reference, path)| (path.clone(), reference.as_str()))
+            .collect();
+        let Some((first_key, first_ref, _)) = validated.first() else {
+            return Ok(None);
+        };
+        let mut batch = ChangedFilesBatch::new(&root, first_ref).map_err(|source| {
+            PackageBaselineError::Git {
+                key: (*first_key).clone(),
+                reference: (*first_ref).clone(),
+                source,
+            }
+        })?;
         let mut refs = BTreeMap::<String, Arc<FxHashSet<PathBuf>>>::new();
         for (key, reference, path) in validated {
             let files = if let Some(files) = refs.get(reference) {
                 Arc::clone(files)
             } else {
                 let files =
-                    crate::changed_files::changed_files(&root, reference).map_err(|source| {
-                        PackageBaselineError::Git {
+                    batch
+                        .changed_files(reference)
+                        .map_err(|source| PackageBaselineError::Git {
                             key: key.clone(),
                             reference: reference.clone(),
                             source,
-                        }
-                    })?;
+                        })?;
                 let files = Arc::new(
                     files
                         .into_iter()
                         .map(|path| dunce::simplified(&path).to_path_buf())
+                        .filter(|file| {
+                            let owner = file
+                                .ancestors()
+                                .find(|ancestor| packages.contains_key(*ancestor));
+                            owner
+                                .and_then(|owner| configured_owners.get(owner))
+                                .is_some_and(|owner_ref| *owner_ref == reference.as_str())
+                        })
                         .collect(),
                 );
                 refs.insert(reference.clone(), Arc::clone(&files));
@@ -389,6 +411,13 @@ mod tests {
             Some("HEAD")
         );
         assert_eq!(scope.baseline_for(&root.join(other).join("index.ts")), None);
+        let parent_root = canonical_root(&root.join(parent)).expect("canonical package");
+        let Some(WorkspaceBaseline::Changed { files, .. }) = scope.workspaces.get(&parent_root)
+        else {
+            panic!("parent baseline missing");
+        };
+        assert_eq!(files.len(), 1, "retain only parent-owned changed paths");
+        assert!(files.contains(&parent_root.join("index.ts")));
 
         let mut results = AnalysisResults::default();
         for package in [parent, child] {
