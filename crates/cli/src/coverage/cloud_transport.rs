@@ -4,13 +4,15 @@
 //! `coverage deployment-changes` all send one authenticated JSON request and
 //! read one JSON answer. This module owns the parts they share:
 //!
-//! - `Accept-Encoding: gzip`, with the body decoded here through `flate2`, so
-//!   the large runtime-context answer does not cross the network uncompressed.
+//! - `Accept-Encoding: gzip`, with the body decoded here through `flate2`.
+//!   When the cloud compresses its answer, the large runtime-context answer
+//!   becomes much smaller on the network. An identity answer also works.
 //!   The `ureq` `gzip` feature is not used, because it changes the behavior of
 //!   every other `ureq` client in the build.
 //! - One retry on HTTP 502, 503 and 504, with the delay from
-//!   [`crate::api::retry_delay_for_status`]. A cold cloud read can pass the
-//!   gateway timeout one time and succeed on the next call.
+//!   [`crate::api::retry_delay_for_status`], and one retry on a timeout. A
+//!   cold cloud read can pass the gateway timeout one time and succeed on the
+//!   next call. Each call here is a read, so a second attempt is safe.
 //! - The `x-fallow-agent-source` attribution header, sent only with a value
 //!   from the cloud allowlist.
 //! - Error messages that name the cause: a timeout, a cloud outage (5xx) or a
@@ -30,7 +32,12 @@ use crate::api::{
 /// Connect timeout for a cloud read.
 pub const CLOUD_CONNECT_TIMEOUT_SECS: u64 = 5;
 /// Total timeout for one attempt of a cloud read.
-pub const CLOUD_TOTAL_TIMEOUT_SECS: u64 = 30;
+///
+/// The Fly proxy answers a cold read that takes too long with HTTP 502 after
+/// about 30 s. This limit is longer, so that 502 arrives and gets the retry.
+/// Two attempts plus the retry delay stay below the 120 s limit that the MCP
+/// server sets on the CLI subprocess.
+pub const CLOUD_TOTAL_TIMEOUT_SECS: u64 = 45;
 /// Header that tells the cloud which coding agent sent the read.
 pub const AGENT_SOURCE_HEADER: &str = "x-fallow-agent-source";
 /// Upper limit on the bytes of a response body as sent.
@@ -39,6 +46,8 @@ const MAX_WIRE_BODY_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_DECODED_BODY_BYTES: u64 = 256 * 1024 * 1024;
 /// Number of attempts for a status that [`is_retryable_status`] accepts.
 const MAX_ATTEMPTS: u8 = 2;
+/// Upper limit on the delay before the second attempt.
+const MAX_RETRY_DELAY_SECS: u64 = 2;
 
 /// Agent-source values that the cloud accepts on `x-fallow-agent-source`.
 /// The cloud ignores any other value, so the CLI does not send one.
@@ -125,15 +134,56 @@ pub fn send(
     body: &CloudBody<'_>,
     operation: &str,
 ) -> Result<CloudOutcome, CloudError> {
-    let agent = try_api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, CLOUD_TOTAL_TIMEOUT_SECS)
-        .map_err(|err| CloudError::Network(unreachable_message(operation, &err.to_string())))?;
+    send_with_timing(auth, url, body, operation, CloudTiming::DEFAULT)
+}
+
+/// Timeouts and retry delay for [`send_with_timing`].
+#[derive(Clone, Copy)]
+struct CloudTiming {
+    total_timeout_secs: u64,
+    max_retry_delay: Duration,
+}
+
+impl CloudTiming {
+    const DEFAULT: Self = Self {
+        total_timeout_secs: CLOUD_TOTAL_TIMEOUT_SECS,
+        max_retry_delay: Duration::from_secs(MAX_RETRY_DELAY_SECS),
+    };
+}
+
+fn send_with_timing(
+    auth: &CloudAuth,
+    url: &str,
+    body: &CloudBody<'_>,
+    operation: &str,
+    timing: CloudTiming,
+) -> Result<CloudOutcome, CloudError> {
+    let agent =
+        try_api_agent_with_timeout(CLOUD_CONNECT_TIMEOUT_SECS, timing.total_timeout_secs)
+            .map_err(|err| CloudError::Network(unreachable_message(operation, &err.to_string())))?;
     let mut attempt: u8 = 1;
     loop {
-        let (status, retry_after, bytes, gzip) = send_once(&agent, auth, url, body, operation)?;
+        let (status, retry_after, bytes, gzip) = match send_once(&agent, auth, url, body, operation)
+        {
+            Ok(raw) => raw,
+            Err(AttemptError::Timeout) if attempt < MAX_ATTEMPTS => {
+                std::thread::sleep(timing.max_retry_delay);
+                attempt += 1;
+                continue;
+            }
+            Err(AttemptError::Timeout) => {
+                return Err(CloudError::Network(timeout_message(
+                    operation,
+                    timing.total_timeout_secs,
+                    attempt,
+                )));
+            }
+            Err(AttemptError::Failed(err)) => return Err(err),
+        };
         if is_retryable_status(status) && attempt < MAX_ATTEMPTS {
             let delay =
                 retry_delay_for_status(status, retry_after.as_deref(), attempt, SystemTime::now());
-            std::thread::sleep(delay.min(Duration::from_secs(2)));
+            std::thread::sleep(delay.min(timing.max_retry_delay));
             attempt += 1;
             continue;
         }
@@ -167,13 +217,21 @@ const fn is_retryable_status(status: u16) -> bool {
 
 type RawResponse = (u16, Option<String>, Vec<u8>, bool);
 
+/// Why one attempt failed before a full answer arrived.
+enum AttemptError {
+    /// The attempt passed the total timeout. It gets one more attempt.
+    Timeout,
+    /// Any other transport error. It gets no more attempts.
+    Failed(CloudError),
+}
+
 fn send_once(
     agent: &ureq::Agent,
     auth: &CloudAuth,
     url: &str,
     body: &CloudBody<'_>,
     operation: &str,
-) -> Result<RawResponse, CloudError> {
+) -> Result<RawResponse, AttemptError> {
     let bearer = format!("Bearer {}", auth.api_key);
     let result = match body {
         CloudBody::None => {
@@ -241,25 +299,30 @@ fn decode_body(bytes: &[u8], gzip: bool, operation: &str) -> Result<String, Clou
 
 /// Classify a transport error as a timeout or as a network that cannot reach
 /// the cloud.
-fn transport_error(err: &ureq::Error, operation: &str) -> CloudError {
+fn transport_error(err: &ureq::Error, operation: &str) -> AttemptError {
     let is_timeout = match err {
         ureq::Error::Timeout(_) => true,
         ureq::Error::Io(io) => io.kind() == std::io::ErrorKind::TimedOut,
         _ => false,
     };
     if is_timeout {
-        return CloudError::Network(timeout_message(operation));
+        return AttemptError::Timeout;
     }
-    CloudError::Network(unreachable_message(
+    AttemptError::Failed(CloudError::Network(unreachable_message(
         operation,
         &sanitize_network_error(&err.to_string()),
-    ))
+    )))
 }
 
-/// Message for a read that passed the total timeout.
-pub fn timeout_message(operation: &str) -> String {
+/// Message for a read that passed the total timeout on each attempt.
+pub fn timeout_message(operation: &str, timeout_secs: u64, attempts: u8) -> String {
+    let tries = if attempts > 1 {
+        format!(" on {attempts} attempts")
+    } else {
+        String::new()
+    };
     format!(
-        "fallow.cloud did not answer the {operation} request in {CLOUD_TOTAL_TIMEOUT_SECS} s (timeout).\n\nThe first read after a deploy can be slow while the cloud loads the data. Run the command again in a minute."
+        "fallow.cloud did not answer the {operation} request in {timeout_secs} s{tries} (timeout).\n\nThe first read after a deploy can be slow while the cloud loads the data. Run the command again in a minute."
     )
 }
 
@@ -314,7 +377,8 @@ mod tests {
 
     #[test]
     fn error_messages_name_the_cause() {
-        assert!(timeout_message("runtime-context").contains("(timeout)"));
+        assert!(timeout_message("runtime-context", 45, 2).contains("(timeout)"));
+        assert!(timeout_message("runtime-context", 45, 2).contains("in 45 s on 2 attempts"));
         assert!(outage_message("runtime-context", 502, 2).contains("(cloud outage)"));
         assert!(outage_message("runtime-context", 502, 2).contains("on 2 attempts"));
         assert!(
@@ -329,6 +393,95 @@ mod tests {
             agent_source: None,
         };
         assert!(!format!("{auth:?}").contains("fallow_live_secret"));
+    }
+
+    /// Serve two connections: the first gets no answer until the client has
+    /// timed out, the second gets a JSON answer. Returns the URL and the
+    /// number of accepted connections.
+    fn serve_slow_then_ok(
+        stall: Duration,
+    ) -> (
+        String,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        std::thread::JoinHandle<()>,
+    ) {
+        use std::io::Write;
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind mock server");
+        let addr = listener.local_addr().expect("mock addr");
+        let accepted = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = std::sync::Arc::clone(&accepted);
+        let handle = std::thread::spawn(move || {
+            let (first, _) = listener.accept().expect("accept first");
+            counter.fetch_add(1, Ordering::SeqCst);
+            // Give up when no retry arrives, so a missing retry fails the
+            // test instead of a hang.
+            listener.set_nonblocking(true).expect("nonblocking");
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            let mut second = loop {
+                match listener.accept() {
+                    Ok((stream, _)) => break stream,
+                    Err(_) if std::time::Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(20));
+                    }
+                    Err(_) => return,
+                }
+            };
+            second.set_nonblocking(false).expect("blocking stream");
+            counter.fetch_add(1, Ordering::SeqCst);
+            let mut buf = [0_u8; 4096];
+            let _ = second.read(&mut buf);
+            let body = b"{\"ok\":true}";
+            let head = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            );
+            second.write_all(head.as_bytes()).expect("write head");
+            second.write_all(body).expect("write body");
+            std::thread::sleep(stall);
+            drop(first);
+        });
+        (format!("http://{addr}"), accepted, handle)
+    }
+
+    #[test]
+    fn a_timed_out_attempt_gets_one_more_attempt() {
+        use std::sync::atomic::Ordering;
+
+        let (url, accepted, handle) = serve_slow_then_ok(Duration::from_millis(100));
+        let timing = CloudTiming {
+            total_timeout_secs: 1,
+            max_retry_delay: Duration::from_millis(10),
+        };
+        let outcome = send_with_timing(
+            &CloudAuth::default(),
+            &url,
+            &CloudBody::None,
+            "runtime-context",
+            timing,
+        );
+        handle.join().expect("server joins");
+        assert_eq!(accepted.load(Ordering::SeqCst), 2);
+        match outcome {
+            Ok(CloudOutcome::Success(response)) => assert_eq!(response.body, "{\"ok\":true}"),
+            Ok(CloudOutcome::Http(failure)) => panic!("unexpected HTTP failure: {failure:?}"),
+            Err(err) => panic!("unexpected error: {err:?}"),
+        }
+    }
+
+    #[test]
+    fn per_attempt_timeout_waits_for_the_gateway_answer() {
+        // The Fly proxy answers a slow cold read with 502 after about 30 s.
+        // The attempt must wait for that answer, so the 502 retry can run.
+        const GATEWAY_TIMEOUT_SECS: u64 = 32;
+        const MCP_SUBPROCESS_TIMEOUT_SECS: u64 = 120;
+        let default = CloudTiming::DEFAULT;
+        assert!(default.total_timeout_secs > GATEWAY_TIMEOUT_SECS);
+        let worst_case = u64::from(MAX_ATTEMPTS) * default.total_timeout_secs
+            + default.max_retry_delay.as_secs();
+        assert!(worst_case < MCP_SUBPROCESS_TIMEOUT_SECS);
     }
 
     #[test]
