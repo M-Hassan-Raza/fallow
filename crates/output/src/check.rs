@@ -1339,6 +1339,7 @@ mod tests {
         let output = CheckGroupedOutput {
             gate_outcomes: None,
             request_outcomes: None,
+            package_baselines: Vec::new(),
             baseline_staleness: None,
             schema_version: SchemaVersion(7),
             version: ToolVersion("0.0.0".to_string()),
