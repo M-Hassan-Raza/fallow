@@ -97,8 +97,8 @@ describe("buildStatusBarTooltipMarkdown", () => {
     const markdown = buildStatusBarTooltipMarkdown(
       baseParams({
         packageBaselines: [
-          { workspaceRoot: "packages/web", reference: "main" },
-          { workspaceRoot: "packages/legacy", reference: "release/2024.10" },
+          { workspace_root: "packages/web", reference: "main" },
+          { workspace_root: "packages/legacy", reference: "release/2024.10" },
         ],
       }),
     );
@@ -220,7 +220,7 @@ describe("renderStatusBarText", () => {
   });
 
   it("shows package baselines unless a global ref overrides them", () => {
-    const packages = [{ workspaceRoot: "packages/web", reference: "main" }];
+    const packages = [{ workspace_root: "packages/web", reference: "main" }];
     expect(renderStatusBarText("$(search) Fallow", null, undefined, packages)).toBe(
       "$(search) Fallow (package baselines)",
     );

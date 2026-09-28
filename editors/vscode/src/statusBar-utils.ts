@@ -1,6 +1,9 @@
 import { countCheckIssues } from "./analysis-utils.js";
+import type { PackageBaselineStatus } from "./generated/output-contract.js";
 import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
 import type { FallowCheckResult, FallowDupesResult } from "./types.js";
+
+export type { PackageBaselineStatus } from "./generated/output-contract.js";
 
 /** Whether the LSP server applied or dropped a requested changed-since scope. */
 export type ChangedSinceScopeState = "applied" | "dropped";
@@ -10,12 +13,6 @@ export interface ChangedSinceScopeStatus {
   readonly requestedRef: string;
   readonly state: ChangedSinceScopeState;
   readonly reason?: string;
-}
-
-/** Applied Git ref for a package relative to the workspace root. */
-export interface PackageBaselineStatus {
-  readonly workspaceRoot: string;
-  readonly reference: string;
 }
 
 export interface AnalysisCompleteParams {
@@ -269,7 +266,7 @@ export const buildStatusBarTooltipMarkdown = (
       lines.push("$(git-branch) Code diagnostics and clone groups use package baselines:");
       for (const baseline of params.packageBaselines) {
         lines.push(
-          `- ${escapeMarkdownText(baseline.workspaceRoot)}: ${escapeMarkdownText(baseline.reference)}`,
+          `- ${escapeMarkdownText(baseline.workspace_root)}: ${escapeMarkdownText(baseline.reference)}`,
         );
       }
       lines.push("Unlisted packages and root files remain in full scope.");
