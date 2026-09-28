@@ -41,8 +41,12 @@ apply package refs.
 For example, `.fallowrc.json` can contain
 `"workspaces": { "changedSince": { "packages/web": "main" } }`. The map
 does not change standalone health or security reports. Machine-readable CLI
-reports currently carry the scoped findings but no package-ref provenance;
-the LSP publishes that provenance in `fallow/analysisComplete`.
+`check`, `dead-code`, `dupes`, and combined reports include optional
+`package_baselines` provenance when package refs are applied. Each row has an
+exact project-relative `workspace_root` and its `reference`. The field is
+absent for unconfigured runs, a global ref override, and standalone health or
+security reports. The LSP publishes the same row type in
+`fallow/analysisComplete`.
 
 The production mode of each analysis is
 `fallow_engine::project_config::ProductionFlags`. The error-severity rule is

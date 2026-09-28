@@ -139,7 +139,8 @@ same scope. Each published document receives its owning package's ref in
 `data.changedSince`; a document in an unlisted package or at the project root
 receives no ref. A cross-package finding can therefore appear in documents
 with different metadata. `fallow/analysisComplete` reports the configured
-`packageBaselines` in stable path order. A global editor ref keeps its existing
+`packageBaselines` in stable path order using the output contract's
+`workspace_root` and `reference` row. A global editor ref keeps its existing
 applied or dropped status and suppresses package resolution, even when the
 global ref is invalid.
 

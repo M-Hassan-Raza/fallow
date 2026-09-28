@@ -435,6 +435,16 @@ When a stable interface needs to change:
 
 These are documented for the rare CI script that depended on the old behavior. None require a config migration.
 
+- **Workspace package baselines.** `workspaces.changedSince` maps exact,
+  project-relative workspace roots to Git refs. It scopes source findings in
+  `check`, `dead-code`, `dupes`, their combined report, and editor diagnostics;
+  unlisted packages and root files remain in full scope. An explicit global
+  changed-since ref takes precedence. JSON reports expose applied refs through
+  an optional `package_baselines[]` array of `{ workspace_root, reference }`
+  rows; the LSP sends the same rows as `packageBaselines`. The field is absent
+  without an applied package map, so no `schema_version` changes. Standalone
+  health and security reports keep their own scope controls.
+
 - **Save flags write only into the project and the temp directories.**
   `--save-baseline`, `--save-regression-baseline` and `--save-snapshot` now
   exit 2 with an error document, before the analysis runs, when the file
