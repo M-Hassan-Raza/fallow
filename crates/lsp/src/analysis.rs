@@ -366,6 +366,9 @@ fn run_typed_project_analysis(
     session: &AnalysisSession,
     duplicates_config: &DuplicatesConfig,
 ) -> Result<(), ProjectAnalysisError> {
+    if input.run_cancellation.load(Ordering::SeqCst) {
+        return Err(ProjectAnalysisError::cancelled(input.project_root));
+    }
     let package_scope = if input.global_changed_since_requested {
         None
     } else {
