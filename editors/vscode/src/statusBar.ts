@@ -23,6 +23,7 @@ import type {
 } from "./statusBar-utils.js";
 
 let statusBarItem: vscode.StatusBarItem | null = null;
+let showingAnalysisResult = true;
 
 /**
  * Last health score segment (e.g. `B (82)`), or null when health has not run or
@@ -40,6 +41,7 @@ const healthSuffix = (): string => (healthPart ? ` | health: ${healthPart}` : ""
 
 export const createStatusBar = (): vscode.StatusBarItem => {
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
+  showingAnalysisResult = true;
   statusBarItem.command = "fallow.analyze";
   statusBarItem.text = renderStatusBarText("$(search) Fallow", liveChangedSince());
   statusBarItem.show();
@@ -126,6 +128,7 @@ const applyStatusBarText = (
   lastBaseParts = parts;
   lastChangedSinceScope = changedSinceScope;
   lastPackageBaselines = packageBaselines;
+  showingAnalysisResult = true;
   const joined = parts.length > 0 ? `$(search) Fallow: ${parts.join(" | ")}` : "$(search) Fallow";
   const base = `${joined}${healthSuffix()}`;
   statusBarItem.text = renderStatusBarText(
@@ -147,6 +150,9 @@ export const updateStatusBarHealth = (report: HealthOutput | null): void => {
   if (!statusBarItem) {
     return;
   }
+  if (!showingAnalysisResult) {
+    return;
+  }
   // Re-render against the cached analysis parts so the health segment appends
   // without clobbering the issue/duplication counts.
   applyStatusBarText(lastBaseParts, lastChangedSinceScope, lastPackageBaselines);
@@ -154,6 +160,8 @@ export const updateStatusBarHealth = (report: HealthOutput | null): void => {
 
 export const setStatusBarAnalyzing = (): void => {
   if (statusBarItem) {
+    showingAnalysisResult = false;
+    statusBarItem.tooltip = undefined;
     statusBarItem.text = renderStatusBarText(
       "$(loading~spin) Fallow: Analyzing...",
       liveChangedSince(),
@@ -163,6 +171,8 @@ export const setStatusBarAnalyzing = (): void => {
 
 export const setStatusBarError = (): void => {
   if (statusBarItem) {
+    showingAnalysisResult = false;
+    statusBarItem.tooltip = undefined;
     statusBarItem.text = renderStatusBarText("$(error) Fallow: Error", liveChangedSince());
   }
 };
@@ -176,4 +186,5 @@ export const disposeStatusBar = (): void => {
   lastBaseParts = [];
   lastChangedSinceScope = undefined;
   lastPackageBaselines = [];
+  showingAnalysisResult = true;
 };
