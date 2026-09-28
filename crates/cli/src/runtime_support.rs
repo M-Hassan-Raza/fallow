@@ -465,17 +465,31 @@ fn report_workspace_diagnostics(
                 && matches!(options.output, OutputFormat::Human)
                 && !options.quiet
             {
-                eprintln!(
-                    "fallow: {} workspace discovery diagnostic{}. \
-                     Run `fallow list --workspaces` for detail.",
-                    diagnostics.len(),
-                    if diagnostics.len() == 1 { "" } else { "s" }
-                );
+                eprintln!("{}", workspace_diagnostics_notice(diagnostics.len()));
             }
             Ok(())
         }
         Err(err) => Err(crate::error::emit_error(err.message(), 2, options.output)),
     }
+}
+
+/// Render the one-line stderr notice that workspace discovery produced
+/// diagnostics.
+///
+/// Built by name so the wording is unit testable rather than only observable
+/// through a subprocess. The notice names the dedicated `fallow workspaces`
+/// command rather than the equivalent `fallow list --workspaces`: both print
+/// the same per-entry block, and the dedicated command is the shorter, more
+/// direct spelling: at the four-digit count this treats as the realistic
+/// ceiling it leaves ten columns of the eighty-column terminal budget, against
+/// three for `fallow list --workspaces`. The pinning test measures the chosen
+/// spelling; the alternative's figure is stated here because nothing measures
+/// it.
+fn workspace_diagnostics_notice(count: usize) -> String {
+    format!(
+        "fallow: {count} workspace discovery diagnostic{}. Run `fallow workspaces`.",
+        crate::report::plural(count)
+    )
 }
 
 fn config_shape_for(
@@ -577,6 +591,29 @@ mod tests {
             ..fallow_config::SecurityConfig::default()
         };
         assert!(find_unknown_security_categories(&security).is_empty());
+    }
+
+    /// The notice promises a route, so pin the exact sentence in both
+    /// spellings: `fallow workspaces` prints the per-entry block this line
+    /// summarises, and a rename of that command must fail here rather than
+    /// leave the warning pointing at nothing.
+    ///
+    /// The count is the only part that grows, so these two strings are also
+    /// the narrowest and widest plausible renderings: 66 columns at one
+    /// diagnostic, 70 once a monorepo drives the count to four digits. That
+    /// leaves ten columns of headroom under the eighty-column terminal
+    /// budget, so pinning the strings byte for byte is the width guard as
+    /// well; a rewording that spends the headroom fails here.
+    #[test]
+    fn workspace_diagnostics_notice_pins_wording_and_route() {
+        assert_eq!(
+            workspace_diagnostics_notice(1),
+            "fallow: 1 workspace discovery diagnostic. Run `fallow workspaces`."
+        );
+        assert_eq!(
+            workspace_diagnostics_notice(1234),
+            "fallow: 1234 workspace discovery diagnostics. Run `fallow workspaces`."
+        );
     }
 
     #[test]
