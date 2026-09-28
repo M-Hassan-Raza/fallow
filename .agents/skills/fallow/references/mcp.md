@@ -97,6 +97,34 @@ ambiguity or reachable references.
 
 `trace_export` never carries a `semantic` block: it is API-backed in-process and answers from the graph alone.
 
+## Scoped cloud reads
+
+Use these reads when the project sends production coverage to Fallow Cloud. The CLI reads the key from `--api-key` or `FALLOW_API_KEY`; the MCP tools read `FALLOW_API_KEY` from the server environment only. Prefer the two scoped reads: they return only the functions or the deploy you ask about. `get_cloud_runtime_context` downloads the evidence of every function and runs a full local analysis first, so keep it for whole-project questions.
+
+| Question | CLI | MCP tool |
+|:---------|:----|:---------|
+| Is a changed function hot, cold, or tested? | `fallow coverage review-packet --repo <owner/repo>` | `get_cloud_review_packet` |
+| Did the last deploy change what runs? | `fallow coverage deployment-changes --repo <owner/repo>` | `get_cloud_deployment_changes` |
+
+**Before an edit.** Without `--file` or `--function`, `review-packet` sends the source files changed against the base (`--base`, then `FALLOW_AUDIT_BASE`, then the merge-base). Narrow it with `--file <path>` or `--function <file>:<name>[:<line>]`, both repeatable; over MCP pass `files[]` or `functions[{file, name, line?}]`. Per function, read:
+
+- `hit_count`: the production call count. Rank hot functions by it, not by `prod_hit_count`, which counts tagged traffic only.
+- `tracking_state`: `called`, `never_called`, or `untracked` in the current deployment.
+- `covered_by_test`: `true` or `null`. `null` means no test evidence, not "no test". A hot function with `covered_by_test: null` is a high-risk edit.
+- `blast_radius.caller_count` and `blast_radius.caller_sites`: callers when the data exists; `null` is unknown, not zero.
+
+An entry in `not_found` has no cloud data. Absence is not evidence that the code is cold.
+
+**Before a delete.** Require both static and runtime evidence:
+
+1. `fallow dead-code --trace <file>:<export>` (MCP `trace_export`) confirms the static side.
+2. `period_tracking_state` is `never_called`. It covers the whole period, while `tracking_state` covers only the current deployment. A function with `period_tracking_state: "called"` never gets a `safe_to_delete` verdict.
+3. `evidence_window.observed_hours` is large enough for the traffic of that code. An admin page, a yearly job, an error handler, or a flagged feature can stay unvisited for a long time: "never called" there means "not visited", not "dead". Ask the owner or keep the code.
+
+**After a deploy.** `deployment-changes` compares `--sha` (default: git HEAD) with `--base` (default: the previous deployment with production runtime). Each function gets one kind: `stopped`, `new_not_called`, `heated_up`, `cooled_down`, `new_called`, or `unchanged`. Filter with `--change <kind>`, page with `--limit` (1 to 200) and `--cursor`. When `comparable` is `false`, report `reason` and claim no stop and no rate change: `head_warming_up`, `head_short_window`, and `head_insufficient_runtime` mean "try again later"; `no_base_deployment` means there is nothing to compare; `runtime_surfaces_differ`, `runtime_surfaces_unknown`, and `function_set_differs` mean the two deployments do not measure the same code. The report is context and never proves that a function is dead.
+
+**Paths.** Open and edit files by `repo_path`. `file_path` is the path the runtime reported (for example `/app/src/x.ts` in a container) and often does not exist in the checkout.
+
 ## Runtime source-map confidence for cloud runtime tools
 
 | Values | Meaning | Agent action |
