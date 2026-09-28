@@ -109,6 +109,16 @@ describe("buildStatusBarTooltipMarkdown", () => {
     expect(markdown).toContain("Health and security reports use their own scopes.");
   });
 
+  it("prefers a completed package scope over a setting changed after the run", () => {
+    const params = baseParams({
+      packageBaselines: [{ workspace_root: "packages/web", reference: "main" }],
+    });
+    expect(buildStatusBarTooltipMarkdown(params, "new-global-ref"))
+      .toContain("packages/web: main");
+    expect(renderStatusBarText("$(search) Fallow", "new-global-ref", undefined, params.packageBaselines))
+      .toBe("$(search) Fallow (package baselines)");
+  });
+
   it("uses the server-applied changedSince scope when present", () => {
     const markdown = buildStatusBarTooltipMarkdown(
       baseParams({
@@ -219,12 +229,18 @@ describe("renderStatusBarText", () => {
     ).toBe("$(search) Fallow: 3 issues (since origin/main)");
   });
 
-  it("shows package baselines unless a global ref overrides them", () => {
+  it("shows reported package baselines until a reported global scope overrides them", () => {
     const packages = [{ workspace_root: "packages/web", reference: "main" }];
     expect(renderStatusBarText("$(search) Fallow", null, undefined, packages)).toBe(
       "$(search) Fallow (package baselines)",
     );
     expect(renderStatusBarText("$(search) Fallow", "HEAD", undefined, packages)).toBe(
+      "$(search) Fallow (package baselines)",
+    );
+    expect(renderStatusBarText("$(search) Fallow", "HEAD", {
+      requestedRef: "HEAD",
+      state: "applied",
+    }, packages)).toBe(
       "$(search) Fallow (since HEAD)",
     );
   });

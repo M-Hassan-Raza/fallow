@@ -239,8 +239,8 @@ export const formatChangedSinceRefForStatusBar = (ref: string): string => {
  * visible signal that should match the `changedSince` filter applied to
  * LSP diagnostics.
  *
- * Pure: takes the resolved ref so it can be unit-tested without a vscode
- * mock. Callers in `statusBar.ts` pass `getChangedSince()` or `null`.
+ * Pure: a reported scope wins over the live editor setting, which may have
+ * changed since the run. Callers pass `getChangedSince()` as a fallback.
  */
 export const renderStatusBarText = (
   base: string,
@@ -248,9 +248,12 @@ export const renderStatusBarText = (
   scope?: ChangedSinceScopeStatus,
   packageBaselines: ReadonlyArray<PackageBaselineStatus> = [],
 ): string => {
+  if (!scope && packageBaselines.length > 0) {
+    return `${base} (package baselines)`;
+  }
   const requestedRef = scope?.requestedRef || changedSince;
   if (!requestedRef) {
-    return packageBaselines.length > 0 ? `${base} (package baselines)` : base;
+    return base;
   }
   const formattedRef = formatChangedSinceRefForStatusBar(requestedRef);
   if (scope?.state === "dropped") {
@@ -275,7 +278,8 @@ export const buildStatusBarTooltipMarkdown = (
       lines.push(`Reason: ${escapeMarkdownText(scope.reason)}`);
     }
   } else {
-    const appliedRef = scope?.requestedRef || changedSinceRef;
+    const appliedRef =
+      scope?.requestedRef || (params.packageBaselines?.length ? null : changedSinceRef);
     if (appliedRef) {
       lines.push(`$(git-branch) Scoped to changes since ${escapeMarkdownText(appliedRef)}`);
     } else if (params.packageBaselines?.length) {
