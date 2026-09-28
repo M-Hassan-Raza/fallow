@@ -102,10 +102,11 @@ describe("buildStatusBarTooltipMarkdown", () => {
         ],
       }),
     );
-    expect(markdown).toContain("Package baselines:");
+    expect(markdown).toContain("Code diagnostics and clone groups use package baselines:");
     expect(markdown).toContain("packages/web: main");
     expect(markdown).toContain("packages/legacy: release/2024\\.10");
     expect(markdown).toContain("Unlisted packages and root files remain in full scope.");
+    expect(markdown).toContain("Health and security reports use their own scopes.");
   });
 
   it("uses the server-applied changedSince scope when present", () => {

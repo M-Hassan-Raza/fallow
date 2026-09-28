@@ -51,7 +51,11 @@ export const updateStatusBar = (
   }
 
   const params = buildParamsFromCli(checkResult, dupesResult);
-  applyTooltipAndSeverity(params);
+  const changedSince = liveChangedSince();
+  const scope =
+    lastChangedSinceScope?.requestedRef === changedSince ? lastChangedSinceScope : undefined;
+  const packageBaselines = changedSince ? [] : lastPackageBaselines;
+  applyTooltipAndSeverity({ ...params, changedSinceScope: scope, packageBaselines });
 
   const parts: string[] = [];
   if (checkResult) {
@@ -60,7 +64,7 @@ export const updateStatusBar = (
   if (dupesResult) {
     parts.push(`${params.duplicationPercentage.toFixed(1)}% duplication`);
   }
-  applyStatusBarText(parts);
+  applyStatusBarText(parts, scope, packageBaselines);
 };
 
 /** Update the status bar from LSP notification data. */

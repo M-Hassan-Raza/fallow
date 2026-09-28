@@ -266,13 +266,14 @@ export const buildStatusBarTooltipMarkdown = (
     if (appliedRef) {
       lines.push(`$(git-branch) Scoped to changes since ${escapeMarkdownText(appliedRef)}`);
     } else if (params.packageBaselines?.length) {
-      lines.push("$(git-branch) Package baselines:");
+      lines.push("$(git-branch) Code diagnostics and clone groups use package baselines:");
       for (const baseline of params.packageBaselines) {
         lines.push(
           `- ${escapeMarkdownText(baseline.workspaceRoot)}: ${escapeMarkdownText(baseline.reference)}`,
         );
       }
       lines.push("Unlisted packages and root files remain in full scope.");
+      lines.push("Health and security reports use their own scopes.");
     }
   }
 
