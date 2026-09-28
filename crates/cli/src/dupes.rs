@@ -397,13 +397,14 @@ fn execute_dupes_inner(
     let (mut report, default_ignore_skips, package_scope) = match pre_discovered {
         Some(files) => {
             let package_scope = if package_baselines_requested(opts, &config) {
-                let (workspaces, _) = fallow_config::discover_workspaces_with_diagnostics(
-                    &config.root,
-                    &config.ignore_patterns,
-                )
-                .map_err(|err| {
-                    emit_error(&format!("Workspace discovery error: {err}"), 2, opts.output)
-                })?;
+                let (workspaces, _) =
+                    fallow_engine::discover::discover_workspace_packages_with_diagnostics(
+                        &config.root,
+                        &config.ignore_patterns,
+                    )
+                    .map_err(|err| {
+                        emit_error(&format!("Workspace discovery error: {err}"), 2, opts.output)
+                    })?;
                 resolve_package_scope(opts, &config, &workspaces)?
             } else {
                 None

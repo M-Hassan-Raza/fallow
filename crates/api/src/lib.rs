@@ -101,7 +101,7 @@ pub use editor::{
     EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorDuplicationStats,
     EditorInlineComplexityExceeded, EditorInlineComplexityFinding, EditorMirroredDirectory,
     EditorProjectAnalysisOutput, EditorRefactoringKind, EditorRefactoringSuggestion,
-    EditorSessionParseCounts, PackageBaselineError, PackageChangeScope, collect_inline_complexity,
+    EditorSessionParseCounts, collect_inline_complexity,
     editor_duplicates, editor_extract, editor_results, editor_security, editor_suppress,
     filter_inline_complexity_by_changed_files, filter_inline_complexity_by_package_scope,
     resolve_git_toplevel, try_get_changed_files_with_toplevel,
@@ -114,6 +114,8 @@ pub use explain::{
 };
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
+/// Engine-owned per-workspace Git baseline state used by analysis surfaces.
+pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
 /// Parsed modules that a long-lived process keeps across analysis calls.
 ///
 /// A process that runs many calls on the same project, such as the MCP

@@ -6,7 +6,7 @@ use rustc_hash::FxHashSet;
 
 use fallow_types::{discover::DiscoveredFile, extract::ModuleInfo};
 
-pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
+use crate::{PackageBaselineError, PackageChangeScope};
 
 /// Editor-boundary alias for the clone-family payload.
 pub type EditorCloneFamily = fallow_types::duplicates::CloneFamily;
