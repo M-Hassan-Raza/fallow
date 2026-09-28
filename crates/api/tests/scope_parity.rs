@@ -126,7 +126,15 @@ fn package_git_baselines_apply_to_programmatic_dead_code() {
             .map(ToOwned::to_owned)
             .collect::<Vec<_>>()
     };
-    let package_paths = paths(&dead_code(analysis(root)));
+    let package_report = dead_code(analysis(root));
+    assert_eq!(
+        package_report["package_baselines"],
+        serde_json::json!([
+            {"workspace_root":"packages/legacy","reference":"HEAD"},
+            {"workspace_root":"packages/web","reference":"HEAD~1"}
+        ])
+    );
+    let package_paths = paths(&package_report);
     assert!(
         package_paths
             .iter()
@@ -138,10 +146,12 @@ fn package_git_baselines_apply_to_programmatic_dead_code() {
             .any(|path| path.contains("packages/legacy/"))
     );
 
-    let global_paths = paths(&dead_code(AnalysisOptions {
+    let global_report = dead_code(AnalysisOptions {
         changed_since: Some("HEAD".to_owned()),
         ..analysis(root)
-    }));
+    });
+    assert!(global_report.get("package_baselines").is_none());
+    let global_paths = paths(&global_report);
     assert!(
         !global_paths
             .iter()
@@ -290,6 +300,13 @@ fn package_baselines_scope_standalone_and_combined_duplication() {
         r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
     );
     assert!(clone_group_files(&duplication(analysis(root))).is_empty());
+    assert_eq!(
+        duplication(analysis(root))["package_baselines"],
+        serde_json::json!([
+            {"workspace_root":"packages/a","reference":"HEAD"},
+            {"workspace_root":"packages/b","reference":"HEAD"}
+        ])
+    );
 
     let combined = serialize_combined_programmatic_json(
         run_combined(&CombinedOptions {
@@ -305,6 +322,10 @@ fn package_baselines_scope_standalone_and_combined_duplication() {
         combined["dupes"]["clone_groups"]
             .as_array()
             .is_some_and(Vec::is_empty)
+    );
+    assert_eq!(
+        combined["package_baselines"],
+        duplication(analysis(root))["package_baselines"]
     );
 
     write(

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use fallow_api::{
     EditorAnalysisResults as AnalysisResults, EditorDuplicationReport as DuplicationReport,
-    PackageChangeScope,
+    PackageBaselineStatus,
 };
 use fallow_types::issue_meta::diagnostic_issue_metas;
 use ls_types::notification;
@@ -39,39 +39,6 @@ pub struct ChangedSinceScopeStatus {
     /// Concise explanation when the scope was dropped.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
-}
-
-/// One package's applied Git baseline, relative to the LSP workspace root.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct PackageBaselineStatus {
-    /// Workspace package root within the LSP workspace.
-    pub workspace_root: String,
-    /// Applied Git ref.
-    pub reference: String,
-}
-
-/// Project-relative package baselines for the editor status display.
-pub fn package_baseline_statuses(
-    scopes: &[PackageChangeScope],
-    workspace_root: &Path,
-) -> Vec<PackageBaselineStatus> {
-    let workspace_root =
-        dunce::canonicalize(workspace_root).unwrap_or_else(|_| workspace_root.to_path_buf());
-    let mut statuses = scopes
-        .iter()
-        .flat_map(PackageChangeScope::configured_baselines)
-        .map(|(path, reference)| PackageBaselineStatus {
-            workspace_root: path
-                .strip_prefix(&workspace_root)
-                .unwrap_or(path)
-                .to_string_lossy()
-                .replace('\\', "/"),
-            reference: reference.to_owned(),
-        })
-        .collect::<Vec<_>>();
-    statuses.sort_by(|a, b| a.workspace_root.cmp(&b.workspace_root));
-    statuses
 }
 
 #[derive(Debug, Serialize, Deserialize)]

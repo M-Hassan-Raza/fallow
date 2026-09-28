@@ -103,6 +103,22 @@ fn package_baselines_scope_each_workspace_and_global_ref_overrides() {
     .expect("legacy change");
 
     let paths = unused_export_paths(root, &[]);
+    let report = run_fallow_raw(&[
+        "check",
+        "--root",
+        root.to_str().unwrap(),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let json = parse_json(&report);
+    assert_eq!(
+        json["package_baselines"],
+        serde_json::json!([
+            {"workspace_root":"packages/legacy","reference":"HEAD"},
+            {"workspace_root":"packages/web","reference":"HEAD~1"}
+        ])
+    );
     assert!(
         paths
             .iter()
@@ -116,6 +132,21 @@ fn package_baselines_scope_each_workspace_and_global_ref_overrides() {
 
     write_config(root, "missing-ref");
     let global_paths = unused_export_paths(root, &["--changed-since", "HEAD"]);
+    let global_report = run_fallow_raw(&[
+        "check",
+        "--root",
+        root.to_str().unwrap(),
+        "--changed-since",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        parse_json(&global_report)
+            .get("package_baselines")
+            .is_none()
+    );
     assert!(
         global_paths
             .iter()

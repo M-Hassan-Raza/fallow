@@ -97,6 +97,13 @@ fn package_baselines_scope_standalone_and_combined_dupes() {
     let standalone = run_fallow_raw(&["dupes", "--root", root_arg, "--format", "json", "--quiet"]);
     assert_eq!(standalone.code, 0, "{}", standalone.stderr);
     assert_eq!(count_clone_groups(&parse_json(&standalone)), 0);
+    assert_eq!(
+        parse_json(&standalone)["package_baselines"],
+        serde_json::json!([
+            {"workspace_root":"packages/api","reference":"HEAD"},
+            {"workspace_root":"packages/ui","reference":"HEAD"}
+        ])
+    );
 
     let combined = run_fallow_raw(&["--root", root_arg, "--format", "json", "--quiet"]);
     assert!(
@@ -105,6 +112,10 @@ fn package_baselines_scope_standalone_and_combined_dupes() {
         combined.stderr
     );
     assert_eq!(combined_dupes_clone_groups(&parse_json(&combined)), 0);
+    assert_eq!(
+        parse_json(&combined)["package_baselines"],
+        parse_json(&standalone)["package_baselines"]
+    );
 
     fs::write(
         root.join(".fallowrc.json"),

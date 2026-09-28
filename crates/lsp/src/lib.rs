@@ -190,7 +190,7 @@ use fallow_api::EditorDuplicationReport as DuplicationReport;
 use fallow_api::EditorInlineComplexityExceeded as InlineComplexityExceeded;
 #[cfg(test)]
 use fallow_api::EditorInlineComplexityFinding as InlineComplexityFinding;
-use fallow_api::resolve_git_toplevel;
+use fallow_api::{package_baseline_statuses, resolve_git_toplevel};
 #[cfg(test)]
 use fallow_config::DetectionMode;
 #[cfg(test)]
@@ -206,7 +206,7 @@ use protocol::analysis_complete_params_for_test;
 use protocol::config_load_error_detail;
 use protocol::{
     AnalysisComplete, AnalysisCompleteInput, IssueTypeInfo, analysis_complete_params,
-    diagnostic_issue_types, package_baseline_statuses,
+    diagnostic_issue_types,
 };
 use publish::{DiagnosticCache, PlannedPublish, PublishContext, plan_clears, plan_new_diagnostics};
 use schedule::{RunOutcome, RunScheduler};

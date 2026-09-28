@@ -153,7 +153,7 @@ fn analysis_complete_changed_since_scope_is_additive_and_structured() {
     let _: protocol::AnalysisCompleteParams =
         serde_json::from_value(legacy_json).expect("legacy completion remains accepted");
 
-    let packages = vec![protocol::PackageBaselineStatus {
+    let packages = vec![fallow_api::PackageBaselineStatus {
         workspace_root: "packages/web".to_owned(),
         reference: "main".to_owned(),
     }];
@@ -163,7 +163,7 @@ fn analysis_complete_changed_since_scope_is_additive_and_structured() {
     );
     let package_json = serde_json::to_value(package_params).expect("package status serializes");
     assert_eq!(
-        package_json["packageBaselines"][0]["workspaceRoot"],
+        package_json["packageBaselines"][0]["workspace_root"],
         "packages/web"
     );
     assert_eq!(package_json["packageBaselines"][0]["reference"], "main");
@@ -2060,15 +2060,15 @@ fn package_baselines_scope_lsp_results_and_stamp_each_document_ref() {
             "missing {name} finding: {paths:?}"
         );
     }
-    let statuses = protocol::package_baseline_statuses(&output.package_scopes, root);
+    let statuses = fallow_api::package_baseline_statuses(&output.package_scopes, root);
     assert_eq!(
         statuses,
         vec![
-            protocol::PackageBaselineStatus {
+            fallow_api::PackageBaselineStatus {
                 workspace_root: "packages/legacy".to_owned(),
                 reference: "HEAD".to_owned(),
             },
-            protocol::PackageBaselineStatus {
+            fallow_api::PackageBaselineStatus {
                 workspace_root: "packages/web".to_owned(),
                 reference: "HEAD~1".to_owned(),
             },
