@@ -315,11 +315,20 @@ fn validate_period(period: Option<u16>) -> Result<Option<u16>, CloudError> {
     }
 }
 
+/// Check a commit SHA against the cloud rule (`COMMIT_SHA_PATTERN` in
+/// fallow-cloud): 1 to 64 letters, digits, dots, underscores and hyphens, and
+/// not only dots. A deployment can carry a non-hex id such as `v1.2.3`, and
+/// each SHA that the cloud stores must also be readable here.
 fn validate_sha(raw: &str, flag: &str) -> Result<String, CloudError> {
     let sha = raw.trim();
-    if sha.is_empty() || sha.len() > MAX_SHA_LEN || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-');
+    let valid = !sha.is_empty()
+        && sha.len() <= MAX_SHA_LEN
+        && sha.chars().all(allowed)
+        && !sha.chars().all(|c| c == '.');
+    if !valid {
         return Err(CloudError::Validation(format!(
-            "{flag} must be a hexadecimal commit SHA of at most {MAX_SHA_LEN} characters, got {raw}"
+            "{flag} must be a commit SHA of 1 to {MAX_SHA_LEN} letters, digits, dots, underscores or hyphens (not only dots), got {raw}"
         )));
     }
     Ok(sha.to_owned())
@@ -457,10 +466,19 @@ mod tests {
     }
 
     #[test]
-    fn sha_validation_refuses_non_hex_values() {
+    fn sha_validation_matches_the_cloud_commit_sha_rule() {
         assert!(validate_sha("abc123", "--sha").is_ok());
-        assert!(validate_sha("main", "--sha").is_err());
+        assert!(validate_sha("v1.2.3", "--sha").is_ok());
+        assert!(validate_sha("build-42", "--sha").is_ok());
+        assert!(validate_sha("release_7", "--sha").is_ok());
+        assert!(validate_sha(&"a".repeat(64), "--sha").is_ok());
         assert!(validate_sha(&"a".repeat(65), "--sha").is_err());
+        assert!(validate_sha("", "--sha").is_err());
+        assert!(validate_sha(".", "--sha").is_err());
+        assert!(validate_sha("..", "--sha").is_err());
+        assert!(validate_sha("a/b", "--sha").is_err());
+        assert!(validate_sha("a b", "--sha").is_err());
+        assert!(validate_sha("abc?x=1", "--sha").is_err());
     }
 
     #[test]
