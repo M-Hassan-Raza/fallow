@@ -28,6 +28,7 @@ mod codeowners_tests;
 mod combined_coverage_tests;
 mod complexity_gate_tests;
 mod coverage_analyze_tests;
+mod coverage_cloud_reads_tests;
 mod deprecated_export_tests;
 mod doctor_tests;
 mod dupes_tests;
