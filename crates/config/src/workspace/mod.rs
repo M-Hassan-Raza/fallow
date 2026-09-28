@@ -7,6 +7,7 @@ mod pnpm_catalog;
 mod pnpm_overrides;
 mod tsconfig;
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
@@ -58,6 +59,13 @@ pub struct WorkspaceConfig {
     /// aliases, so `schema.json` documents only `patterns`.
     #[serde(default, alias = "packages")]
     pub patterns: Vec<String>,
+    /// Git baseline refs keyed by exact project-root-relative workspace roots. A global changed-since request takes precedence. Unlisted workspaces remain in full scope.
+    #[serde(
+        default,
+        rename = "changedSince",
+        skip_serializing_if = "BTreeMap::is_empty"
+    )]
+    pub changed_since: BTreeMap<String, String>,
 }
 
 /// Discovered workspace info from package.json, deno.json, pnpm-workspace.yaml,

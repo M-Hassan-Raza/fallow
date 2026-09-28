@@ -1,4 +1,4 @@
-use std::collections::hash_map::DefaultHasher;
+use std::collections::{BTreeMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -315,6 +315,9 @@ pub struct ResolvedConfig {
     pub dynamically_loaded: Vec<String>,
     /// Per-file severity overrides with globs pre-compiled, in config order.
     pub overrides: Vec<ResolvedOverride>,
+    /// Authored Git baseline refs keyed by workspace root; validated against
+    /// discovered packages when an analysis requests package-scoped changes.
+    pub workspace_changed_since: BTreeMap<String, String>,
     /// Saved regression baseline for `--fail-on-regression`, when embedded.
     pub regression: Option<super::RegressionConfig>,
     /// In-repo `fallow audit` defaults, passed through unchanged.
@@ -832,6 +835,10 @@ impl FallowConfig {
         );
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
+        let workspace_changed_since = self
+            .workspaces
+            .map(|workspaces| workspaces.changed_since)
+            .unwrap_or_default();
 
         let unused_component_props_ignore = compile_unused_component_props_ignore(
             self.unused_component_props.ignore_pattern.as_deref(),
@@ -873,6 +880,7 @@ impl FallowConfig {
             external_plugins: plugins.external_plugins,
             dynamically_loaded: self.dynamically_loaded,
             overrides: path_policy.overrides,
+            workspace_changed_since,
             regression: self.regression,
             audit: self.audit,
             codeowners: self.codeowners,
@@ -922,6 +930,29 @@ mod tests {
     use crate::CacheConfig;
     use crate::config::boundaries::BoundaryConfig;
     use crate::config::health::HealthConfig;
+
+    #[test]
+    fn workspace_changed_since_reaches_resolved_config() {
+        let authored: FallowConfig = serde_json::from_str(
+            r#"{"workspaces":{"changedSince":{"packages/web":"main","packages/legacy":"release/2024.10"}}}"#,
+        )
+        .expect("workspace baselines deserialize");
+        let resolved = authored.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Json,
+            1,
+            true,
+            true,
+            None,
+        );
+
+        assert_eq!(resolved.workspace_changed_since.len(), 2);
+        assert_eq!(resolved.workspace_changed_since["packages/web"], "main");
+        assert_eq!(
+            resolved.workspace_changed_since["packages/legacy"],
+            "release/2024.10"
+        );
+    }
 
     #[test]
     fn cache_config_hash_keys_on_user_flag_patterns() {

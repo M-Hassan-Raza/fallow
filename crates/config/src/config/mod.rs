@@ -314,7 +314,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub framework: Vec<ExternalPluginDef>,
 
-    /// Monorepo workspace configuration whose sole sub-key patterns (array of globs) adds workspace package roots beyond those discovered from package.json workspaces, pnpm-workspace.yaml, and tsconfig references. Optional and absent by default (discovery uses the manifests alone); set it only when workspaces live in directories the standard manifests do not declare.
+    /// Monorepo workspace configuration. `patterns` adds workspace package roots beyond manifest discovery; `changedSince` maps exact project-root-relative workspace roots to Git baseline refs. A global changed-since request overrides those per-package baselines.
     #[serde(default)]
     pub workspaces: Option<WorkspaceConfig>,
 
@@ -1156,11 +1156,16 @@ deletePrecedingComments = "never"
         let toml_str = r#"
 [workspaces]
 patterns = ["packages/*", "apps/*"]
+[workspaces.changedSince]
+"packages/web" = "main"
+"packages/legacy" = "release/2024.10"
 "#;
         let config: FallowConfig = toml::from_str(toml_str).unwrap();
         assert!(config.workspaces.is_some());
         let ws = config.workspaces.unwrap();
         assert_eq!(ws.patterns, vec!["packages/*", "apps/*"]);
+        assert_eq!(ws.changed_since["packages/web"], "main");
+        assert_eq!(ws.changed_since["packages/legacy"], "release/2024.10");
     }
 
     #[test]
