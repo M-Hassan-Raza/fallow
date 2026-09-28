@@ -30,9 +30,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment, as `get_cloud_runtime_context` does.
 
 - **Cloud reads ask for gzip and retry one time.** Every Fallow Cloud read
-  now sends `Accept-Encoding: gzip` and decodes a gzip answer. The
-  runtime-context answer becomes much smaller on the network when the cloud
-  compresses its answers. A read that gets HTTP 502, 503 or 504, or that
+  now sends `Accept-Encoding: gzip` and decodes a gzip answer. The cloud
+  compresses its answers, so a runtime-context answer is about 10 times
+  smaller on the network. A read that gets HTTP 502, 503 or 504, or that
   passes the timeout of 45 s, is sent one more time. An error message now
   names the cause: a timeout, a cloud outage or a network that cannot reach
   the cloud. The reads also send `x-fallow-agent-source` when an allowlisted
