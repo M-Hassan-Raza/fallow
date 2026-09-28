@@ -12,7 +12,8 @@ use std::path::Path;
 use std::process::Command;
 
 use fallow_api::{
-    AnalysisOptions, DeadCodeOptions, DuplicationOptions, run_dead_code, run_duplication,
+    AnalysisOptions, CombinedOptions, DeadCodeOptions, DuplicationOptions, run_combined,
+    run_dead_code, run_duplication, serialize_combined_programmatic_json,
     serialize_dead_code_programmatic_json, serialize_duplication_programmatic_json,
 };
 use serde_json::Value;
@@ -277,6 +278,56 @@ fn clone_group_files(report: &Value) -> Vec<Vec<String>> {
             files
         })
         .collect()
+}
+
+#[test]
+fn package_baselines_scope_standalone_and_combined_duplication() {
+    let dir = cross_workspace_clone_repository();
+    let root = dir.path();
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    );
+    assert!(clone_group_files(&duplication(analysis(root))).is_empty());
+
+    let combined = serialize_combined_programmatic_json(
+        run_combined(&CombinedOptions {
+            analysis: analysis(root),
+            dead_code: false,
+            health: false,
+            ..CombinedOptions::default()
+        })
+        .expect("combined analysis"),
+    )
+    .expect("combined JSON");
+    assert!(
+        combined["dupes"]["clone_groups"]
+            .as_array()
+            .is_some_and(Vec::is_empty)
+    );
+
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD"}}}"#,
+    );
+    assert!(
+        !clone_group_files(&duplication(analysis(root))).is_empty(),
+        "a clone group touching the unmapped full-scope package must survive"
+    );
+
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"workspaces":{"changedSince":{"packages/a":"missing-ref"}}}"#,
+    );
+    let err = run_duplication(&DuplicationOptions {
+        analysis: analysis(root),
+        ..DuplicationOptions::default()
+    })
+    .expect_err("invalid configured refs fail duplication");
+    assert_eq!(err.code.as_deref(), Some("FALLOW_PACKAGE_BASELINE_FAILED"));
 }
 
 fn duplication(analysis: AnalysisOptions) -> Value {

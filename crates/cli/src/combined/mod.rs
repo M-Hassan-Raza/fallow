@@ -562,6 +562,7 @@ fn build_combined_dupes_options<'a>(
         diff_index: None,
         use_shared_diff_index: true,
         changed_files: None,
+        apply_package_baselines: true,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
         explain: opts.explain,

@@ -61,6 +61,11 @@ pub(super) fn run_duplication_with_session(
     } else {
         changed_files_for_run(resolved)?
     };
+    let package_scope = if changed_files.is_some() {
+        None
+    } else {
+        resolved.package_change_scope(session.config(), session.workspaces())?
+    };
     let cache_dir = (!resolved.no_cache).then_some(session.config().cache_dir.as_path());
     let report = if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref()) {
         resolved
@@ -78,7 +83,14 @@ pub(super) fn run_duplication_with_session(
     // Duplication detection cannot fail, so a token set while it ran has to be
     // reported here rather than dressed up as a complete report.
     resolved.ensure_not_cancelled("the duplication report")?;
-    run_duplication_report_with_session(options, resolved, session, report, start)
+    run_duplication_report_with_session(
+        options,
+        resolved,
+        session,
+        report,
+        package_scope.as_ref(),
+        start,
+    )
 }
 
 pub(super) fn run_duplication_report_with_session(
@@ -86,6 +98,7 @@ pub(super) fn run_duplication_report_with_session(
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
     mut report: fallow_engine::duplicates::DuplicationReport,
+    package_scope: Option<&fallow_engine::package_baselines::PackageChangeScope>,
     start: Instant,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
@@ -93,7 +106,7 @@ pub(super) fn run_duplication_report_with_session(
     fallow_engine::duplicates::apply_scope(
         &mut report,
         &fallow_engine::duplicates::DuplicationScope {
-            changed_files: None,
+            changes: package_scope.map(fallow_engine::duplicates::ChangedFileScope::Packages),
             diff: resolved.diff.as_ref(),
             workspace_roots: workspace_roots.as_deref(),
         },

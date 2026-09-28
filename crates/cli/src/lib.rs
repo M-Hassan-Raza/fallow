@@ -6146,6 +6146,7 @@ fn dispatch_dupes_run(
         diff_index: None,
         use_shared_diff_index: true,
         changed_files: None,
+        apply_package_baselines: true,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         explain: cli.explain,

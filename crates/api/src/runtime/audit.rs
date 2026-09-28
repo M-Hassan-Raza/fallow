@@ -611,6 +611,7 @@ fn run_dead_code_and_duplication_with_project_artifacts(
         input.resolved,
         input.session,
         project.duplication,
+        None,
         section_start,
     )?;
     let super::dead_code::DeadCodeProgrammaticRunWithArtifacts {

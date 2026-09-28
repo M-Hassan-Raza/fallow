@@ -66,13 +66,22 @@ pub fn refresh_scoped_report(report: &mut DuplicationReport, root: &Path) {
 /// Every field is optional. A field that is `None` does not narrow the run.
 #[derive(Debug, Clone, Copy)]
 pub struct DuplicationScope<'a> {
-    /// `--changed-since`: the files that changed since the ref.
-    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    /// Global changed files or per-package Git baselines.
+    pub changes: Option<ChangedFileScope<'a>>,
     /// A unified diff. Finding paths resolve against the report root.
     pub diff: Option<&'a fallow_output::DiffIndex>,
     /// `--workspace`, `--changed-workspaces` and a positional path: the union
     /// of these roots.
     pub workspace_roots: Option<&'a [PathBuf]>,
+}
+
+/// The changed-file ownership rule for a duplication report.
+#[derive(Debug, Clone, Copy)]
+pub enum ChangedFileScope<'a> {
+    /// One Git ref or caller-provided changed-file set for the whole project.
+    Global(&'a FxHashSet<PathBuf>),
+    /// Git refs resolved for individual discovered workspaces.
+    Packages(&'a crate::package_baselines::PackageChangeScope),
 }
 
 /// Narrow a duplication report to the scope of the run.
@@ -83,8 +92,14 @@ pub struct DuplicationScope<'a> {
 /// that group: a reviewer sees the full clone family. The filters run in this
 /// order: changed files, the diff, the workspace roots.
 pub fn apply_scope(report: &mut DuplicationReport, scope: &DuplicationScope<'_>, root: &Path) {
-    if let Some(changed_files) = scope.changed_files {
-        crate::changed_files::filter_duplication_by_changed_files(report, changed_files, root);
+    match scope.changes {
+        Some(ChangedFileScope::Global(files)) => {
+            crate::changed_files::filter_duplication_by_changed_files(report, files, root);
+        }
+        Some(ChangedFileScope::Packages(packages)) => {
+            crate::changed_files::filter_duplication_by_package_scope(report, packages, root);
+        }
+        None => {}
     }
     if let Some(diff) = scope.diff {
         crate::diff_scope::filter_duplication_by_diff(report, diff, root);

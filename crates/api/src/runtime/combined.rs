@@ -261,11 +261,14 @@ fn run_project_artifact_duplication(
     options
         .duplication
         .then(|| {
+            let package_scope =
+                resolved.package_change_scope(session.config(), session.workspaces())?;
             super::duplication::run_duplication_report_with_session(
                 &prepared.duplication,
                 resolved,
                 session,
                 duplication,
+                package_scope.as_ref(),
                 section_start,
             )
         })
