@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
-use fallow_config::WorkspaceInfo;
+use fallow_config::{ResolvedConfig, WorkspaceInfo};
+use fallow_engine::package_baselines::PackageChangeScope;
 use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
 use fallow_output::{DiffIndex, MAX_DIFF_BYTES, RequestName, RequestOutcome, RequestOutcomes};
 use fallow_types::path_util::is_absolute_path_any_platform;
@@ -304,6 +305,24 @@ impl ProgrammaticAnalysisContext {
     #[must_use]
     pub fn changed_since(&self) -> Option<&str> {
         self.changed_since.as_deref()
+    }
+
+    /// Resolve package refs only when no global changed-since request was made.
+    /// A dropped ambient ref still suppresses package mappings for that call.
+    pub(crate) fn package_change_scope(
+        &self,
+        config: &ResolvedConfig,
+        workspaces: &[WorkspaceInfo],
+    ) -> ProgrammaticResult<Option<PackageChangeScope>> {
+        if self.changed_since.is_some() || self.changed_since_request.get().is_some() {
+            return Ok(None);
+        }
+        PackageChangeScope::resolve(&config.root, &config.workspace_changed_since, workspaces)
+            .map_err(|err| {
+                ProgrammaticError::new(format!("workspace baseline error: {err}"), 2)
+                    .with_code("FALLOW_PACKAGE_BASELINE_FAILED")
+                    .with_context("analysis.workspaces.changedSince")
+            })
     }
 
     /// Workspace filter patterns supplied by the caller.

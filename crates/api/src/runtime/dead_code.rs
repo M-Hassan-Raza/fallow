@@ -582,16 +582,28 @@ fn apply_dead_code_scope(
     } else {
         changed_files_for_run(resolved)?
     };
-    if changed_files.or(resolved_changed_files.as_ref()).is_some() {
+    let global_files = changed_files.or(resolved_changed_files.as_ref());
+    if global_files.is_some() {
         resolved
             .measure_changed_since_scope(session.files().iter().map(|file| file.path.as_path()));
     }
+    let package_scope = if global_files.is_some() {
+        None
+    } else {
+        resolved.package_change_scope(session.config(), session.workspaces())?
+    };
     let files = file_scope(options, session.root());
     fallow_engine::dead_code::apply_scope(
         results,
         &fallow_engine::dead_code::DeadCodeScope {
             workspace_roots: workspace_roots.as_deref(),
-            changed_files: changed_files.or(resolved_changed_files.as_ref()),
+            changes: global_files
+                .map(fallow_engine::dead_code::ChangedFileScope::Global)
+                .or_else(|| {
+                    package_scope
+                        .as_ref()
+                        .map(fallow_engine::dead_code::ChangedFileScope::Packages)
+                }),
             diff: resolved.diff.as_ref().map(|diff| (diff, session.root())),
             files: files.as_ref(),
         },

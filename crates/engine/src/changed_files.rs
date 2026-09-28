@@ -991,12 +991,29 @@ pub fn filter_duplication_by_changed_files(
     changed_files: &FxHashSet<PathBuf>,
     root: &Path,
 ) {
-    let cf = normalize_changed_files_set(changed_files);
+    let cf = NormalizedChangedFiles(normalize_changed_files_set(changed_files));
+    filter_duplication_by_path_scope(report, &cf, root);
+}
+
+/// Scope clone groups through the same package owner used for findings.
+pub fn filter_duplication_by_package_scope(
+    report: &mut DuplicationReport,
+    packages: &crate::package_baselines::PackageChangeScope,
+    root: &Path,
+) {
+    filter_duplication_by_path_scope(report, packages, root);
+}
+
+fn filter_duplication_by_path_scope(
+    report: &mut DuplicationReport,
+    scope: &impl ChangedPathScope,
+    root: &Path,
+) {
     report.clone_groups.retain(|group| {
         group
             .instances
             .iter()
-            .any(|instance| contains_normalized(&cf, &instance.file))
+            .any(|instance| scope.contains(&instance.file))
     });
     duplicates::refresh_clone_families(report, root);
     report.stats = duplicates::recompute_stats(report);

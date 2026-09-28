@@ -71,6 +71,88 @@ fn dead_code(analysis: AnalysisOptions) -> Value {
         .expect("run the programmatic dead-code analysis")
 }
 
+#[test]
+fn package_git_baselines_apply_to_programmatic_dead_code() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    );
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"workspaces":{"changedSince":{"packages/web":"HEAD~1","packages/legacy":"HEAD"}}}"#,
+    );
+    for name in ["web", "legacy"] {
+        write(
+            root,
+            &format!("packages/{name}/package.json"),
+            &format!(r#"{{"name":"{name}","main":"src/index.ts"}}"#),
+        );
+        write(
+            root,
+            &format!("packages/{name}/src/index.ts"),
+            "import { used } from './utils';\nused();\n",
+        );
+        write(
+            root,
+            &format!("packages/{name}/src/utils.ts"),
+            &format!("export const used = () => 1;\nexport const unused_{name} = 1;\n"),
+        );
+    }
+    git(root, &["init", "-q"]);
+    commit(root, "base");
+    write(
+        root,
+        "packages/web/src/utils.ts",
+        "export const used = () => 2;\nexport const unused_web = 2;\n",
+    );
+    commit(root, "web change");
+    write(
+        root,
+        "packages/legacy/src/utils.ts",
+        "export const used = () => 3;\nexport const unused_legacy = 3;\n",
+    );
+
+    let paths = |report: &Value| {
+        report["unused_exports"]
+            .as_array()
+            .expect("unused exports")
+            .iter()
+            .filter_map(|finding| finding["path"].as_str())
+            .map(ToOwned::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let package_paths = paths(&dead_code(analysis(root)));
+    assert!(
+        package_paths
+            .iter()
+            .any(|path| path.contains("packages/web/"))
+    );
+    assert!(
+        package_paths
+            .iter()
+            .any(|path| path.contains("packages/legacy/"))
+    );
+
+    let global_paths = paths(&dead_code(AnalysisOptions {
+        changed_since: Some("HEAD".to_owned()),
+        ..analysis(root)
+    }));
+    assert!(
+        !global_paths
+            .iter()
+            .any(|path| path.contains("packages/web/"))
+    );
+    assert!(
+        global_paths
+            .iter()
+            .any(|path| path.contains("packages/legacy/"))
+    );
+}
+
 /// The locations of each `duplicate_exports` finding, as relative paths.
 fn duplicate_export_owners(report: &Value) -> Vec<Vec<String>> {
     report["duplicate_exports"]

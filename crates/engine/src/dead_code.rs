@@ -19,7 +19,8 @@ pub use crate::effective_severity::{
 };
 
 use crate::{
-    EngineResult, session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
+    EngineResult, package_baselines::PackageChangeScope,
+    session::analyze_dead_code_with_parse_result_from_config, source::ModuleInfo,
 };
 
 /// Run dead-code analysis from pre-parsed modules.
@@ -52,6 +53,15 @@ pub fn filter_to_workspaces(results: &mut AnalysisResults, ws_roots: &[PathBuf])
     filter_workspace_policy_findings(results, &any_under);
 }
 
+/// The selected Git change scope for one dead-code run.
+#[derive(Debug, Clone, Copy)]
+pub enum ChangedFileScope<'a> {
+    /// One global Git ref supplied by the caller.
+    Global(&'a FxHashSet<PathBuf>),
+    /// Configured refs resolved independently per workspace.
+    Packages(&'a PackageChangeScope),
+}
+
 /// The scope of one dead-code run, as the surface resolved it.
 ///
 /// Every field is optional. A field that is `None` does not narrow the run.
@@ -60,8 +70,8 @@ pub struct DeadCodeScope<'a> {
     /// `--workspace`, `--changed-workspaces` and a positional path: the union
     /// of these roots.
     pub workspace_roots: Option<&'a [PathBuf]>,
-    /// `--changed-since`: the files that changed since the ref.
-    pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    /// Either a global changed-file set or per-package baselines.
+    pub changes: Option<ChangedFileScope<'a>>,
     /// A unified diff, with the root that finding paths resolve against.
     pub diff: Option<(&'a fallow_output::DiffIndex, &'a Path)>,
     /// `--file`: the only files to report. Dependency findings are dropped,
@@ -86,8 +96,14 @@ pub fn apply_scope(
     if let Some(roots) = scope.workspace_roots {
         filter_to_workspaces(results, roots);
     }
-    if let Some(changed_files) = scope.changed_files {
-        filter_by_changed_files(results, changed_files);
+    match scope.changes {
+        Some(ChangedFileScope::Global(changed_files)) => {
+            filter_by_changed_files(results, changed_files);
+        }
+        Some(ChangedFileScope::Packages(packages)) => {
+            crate::changed_files::filter_results_by_path_scope(results, packages);
+        }
+        None => {}
     }
     if let Some((diff, root)) = scope.diff {
         crate::diff_scope::filter_dead_code_by_diff(results, diff, root);

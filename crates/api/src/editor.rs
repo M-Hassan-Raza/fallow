@@ -6,6 +6,8 @@ use rustc_hash::FxHashSet;
 
 use fallow_types::{discover::DiscoveredFile, extract::ModuleInfo};
 
+pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
+
 /// Editor-boundary alias for the clone-family payload.
 pub type EditorCloneFamily = fallow_types::duplicates::CloneFamily;
 /// Editor-boundary alias for the clone-group payload.
@@ -352,6 +354,14 @@ pub fn filter_inline_complexity_by_changed_files(
     findings.retain(|finding| changed_files.contains(&finding.path));
 }
 
+/// Retain inline complexity findings selected by package baselines.
+pub fn filter_inline_complexity_by_package_scope(
+    findings: &mut Vec<EditorInlineComplexityFinding>,
+    packages: &PackageChangeScope,
+) {
+    findings.retain(|finding| packages.includes(&finding.path));
+}
+
 /// The parse work of an editor session. See
 /// [`fallow_engine::session::SessionParseCounts`].
 pub type EditorSessionParseCounts = fallow_engine::session::SessionParseCounts;
@@ -496,6 +506,19 @@ impl EditorAnalysisSession {
         self.inner.config()
     }
 
+    /// Resolve this project's authored package baselines against discovered workspaces.
+    ///
+    /// # Errors
+    ///
+    /// Returns a typed error when a workspace key or Git ref is invalid.
+    pub fn package_change_scope(&self) -> Result<Option<PackageChangeScope>, PackageBaselineError> {
+        PackageChangeScope::resolve(
+            &self.inner.config().root,
+            &self.inner.config().workspace_changed_since,
+            self.inner.workspaces(),
+        )
+    }
+
     /// Config file path when one was loaded.
     #[must_use]
     pub fn config_path(&self) -> Option<&Path> {
@@ -620,11 +643,36 @@ impl EditorAnalysisSession {
             &mut dead_code.results,
             &fallow_engine::dead_code::DeadCodeScope {
                 workspace_roots: None,
-                changed_files,
+                changes: changed_files.map(fallow_engine::dead_code::ChangedFileScope::Global),
                 diff: None,
                 files: None,
             },
             self.inner.config(),
+        );
+    }
+
+    /// Narrow one project after type-aware refinement, including clone groups.
+    pub fn apply_package_change_scope(
+        &self,
+        output: &mut EditorProjectAnalysisOutput,
+        packages: &PackageChangeScope,
+    ) {
+        fallow_engine::dead_code::apply_scope(
+            &mut output.dead_code.results,
+            &fallow_engine::dead_code::DeadCodeScope {
+                workspace_roots: None,
+                changes: Some(fallow_engine::dead_code::ChangedFileScope::Packages(
+                    packages,
+                )),
+                diff: None,
+                files: None,
+            },
+            self.inner.config(),
+        );
+        fallow_engine::changed_files::filter_duplication_by_package_scope(
+            &mut output.duplication,
+            packages,
+            &self.inner.config().root,
         );
     }
 

@@ -772,7 +772,7 @@ fn apply_scope_filters(
     config: &ResolvedConfig,
     results: &mut AnalysisResults,
     ws_roots: Option<&Vec<std::path::PathBuf>>,
-    changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>>,
+    changes: Option<fallow_engine::dead_code::ChangedFileScope<'_>>,
 ) {
     let diff_index = match opts.diff_index {
         Some(index) => Some(index),
@@ -784,7 +784,7 @@ fn apply_scope_filters(
         results,
         &fallow_engine::dead_code::DeadCodeScope {
             workspace_roots: ws_roots.map(Vec::as_slice),
-            changed_files,
+            changes,
             diff: diff_index.map(|index| (index, opts.root)),
             files: files.as_ref(),
         },
@@ -1101,13 +1101,28 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     }
     let unfiltered_unused_files = data.results.unused_files.clone();
 
-    apply_scope_filters(
-        opts,
-        &config,
-        &mut data.results,
-        ws_roots.as_ref(),
-        changed_files.as_ref(),
-    );
+    let package_scope = if opts.changed_since.is_none() {
+        process_clock::time(ProcessSpan::Git, || {
+            fallow_engine::package_baselines::PackageChangeScope::resolve(
+                &config.root,
+                &config.workspace_changed_since,
+                &data.workspaces,
+            )
+        })
+        .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?
+    } else {
+        None
+    };
+    let changes = changed_files
+        .as_ref()
+        .map(fallow_engine::dead_code::ChangedFileScope::Global)
+        .or_else(|| {
+            package_scope
+                .as_ref()
+                .map(fallow_engine::dead_code::ChangedFileScope::Packages)
+        });
+
+    apply_scope_filters(opts, &config, &mut data.results, ws_roots.as_ref(), changes);
 
     apply_rules_and_filters(opts, &config, &mut data.results);
 
