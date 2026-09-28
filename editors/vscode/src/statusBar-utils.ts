@@ -12,6 +12,12 @@ export interface ChangedSinceScopeStatus {
   readonly reason?: string;
 }
 
+/** Applied Git ref for a package relative to the workspace root. */
+export interface PackageBaselineStatus {
+  readonly workspaceRoot: string;
+  readonly reference: string;
+}
+
 export interface AnalysisCompleteParams {
   totalIssues: number;
   unusedFiles: number;
@@ -40,6 +46,7 @@ export interface AnalysisCompleteParams {
   duplicationPercentage: number;
   cloneGroups: number;
   changedSinceScope?: ChangedSinceScopeStatus;
+  packageBaselines?: ReadonlyArray<PackageBaselineStatus>;
 }
 
 /**
@@ -226,10 +233,11 @@ export const renderStatusBarText = (
   base: string,
   changedSince: string | null,
   scope?: ChangedSinceScopeStatus,
+  packageBaselines: ReadonlyArray<PackageBaselineStatus> = [],
 ): string => {
   const requestedRef = scope?.requestedRef || changedSince;
   if (!requestedRef) {
-    return base;
+    return packageBaselines.length > 0 ? `${base} (package baselines)` : base;
   }
   const formattedRef = formatChangedSinceRefForStatusBar(requestedRef);
   if (scope?.state === "dropped") {
@@ -257,6 +265,14 @@ export const buildStatusBarTooltipMarkdown = (
     const appliedRef = scope?.requestedRef || changedSinceRef;
     if (appliedRef) {
       lines.push(`$(git-branch) Scoped to changes since ${escapeMarkdownText(appliedRef)}`);
+    } else if (params.packageBaselines?.length) {
+      lines.push("$(git-branch) Package baselines:");
+      for (const baseline of params.packageBaselines) {
+        lines.push(
+          `- ${escapeMarkdownText(baseline.workspaceRoot)}: ${escapeMarkdownText(baseline.reference)}`,
+        );
+      }
+      lines.push("Unlisted packages and root files remain in full scope.");
     }
   }
 

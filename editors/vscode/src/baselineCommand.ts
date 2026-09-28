@@ -125,7 +125,7 @@ const confirmationMessage = (createTag: boolean, currentChangedSince: string): s
     currentChangedSince && currentChangedSince !== BASELINE_TAG
       ? ` This replaces the current effective value \`${currentChangedSince}\`.`
       : "";
-  return `${actions}${replacement} This does not push anything to a remote.`;
+  return `${actions}${replacement} This workspace-wide setting takes precedence over package baselines in the Fallow config. This does not push anything to a remote.`;
 };
 
 const resolveWorkspaceRoot = async (

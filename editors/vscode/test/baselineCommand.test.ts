@@ -166,6 +166,9 @@ describe("runBaselineCommand", () => {
     expect(confirm).toHaveBeenCalledWith(
       expect.stringContaining("This does not push anything to a remote."),
     );
+    expect(confirm).toHaveBeenCalledWith(
+      expect.stringContaining("takes precedence over package baselines"),
+    );
   });
 
   it("treats a tag already at HEAD as idempotent", async () => {

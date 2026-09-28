@@ -93,6 +93,21 @@ describe("buildStatusBarTooltipMarkdown", () => {
     expect(markdown).toContain("Scoped to changes since fallow\\-baseline");
   });
 
+  it("lists package refs and explains the remaining full scope", () => {
+    const markdown = buildStatusBarTooltipMarkdown(
+      baseParams({
+        packageBaselines: [
+          { workspaceRoot: "packages/web", reference: "main" },
+          { workspaceRoot: "packages/legacy", reference: "release/2024.10" },
+        ],
+      }),
+    );
+    expect(markdown).toContain("Package baselines:");
+    expect(markdown).toContain("packages/web: main");
+    expect(markdown).toContain("packages/legacy: release/2024\\.10");
+    expect(markdown).toContain("Unlisted packages and root files remain in full scope.");
+  });
+
   it("uses the server-applied changedSince scope when present", () => {
     const markdown = buildStatusBarTooltipMarkdown(
       baseParams({
@@ -201,6 +216,16 @@ describe("renderStatusBarText", () => {
         state: "applied",
       }),
     ).toBe("$(search) Fallow: 3 issues (since origin/main)");
+  });
+
+  it("shows package baselines unless a global ref overrides them", () => {
+    const packages = [{ workspaceRoot: "packages/web", reference: "main" }];
+    expect(renderStatusBarText("$(search) Fallow", null, undefined, packages)).toBe(
+      "$(search) Fallow (package baselines)",
+    );
+    expect(renderStatusBarText("$(search) Fallow", "HEAD", undefined, packages)).toBe(
+      "$(search) Fallow (since HEAD)",
+    );
   });
 
   it("marks dropped scope without claiming the filter is active", () => {

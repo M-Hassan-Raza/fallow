@@ -11,7 +11,11 @@ import {
 } from "./statusBar-utils.js";
 import type { FallowCheckResult, FallowDupesResult, HealthOutput } from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
-import type { AnalysisCompleteParams, ChangedSinceScopeStatus } from "./statusBar-utils.js";
+import type {
+  AnalysisCompleteParams,
+  ChangedSinceScopeStatus,
+  PackageBaselineStatus,
+} from "./statusBar-utils.js";
 
 let statusBarItem: vscode.StatusBarItem | null = null;
 
@@ -66,7 +70,11 @@ export const updateStatusBarFromLsp = (params: AnalysisCompleteParams): void => 
   }
 
   applyTooltipAndSeverity(params);
-  applyStatusBarText(buildStatusBarPartsFromLsp(params), params.changedSinceScope);
+  applyStatusBarText(
+    buildStatusBarPartsFromLsp(params),
+    params.changedSinceScope,
+    params.packageBaselines,
+  );
 };
 
 const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
@@ -97,16 +105,27 @@ const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
  */
 let lastBaseParts: string[] = [];
 let lastChangedSinceScope: ChangedSinceScopeStatus | undefined;
+let lastPackageBaselines: ReadonlyArray<PackageBaselineStatus> = [];
 
-const applyStatusBarText = (parts: string[], changedSinceScope?: ChangedSinceScopeStatus): void => {
+const applyStatusBarText = (
+  parts: string[],
+  changedSinceScope?: ChangedSinceScopeStatus,
+  packageBaselines: ReadonlyArray<PackageBaselineStatus> = [],
+): void => {
   if (!statusBarItem) {
     return;
   }
   lastBaseParts = parts;
   lastChangedSinceScope = changedSinceScope;
+  lastPackageBaselines = packageBaselines;
   const joined = parts.length > 0 ? `$(search) Fallow: ${parts.join(" | ")}` : "$(search) Fallow";
   const base = `${joined}${healthSuffix()}`;
-  statusBarItem.text = renderStatusBarText(base, liveChangedSince(), changedSinceScope);
+  statusBarItem.text = renderStatusBarText(
+    base,
+    liveChangedSince(),
+    changedSinceScope,
+    packageBaselines,
+  );
 };
 
 /**
@@ -122,7 +141,7 @@ export const updateStatusBarHealth = (report: HealthOutput | null): void => {
   }
   // Re-render against the cached analysis parts so the health segment appends
   // without clobbering the issue/duplication counts.
-  applyStatusBarText(lastBaseParts, lastChangedSinceScope);
+  applyStatusBarText(lastBaseParts, lastChangedSinceScope, lastPackageBaselines);
 };
 
 export const setStatusBarAnalyzing = (): void => {
@@ -130,13 +149,20 @@ export const setStatusBarAnalyzing = (): void => {
     statusBarItem.text = renderStatusBarText(
       "$(loading~spin) Fallow: Analyzing...",
       liveChangedSince(),
+      undefined,
+      lastPackageBaselines,
     );
   }
 };
 
 export const setStatusBarError = (): void => {
   if (statusBarItem) {
-    statusBarItem.text = renderStatusBarText("$(error) Fallow: Error", liveChangedSince());
+    statusBarItem.text = renderStatusBarText(
+      "$(error) Fallow: Error",
+      liveChangedSince(),
+      undefined,
+      lastPackageBaselines,
+    );
   }
 };
 
@@ -148,4 +174,5 @@ export const disposeStatusBar = (): void => {
   healthPart = null;
   lastBaseParts = [];
   lastChangedSinceScope = undefined;
+  lastPackageBaselines = [];
 };
