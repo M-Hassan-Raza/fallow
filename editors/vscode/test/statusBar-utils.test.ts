@@ -299,10 +299,36 @@ describe("buildParamsFromCli", () => {
   });
 
   it("returns zero counts when both inputs are null", () => {
-    const params = buildParamsFromCli(null, null);
+    const params = buildParamsFromCli(null, null, null);
     expect(params.totalIssues).toBe(0);
     expect(params.duplicationPercentage).toBe(0);
     expect(params.cloneGroups).toBe(0);
+  });
+
+  it("uses CLI scope provenance for the displayed analysis", () => {
+    const params = buildParamsFromCli(emptyCheck(), null, {
+      package_baselines: [{ workspace_root: "packages/web", reference: "main" }],
+    });
+    expect(
+      renderStatusBarText("$(search) Fallow", null, params.changedSinceScope, params.packageBaselines),
+    ).toBe("$(search) Fallow (package baselines)");
+    expect(buildStatusBarTooltipMarkdown(params)).toContain("packages/web: main");
+
+    const dropped = buildParamsFromCli(emptyCheck(), null, {
+      request_outcomes: {
+        "changed-since": {
+          status: "not-applied",
+          affects: "scope",
+          requested: "missing-ref",
+          reason: "git-missing",
+          message: "The Git ref was not found.",
+        },
+      },
+    });
+    expect(renderStatusBarText("$(search) Fallow", "missing-ref", dropped.changedSinceScope))
+      .toBe("$(search) Fallow (since missing-ref: scope dropped)");
+    expect(buildStatusBarTooltipMarkdown(dropped, "missing-ref"))
+      .toContain("The Git ref was not found\\.");
   });
 
   it("counts issue categories from the check result", () => {
@@ -389,7 +415,7 @@ describe("buildParamsFromCli", () => {
       ],
     };
 
-    const params = buildParamsFromCli(check, null);
+    const params = buildParamsFromCli(check, null, null);
     expect(params.unusedFiles).toBe(1);
     expect(params.unusedExports).toBe(2);
     expect(params.unusedOptionalDependencies).toBe(1);
@@ -426,7 +452,7 @@ describe("buildParamsFromCli", () => {
       ],
     };
 
-    const params = buildParamsFromCli(check, null);
+    const params = buildParamsFromCli(check, null, null);
     expect(params.boundaryViolations).toBe(2);
     expect(params.totalIssues).toBe(2);
   });
@@ -449,7 +475,7 @@ describe("buildParamsFromCli", () => {
       },
     };
 
-    const params = buildParamsFromCli(null, dupes);
+    const params = buildParamsFromCli(null, dupes, null);
     expect(params.duplicationPercentage).toBe(0.8);
     expect(params.cloneGroups).toBe(3);
   });
@@ -468,7 +494,7 @@ describe("buildParamsFromCli", () => {
     delete (check as { boundary_violations?: unknown }).boundary_violations;
     delete (check as { stale_suppressions?: unknown }).stale_suppressions;
 
-    const params = buildParamsFromCli(check, null);
+    const params = buildParamsFromCli(check, null, null);
     expect(params.unusedOptionalDependencies).toBe(0);
     expect(params.privateTypeLeaks).toBe(0);
     expect(params.typeOnlyDependencies).toBe(0);

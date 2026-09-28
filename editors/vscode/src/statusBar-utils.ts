@@ -1,7 +1,7 @@
 import { countCheckIssues } from "./analysis-utils.js";
 import type { PackageBaselineStatus } from "./generated/output-contract.js";
 import { escapeMarkdownText, normalizeInlineText } from "./markdown-utils.js";
-import type { FallowCheckResult, FallowDupesResult } from "./types.js";
+import type { FallowAnalysisScope, FallowCheckResult, FallowDupesResult } from "./types.js";
 
 export type { PackageBaselineStatus } from "./generated/output-contract.js";
 
@@ -46,6 +46,19 @@ export interface AnalysisCompleteParams {
   packageBaselines?: ReadonlyArray<PackageBaselineStatus>;
 }
 
+const changedSinceScopeFromCli = (
+  scope: FallowAnalysisScope | null,
+): ChangedSinceScopeStatus | undefined => {
+  const outcome = scope?.request_outcomes?.["changed-since"];
+  return outcome
+    ? {
+        requestedRef: outcome.requested,
+        state: outcome.status === "applied" ? "applied" : "dropped",
+        reason: outcome.message ?? undefined,
+      }
+    : undefined;
+};
+
 /**
  * Convert CLI analysis results into the same shape the LSP notification
  * delivers, so the status bar text and tooltip can be built from a single
@@ -54,6 +67,7 @@ export interface AnalysisCompleteParams {
 export const buildParamsFromCli = (
   check: FallowCheckResult | null,
   dupes: FallowDupesResult | null,
+  scope: FallowAnalysisScope | null,
 ): AnalysisCompleteParams => ({
   totalIssues: countCheckIssues(check),
   unusedFiles: check?.unused_files.length ?? 0,
@@ -84,6 +98,8 @@ export const buildParamsFromCli = (
   misconfiguredDependencyOverrides: check?.misconfigured_dependency_overrides?.length ?? 0,
   duplicationPercentage: dupes?.stats.duplication_percentage ?? 0,
   cloneGroups: dupes?.stats.clone_groups ?? 0,
+  changedSinceScope: changedSinceScopeFromCli(scope),
+  packageBaselines: scope?.package_baselines,
 });
 
 interface BreakdownLine {

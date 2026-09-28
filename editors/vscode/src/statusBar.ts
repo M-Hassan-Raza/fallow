@@ -9,7 +9,12 @@ import {
   buildStatusBarTooltipMarkdown,
   renderStatusBarText,
 } from "./statusBar-utils.js";
-import type { FallowCheckResult, FallowDupesResult, HealthOutput } from "./types.js";
+import type {
+  FallowAnalysisScope,
+  FallowCheckResult,
+  FallowDupesResult,
+  HealthOutput,
+} from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
 import type {
   AnalysisCompleteParams,
@@ -45,17 +50,16 @@ export const createStatusBar = (): vscode.StatusBarItem => {
 export const updateStatusBar = (
   checkResult: FallowCheckResult | null,
   dupesResult: FallowDupesResult | null,
+  scope: FallowAnalysisScope | null,
 ): void => {
   if (!statusBarItem) {
     return;
   }
 
-  const params = buildParamsFromCli(checkResult, dupesResult);
+  const params = buildParamsFromCli(checkResult, dupesResult, scope);
   const changedSince = liveChangedSince();
-  const scope =
-    lastChangedSinceScope?.requestedRef === changedSince ? lastChangedSinceScope : undefined;
-  const packageBaselines = changedSince ? [] : lastPackageBaselines;
-  applyTooltipAndSeverity({ ...params, changedSinceScope: scope, packageBaselines });
+  const packageBaselines = changedSince ? [] : params.packageBaselines;
+  applyTooltipAndSeverity({ ...params, packageBaselines });
 
   const parts: string[] = [];
   if (checkResult) {
@@ -64,7 +68,7 @@ export const updateStatusBar = (
   if (dupesResult) {
     parts.push(`${params.duplicationPercentage.toFixed(1)}% duplication`);
   }
-  applyStatusBarText(parts, scope, packageBaselines);
+  applyStatusBarText(parts, params.changedSinceScope, packageBaselines);
 };
 
 /** Update the status bar from LSP notification data. */
@@ -153,20 +157,13 @@ export const setStatusBarAnalyzing = (): void => {
     statusBarItem.text = renderStatusBarText(
       "$(loading~spin) Fallow: Analyzing...",
       liveChangedSince(),
-      undefined,
-      lastPackageBaselines,
     );
   }
 };
 
 export const setStatusBarError = (): void => {
   if (statusBarItem) {
-    statusBarItem.text = renderStatusBarText(
-      "$(error) Fallow: Error",
-      liveChangedSince(),
-      undefined,
-      lastPackageBaselines,
-    );
+    statusBarItem.text = renderStatusBarText("$(error) Fallow: Error", liveChangedSince());
   }
 };
 
