@@ -1737,7 +1737,8 @@ pub enum ModuleLoadMechanism {
 ///
 /// The startup weight report follows only `Static` edges to find the code that
 /// loads before the entry module runs. The other kinds load later, or outside
-/// the importing thread.
+/// the importing thread, except `PathReference`: that edge keeps its target in
+/// use but loads nothing, so cycle detection and the entry load closure skip it.
 #[derive(
     Debug,
     Clone,
@@ -1770,6 +1771,11 @@ pub enum ImportLoadKind {
     /// `new URL(..., import.meta.url)` reference (for example a worker URL),
     /// `child_process.fork`, a pino transport or a `module.register` hook.
     OutOfThread = 3,
+    /// The importer gets only the path of the target and does not load it:
+    /// `require.resolve('./file')` or ``require.resolve(`./file`)``. The edge
+    /// keeps the target in use, but it never takes part in a cycle or in the
+    /// entry load closure.
+    PathReference = 4,
 }
 
 impl ImportLoadKind {
@@ -1783,6 +1789,13 @@ impl ImportLoadKind {
     #[must_use]
     pub const fn is_deferred(self) -> bool {
         matches!(self, Self::Dynamic | Self::DynamicPattern)
+    }
+
+    /// Whether the target loads at runtime through this edge. Only a path
+    /// reference does not load it.
+    #[must_use]
+    pub const fn loads_target(self) -> bool {
+        !matches!(self, Self::PathReference)
     }
 }
 
