@@ -30,11 +30,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment, as `get_cloud_runtime_context` does.
 
 - **Cloud reads ask for gzip and retry one time.** Every Fallow Cloud read
-  now sends `Accept-Encoding: gzip`, which makes the runtime-context answer
-  much smaller on the network. A read that gets HTTP 502, 503 or 504 is sent
-  one more time. An error message now names the cause: a timeout, a cloud
-  outage or a network that cannot reach the cloud. The reads also send
-  `x-fallow-agent-source` when an allowlisted coding agent runs the command.
+  now sends `Accept-Encoding: gzip` and decodes a gzip answer. The
+  runtime-context answer becomes much smaller on the network when the cloud
+  compresses its answers. A read that gets HTTP 502, 503 or 504, or that
+  passes the timeout of 45 s, is sent one more time. An error message now
+  names the cause: a timeout, a cloud outage or a network that cannot reach
+  the cloud. The reads also send `x-fallow-agent-source` when an allowlisted
+  coding agent runs the command.
 
 - **`coverage analyze --cloud` reads the new runtime-context fields.** When
   the cloud sends `repo_path`, the CLI matches the function on that
@@ -42,9 +44,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   function that is `never_called` in the current deployment but ran in an
   earlier deployment of the period (`period_tracking_state: "called"`) is
   `review_required`, never `safe_to_delete`. `observation_days` on a finding
-  reads the real evidence span of the current deployment from
-  `evidence_window`. An older cloud without these fields gives the same
-  result as before.
+  is the nominal period when the function has `period_tracking_state`. Only
+  for a function without that field does it read the evidence span of the
+  current deployment from `evidence_window`. An older cloud without these
+  fields gives the same result as before.
 
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
