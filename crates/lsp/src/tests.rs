@@ -31,6 +31,7 @@ fn analyze_project_root_for_test(
     let cancellation = Arc::new(AtomicBool::new(false));
     let type_aware_sessions = Arc::new(StdMutex::new(FxHashMap::default()));
     let type_aware_changes = fallow_api::TypeAwareFileChanges::default();
+    let mut package_scopes = Vec::new();
     analyze_project_root(&mut ProjectRootAnalysisInput {
         project_root,
         config_path,
@@ -44,11 +45,13 @@ fn analyze_project_root_for_test(
         cancellation: &cancellation,
         run_cancellation: &cancellation,
         changed_files: None,
+        global_changed_since_requested: false,
         sessions: &Arc::default(),
         parse_work: &mut analysis::RunParseWork::default(),
         merged_analysis: &mut merged_analysis,
         merged_inline_complexity,
         config_messages,
+        package_scopes: &mut package_scopes,
     })
     .expect("project analysis succeeds");
     *merged_results = merged_analysis.results;
@@ -146,8 +149,24 @@ fn analysis_complete_changed_since_scope_is_additive_and_structured() {
         legacy_json.get("changedSinceScope").is_none(),
         "omitted scope status must preserve the legacy payload"
     );
+    assert!(legacy_json.get("packageBaselines").is_none());
     let _: protocol::AnalysisCompleteParams =
         serde_json::from_value(legacy_json).expect("legacy completion remains accepted");
+
+    let packages = vec![protocol::PackageBaselineStatus {
+        workspace_root: "packages/web".to_owned(),
+        reference: "main".to_owned(),
+    }];
+    let package_params = protocol::analysis_complete_params(
+        protocol::AnalysisCompleteInput::new(&results, &duplication)
+            .with_package_baselines(&packages),
+    );
+    let package_json = serde_json::to_value(package_params).expect("package status serializes");
+    assert_eq!(
+        package_json["packageBaselines"][0]["workspaceRoot"],
+        "packages/web"
+    );
+    assert_eq!(package_json["packageBaselines"][0]["reference"], "main");
 
     let applied_status = protocol::ChangedSinceScopeStatus {
         requested_ref: "origin/main".to_string(),
@@ -1963,6 +1982,151 @@ fn changed_since_fixture() -> tempfile::TempDir {
     temp
 }
 
+fn package_baseline_fixture() -> tempfile::TempDir {
+    let temp = tempfile::tempdir().expect("temp project");
+    let root = temp.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"lsp-packages","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("root manifest");
+    for name in ["web", "legacy", "other"] {
+        let package = root.join("packages").join(name);
+        std::fs::create_dir_all(package.join("src")).expect("package directory");
+        std::fs::write(
+            package.join("package.json"),
+            format!(r#"{{"name":"{name}","main":"src/index.ts"}}"#),
+        )
+        .expect("package manifest");
+        std::fs::write(
+            package.join("src/index.ts"),
+            "import { used } from './utils';\nused();\n",
+        )
+        .expect("entry");
+        std::fs::write(
+            package.join("src/utils.ts"),
+            format!("export const used = () => 1;\nexport const unused_{name} = 1;\n"),
+        )
+        .expect("source");
+    }
+    git(root, &["init", "-q"]);
+    git(root, &["config", "user.email", "test@example.com"]);
+    git(root, &["config", "user.name", "Test User"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::write(
+        root.join("packages/web/src/utils.ts"),
+        "export const used = () => 2;\nexport const unused_web = 2;\n",
+    )
+    .expect("web change");
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "web change"]);
+    std::fs::write(
+        root.join("packages/legacy/src/utils.ts"),
+        "export const used = () => 3;\nexport const unused_legacy = 3;\n",
+    )
+    .expect("legacy change");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/web":"HEAD~1","packages/legacy":"HEAD"}}}"#,
+    )
+    .expect("config");
+    temp
+}
+
+#[test]
+fn package_baselines_scope_lsp_results_and_stamp_each_document_ref() {
+    let temp = package_baseline_fixture();
+    let root = temp.path();
+    let input = BlockingAnalysisInput {
+        changed_since: None,
+        ..changed_since_input(root, "HEAD", None)
+    };
+    let output = run_blocking_analysis(&input).expect("package analysis succeeds");
+    assert_eq!(output.package_scopes.len(), 1);
+    let paths = output
+        .analysis
+        .results
+        .unused_exports
+        .iter()
+        .map(|finding| finding.export.path.to_string_lossy().replace('\\', "/"))
+        .collect::<Vec<_>>();
+    for name in ["web", "legacy", "other"] {
+        assert!(
+            paths
+                .iter()
+                .any(|path| path.ends_with(&format!("packages/{name}/src/utils.ts"))),
+            "missing {name} finding: {paths:?}"
+        );
+    }
+    let statuses = protocol::package_baseline_statuses(&output.package_scopes, root);
+    assert_eq!(
+        statuses,
+        vec![
+            protocol::PackageBaselineStatus {
+                workspace_root: "packages/legacy".to_owned(),
+                reference: "HEAD".to_owned(),
+            },
+            protocol::PackageBaselineStatus {
+                workspace_root: "packages/web".to_owned(),
+                reference: "HEAD~1".to_owned(),
+            },
+        ]
+    );
+
+    let mut diagnostics = FxHashMap::default();
+    for name in ["web", "legacy", "other"] {
+        let uri = Uri::from_file_path(root.join("packages").join(name).join("src/utils.ts"))
+            .expect("source URI");
+        diagnostics.insert(uri, vec![make_diagnostic()]);
+    }
+    diagnostic_filter::attach_package_changed_since_data(&mut diagnostics, &output.package_scopes);
+    for (name, expected) in [
+        ("web", Some("HEAD~1")),
+        ("legacy", Some("HEAD")),
+        ("other", None),
+    ] {
+        let uri = Uri::from_file_path(root.join("packages").join(name).join("src/utils.ts"))
+            .expect("source URI");
+        assert_eq!(
+            diagnostics[&uri][0]
+                .data
+                .as_ref()
+                .and_then(|data| data["changedSince"].as_str()),
+            expected
+        );
+    }
+
+    let dropped = run_blocking_analysis(&changed_since_input(root, "missing-ref", None))
+        .expect("dropped global ref keeps full analysis");
+    assert!(dropped.package_scopes.is_empty());
+}
+
+#[test]
+fn invalid_package_ref_is_a_project_error_unless_global_ref_overrides_it() {
+    let temp = package_baseline_fixture();
+    let root = temp.path();
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/web":"missing-ref"}}}"#,
+    )
+    .expect("invalid config ref");
+    let package_input = BlockingAnalysisInput {
+        changed_since: None,
+        ..changed_since_input(root, "HEAD", None)
+    };
+    let Err(error) = run_blocking_analysis(&package_input) else {
+        panic!("invalid package ref must fail");
+    };
+    assert!(error.to_string().contains("missing-ref"));
+
+    let overridden = run_blocking_analysis(&changed_since_input(root, "HEAD", None))
+        .expect("global ref overrides invalid package ref");
+    assert!(overridden.package_scopes.is_empty());
+    assert_eq!(overridden.applied_changed_since.as_deref(), Some("HEAD"));
+}
+
 fn changed_since_input(
     root: &Path,
     changed_since: &str,
@@ -3386,6 +3550,7 @@ fn muted_analysis_output(source: &Path) -> BlockingAnalysisOutput {
         changed_message: None,
         applied_changed_since: None,
         changed_since_scope: None,
+        package_scopes: Vec::new(),
         parse_work: analysis::RunParseWork::default(),
     }
 }

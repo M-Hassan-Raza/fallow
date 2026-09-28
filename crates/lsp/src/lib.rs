@@ -172,9 +172,9 @@ use analysis::{
 };
 #[cfg(test)]
 use analysis::{ProjectRootAnalysisInput, analyze_project_root};
-use diagnostic_filter::attach_changed_since_data;
 #[cfg(test)]
 use diagnostic_filter::filter_disabled_diagnostics;
+use diagnostic_filter::{attach_changed_since_data, attach_package_changed_since_data};
 #[cfg(test)]
 use document_state::uri_is_stale;
 #[cfg(test)]
@@ -206,7 +206,7 @@ use protocol::analysis_complete_params_for_test;
 use protocol::config_load_error_detail;
 use protocol::{
     AnalysisComplete, AnalysisCompleteInput, IssueTypeInfo, analysis_complete_params,
-    diagnostic_issue_types,
+    diagnostic_issue_types, package_baseline_statuses,
 };
 use publish::{DiagnosticCache, PlannedPublish, PublishContext, plan_clears, plan_new_diagnostics};
 use schedule::{RunOutcome, RunScheduler};
@@ -1252,12 +1252,15 @@ impl FallowLspServer {
             &mut all_diagnostics,
             output.applied_changed_since.as_deref(),
         );
+        attach_package_changed_since_data(&mut all_diagnostics, &output.package_scopes);
         self.publish_collected_diagnostics(all_diagnostics, version_snapshot)
             .await;
 
+        let package_baselines = package_baseline_statuses(&output.package_scopes, root);
         let complete_params = analysis_complete_params(
             AnalysisCompleteInput::new(&output.analysis.results, &output.analysis.duplication)
-                .with_changed_since_scope(output.changed_since_scope.as_ref()),
+                .with_changed_since_scope(output.changed_since_scope.as_ref())
+                .with_package_baselines(&package_baselines),
         );
         *self.analysis.write().await = Some(LspAnalysisSnapshot::new(
             output.analysis.results,

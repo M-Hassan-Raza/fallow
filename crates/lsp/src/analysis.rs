@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use fallow_api::{
     EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
     EditorAnalysisSession as AnalysisSession, EditorDuplicationReport as DuplicationReport,
-    EditorInlineComplexityFinding as InlineComplexityFinding,
+    EditorInlineComplexityFinding as InlineComplexityFinding, PackageChangeScope,
 };
 use fallow_config::DuplicatesConfig;
 use ls_types::MessageType;
@@ -147,11 +147,13 @@ pub struct ProjectRootAnalysisInput<'a> {
     /// Set when a newer workspace event supersedes this run.
     pub run_cancellation: &'a Arc<AtomicBool>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
+    pub global_changed_since_requested: bool,
     pub sessions: &'a SharedSessionStore,
     pub parse_work: &'a mut RunParseWork,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
     pub merged_inline_complexity: &'a mut Vec<InlineComplexityFinding>,
     pub config_messages: &'a mut Vec<(MessageType, String)>,
+    pub package_scopes: &'a mut Vec<PackageChangeScope>,
 }
 
 pub struct BlockingAnalysisInput {
@@ -184,6 +186,7 @@ pub struct BlockingAnalysisOutput {
     pub changed_message: Option<(MessageType, String)>,
     pub applied_changed_since: Option<String>,
     pub changed_since_scope: Option<ChangedSinceScopeStatus>,
+    pub package_scopes: Vec<PackageChangeScope>,
     pub parse_work: RunParseWork,
 }
 
@@ -363,6 +366,13 @@ fn run_typed_project_analysis(
     session: &AnalysisSession,
     duplicates_config: &DuplicatesConfig,
 ) -> Result<(), ProjectAnalysisError> {
+    let package_scope = if input.global_changed_since_requested {
+        None
+    } else {
+        session
+            .package_change_scope()
+            .map_err(|error| ProjectAnalysisError::failed(input.project_root, error.to_string()))?
+    };
     let mut output = session
         .analyze_project_with_changed_files(
             duplicates_config,
@@ -420,15 +430,21 @@ fn run_typed_project_analysis(
     // The type-aware pass reads `unused_files` as its set of unreachable
     // files, so the changed-files scope runs after it.
     session.apply_changed_files_scope(&mut output.dead_code, input.changed_files);
+    if let Some(packages) = package_scope.as_ref() {
+        session.apply_package_change_scope(&mut output, packages);
+    }
     if input.inline_complexity_enabled {
-        input
-            .merged_inline_complexity
-            .extend(fallow_api::collect_inline_complexity(
-                session.config(),
-                &output.dead_code,
-            ));
+        let mut findings =
+            fallow_api::collect_inline_complexity(session.config(), &output.dead_code);
+        if let Some(packages) = package_scope.as_ref() {
+            fallow_api::filter_inline_complexity_by_package_scope(&mut findings, packages);
+        }
+        input.merged_inline_complexity.extend(findings);
     }
     input.merged_analysis.merge_project_output(output);
+    if let Some(packages) = package_scope {
+        input.package_scopes.push(packages);
+    }
     Ok(())
 }
 
@@ -523,6 +539,7 @@ pub fn run_blocking_analysis(
     let mut inline_complexity = Vec::new();
     let mut config_messages: Vec<(MessageType, String)> =
         Vec::with_capacity(input.project_roots.len());
+    let mut package_scopes = Vec::new();
     let changed_scope = resolve_changed_since_scope(
         input.changed_since.as_deref(),
         input.toplevel.as_deref().unwrap_or(input.root.as_path()),
@@ -545,11 +562,13 @@ pub fn run_blocking_analysis(
             cancellation: &input.cancellation,
             run_cancellation: &input.run_cancellation,
             changed_files: changed_scope.files.as_ref(),
+            global_changed_since_requested: input.changed_since.is_some(),
             sessions: &input.sessions,
             parse_work: &mut parse_work,
             merged_analysis: &mut analysis,
             merged_inline_complexity: &mut inline_complexity,
             config_messages: &mut config_messages,
+            package_scopes: &mut package_scopes,
         })
         .map_err(|error| {
             if index == 0 {
@@ -575,6 +594,7 @@ pub fn run_blocking_analysis(
         changed_message: changed_scope.message,
         applied_changed_since: changed_scope.applied_ref,
         changed_since_scope: changed_scope.status,
+        package_scopes,
         parse_work,
     })
 }

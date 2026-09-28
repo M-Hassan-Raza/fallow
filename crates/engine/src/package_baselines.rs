@@ -108,6 +108,29 @@ pub struct PackageChangeScope {
 }
 
 impl PackageChangeScope {
+    /// Canonical analysis root used by this package scope.
+    #[must_use]
+    pub fn project_root(&self) -> &Path {
+        &self.root
+    }
+
+    /// Whether this scope owns a project path, including root-level files.
+    #[must_use]
+    pub fn covers(&self, path: &Path) -> bool {
+        self.absolute_path(path).starts_with(&self.root)
+    }
+
+    /// Authored workspace roots and their resolved refs in path order.
+    pub fn configured_baselines(&self) -> impl Iterator<Item = (&Path, &str)> {
+        self.workspaces.iter().filter_map(|(path, baseline)| {
+            if let WorkspaceBaseline::Changed { reference, .. } = baseline {
+                Some((path.as_path(), reference.as_str()))
+            } else {
+                None
+            }
+        })
+    }
+
     /// Resolve configured refs and discovered workspace ownership atomically.
     /// An empty map means no package scope was requested.
     ///
