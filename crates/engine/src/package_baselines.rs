@@ -30,13 +30,6 @@ pub enum PackageBaselineError {
         /// Authored key.
         key: String,
     },
-    /// Two authored keys resolve to the same discovered workspace.
-    DuplicateWorkspace {
-        /// Earlier authored key.
-        first: String,
-        /// Later authored key.
-        second: String,
-    },
     /// Git could not resolve a package's baseline ref.
     Git {
         /// Authored workspace key.
@@ -68,10 +61,6 @@ impl fmt::Display for PackageBaselineError {
                     "workspace baseline key '{key}' names no discovered workspace"
                 )
             }
-            Self::DuplicateWorkspace { first, second } => write!(
-                f,
-                "workspace baseline keys '{first}' and '{second}' name the same workspace"
-            ),
             Self::Git {
                 key,
                 reference,
@@ -154,7 +143,6 @@ impl PackageChangeScope {
             packages.insert(canonical_root(&workspace.root)?, WorkspaceBaseline::Full);
         }
 
-        let mut assigned = BTreeMap::<PathBuf, String>::new();
         let mut validated = Vec::with_capacity(configured.len());
         for (key, reference) in configured {
             if !valid_workspace_key(key) {
@@ -165,14 +153,11 @@ impl PackageChangeScope {
                 return Err(PackageBaselineError::UnknownWorkspace { key: key.clone() });
             }
             let path = canonical_root(&candidate)?;
+            if candidate != path {
+                return Err(PackageBaselineError::InvalidWorkspaceKey { key: key.clone() });
+            }
             if !path.starts_with(&root) || !packages.contains_key(&path) {
                 return Err(PackageBaselineError::UnknownWorkspace { key: key.clone() });
-            }
-            if let Some(first) = assigned.insert(path.clone(), key.clone()) {
-                return Err(PackageBaselineError::DuplicateWorkspace {
-                    first,
-                    second: key.clone(),
-                });
             }
             validated.push((key, reference, path));
         }
@@ -510,19 +495,16 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn symlinked_keys_cannot_assign_one_workspace_twice() {
+    fn symlinked_alias_is_not_an_exact_workspace_root() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path();
         fs::create_dir_all(root.join("packages/app")).expect("package directory");
         std::os::unix::fs::symlink(root.join("packages/app"), root.join("alias"))
             .expect("workspace alias");
-        let configured = BTreeMap::from([
-            ("alias".to_owned(), "HEAD".to_owned()),
-            ("packages/app".to_owned(), "HEAD".to_owned()),
-        ]);
+        let configured = BTreeMap::from([("alias".to_owned(), "HEAD".to_owned())]);
         assert!(matches!(
             PackageChangeScope::resolve(root, &configured, &[workspace(root, "packages/app")]),
-            Err(PackageBaselineError::DuplicateWorkspace { .. })
+            Err(PackageBaselineError::InvalidWorkspaceKey { .. })
         ));
     }
 }
