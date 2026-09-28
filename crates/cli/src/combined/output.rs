@@ -964,6 +964,14 @@ fn build_combined_json_output(
     let workspace_diagnostics = combined_workspace_diagnostics(&input);
 
     fallow_api::serialize_combined_json(CombinedJsonOutputInput {
+        package_baselines: input.check_result.map_or_else(
+            || {
+                input
+                    .dupes_result
+                    .map_or_else(Vec::new, |run| run.package_baselines.clone())
+            },
+            |run| run.package_baselines.clone(),
+        ),
         gate_outcomes: combined_gate_outcomes(
             input.check_result,
             input.dupes_result,

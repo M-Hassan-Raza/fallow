@@ -26,6 +26,7 @@ use fallow_config::WorkspaceDiagnostic;
 use fallow_output::GroupByMode;
 
 pub(super) struct PrintJsonInput<'a> {
+    pub(super) package_baselines: &'a [fallow_api::PackageBaselineStatus],
     pub(super) results: &'a AnalysisResults,
     pub(super) root: &'a Path,
     pub(super) elapsed: Duration,
@@ -54,20 +55,22 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
 }
 
 pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_json::Error> {
+    let mut extras = check_json_extras_with_verdicts(
+        input.regression,
+        None,
+        input.baseline_matched,
+        input.baseline_staleness,
+        input.gate_outcomes.clone(),
+        crate::requests::request_outcomes(),
+    );
+    extras.package_baselines = input.package_baselines.to_vec();
     let output = api_check_json_document_with_config_fixable_meta_and_extras(
         input.results,
         input.root,
         input.elapsed,
         input.config_fixable,
         check_output_meta(input.explain, input.type_aware),
-        check_json_extras_with_verdicts(
-            input.regression,
-            None,
-            input.baseline_matched,
-            input.baseline_staleness,
-            input.gate_outcomes.clone(),
-            crate::requests::request_outcomes(),
-        ),
+        extras,
         input.workspace_diagnostics,
     )?;
     input.json_style.serialize(&output)
@@ -75,6 +78,7 @@ pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_js
 
 #[must_use]
 pub(super) struct PrintGroupedJsonInput<'a> {
+    pub(super) package_baselines: &'a [fallow_api::PackageBaselineStatus],
     pub(super) groups: &'a [ResultGroup],
     pub(super) original: &'a AnalysisResults,
     pub(super) root: &'a Path,
@@ -91,6 +95,7 @@ pub(super) struct PrintGroupedJsonInput<'a> {
 
 pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode {
     let output = match fallow_api::serialize_grouped_check_json(GroupedCheckJsonOutputInput {
+        package_baselines: input.package_baselines.to_vec(),
         gate_outcomes: input.gate_outcomes.clone(),
         request_outcomes: crate::requests::request_outcomes(),
         groups: input.groups,
@@ -629,6 +634,7 @@ pub fn check_json_extras_with_verdicts(
     request_outcomes: Option<fallow_output::RequestOutcomes>,
 ) -> CheckJsonExtraOutputs {
     CheckJsonExtraOutputs {
+        package_baselines: Vec::new(),
         gate_outcomes,
         request_outcomes,
         regression: regression.map(regression_output),
@@ -864,7 +870,8 @@ pub(super) fn print_grouped_health_json(
 /// The two presentation switches the duplication JSON path carries, paired so
 /// they travel as one argument through the render chain.
 #[derive(Debug, Clone)]
-pub(super) struct DuplicationJsonRender {
+pub(super) struct DuplicationJsonRender<'a> {
+    pub(super) package_baselines: &'a [fallow_api::PackageBaselineStatus],
     /// This run's view of the loaded duplication baseline, for baseline runs.
     pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
     /// Every gate this run evaluated, for the envelope's `gate_outcomes`.
@@ -879,7 +886,7 @@ pub(super) fn api_duplication_json_document(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
-    render: &DuplicationJsonRender,
+    render: &DuplicationJsonRender<'_>,
     workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload = DupesReportPayload::from_report(report);
@@ -890,6 +897,7 @@ pub(super) fn api_duplication_json_document(
         crate::report::suggestions::due_impact_digest(root),
     );
     fallow_api::serialize_duplication_json(DuplicationJsonOutputInput {
+        package_baselines: render.package_baselines.to_vec(),
         gate_outcomes: render.gate_outcomes.clone(),
         request_outcomes: crate::requests::request_outcomes(),
         report,
@@ -908,7 +916,7 @@ pub(super) fn print_duplication_json(
     report: &DuplicationReport,
     root: &Path,
     elapsed: Duration,
-    render: &DuplicationJsonRender,
+    render: &DuplicationJsonRender<'_>,
     workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
@@ -926,7 +934,7 @@ fn api_grouped_duplication_json_document(
     grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
-    render: &DuplicationJsonRender,
+    render: &DuplicationJsonRender<'_>,
     workspace_diagnostics: &[WorkspaceDiagnostic],
 ) -> Result<serde_json::Value, serde_json::Error> {
     let payload = DupesReportPayload::from_report(report);
@@ -937,6 +945,7 @@ fn api_grouped_duplication_json_document(
         crate::report::suggestions::due_impact_digest(root),
     );
     fallow_api::serialize_grouped_duplication_json(GroupedDuplicationJsonOutputInput {
+        package_baselines: render.package_baselines.to_vec(),
         gate_outcomes: render.gate_outcomes.clone(),
         request_outcomes: crate::requests::request_outcomes(),
         report,
@@ -970,7 +979,7 @@ pub(super) fn print_grouped_duplication_json(
     grouping: &DuplicationGrouping,
     root: &Path,
     elapsed: Duration,
-    render: &DuplicationJsonRender,
+    render: &DuplicationJsonRender<'_>,
     workspace_diagnostics: &[WorkspaceDiagnostic],
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {

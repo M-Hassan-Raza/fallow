@@ -51,6 +51,13 @@
           ],
           "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
         },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied package Git refs for this combined analysis."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -942,6 +949,13 @@
           ],
           "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
         },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied Git refs for exact workspace packages. Absent when no package\nbaselines were selected, including runs with a global changed-since ref."
+        },
         "_meta": {
           "anyOf": [
             {
@@ -1054,6 +1068,13 @@
             }
           ],
           "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied package Git refs, omitted outside package-baseline runs."
         },
         "_meta": {
           "anyOf": [
@@ -2968,6 +2989,13 @@
             }
           ],
           "description": "Every narrowing or shaping request this run RECEIVED, keyed by name,\nabsent when it was asked for nothing. An entry whose `status` is not\n`applied` means the run could not do what it was asked and reported\nsomething WIDER instead, so what follows is a valid report of a scope\nnobody requested. Honoured requests are published too, with\n`status: \"applied\"`, so an absent object means \"nothing was asked for\",\nnever \"nothing failed\". See [`crate::RequestOutcomes`]."
+        },
+        "package_baselines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/PackageBaselineStatus"
+          },
+          "description": "Applied package Git refs, omitted outside package-baseline runs."
         },
         "_meta": {
           "anyOf": [
@@ -28519,6 +28547,24 @@
         "age_days"
       ],
       "description": "A flag that is older than `--max-flag-age`."
+    },
+    "PackageBaselineStatus": {
+      "type": "object",
+      "properties": {
+        "workspace_root": {
+          "type": "string",
+          "description": "Workspace package root, relative to the analysis root with `/` separators."
+        },
+        "reference": {
+          "type": "string",
+          "description": "Git ref used to select changed files in this package."
+        }
+      },
+      "required": [
+        "workspace_root",
+        "reference"
+      ],
+      "description": "One applied baseline for an exact, project-relative workspace root."
     }
   }
 }

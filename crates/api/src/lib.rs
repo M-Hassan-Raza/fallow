@@ -67,7 +67,9 @@ pub mod security_output;
 /// Local-only advisory similar-code discovery and provider status.
 pub mod similar_code;
 mod type_aware;
-pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
+pub use analysis_context::{
+    ProgrammaticAnalysisContext, package_baseline_statuses, resolve_programmatic_analysis_context,
+};
 pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
     AuditSarifOutputInput, AuditSummary, AuditVerdict,
@@ -101,10 +103,10 @@ pub use editor::{
     EditorDeadCodeAnalysisOutput, EditorDuplicationReport, EditorDuplicationStats,
     EditorInlineComplexityExceeded, EditorInlineComplexityFinding, EditorMirroredDirectory,
     EditorProjectAnalysisOutput, EditorRefactoringKind, EditorRefactoringSuggestion,
-    EditorSessionParseCounts, collect_inline_complexity,
-    editor_duplicates, editor_extract, editor_results, editor_security, editor_suppress,
-    filter_inline_complexity_by_changed_files, filter_inline_complexity_by_package_scope,
-    resolve_git_toplevel, try_get_changed_files_with_toplevel,
+    EditorSessionParseCounts, collect_inline_complexity, editor_duplicates, editor_extract,
+    editor_results, editor_security, editor_suppress, filter_inline_complexity_by_changed_files,
+    filter_inline_complexity_by_package_scope, resolve_git_toplevel,
+    try_get_changed_files_with_toplevel,
 };
 pub use explain::{
     CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, RuleGuide, SECURITY_RULES,
@@ -122,6 +124,8 @@ pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeSc
 /// server, installs a store once. Each later analysis session then takes the
 /// modules of an unchanged file list from memory and does no parse work.
 pub use fallow_engine::warm_parse;
+/// Shared JSON and editor notification row for an applied package Git ref.
+pub use fallow_output::PackageBaselineStatus;
 pub use fallow_output::serialize_similar_code_json_output;
 pub use fallow_types::trace::{
     CloneTrace, DependencyTrace, ExportReference, ExportTrace, FileTrace, ReExportChain,

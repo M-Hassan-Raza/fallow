@@ -404,6 +404,7 @@ pub struct CheckOptions<'a> {
 
 /// Result of executing check analysis without printing.
 pub struct CheckResult {
+    pub package_baselines: Vec<fallow_api::PackageBaselineStatus>,
     pub results: AnalysisResults,
     pub config: ResolvedConfig,
     pub config_fixable: bool,
@@ -934,6 +935,7 @@ fn resolve_check_regression(
 }
 
 struct CheckCompletionInput<'a> {
+    package_baselines: Vec<fallow_api::PackageBaselineStatus>,
     opts: &'a CheckOptions<'a>,
     config: ResolvedConfig,
     data: CheckAnalysisData,
@@ -947,6 +949,7 @@ struct CheckCompletionInput<'a> {
 
 fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     let CheckCompletionInput {
+        package_baselines,
         opts,
         config,
         data,
@@ -1016,6 +1019,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
     crate::telemetry::note_result_count(results.total_issues());
 
     CheckResult {
+        package_baselines,
         results,
         config,
         config_fixable,
@@ -1113,6 +1117,9 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     } else {
         None
     };
+    let package_baselines = package_scope.as_ref().map_or_else(Vec::new, |scope| {
+        fallow_api::package_baseline_statuses(std::slice::from_ref(scope), &config.root)
+    });
     let changes = changed_files
         .as_ref()
         .map(fallow_engine::dead_code::ChangedFileScope::Global)
@@ -1238,6 +1245,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         resolve_check_regression(opts, &config, &data.results, &analysis_identity)?;
 
     Ok(complete_check_execution(CheckCompletionInput {
+        package_baselines,
         opts,
         config,
         data,
@@ -1316,6 +1324,7 @@ pub fn benchmark_dead_code_json(
         explain_skipped: false,
     })?;
     let rendered = report::render_check_json(&report::CheckJsonRenderInput {
+        package_baselines: &result.package_baselines,
         results: &result.results,
         root: &result.config.root,
         elapsed: result.elapsed,
@@ -1425,6 +1434,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         has_error_severity,
         parse_error,
         report_ctx: report::ReportContext {
+            package_baselines: &result.package_baselines,
             root: &result.config.root,
             rules: &result.config.rules,
             workspace_diagnostics: &result.workspace_diagnostics,

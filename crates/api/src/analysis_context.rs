@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_engine::package_baselines::PackageChangeScope;
 use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
+use fallow_output::PackageBaselineStatus;
 use fallow_output::{DiffIndex, MAX_DIFF_BYTES, RequestName, RequestOutcome, RequestOutcomes};
 use fallow_types::path_util::is_absolute_path_any_platform;
 use rustc_hash::FxHashSet;
@@ -14,6 +15,30 @@ use rustc_hash::FxHashSet;
 use crate::{AnalysisOptions, ProgrammaticError};
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+
+/// Project-relative, sorted package baseline rows for report and editor output.
+/// Only applied package scopes are passed here; global overrides pass none.
+#[must_use]
+pub fn package_baseline_statuses(
+    scopes: &[PackageChangeScope],
+    root: &Path,
+) -> Vec<PackageBaselineStatus> {
+    let root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut rows = scopes
+        .iter()
+        .flat_map(PackageChangeScope::configured_baselines)
+        .map(|(path, reference)| PackageBaselineStatus {
+            workspace_root: path
+                .strip_prefix(&root)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .replace('\\', "/"),
+            reference: reference.to_owned(),
+        })
+        .collect::<Vec<_>>();
+    rows.sort_by(|a, b| a.workspace_root.cmp(&b.workspace_root));
+    rows
+}
 
 /// Resolved common programmatic analysis context.
 ///
@@ -39,6 +64,7 @@ pub struct ProgrammaticAnalysisContext {
     pub(crate) changed_since_request: OnceLock<RequestOutcome>,
     /// The changed files of the resolved ref, normalized like the CLI's.
     pub(crate) changed_since_files: OnceLock<FxHashSet<PathBuf>>,
+    pub(crate) package_baselines: OnceLock<Vec<PackageBaselineStatus>>,
     /// The changed files the call's analyses kept, over every analysis that
     /// measured: the `scope_size` of the `changed-since` entry.
     pub(crate) changed_since_analyzed: Mutex<Option<FxHashSet<PathBuf>>>,
@@ -111,6 +137,7 @@ fn resolve_programmatic_analysis_context_inner(
         changed_since,
         changed_since_request,
         changed_since_files,
+        package_baselines: OnceLock::new(),
         changed_since_analyzed: Mutex::new(None),
         workspace: options.workspace.clone(),
         changed_workspaces: options.changed_workspaces.clone(),
@@ -317,12 +344,24 @@ impl ProgrammaticAnalysisContext {
         if self.changed_since.is_some() || self.changed_since_request.get().is_some() {
             return Ok(None);
         }
-        PackageChangeScope::resolve(&config.root, &config.workspace_changed_since, workspaces)
-            .map_err(|err| {
-                ProgrammaticError::new(format!("workspace baseline error: {err}"), 2)
-                    .with_code("FALLOW_PACKAGE_BASELINE_FAILED")
-                    .with_context("analysis.workspaces.changedSince")
-            })
+        let scope =
+            PackageChangeScope::resolve(&config.root, &config.workspace_changed_since, workspaces)
+                .map_err(|err| {
+                    ProgrammaticError::new(format!("workspace baseline error: {err}"), 2)
+                        .with_code("FALLOW_PACKAGE_BASELINE_FAILED")
+                        .with_context("analysis.workspaces.changedSince")
+                })?;
+        if let Some(scope) = scope.as_ref() {
+            let _ = self.package_baselines.set(package_baseline_statuses(
+                std::slice::from_ref(scope),
+                &config.root,
+            ));
+        }
+        Ok(scope)
+    }
+
+    pub(crate) fn package_baselines(&self) -> &[PackageBaselineStatus] {
+        self.package_baselines.get().map_or(&[], Vec::as_slice)
     }
 
     /// Workspace filter patterns supplied by the caller.

@@ -101,6 +101,7 @@ pub(crate) fn build_walkthrough_human(
 /// Bundles the common parameters that every format renderer needs,
 /// replacing per-parameter threading through the dispatch match arms.
 pub(crate) struct ReportContext<'a> {
+    pub(crate) package_baselines: &'a [fallow_api::PackageBaselineStatus],
     pub(crate) root: &'a Path,
     pub(crate) rules: &'a RulesConfig,
     /// Workspace diagnostics captured by the analysis that owns this report.
@@ -258,6 +259,7 @@ pub(crate) fn emit_report_json(
 }
 
 pub(crate) struct CheckJsonRenderInput<'a> {
+    pub(crate) package_baselines: &'a [fallow_api::PackageBaselineStatus],
     pub(crate) results: &'a AnalysisResults,
     pub(crate) root: &'a Path,
     pub(crate) elapsed: Duration,
@@ -275,6 +277,7 @@ pub(crate) fn render_check_json(
     input: &CheckJsonRenderInput<'_>,
 ) -> Result<String, serde_json::Error> {
     json::render_json(&json::PrintJsonInput {
+        package_baselines: input.package_baselines,
         results: input.results,
         root: input.root,
         elapsed: input.elapsed,
@@ -414,6 +417,7 @@ pub(crate) fn print_results(
             ExitCode::SUCCESS
         }
         OutputFormat::Json => json::print_json(&json::PrintJsonInput {
+            package_baselines: ctx.package_baselines,
             results,
             root: ctx.root,
             elapsed: ctx.elapsed,
@@ -625,6 +629,7 @@ fn print_grouped_results(
             ExitCode::SUCCESS
         }
         OutputFormat::Json => json::print_grouped_json(&json::PrintGroupedJsonInput {
+            package_baselines: ctx.package_baselines,
             groups,
             original,
             root: ctx.root,
@@ -717,6 +722,7 @@ pub(crate) fn print_duplication_report(
             ctx.root,
             ctx.elapsed,
             &json::DuplicationJsonRender {
+                package_baselines: ctx.package_baselines,
                 explain: ctx.explain,
                 include_fragments: ctx.include_fragments,
                 baseline_staleness: ctx.baseline_staleness,
@@ -757,6 +763,7 @@ fn print_dupes_github_format(
         ctx.root,
         ctx.elapsed,
         &json::DuplicationJsonRender {
+            package_baselines: ctx.package_baselines,
             explain: ctx.explain,
             include_fragments: ctx.include_fragments,
             baseline_staleness: ctx.baseline_staleness,
@@ -840,6 +847,7 @@ fn print_grouped_duplication_report(
             ctx.root,
             ctx.elapsed,
             &json::DuplicationJsonRender {
+                package_baselines: ctx.package_baselines,
                 explain: ctx.explain,
                 include_fragments: ctx.include_fragments,
                 baseline_staleness: ctx.baseline_staleness,
@@ -1496,6 +1504,7 @@ mod tests {
 
     fn test_context<'a>(root: &'a Path, rules: &'a RulesConfig) -> ReportContext<'a> {
         ReportContext {
+            package_baselines: &[],
             baseline_staleness: None,
             gate_outcomes: None,
             failed_parse_files: 0,

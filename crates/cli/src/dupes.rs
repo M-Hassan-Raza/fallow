@@ -207,6 +207,7 @@ pub fn exceeds_threshold(threshold: f64, duplication_percentage: f64) -> bool {
 
 /// Result of executing duplication analysis without printing.
 pub struct DupesResult {
+    pub package_baselines: Vec<fallow_api::PackageBaselineStatus>,
     pub report: DuplicationReport,
     pub default_ignore_skips: DefaultIgnoreSkips,
     pub config: ResolvedConfig,
@@ -483,6 +484,9 @@ fn execute_dupes_inner(
     crate::telemetry::note_analysis_scale(Some(report.stats.total_files), None);
 
     Ok(DupesResult {
+        package_baselines: package_scope.as_ref().map_or_else(Vec::new, |scope| {
+            fallow_api::package_baseline_statuses(std::slice::from_ref(scope), &config.root)
+        }),
         report,
         default_ignore_skips,
         config,
@@ -961,6 +965,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         result.fail_on_stale_baseline,
     );
     let ctx = report::ReportContext {
+        package_baselines: &result.package_baselines,
         root: &result.config.root,
         rules: &result.config.rules,
         workspace_diagnostics: &result.workspace_diagnostics,

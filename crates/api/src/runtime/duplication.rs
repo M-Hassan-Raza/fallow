@@ -134,7 +134,7 @@ pub(super) fn run_duplication_report_with_session(
         audit_changed: audit_changed_applicable(root),
         baseline_recheck: None,
     });
-    let output: DupesOutput<DupesReportPayload, DuplicationGroup> =
+    let mut output: DupesOutput<DupesReportPayload, DuplicationGroup> =
         build_dupes_output(DupesOutputInput {
             gate_outcomes: None,
             request_outcomes: resolved.request_outcomes(),
@@ -156,6 +156,9 @@ pub(super) fn run_duplication_report_with_session(
             workspace_diagnostics: session.workspace_diagnostics().to_vec(),
             next_steps,
         });
+    output.package_baselines = package_scope.map_or_else(Vec::new, |scope| {
+        crate::package_baseline_statuses(std::slice::from_ref(scope), session.root())
+    });
     Ok(DuplicationProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),

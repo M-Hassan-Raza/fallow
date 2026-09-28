@@ -451,6 +451,7 @@ fn build_dead_code_programmatic_output(
         next_steps,
     });
     output.request_outcomes = resolved.request_outcomes();
+    output.package_baselines = resolved.package_baselines().to_vec();
     DeadCodeProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),

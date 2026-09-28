@@ -3071,6 +3071,11 @@ gate_outcomes?: (GateOutcomes | null)
  */
 request_outcomes?: (RequestOutcomes | null)
 /**
+ * Applied Git refs for exact workspace packages. Absent when no package
+ * baselines were selected, including runs with a global changed-since ref.
+ */
+package_baselines?: PackageBaselineStatus[]
+/**
  * `_meta` block with docs and rule definitions, when `--explain` was
  * passed.
  */
@@ -6195,6 +6200,19 @@ reason?: (string | null)
  * Present exactly when `status` is not `applied`.
  */
 message?: (string | null)
+}
+/**
+ * One applied baseline for an exact, project-relative workspace root.
+ */
+export interface PackageBaselineStatus {
+/**
+ * Workspace package root, relative to the analysis root with `/` separators.
+ */
+workspace_root: string
+/**
+ * Git ref used to select changed files in this package.
+ */
+reference: string
 }
 /**
  * A read-only follow-up command fallow surfaces from the current findings,
@@ -12187,6 +12205,10 @@ gate_outcomes?: (GateOutcomes | null)
  */
 request_outcomes?: (RequestOutcomes | null)
 /**
+ * Applied package Git refs, omitted outside package-baseline runs.
+ */
+package_baselines?: PackageBaselineStatus[]
+/**
  * `_meta` block with metric / rule definitions, emitted when `--explain`
  * is passed (always present in MCP responses).
  */
@@ -12373,6 +12395,10 @@ gate_outcomes?: (GateOutcomes | null)
  * never "nothing failed". See [`crate::RequestOutcomes`].
  */
 request_outcomes?: (RequestOutcomes | null)
+/**
+ * Applied package Git refs, omitted outside package-baseline runs.
+ */
+package_baselines?: PackageBaselineStatus[]
 /**
  * `_meta` block with docs and rule definitions, when `--explain` was
  * passed.
@@ -14021,6 +14047,10 @@ gate_outcomes?: (GateOutcomes | null)
  * never "nothing failed". See [`crate::RequestOutcomes`].
  */
 request_outcomes?: (RequestOutcomes | null)
+/**
+ * Applied package Git refs for this combined analysis.
+ */
+package_baselines?: PackageBaselineStatus[]
 /**
  * Per-section `_meta` blocks, when `--explain` was passed.
  */
