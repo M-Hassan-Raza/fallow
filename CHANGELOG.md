@@ -9,6 +9,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`ignoreDependencies` accepts globs.** An entry with `*`, `?`, `[` or `{`
+  is a glob in the `ignorePatterns` syntax, matched against the package name.
+  `@acme/*` now covers every package in the `@acme` scope, so a monorepo does
+  not have to list each package. An entry without these characters keeps the
+  exact-name match. `fallow migrate` now converts a knip regex such as
+  `@acme/.+` to the glob `@acme/*` when the glob matches the same packages,
+  and skips other regexes with a warning as before.
+
+  ```json
+  { "ignoreDependencies": ["@acme/*", "@types/*"] }
+  ```
+
+  Thanks [@azu](https://github.com/azu) for the request
+  ([#2953](https://github.com/fallow-rs/fallow/issues/2953)).
+
+- **A config pattern that matches nothing shows in every output.** When an
+  `ignoreDependencies` glob matches no declared dependency, or an
+  `ignoreFindings` pattern matches no finding, the entry has no effect. The
+  usual cause is a typo. Before, only the human output printed a note for
+  `ignoreFindings`. Now `workspace_diagnostics[]` in the JSON output carries
+  the new kinds `ignore-dependencies-glob-unmatched` and
+  `ignore-findings-pattern-unmatched`, each with the `pattern`. The MCP
+  dead-code tool, the programmatic API, `fallow audit` and the combined run
+  get the same entries. Each format shows them in one place, and
+  `fallow report --from` uses the same place as the live run:
+  - SARIF lists them as `invocations[].toolConfigurationNotifications` on
+    the dead-code run.
+  - Markdown, the GitHub job summary and the PR or MR comment add an
+    `Unmatched config patterns` section. The GitHub Action and the GitLab
+    template post these bodies, so the entries reach the pull request.
+  - Human, compact, CodeClimate, GitHub annotations and the review formats
+    print a stderr note, so their stdout does not change. `--quiet` removes
+    the note, on the live run and on `fallow report --from`.
+  - The LSP writes each entry as a warning to the output log.
+
+  A run that shows no dependency findings
+  (`--unused-files`, `--file`, or every dependency rule `off`) does not report
+  an `ignoreDependencies` glob. The check starts again on each analysis pass,
+  so a long-lived process (watch mode, the LSP, an engine session) does not
+  keep a match from an earlier pass.
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take

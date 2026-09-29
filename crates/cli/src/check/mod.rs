@@ -147,6 +147,15 @@ impl IssueFilters {
             || self.dynamic_segment_name_conflicts
     }
 
+    /// Whether the report keeps dependency findings: no filter is active, or
+    /// `--unused-deps` or `--unlisted-deps` is one of the active filters.
+    ///
+    /// These are the issue types `ignoreDependencies` controls, so an
+    /// unmatched `ignoreDependencies` glob is reported only when this is true.
+    pub const fn reports_dependency_findings(&self) -> bool {
+        !self.any_active() || self.unused_deps || self.unlisted_deps
+    }
+
     /// Enable off-by-default issue types when explicitly requested as filters.
     pub fn activate_explicit_opt_ins(&self, rules: &mut RulesConfig) {
         if self.private_type_leaks && rules.private_type_leaks == Severity::Off {
@@ -972,15 +981,23 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         script_used_packages,
         trace_provenance: _,
     } = data;
+    // A `--file` run drops dependency findings, so it reports none, like a
+    // filter without the dependency issue types.
+    let reports_dependencies = opts.filters.reports_dependency_findings() && opts.file.is_empty();
+    let workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
+        workspace_diagnostics,
+        fallow_engine::dead_code::config_pattern_diagnostics(&config, reports_dependencies),
+    );
 
     if let Some(sarif_path) = opts.sarif_file {
-        output::write_sarif_file(
-            &results,
-            &config,
+        output::write_sarif_file(&output::SarifFileInput {
+            results: &results,
+            config: &config,
             sarif_path,
-            opts.quiet,
-            type_aware.as_ref().map(|outcome| &outcome.meta),
-        );
+            quiet: opts.quiet,
+            type_aware: type_aware.as_ref().map(|outcome| &outcome.meta),
+            workspace_diagnostics: &workspace_diagnostics,
+        });
     }
 
     let retained_files_for_cross_reference = if opts.include_dupes && retained_modules.is_some() {
@@ -1479,7 +1496,7 @@ pub fn print_check_result(result: &CheckResult, opts: PrintCheckOptions) -> Exit
 
     print_load_data_key_abstain_note(result, prepared.quiet);
     print_unused_component_props_exempted_note(result, prepared.quiet);
-    print_unmatched_ignore_findings_note(result, prepared.quiet);
+    print_unmatched_config_pattern_notes(result, prepared.quiet);
 
     let stale_baseline_failed = crate::baseline_gate::gate_failed(
         result.baseline_staleness.as_ref(),
@@ -1653,25 +1670,18 @@ fn print_unused_component_props_exempted_note(result: &CheckResult, quiet: bool)
     );
 }
 
-/// Human-output note when an `ignoreFindings` pattern matched no candidate
-/// finding this run. A typo'd pattern is otherwise a silent no-op.
-fn print_unmatched_ignore_findings_note(result: &CheckResult, quiet: bool) {
-    if quiet || !matches!(result.config.output, OutputFormat::Human) {
-        return;
-    }
-    let unmatched = result.config.ignore_findings.unmatched_patterns();
-    if unmatched.is_empty() {
-        return;
-    }
-    let noun = if unmatched.len() == 1 {
-        "pattern"
-    } else {
-        "patterns"
-    };
-    eprintln!(
-        "Note: ignoreFindings {noun} matched no finding this run: {} (patterns are \
-         project-root-relative globs; check for typos).",
-        unmatched.join(", ")
+/// Stderr notes for config patterns that matched nothing this run
+/// (`ignoreFindings`, `ignoreDependencies`). A typo in a pattern is otherwise
+/// a silent no-op.
+///
+/// The notes read `workspace_diagnostics[]`, the same entries the JSON output
+/// carries, so the two outputs always name the same patterns. A format that
+/// carries the entries in its document gets no stderr note.
+fn print_unmatched_config_pattern_notes(result: &CheckResult, quiet: bool) {
+    crate::report::config_pattern_text::print_stderr_notes(
+        &result.workspace_diagnostics,
+        result.config.output,
+        quiet,
     );
 }
 
@@ -2060,6 +2070,20 @@ mod tests {
                 "cli={cli:?} scoped={scoped:?} config={config_enabled}"
             );
         }
+    }
+
+    #[test]
+    fn dependency_findings_are_reported_without_filters_or_with_a_dependency_filter() {
+        assert!(no_filters().reports_dependency_findings());
+        let mut files_only = no_filters();
+        files_only.unused_files = true;
+        assert!(!files_only.reports_dependency_findings());
+        let mut unlisted = files_only;
+        unlisted.unlisted_deps = true;
+        assert!(unlisted.reports_dependency_findings());
+        let mut unused = no_filters();
+        unused.unused_deps = true;
+        assert!(unused.reports_dependency_findings());
     }
 
     fn no_filters() -> IssueFilters {
