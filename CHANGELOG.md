@@ -124,8 +124,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second gets the suffix `~1`. Workspace scope, `--changed-since`,
   `ignoreFindings` and baselines do not change the id of a finding that stays
   in the report. The field is optional in the JSON schema, so
-  `schema_version` does not change. Baseline files do not use the id yet.
-  CodeClimate fingerprints and CI review markers use it (see Fixed).
+  `schema_version` does not change. CodeClimate fingerprints, CI review
+  markers and dead-code baselines build on it (see Fixed).
 - **LSP dead-code diagnostics carry the finding id in `data.findingId`.** Each
   dead-code diagnostic now has the same `finding_id` as the JSON output, so an
   editor client or an agent can join a diagnostic to a CLI or CI report. The
@@ -180,7 +180,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   passed. The new gate compares each loaded baseline with the same file at a
   base ref. It fails with exit 1 when the baseline has a key that the base
   file does not have, and it lists each new key per category on stderr. A
-  renamed file or a moved line gives a new key, so it counts as growth.
+  renamed file gives a new key, so it counts as growth. In a dead-code
+  baseline with line-free keys, one more occurrence of a key also counts as
+  growth, and a moved line does not.
   - `--baseline-base <ref>` sets the base ref. Without it, the gate uses the
     `fallow audit` base: `--changed-since` / `--base`, then
     `FALLOW_AUDIT_BASE`, then the merge-base with the upstream or the remote
@@ -458,6 +460,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   once, on the first run after the upgrade. Health, duplication and security
   fingerprints do not change. A saved report without finding ids
   (`fallow report --from`) keeps the old fingerprint.
+- **Dead-code baselines and `audit --gate new-only` no longer report old
+  findings as new after a line shift.** Before, the keys of some findings held
+  a line: stale suppressions and misplaced directives in baselines, and
+  unlisted-dependency import sites, pnpm catalog entries and references,
+  dependency overrides and misplaced directives in the audit. The audit key of
+  a stale suppression also held the reason text. When you added lines above
+  these findings, the baseline did not hide them and the audit marked them
+  introduced. Now both use the canonical key of the finding: the rule, the
+  root-relative path and the names, the same input as `finding_id`. The keys
+  also count occurrences. A baseline entry hides one finding, not every
+  finding with the same key, and a new second finding with an inherited key
+  is introduced in the audit. An unlisted-dependency finding is the package,
+  so a new import site of a package that the base already reports stays
+  inherited.
+
+  Migration: `--save-baseline` now writes `"identity": "dc1"` and canonical
+  keys such as `unused-export:src/utils.ts:helper`. An old dead-code baseline
+  still loads, and each old entry matches its old form. Old entries that hold
+  a line can go stale after a line shift, and the baseline staleness output
+  reports them. A run that loads an old baseline prints a note on stderr in
+  human output, and the JSON `baseline_staleness` object carries
+  `format: "legacy"`. Run `--save-baseline` once to rewrite the file. When a
+  change rewrites a legacy baseline, `--fail-on-baseline-growth` translates
+  each old key to its new key and compares by key, so a finding that the
+  commit swaps for another still counts as growth. Old keys with no safe
+  translation, such as keys with a line or bare package names, fall back to
+  the entry count of their category. An older fallow
+  version matches nothing in a new file. The audit base snapshot cache moves
+  to a new version and is computed again once. The `dupes` and `health`
+  baselines do not change.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
