@@ -392,6 +392,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ("Duplicate exports", "fallow/duplicate-export"),
         ("Circular dependencies", "fallow/circular-dependency"),
         ("Re-Export Cycles", "fallow/re-export-cycle"),
+        ("Package cycles", "fallow/package-cycle"),
         ("Boundary violations", "fallow/boundary-violation"),
         ("Stale suppressions", "fallow/stale-suppression"),
         ("Unused catalog entries", "fallow/unused-catalog-entry"),
@@ -1613,6 +1614,7 @@ fn build_structure_section(
     let has_structure = !results.duplicate_exports.is_empty()
         || !results.circular_dependencies.is_empty()
         || !results.re_export_cycles.is_empty()
+        || !results.package_cycles.is_empty()
         || !results.boundary_violations.is_empty()
         || !results.boundary_coverage_violations.is_empty()
         || !results.boundary_call_violations.is_empty();
@@ -1639,6 +1641,13 @@ fn build_structure_section(
         lines,
         &results.re_export_cycles,
         severity_to_level(rules.re_export_cycle),
+        root,
+        total_issues,
+    );
+    build_package_cycles_section(
+        lines,
+        &results.package_cycles,
+        severity_to_level(rules.package_cycle),
         root,
         total_issues,
     );
@@ -2946,6 +2955,68 @@ fn build_re_export_cycles_section(
     }
 }
 
+/// Build package cycles section. Each finding shows the package chain, then
+/// one example import per hop.
+fn build_package_cycles_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_types::output_dead_code::PackageCycleFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Package cycles";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let arrow = format!(" {} ", "\u{2192}".dimmed());
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let cycle = &entry.cycle;
+        let mut chain: Vec<String> = cycle
+            .packages
+            .iter()
+            .map(|name| name.bold().to_string())
+            .collect();
+        if let Some(first) = chain.first().cloned() {
+            chain.push(first);
+        }
+        lines.push(format!("  {}", chain.join(&arrow)));
+        if cycle.group_truncated {
+            let note = format!(
+                "({})",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            );
+            lines.push(format!("    {}", note.dimmed()));
+        }
+        for edge in &cycle.edges {
+            let type_tag = if edge.type_only {
+                format!(" {}", "(type-only)".dimmed())
+            } else {
+                String::new()
+            };
+            lines.push(format!(
+                "    {}:{} {} {}{}",
+                format_display_path(&edge.path, root),
+                edge.line,
+                "\u{2192}".dimmed(),
+                format_display_path(&edge.target_path, root),
+                type_tag,
+            ));
+        }
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
 /// Build boundary violations section grouped by importing file.
 fn build_boundary_violations_section(
     lines: &mut Vec<String>,
@@ -3620,6 +3691,7 @@ fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) 
         "circular dependencies",
     );
     push_summary_part(parts, results.re_export_cycles.len(), "re-export cycles");
+    push_summary_part(parts, results.package_cycles.len(), "package cycles");
     push_summary_part(parts, results.boundary_violations.len(), "violations");
 }
 
@@ -3964,6 +4036,11 @@ fn check_summary_dependency_categories(
             "Re-export cycles",
             results.re_export_cycles.len(),
             severity_to_level(rules.re_export_cycle),
+        ),
+        (
+            "Package cycles",
+            results.package_cycles.len(),
+            severity_to_level(rules.package_cycle),
         ),
         (
             "Boundary violations",
@@ -5421,6 +5498,43 @@ mod tests {
         assert!(text.contains("b.ts"));
         assert!(text.contains("c.ts"));
         assert!(text.contains("\u{2192}"));
+    }
+
+    #[test]
+    fn package_cycle_in_a_truncated_group_shows_a_note() {
+        let root = PathBuf::from("/project");
+        let hop = |from: &str, to: &str, file: &str| PackageCycleEdge {
+            from_package: from.to_string(),
+            to_package: to.to_string(),
+            path: root.join(file),
+            target_path: root.join(file),
+            line: 1,
+            col: 0,
+            type_only: false,
+        };
+        let cycle = |group_truncated: bool| {
+            PackageCycleFinding::with_actions(PackageCycle {
+                packages: vec!["a".to_string(), "b".to_string()],
+                package_roots: vec![root.join("packages/a"), root.join("packages/b")],
+                length: 2,
+                edges: vec![
+                    hop("a", "b", "packages/a/x.ts"),
+                    hop("b", "a", "packages/b/y.ts"),
+                ],
+                group_truncated,
+            })
+        };
+        let mut results = AnalysisResults::default();
+        results.package_cycles.push(cycle(true));
+        results.package_cycles.push(cycle(false));
+        let rules = RulesConfig::default();
+        let text = plain(&build_human_lines(&results, &root, &rules, None));
+        assert_eq!(
+            text.matches("(this package group has more cycles than listed)")
+                .count(),
+            1,
+            "{text}"
+        );
     }
 
     #[test]

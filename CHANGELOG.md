@@ -60,6 +60,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loads through a flag (`eslint -f ./fmt.js`), so you can declare the real
   entries in `entry`.
 
+- **`package-cycle` reports dependency cycles between workspace packages**
+  ([#2955](https://github.com/fallow-rs/fallow/issues/2955)). Each workspace
+  package is a node. Each resolved import from a file in one package to a
+  file in another package is an edge. So the check finds a cycle such as
+  `@repro/a -> @repro/b -> @repro/a` when the file edges `a/x -> b/y` and
+  `b/z -> a/w` do not form a file-level cycle. Packages in such a cycle cannot
+  be built in dependency order.
+  - Each finding in `package_cycles` lists `packages` in cycle order and one
+    example import per hop in `edges`. The example is the first runtime
+    import of the hop, or the first type-only import when the hop has no
+    runtime import.
+  - Type-only imports are edges too, because they still force a build order
+    for declaration builds. A hop that has only type-only imports has
+    `type_only: true`.
+  - Declared `package.json` dependencies are not edges. Only resolved imports
+    are edges.
+  - Imports from test, spec, story, fixture and tooling config files are not
+    edges, because those files are not part of the package build. A package
+    often imports a sibling package in its tests only.
+  - The rule is `package-cycle` (alias `package-cycles`) and the default is
+    `warn`. `--package-cycles` shows only this finding.
+  - `// fallow-ignore-next-line package-cycle` removes one import or
+    re-export statement from the package graph. Other statements in the same
+    file that import the same module stay. `// fallow-ignore-file package-cycle`, or a per-file
+    override that sets `package-cycle` to `off`, removes every import of
+    that file. A cycle stays while one import that is not removed keeps
+    each hop. It goes away when every import on one hop is removed.
+  - `package_roots` gives the root directory of each package in cycle
+    order. When two workspace packages share a name, the label in
+    `packages` is `name (root)`, so the output, the baseline keys and the
+    audit keys name one package.
+  - The list of cycles in one group of connected packages stops at 20, or
+    earlier on a very dense package graph. Each cycle in such a group has
+    `group_truncated: true`, and every output format shows a note.
+  - `--group-by` puts a cycle in the group of the file that holds the first
+    example import. Workspace scope and per-file severity use the same file.
+  - `--changed-since` and diff scope keep a cycle when a changed file holds
+    the example import of one hop. Other imports on a hop do not count. An
+    import that closes a new cycle usually makes a new hop, and then it is
+    the example import of that hop.
+  - The existing `circular-dependencies` check does not change.
+  - The MCP `analyze` tool names package cycles in its description, and
+    `issue_types: ["package-cycles"]` returns them. The new
+    `fallow://tools/analyze` guide explains each `group_by` mode.
+  - The extraction cache version changes, so the first run after the upgrade
+    rebuilds the cache.
+
+  Thanks [@azu](https://github.com/azu) for the report.
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take
@@ -285,6 +334,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `pnpm --filter <pattern> exec <bin>`, `pnpm -r exec <bin>` and
   `dotenv -e <file> -- <bin>` now credit `<bin>` too. Before, the dependency
   could be reported as unused.
+- **`--group-by` keeps re-export cycles.** A grouped run counted re-export
+  cycles in `total_issues` but did not put them in a group, so the JSON
+  `groups` and the human output did not show them. Now the first file of the
+  cycle picks the group, the same as for circular dependencies.
+- **MCP `analyze` returns re-export cycles for `issue_types:
+  ["re-export-cycles"]`.** The typed route sent this request to the
+  circular-dependency runner, which keeps only file-level cycles. So the
+  response had an empty `re_export_cycles` list. Now only a request for
+  `circular-deps` alone uses that runner.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the

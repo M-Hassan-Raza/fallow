@@ -299,6 +299,7 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "circular-dependencies",
     ),
     ("Re-export cycles", "re_export_cycles", "re-export-cycles"),
+    ("Package cycles", "package_cycles", "package-cycles"),
     (
         "Boundary violations",
         "boundary_violations",
@@ -799,6 +800,36 @@ fn check_sections_architecture() -> Vec<SectionSpec> {
                     "| {cycle} | {} | {} |",
                     markdown_table_text(s(it, "kind")),
                     arr(it, "files").count()
+                )
+            },
+        },
+        SectionSpec {
+            name: "Package cycles",
+            key: "package_cycles",
+            header: "Workspace packages that import each other in a loop. Packages in a cycle cannot be built in dependency order.\n\n| Cycle | Example import | Packages |\n|-------|----------------|---------:|\n",
+            row: |it| {
+                let mut chain: Vec<String> = arr(it, "packages")
+                    .filter_map(Value::as_str)
+                    .map(markdown_table_code_span)
+                    .collect();
+                if let Some(first) = chain.first().cloned() {
+                    chain.push(first);
+                }
+                let example = arr(it, "edges")
+                    .next()
+                    .map_or_else(String::new, path_line_cell);
+                let note = if it.get("group_truncated").and_then(Value::as_bool) == Some(true) {
+                    format!(
+                        " ({})",
+                        fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+                    )
+                } else {
+                    String::new()
+                };
+                format!(
+                    "| {}{note} | {example} | {} |",
+                    chain.join(" \u{2192} "),
+                    arr(it, "packages").count()
                 )
             },
         },
@@ -2018,6 +2049,22 @@ fn audit_rows_graph(dead_code: &Value, rows: &mut Vec<AuditRow>) {
             markdown_table_text(str_or(it, "kind", "cycle")),
             it,
         ));
+    }
+    for it in arr(dead_code, "package_cycles") {
+        let location = arr(it, "packages")
+            .filter_map(Value::as_str)
+            .map(markdown_table_code_span)
+            .collect::<Vec<_>>()
+            .join(" -> ");
+        let detail = if it.get("group_truncated").and_then(Value::as_bool) == Some(true) {
+            format!(
+                "cycle ({})",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            )
+        } else {
+            "cycle".to_owned()
+        };
+        rows.push(audit_row("Package cycle", location, detail, it));
     }
 }
 

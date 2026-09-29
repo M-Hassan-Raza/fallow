@@ -89,6 +89,26 @@ fn compact_re_export_cycle_line(
     )
 }
 
+fn compact_package_cycle_line(
+    cycle: &fallow_types::output_dead_code::PackageCycleFinding,
+    root: &Path,
+) -> String {
+    let (anchor, line) = cycle.cycle.edges.first().map_or_else(
+        || (String::new(), 0),
+        |edge| (compact_path(&edge.path, root), edge.line),
+    );
+    let chain = cycle.cycle.chain(" \u{2192} ");
+    let note = if cycle.cycle.group_truncated {
+        format!(
+            " ({})",
+            fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+        )
+    } else {
+        String::new()
+    };
+    format!("package-cycle:{anchor}:{line}:{chain}{note}")
+}
+
 fn compact_boundary_violation_line(
     item: &fallow_types::output_dead_code::BoundaryViolationFinding,
     root: &Path,
@@ -394,6 +414,10 @@ impl<'a> CompactLineBuilder<'a> {
         for cycle in &self.results.re_export_cycles {
             self.lines
                 .push(compact_re_export_cycle_line(cycle, self.root));
+        }
+        for cycle in &self.results.package_cycles {
+            self.lines
+                .push(compact_package_cycle_line(cycle, self.root));
         }
         for violation in &self.results.boundary_violations {
             self.lines
