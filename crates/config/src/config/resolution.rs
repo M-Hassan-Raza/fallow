@@ -1,4 +1,5 @@
 use std::collections::hash_map::DefaultHasher;
+use std::ffi::{OsStr, OsString};
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
@@ -365,6 +366,70 @@ pub struct ResolvedConfig {
     /// sets [`AnalysisSnapshot::Base`] post-resolve for the isolated
     /// `audit --base` pass so diagnostics can name the base revision.
     pub analysis_snapshot: AnalysisSnapshot,
+    /// A stable hash of the config that decides which dead-code findings a
+    /// run reports: the merged user config after `extends`, without the keys
+    /// that only shape other commands or output, plus the loaded external
+    /// plugin and rule pack definitions. It holds no path of this machine,
+    /// so two checkouts of one commit give the same value. Settings that a
+    /// surface changes after resolution (for example `--include-entry-exports`)
+    /// are not in it; the analysis fingerprint adds them.
+    pub detection_config_digest: String,
+}
+
+/// Top-level config keys that do not change which dead-code findings a run
+/// reports. The detection digest leaves them out, so a health threshold or a
+/// cache setting does not change the analysis fingerprint.
+const NON_DETECTION_CONFIG_KEYS: &[&str] = &[
+    "minimumVersion",
+    "duplicates",
+    "similarCode",
+    "health",
+    "security",
+    "fix",
+    "codeowners",
+    "regression",
+    "audit",
+    "failOnParseError",
+    "cache",
+];
+
+/// Serialize `value` with every object key sorted, so a map field gives the
+/// same bytes whatever its insertion order.
+fn canonical_json(value: serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let mut entries: Vec<(String, serde_json::Value)> = map.into_iter().collect();
+            entries.sort_by(|a, b| a.0.cmp(&b.0));
+            serde_json::Value::Object(
+                entries
+                    .into_iter()
+                    .map(|(key, value)| (key, canonical_json(value)))
+                    .collect(),
+            )
+        }
+        serde_json::Value::Array(items) => {
+            serde_json::Value::Array(items.into_iter().map(canonical_json).collect())
+        }
+        other => other,
+    }
+}
+
+fn canonical_json_string<T: Serialize>(value: &T) -> String {
+    serde_json::to_value(value)
+        .map(canonical_json)
+        .map(|value| value.to_string())
+        .unwrap_or_default()
+}
+
+/// The canonical JSON of the detection-affecting user config keys.
+fn detection_config_json(config: &FallowConfig) -> String {
+    let mut value = serde_json::to_value(config).unwrap_or_default();
+    if let serde_json::Value::Object(map) = &mut value {
+        for key in NON_DETECTION_CONFIG_KEYS {
+            map.shift_remove(*key);
+        }
+    }
+    canonical_json(value).to_string()
 }
 
 /// Default per-file size ceiling (in megabytes) for source discovery. A value
@@ -438,9 +503,38 @@ pub const CACHE_DIR_ENV: &str = "FALLOW_CACHE_DIR";
 /// variable has one meaning on every surface. It wins over `cache.dir`.
 #[must_use]
 pub fn cache_dir_env_override() -> Option<PathBuf> {
-    std::env::var_os(CACHE_DIR_ENV)
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
+    std::env::var_os(CACHE_DIR_ENV).and_then(cache_dir_from_env_value)
+}
+
+/// Parse a raw `FALLOW_CACHE_DIR` value. An empty value is no override.
+#[must_use]
+pub fn cache_dir_from_env_value(raw: OsString) -> Option<PathBuf> {
+    Some(PathBuf::from(raw)).filter(|path| !path.as_os_str().is_empty())
+}
+
+/// Environment variable that caps the extraction cache size in megabytes.
+/// It is not a CLI flag because the cap is a platform or CI concern, not an
+/// analysis input (ADR-009).
+pub const CACHE_MAX_SIZE_ENV: &str = "FALLOW_CACHE_MAX_SIZE";
+
+/// Read `FALLOW_CACHE_MAX_SIZE` from the process environment. It wins over
+/// `cache.maxSizeMb` on every host, like [`cache_dir_env_override`].
+#[must_use]
+pub fn cache_max_size_env_override() -> Option<u32> {
+    std::env::var_os(CACHE_MAX_SIZE_ENV)
+        .as_deref()
+        .and_then(cache_max_size_from_env_value)
+}
+
+/// Parse a raw `FALLOW_CACHE_MAX_SIZE` value. Only a positive whole number of
+/// megabytes is an override.
+#[must_use]
+pub fn cache_max_size_from_env_value(raw: &OsStr) -> Option<u32> {
+    raw.to_str()?
+        .trim()
+        .parse::<u32>()
+        .ok()
+        .filter(|mb| *mb > 0)
 }
 
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
@@ -871,6 +965,7 @@ impl FallowConfig {
         cache_max_size_mb: Option<u32>,
     ) -> ResolvedConfig {
         let compiled_ignores = compile_ignore_settings(&self);
+        let config_json = detection_config_json(&self);
 
         let production_rules = resolve_production_rules(self.production, self.rules);
 
@@ -885,6 +980,17 @@ impl FallowConfig {
             no_cache,
             || cache_config_hash(&plugins.external_plugins, &self.flags),
         );
+
+        let detection_config_digest = fallow_types::identity::fnv1a64_parts(&[
+            "config",
+            &config_json,
+            &canonical_json_string(&{
+                let mut sorted: Vec<&ExternalPluginDef> = plugins.external_plugins.iter().collect();
+                sorted.sort_by(|a, b| a.name.cmp(&b.name));
+                sorted
+            }),
+            &canonical_json_string(&plugins.rule_packs),
+        ]);
 
         let path_policy = resolve_path_policy_settings(self.boundaries, self.overrides, &root);
 
@@ -942,6 +1048,7 @@ impl FallowConfig {
             fail_on_parse_error: self.fail_on_parse_error,
             max_file_size_bytes: Some(DEFAULT_MAX_FILE_SIZE_BYTES),
             analysis_snapshot: AnalysisSnapshot::Current,
+            detection_config_digest,
         }
     }
 }

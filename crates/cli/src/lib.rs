@@ -920,6 +920,13 @@ enum Command {
         #[arg(long, value_name = "PATH")]
         file: Vec<std::path::PathBuf>,
 
+        /// Only report the findings with these `finding_id` values. Repeat the flag
+        /// or pass a comma-separated list. Ids stay the same under every filter.
+        /// The JSON output adds `finding_id_query`: a missing id means "resolved"
+        /// only when `conclusive` is true.
+        #[arg(long = "finding-id", value_name = "ID", value_delimiter = ',')]
+        finding_id: Vec<String>,
+
         /// Scope reported findings to this file or directory (default: whole project).
         /// The full project graph is still built; only reported items are narrowed.
         #[arg(value_name = "PATH")]
@@ -4381,11 +4388,17 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         symbol_impact,
         top,
         file,
+        finding_id,
         path,
         ..
     } = command
     else {
         unreachable!("check dispatcher only handles check commands");
+    };
+
+    let finding_ids = match fallow_engine::dead_code::FindingIdFilter::parse(&finding_id) {
+        Ok(filter) => filter,
+        Err(message) => return emit_error(&format!("--finding-id: {message}"), 2, dispatch.output),
     };
 
     let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
@@ -4413,6 +4426,7 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             top,
             file,
             scope,
+            finding_ids,
         },
     )
 }
@@ -5888,6 +5902,7 @@ struct CheckDispatchArgs {
     top: Option<usize>,
     file: Vec<std::path::PathBuf>,
     scope: Option<std::path::PathBuf>,
+    finding_ids: Option<fallow_engine::dead_code::FindingIdFilter>,
 }
 
 #[derive(Clone)]
@@ -6111,6 +6126,7 @@ fn dispatch_check_run(
         top: args.top,
         file: &args.file,
         scope: args.scope.clone(),
+        finding_ids: args.finding_ids.as_ref(),
         include_entry_exports: cli.include_entry_exports,
         fail_on_parse_error: cli.fail_on_parse_error,
         summary: cli.summary,
@@ -6289,6 +6305,7 @@ fn dispatch_dupes_run(
         group_by: cli.group_by,
         performance: cli.performance,
         include_fragments: !args.no_fragments,
+        retain_unfiltered_report: false,
         scope: args.scope.clone(),
     })
 }

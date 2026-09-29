@@ -299,6 +299,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a `!` entry, for example from `fallow migrate` of a knip `ignore` list, now
   applies it as an exception.
 
+- **`fallow dead-code --finding-id <id>` reports only the findings you ask
+  for.** Repeat the flag or pass a comma-separated list. The filter runs after
+  every other filter and after the baseline, and the ids do not change. The
+  JSON output adds `finding_id_query` with `requested`, `found`, `missing`,
+  `filtered`, `conclusive` and `inconclusive_reasons`. When `conclusive` is
+  true, a missing id means the finding is fixed, suppressed, or ignored by
+  config. A scope, `--changed-since`, a workspace, `--file`, an issue-type
+  filter, production mode or `includeEntryExports` (also from the config), a
+  baseline or a rule set to `off` makes the answer not conclusive, because
+  each one can hide a finding that still exists. A missing id is then unknown.
+  The answer also carries `analysis_fingerprint`, a hash of the fallow
+  version, the config, the plugins, the detection options, the ignore files,
+  the manifests, the tsconfig and jsconfig files and the plugin config files.
+  Store it with your verdict: when a later query gives another fingerprint,
+  treat a missing id as unknown. `filtered` lists the requested findings that
+  still exist but that a filter of the run removed. The exit code follows the
+  normal rule, and a malformed id exits with code 2. The MCP `analyze` tool
+  (`finding_ids`), the programmatic API (`DeadCodeOptions::finding_ids`) and
+  the Node bindings (`findingIds`) take the same option.
+
 ### Changed
 
 - **The release workflow builds the Linux x64 (glibc) and macOS arm64
@@ -403,6 +423,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The programmatic combined runner reports the same health duplication as
+  `fallow health`.** `run_combined` gave health the duplication report of the
+  run and recomputed its stats from all parsed files. Files that
+  `duplicates.ignore` excludes then counted in the duplication percentage, so
+  the score could differ from `fallow health --score`. When health covers
+  every file, it now uses the report unchanged.
 - **`--quiet` removes the level notes of `fallow report --from`.** When a
   saved report has findings without `effective_severity` and no config is
   found, `report --from` prints a note that the default rules set their
@@ -779,6 +805,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server keeps one subdirectory for each project root. Two editor windows on
   two projects thus keep both caches warm. The CLI still writes directly into
   the directory, so CI caches that move between checkout paths keep working.
+- **`FALLOW_CACHE_MAX_SIZE` caps the cache on every surface.** Before this
+  fix, only the CLI read the variable. The language server, the MCP server and
+  the Node bindings used only `cache.maxSizeMb`. These hosts now read the
+  variable in the same way as the CLI, and it wins over `cache.maxSizeMb`.
+
+### Performance
+
+- **Duplicate detection no longer slows down on long runs of one repeated
+  token.** A generated stylesheet can repeat one value thousands of times.
+  Each repeat length is a nested clone candidate, and the detector copied and
+  sorted all positions again for each candidate. The cost grew with the
+  square of the run length. On the next.js repository, five test stylesheets
+  with about 19,000 repeats each made `fallow dupes` take 13 s, and the bare
+  `fallow` command take 32 s. Large candidates now share one ordered position
+  set with their nested candidates. `fallow dupes` now takes 1.3 s and the
+  bare command 5 s. The findings do not change.
+- **The bare `fallow` command detects duplicates once.** Health ran its own
+  duplicate detection after the duplication section had done the same work.
+  Health now uses the report of the duplication section when both cover the
+  same files with the same duplicates config. That is the case without
+  `--dupes-*` overrides, `--changed-since`, a workspace scope, or different
+  production modes. The bare command then runs one duplicate detection in
+  place of two. On the next.js repository, one detection takes about 1.3 s.
+  The output does not change.
 
 ## [3.30.0] - 2026-09-26
 
