@@ -953,7 +953,7 @@ fn print_ci_comment_format_with_status(
                     analysis,
                     provider,
                     issues,
-                    status.message,
+                    status.into(),
                 )
             },
             |conclusion| {
@@ -962,7 +962,7 @@ fn print_ci_comment_format_with_status(
                     provider,
                     issues,
                     conclusion,
-                    status.message,
+                    status.into(),
                 )
             },
         )

@@ -622,6 +622,7 @@ fn apply_duplication_baseline(
         scope_reasons,
         unrecognised_format,
         saved_by,
+        legacy_keys: false,
     }))
 }
 

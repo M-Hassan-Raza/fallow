@@ -2110,6 +2110,7 @@ fn baseline_staleness_fixture(
         moved_entries: 0,
         unrecognised_format: false,
         saved_by: None,
+        format: None,
         scope_reasons: BaselineScopeReasons::empty(),
     }
 }
@@ -2131,6 +2132,7 @@ fn unrecognised_baseline_fixture() -> BaselineStaleness {
         moved_entries: 0,
         unrecognised_format: true,
         saved_by: Some("health"),
+        format: None,
         scope_reasons: BaselineScopeReasons::empty(),
     }
 }
