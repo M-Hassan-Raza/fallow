@@ -57,6 +57,19 @@ lifecycle behavior.
   `security-sink` and `security-client-server-leak` default to `off`, retain
   those exact diagnostic codes, and publish at information severity because
   candidates are not verified vulnerabilities.
+- The component health signals (`prop-drilling`, `thin-wrapper`,
+  `duplicate-prop-shape`) publish at hint severity. Their rules default to
+  `off`, so the diagnostics show only in a project that turned a rule on.
+  They stay out of the pull request surfaces (CodeClimate, GitHub annotations
+  and summary, PR comment, review), because those surfaces gate on changes
+  and the signals do not gate.
+- A config pattern that matched nothing (`ignoreFindings`,
+  `ignoreDependencies`) is an information diagnostic with the `unnecessary`
+  tag on the entry in the config file that declares the list. The code is the
+  `workspace_diagnostics[]` kind and the message is the entry `message`.
+  `FallowConfig::locate_list_entry` finds the entry through the `extends`
+  merge order. A pattern without a local entry (for example from a remote
+  `extends` config) goes to the output log, once per changed set.
 - The `workspace/didChangeWatchedFiles` registration derives its config-file
   globs from `fallow_config::CONFIG_FILE_NAMES`, the list the loader itself
   reads, and `type_aware_resolution_file` matches the same names. Add a config
@@ -131,6 +144,20 @@ the filter was applied. It merges into an existing object instead of erasing
 metadata such as `circularDependency: { cycleId, fileCount }`. Circular
 findings share a cycle identifier and use each import edge for their ranges;
 legacy results without edges retain the first-file fallback.
+
+Each dead-code diagnostic sets `data.findingId` to the `finding_id` of its
+finding. The value has the form `dc1:<rule-token>:<16 hex digits>`, with a
+`~k` suffix for findings that share a subject. It is the same value as the
+`finding_id` field of the JSON output, so an editor client can join a
+diagnostic to a CLI, MCP or CI report. Use `diagnostics::finding_data` for a new producer and
+`diagnostics::with_finding_id` when the producer already sets `data`: both
+merge the key into the object and keep the other keys. A finding without an
+id keeps `data` absent. The id does not depend on the line or column, so it
+stays the same when code above the finding moves. A change to the identity
+parts of a rule changes the `dc1` scheme and is a breaking change. One finding
+can give more than one diagnostic (for example one per cycle member), and each
+of them carries the same id. Security diagnostics do not carry `findingId`
+yet: the security id is stamped in the CLI, so the LSP results do not have it.
 
 `document_state::uri_is_stale` compares the captured disk-match state and
 version with the live document. A dirty initial buffer, a newer version, or a

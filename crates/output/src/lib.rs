@@ -125,14 +125,15 @@ pub use check::{
     serialize_check_grouped_json_output, serialize_check_json_output,
 };
 pub use ci_output::{
-    CiIssue, CiLocation, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_SUFFIX_V2,
-    MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS, PrCommentRenderInput, ReviewCommentRenderInput,
-    ReviewEnvelopeRenderInput, ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation,
-    ReviewGitlabDiffRefs, apply_path_prefix, cap_body_with_marker, command_title,
-    composite_fingerprint, escape_md, github_check_conclusion, group_review_issues_by_path_line,
-    is_project_level_rule, issues_from_codeclimate, issues_from_codeclimate_issues,
-    markdown_code_span, markdown_table_code_span, markdown_table_text, render_pr_comment,
-    render_pr_comment_with_verdict, render_review_comment_for_group, render_review_envelope,
+    CiIssue, CiLocation, CiProvider, GroupedReviewIssues, MARKER_PREFIX_V2, MARKER_PREFIX_V3,
+    MARKER_SUFFIX_V2, MARKER_SUFFIX_V3, MAX_COMMENT_BODY_BYTES, PROJECT_LEVEL_RULE_IDS,
+    PrCommentRenderInput, ReviewCommentRenderInput, ReviewEnvelopeRenderInput,
+    ReviewEnvelopeRenderResult, ReviewEnvelopeTruncation, ReviewGitlabDiffRefs, apply_path_prefix,
+    cap_body_with_marker, command_title, composite_fingerprint, escape_md, github_check_conclusion,
+    group_review_issues_by_path_line, is_project_level_rule, issues_from_codeclimate,
+    issues_from_codeclimate_issues, markdown_code_span, markdown_table_code_span,
+    markdown_table_text, render_pr_comment, render_pr_comment_with_verdict,
+    render_review_comment_for_group, render_review_envelope,
     render_review_envelope_with_conclusion, render_scoped_review_envelope,
     render_scoped_review_envelope_with_conclusion, review_label_from_codeclimate,
     summary_fingerprint, summary_label,
@@ -307,13 +308,14 @@ pub use report_contract::{
 pub use request_outcomes::{RequestName, RequestOutcome, RequestOutcomes, RequestStatus};
 pub use review_envelopes::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
-    GitLabReviewPositionType, MARKER_REGEX_V2, ReviewCheckConclusion, ReviewComment,
-    ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput, ReviewEnvelopeSchema,
-    ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewId, ReviewProvider,
-    ReviewReconcileOutput, ReviewReconcileSchema, body_matches_review_id, default_marker_regex,
-    default_marker_regex_flags, is_false, parse_review_id_marker, review_id_marker,
-    serialize_review_envelope_json_output, serialize_review_reconcile_json_output,
-    serialize_scoped_review_envelope_json_output, validate_review_body_scope,
+    GitLabReviewPositionType, MARKER_REGEX_V2, MARKER_REGEX_V3, ReviewCheckConclusion,
+    ReviewComment, ReviewEnvelopeEvent, ReviewEnvelopeMeta, ReviewEnvelopeOutput,
+    ReviewEnvelopeSchema, ReviewEnvelopeSummary, ReviewEnvelopeWireOutput, ReviewId,
+    ReviewProvider, ReviewReconcileOutput, ReviewReconcileSchema, body_matches_review_id,
+    default_marker_regex, default_marker_regex_flags, is_false, parse_review_id_marker,
+    review_id_marker, serialize_review_envelope_json_output,
+    serialize_review_reconcile_json_output, serialize_scoped_review_envelope_json_output,
+    validate_review_body_scope,
 };
 pub use root_envelopes::{
     AUDIT_SCHEMA_VERSION, AuditCommand, AuditOutput, COMBINED_SCHEMA_VERSION, CombinedMeta,
@@ -322,9 +324,9 @@ pub use root_envelopes::{
     serialize_named_json_output,
 };
 pub use sarif::{
-    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput, SarifFindingFields,
-    SarifFindingInput, SarifResultInput, SarifRuleInput, SarifSourceSnippetCache,
-    append_sarif_findings, build_sarif_document, build_sarif_result,
+    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINDING_ID_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput,
+    SarifFindingFields, SarifFindingInput, SarifResultInput, SarifRuleInput,
+    SarifSourceSnippetCache, append_sarif_findings, build_sarif_document, build_sarif_result,
     build_sarif_result_with_snippet, build_sarif_rule, ensure_unique_result_fingerprints,
     sarif_finding_fingerprint,
 };
@@ -378,6 +380,6 @@ pub use type_aware_envelopes::{
     serialize_type_aware_status_json_output,
 };
 pub use walkthrough_render::{
-    MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_names, clean_decision_fact,
+    MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_member_list, cap_names, clean_decision_fact,
     decisions_outside_units, visible_stage_units,
 };

@@ -138,7 +138,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "analyze",
         kind: "analysis",
-        description: "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations",
+        description: "Full dead-code analysis: unused files, exports, types, dependencies, circular dependencies, and boundary violations, each with a stable finding_id",
         cli_command: Some("fallow dead-code --format json --quiet"),
         key_params: &[
             "issue_types",
@@ -156,7 +156,7 @@ pub const MCP_TOOLS: &[McpToolInfo] = &[
     McpToolInfo {
         name: "check_changed",
         kind: "analysis",
-        description: "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review)",
+        description: "Incremental dead-code analysis scoped to files changed since a git ref (ideal for PR review); findings keep their finding_id",
         cli_command: Some("fallow dead-code --changed-since <ref> --format json --quiet"),
         key_params: &["since", "baseline", "fail_on_regression"],
         license: McpToolLicense::Free,
@@ -1052,7 +1052,7 @@ pub const CAPABILITY_PARITY: &[CapabilityParityRow] = &[
         napi_export: None,
         mcp_tool: None,
         omission_note: Some(
-            "Rust api variant for hosts that supply an explicit cache directory. The CLI uses it to honor FALLOW_CACHE_DIR without adding ambient environment reads to the api. No napi export or dedicated MCP tool.",
+            "Rust api variant for hosts that supply an explicit cache directory. The value wins over FALLOW_CACHE_DIR and cache.dir, and run_doctor already honors FALLOW_CACHE_DIR. No napi export or dedicated MCP tool.",
         ),
     },
     // -- MCP-only tools that shell out to the CLI: no api runner, no napi

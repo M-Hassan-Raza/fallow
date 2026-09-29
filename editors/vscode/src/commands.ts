@@ -536,6 +536,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
       : [],
     circular_dependencies: types["circular-dependencies"] ? result.circular_dependencies : [],
     re_export_cycles: types["re-export-cycle"] ? result.re_export_cycles : [],
+    package_cycles: types["package-cycle"] ? result.package_cycles : [],
     boundary_violations: types["boundary-violation"] ? result.boundary_violations : [],
     boundary_coverage_violations: types["boundary-violation"]
       ? result.boundary_coverage_violations
@@ -554,6 +555,9 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     misconfigured_dependency_overrides: types["misconfigured-dependency-overrides"]
       ? result.misconfigured_dependency_overrides
       : [],
+    prop_drilling_chains: types["prop-drilling"] ? result.prop_drilling_chains : [],
+    thin_wrappers: types["thin-wrapper"] ? result.thin_wrappers : [],
+    duplicate_prop_shapes: types["duplicate-prop-shape"] ? result.duplicate_prop_shapes : [],
   };
   const totalIssues = countCheckIssues(filtered);
   const summary = {
@@ -579,6 +583,7 @@ const filterCheckResult = (result: FallowCheckResult): FallowCheckResult => {
     dev_dependencies_in_production: filtered.dev_dependencies_in_production?.length ?? 0,
     circular_dependencies: filtered.circular_dependencies?.length ?? 0,
     re_export_cycles: filtered.re_export_cycles?.length ?? 0,
+    package_cycles: filtered.package_cycles?.length ?? 0,
     boundary_violations: filtered.boundary_violations?.length ?? 0,
     boundary_coverage_violations: filtered.boundary_coverage_violations?.length ?? 0,
     boundary_call_violations: filtered.boundary_call_violations?.length ?? 0,

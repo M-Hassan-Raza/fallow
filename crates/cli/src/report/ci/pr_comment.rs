@@ -2,8 +2,6 @@ use crate::report::sink::outln;
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
-use serde_json::Value;
-
 #[cfg(test)]
 use fallow_output::is_project_level_rule;
 use fallow_output::issues_from_codeclimate_issues;
@@ -82,6 +80,9 @@ pub struct PrCommentStatus<'a> {
     /// One row per gate the run armed, appended to the decision surface's
     /// `gates` array after the command row.
     pub gates: &'a [PrDecisionGate],
+    /// The run diagnostics. The unmatched config patterns among them become a
+    /// Markdown section after the findings, as in `--format markdown`.
+    pub config_patterns: &'a [fallow_config::WorkspaceDiagnostic],
 }
 
 /// Render the sticky comment body. `conclusion` is the gate outcome the caller
@@ -94,6 +95,16 @@ pub fn render_pr_comment(
     issues: &[CiIssue],
     conclusion: Option<PrDecisionConclusion>,
 ) -> String {
+    render_pr_comment_body(command, provider, issues, conclusion, None)
+}
+
+fn render_pr_comment_body(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+    conclusion: Option<PrDecisionConclusion>,
+    trailing_section: Option<&str>,
+) -> String {
     fallow_output::render_pr_comment_with_verdict(
         &fallow_output::PrCommentRenderInput {
             command,
@@ -102,13 +113,14 @@ pub fn render_pr_comment(
             marker_id: sticky_marker_id(),
             max_comments: max_comments(),
             category_for_rule: &category_for_rule,
+            trailing_section,
         },
         conclusion.map(super::review::review_conclusion),
     )
 }
 
-/// [`render_pr_comment`] with the status note appended, which is the body both
-/// integrations post.
+/// [`render_pr_comment`] with the unmatched config patterns and the status
+/// note appended, which is the body both integrations post.
 ///
 /// Separate from the printing path so the body a reviewer reads is
 /// snapshot-testable: the note carries the baseline advisory and the gate
@@ -119,9 +131,12 @@ pub fn render_pr_comment_with_status_note(
     provider: Provider,
     issues: &[CiIssue],
     conclusion: Option<PrDecisionConclusion>,
+    config_patterns: &[fallow_config::WorkspaceDiagnostic],
     status_message: Option<&str>,
 ) -> String {
-    let mut body = render_pr_comment(command, provider, issues, conclusion);
+    let section = crate::report::config_pattern_text::markdown_section(config_patterns);
+    let mut body =
+        render_pr_comment_body(command, provider, issues, conclusion, section.as_deref());
     if let Some(message) = status_message {
         body.push_str("\n\n> ");
         body.push_str(message);
@@ -209,34 +224,6 @@ fn sanitize_marker_segment(value: &str) -> String {
 }
 
 #[must_use]
-pub(crate) fn print_pr_comment(
-    command: &str,
-    provider: Provider,
-    codeclimate: &Value,
-    status: PrCommentStatus<'_>,
-) -> ExitCode {
-    let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
-        issues_from_codeclimate(codeclimate),
-    ));
-    let conclusion = issue_decision_conclusion(issues.is_empty());
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status)
-}
-
-#[must_use]
-pub(crate) fn print_pr_comment_with_status(
-    command: &str,
-    provider: Provider,
-    codeclimate: &Value,
-    conclusion: PrDecisionConclusion,
-    status: PrCommentStatus<'_>,
-) -> ExitCode {
-    let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
-        issues_from_codeclimate(codeclimate),
-    ));
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status)
-}
-
-#[must_use]
 pub(crate) fn print_pr_comment_from_codeclimate_issues(
     command: &str,
     provider: Provider,
@@ -274,6 +261,7 @@ fn print_pr_comment_from_ci_issues(
         provider,
         issues,
         Some(conclusion),
+        status.config_patterns,
         status.message,
     );
     let max_comments = max_comments();
@@ -527,6 +515,7 @@ mod tests {
                 other_locations: Vec::new(),
                 owner: None,
                 group: None,
+                legacy_fingerprint: None,
             })
             .collect::<Vec<_>>();
         let value = serde_json::to_value(&typed).expect("typed fixture serializes");
@@ -595,6 +584,7 @@ mod tests {
             "fallow/duplicate-export",
             "fallow/circular-dependency",
             "fallow/re-export-cycle",
+            "fallow/package-cycle",
             "fallow/boundary-violation",
             "fallow/stale-suppression",
             "fallow/private-type-leak",
@@ -619,6 +609,7 @@ mod tests {
             description: "Function is hard to safely change.".to_owned(),
             severity: "minor".to_owned(),
             fingerprint: "abc".to_owned(),
+            legacy_fingerprint: None,
         }];
         let envelope = PrCommentEnvelope {
             marker_id: "fallow-results".to_owned(),
@@ -641,6 +632,7 @@ mod tests {
             PrCommentStatus {
                 message: Some(crate::report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
                 gates: &[],
+                config_patterns: &[],
             },
         );
 
@@ -689,6 +681,7 @@ mod tests {
             PrCommentStatus {
                 message: None,
                 gates: &gates,
+                config_patterns: &[],
             },
         );
 
@@ -702,8 +695,37 @@ mod tests {
     fn a_body_without_a_note_is_the_bare_render() {
         let issues: Vec<CiIssue> = Vec::new();
         assert_eq!(
-            render_pr_comment_with_status_note("check", Provider::Github, &issues, None, None),
+            render_pr_comment_with_status_note("check", Provider::Github, &issues, None, &[], None),
             render_pr_comment("check", Provider::Github, &issues, None)
+        );
+    }
+
+    #[test]
+    fn unmatched_config_patterns_follow_the_findings_and_precede_the_footer() {
+        let issues: Vec<CiIssue> = Vec::new();
+        let root = std::path::Path::new("/project");
+        let patterns = [fallow_config::WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                pattern: "@typo/*".to_owned(),
+            },
+        )];
+        let body = render_pr_comment_with_status_note(
+            "check",
+            Provider::Github,
+            &issues,
+            None,
+            &patterns,
+            Some("Gate outcomes: passed."),
+        );
+        let section = body.find("## Unmatched config patterns").expect("section");
+        let footer = body.find("Generated by fallow.").expect("footer");
+        let note = body.find("> Gate outcomes").expect("note");
+        assert!(section < footer && footer < note, "{body}");
+        assert!(
+            body.contains("- `ignoreDependencies`: `@typo/*` matched nothing in this run"),
+            "{body}"
         );
     }
 

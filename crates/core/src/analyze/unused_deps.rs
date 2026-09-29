@@ -3,7 +3,7 @@ use std::sync::OnceLock;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_config::{PackageJson, ResolvedConfig};
+use fallow_config::{IgnoreDependencyMatcher, PackageJson, ResolvedConfig};
 
 use crate::discover::FileId;
 use crate::graph::ModuleGraph;
@@ -79,7 +79,7 @@ pub struct SharedDepSets<'a> {
     pub package_plugin_referenced: &'a FxHashSet<&'a str>,
     pub plugin_tooling: &'a FxHashSet<&'a str>,
     pub script_used: &'a FxHashSet<&'a str>,
-    pub ignore_deps: &'a FxHashSet<&'a str>,
+    pub ignore_deps: &'a IgnoreDependencyMatcher,
 }
 
 struct PeerDependencyResolver {
@@ -387,7 +387,7 @@ fn shared_dep_sets<'a>(
     package_plugin_referenced: &'a FxHashSet<&'a str>,
     plugin_tooling: &'a FxHashSet<&'a str>,
     script_used: &'a FxHashSet<&'a str>,
-    ignore_deps: &'a FxHashSet<&'a str>,
+    ignore_deps: &'a IgnoreDependencyMatcher,
 ) -> SharedDepSets<'a> {
     SharedDepSets {
         plugin_referenced,
@@ -416,6 +416,9 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
     input
         .dep_names
         .into_iter()
+        // Checked first so every declared name reaches the matcher, which
+        // lets it report a glob that matches no declared dependency.
+        .filter(|dep| !input.shared.ignore_deps.is_declared_ignored(dep))
         .filter(|dep| !(input.is_used)(dep))
         .filter(|dep| !input.shared.script_used.contains(dep.as_str()))
         .filter(|dep| !input.category.check_implicit || !is_implicit_dependency(dep))
@@ -433,7 +436,6 @@ pub fn collect_unused_for_category(input: UnusedCategoryInput<'_>) -> Vec<Unused
                 .package_plugin_referenced
                 .contains(dep.as_str())
         })
-        .filter(|dep| !input.shared.ignore_deps.contains(dep.as_str()))
         .map(|dep| {
             let line = input
                 .pkg_content
@@ -606,7 +608,7 @@ struct UnusedDependencyScan<'a> {
     script_used: FxHashSet<&'a str>,
     package_referenced: FxHashMap<PathBuf, FxHashSet<&'a str>>,
     empty_package_referenced: FxHashSet<&'a str>,
-    ignore_deps: FxHashSet<&'a str>,
+    ignore_deps: &'a IgnoreDependencyMatcher,
     usage: DependencyUsageIndices<'a>,
 }
 
@@ -619,7 +621,7 @@ impl<'a> UnusedDependencyScan<'a> {
                 .unwrap_or(&self.empty_package_referenced),
             &self.plugin_tooling,
             &self.script_used,
-            &self.ignore_deps,
+            self.ignore_deps,
         )
     }
 
@@ -635,7 +637,7 @@ impl<'a> UnusedDependencyScan<'a> {
             plugin_referenced: &self.plugin_referenced,
             plugin_tooling: &self.plugin_tooling,
             script_used: &self.script_used,
-            ignore_deps: &self.ignore_deps,
+            ignore_deps: self.ignore_deps,
             workspace_used_packages: &self.usage.workspace_used_packages,
             bundled_workspace_usage: &self.usage.bundled_workspace_usage,
             package_workspace_usage: &self.usage.package_workspace_usage,
@@ -658,11 +660,7 @@ fn build_unused_dependency_scan<'a>(
             .map(package_referenced_dependencies_by_path)
             .unwrap_or_default(),
         empty_package_referenced: FxHashSet::default(),
-        ignore_deps: config
-            .ignore_dependencies
-            .iter()
-            .map(String::as_str)
-            .collect(),
+        ignore_deps: &config.ignore_dependencies,
         usage: collect_dependency_usage_indices(graph, config, workspaces),
     }
 }
@@ -804,7 +802,7 @@ struct WorkspaceUnusedDependencyInputs<'a> {
     plugin_referenced: &'a FxHashSet<&'a str>,
     plugin_tooling: &'a FxHashSet<&'a str>,
     script_used: &'a FxHashSet<&'a str>,
-    ignore_deps: &'a FxHashSet<&'a str>,
+    ignore_deps: &'a IgnoreDependencyMatcher,
     workspace_used_packages: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
     bundled_workspace_usage: &'a FxHashMap<&'a Path, FxHashSet<&'a str>>,
     package_workspace_usage: &'a FxHashMap<String, Vec<PathBuf>>,
@@ -977,7 +975,7 @@ pub fn find_type_only_dependencies(
         if workspace_names.contains(dep.as_str()) {
             continue;
         }
-        if config.ignore_dependencies.iter().any(|d| d == &dep) {
+        if config.ignore_dependencies.is_ignored(&dep) {
             continue;
         }
 
@@ -1077,11 +1075,7 @@ pub fn find_test_only_dependencies(
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
-    let ignore_deps: FxHashSet<&str> = config
-        .ignore_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
+    let ignore_deps = &config.ignore_dependencies;
 
     let mut test_only_deps = Vec::new();
 
@@ -1089,7 +1083,7 @@ pub fn find_test_only_dependencies(
         if workspace_names.contains(dep.as_str()) {
             continue;
         }
-        if ignore_deps.contains(dep.as_str()) {
+        if ignore_deps.is_ignored(&dep) {
             continue;
         }
 
@@ -1111,13 +1105,16 @@ pub fn find_test_only_dependencies(
 /// Return `true` when at least one PRODUCTION (non-test, non-config) file
 /// imports `dep` via a runtime/value import.
 ///
-/// `package_usage` records one entry per import statement and
-/// `type_only_package_usage` one entry per `import type` statement, so for a
-/// given file the count of value imports is `total - type_only`. A file with a
-/// value import of `dep` is therefore one whose `total` occurrences exceed its
-/// `type_only` occurrences. This mirrors the per-statement granularity the
+/// `package_usage` records one entry per import statement,
+/// `type_only_package_usage` one entry per `import type` statement and
+/// `asset_package_usage` one entry per import through a webpack asset loader
+/// (`raw-loader!pkg/file.txt`, read at build time). So for a given file the
+/// count of runtime value imports is `total - type_only - asset`. A file with
+/// a value import of `dep` is therefore one whose `total` occurrences exceed
+/// its build-time occurrences. This mirrors the per-statement granularity the
 /// `type-only-dependency` / `test-only-dependency` detectors rely on, so a
-/// production file that imports `dep` ONLY via `import type` is not flagged.
+/// production file that imports `dep` ONLY via `import type` or through an
+/// asset loader is not flagged.
 ///
 /// Files owned by a workspace package are skipped: this rule reasons about the
 /// ROOT manifest only, and a workspace file's runtime resolution is governed by
@@ -1147,15 +1144,20 @@ fn dependency_has_prod_value_import(
     for id in file_ids {
         per_file.entry(*id).or_default().0 += 1;
     }
-    if let Some(type_only_ids) = graph.type_only_package_usage.get(dep) {
-        for id in type_only_ids {
-            per_file.entry(*id).or_default().1 += 1;
-        }
+    let build_time_ids = graph
+        .type_only_package_usage
+        .get(dep)
+        .into_iter()
+        .chain(graph.asset_package_usage.get(dep))
+        .flatten();
+    for id in build_time_ids {
+        per_file.entry(*id).or_default().1 += 1;
     }
 
-    per_file.iter().any(|(id, (total, type_only))| {
-        // No value import in this file: every occurrence was `import type`.
-        if total <= type_only {
+    per_file.iter().any(|(id, (total, build_time))| {
+        // No runtime value import in this file: every occurrence was
+        // `import type` or a read through an asset loader.
+        if total <= build_time {
             return false;
         }
         graph.modules.get(id.0 as usize).is_some_and(|module| {
@@ -1186,7 +1188,8 @@ fn dependency_has_prod_value_import(
 ///
 /// A dev dependency is NOT flagged when its only production imports are
 /// type-only (types are erased at build time, mirroring the
-/// `type-only-dependency` import-kind analysis), when it is also listed in
+/// `type-only-dependency` import-kind analysis) or reads through a webpack
+/// asset loader (the bundle holds the file content), when it is also listed in
 /// `dependencies` / `peerDependencies` / `optionalDependencies` (runtime is
 /// provided by another manifest section), when it is a known tooling package
 /// (`@types/*`, `typescript`, ...), a workspace package, or config-ignored via
@@ -1209,11 +1212,7 @@ pub fn find_dev_dependencies_in_production(
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
-    let ignore_deps: FxHashSet<&str> = config
-        .ignore_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
+    let ignore_deps = &config.ignore_dependencies;
 
     // Packages resolvable at runtime through another manifest section: a
     // devDependency that is also a prod/peer/optional dependency is legitimately
@@ -1239,7 +1238,7 @@ pub fn find_dev_dependencies_in_production(
         if workspace_names.contains(dep.as_str()) {
             continue;
         }
-        if ignore_deps.contains(dep.as_str()) {
+        if ignore_deps.is_ignored(&dep) {
             continue;
         }
         if runtime_provided.contains(dep.as_str()) {
@@ -1504,7 +1503,7 @@ pub fn find_unlisted_dependencies(input: UnlistedDependencyInput<'_>) -> Vec<Unl
         provided_dependency_rules: parts.provided_dependency_rules,
         compiled_provided_dependency_rules: &parts.compiled_provided_dependency_rules,
         import_spans_by_file: &parts.import_spans_by_file,
-        ignore_deps: &parts.ignore_deps,
+        ignore_deps: parts.ignore_deps,
         line_offsets_by_file: input.line_offsets_by_file,
         workspace_ownership: &workspace_ownership,
     };
@@ -1521,7 +1520,7 @@ struct UnlistedDependencyContextParts<'a> {
     provided_dependency_rules: &'a [ProvidedDependencyRule],
     compiled_provided_dependency_rules: Vec<CompiledProvidedDependencyRule<'a>>,
     import_spans_by_file: FxHashMap<FileId, Vec<(&'a str, &'a str, u32)>>,
-    ignore_deps: FxHashSet<&'a str>,
+    ignore_deps: &'a IgnoreDependencyMatcher,
 }
 
 struct UnlistedDependencyPluginParts<'a> {
@@ -1596,12 +1595,7 @@ fn build_unlisted_dependency_context_parts<'a>(
     let plugin_parts = build_unlisted_dependency_plugin_parts(input.plugin_result);
     let import_spans_by_file = import_spans_by_file(input.resolved_modules);
 
-    let ignore_deps = input
-        .config
-        .ignore_dependencies
-        .iter()
-        .map(String::as_str)
-        .collect();
+    let ignore_deps = &input.config.ignore_dependencies;
 
     UnlistedDependencyContextParts {
         all_deps,
@@ -1652,7 +1646,7 @@ struct UnlistedDependencyContext<'a> {
     provided_dependency_rules: &'a [ProvidedDependencyRule],
     compiled_provided_dependency_rules: &'a [CompiledProvidedDependencyRule<'a>],
     import_spans_by_file: &'a FxHashMap<FileId, Vec<(&'a str, &'a str, u32)>>,
-    ignore_deps: &'a FxHashSet<&'a str>,
+    ignore_deps: &'a IgnoreDependencyMatcher,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     workspace_ownership: &'a WorkspaceOwnershipIndex,
 }
@@ -1660,7 +1654,7 @@ struct UnlistedDependencyContext<'a> {
 fn should_skip_unlisted_package(package_name: &str, ctx: &UnlistedDependencyContext<'_>) -> bool {
     ((package_name != "bun" && is_builtin_module(package_name)) || is_path_alias(package_name))
         || is_virtual_module(package_name)
-        || ctx.ignore_deps.contains(package_name)
+        || ctx.ignore_deps.is_ignored(package_name)
         || (ctx.plugin_tooling.contains(package_name)
             && !package_has_file_scoped_provider(ctx.provided_dependency_rules, package_name))
         || ctx

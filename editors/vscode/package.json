@@ -203,6 +203,10 @@
         "title": "Fallow: Hide Diagnostic Category"
       },
       {
+        "command": "fallow.copyFindingId",
+        "title": "Fallow: Copy Finding Id"
+      },
+      {
         "command": "fallow.license.activate",
         "title": "Fallow: Activate License",
         "category": "Fallow",
@@ -302,6 +306,7 @@
             "dev-dependencies-in-production": true,
             "circular-dependencies": true,
             "re-export-cycle": true,
+            "package-cycle": true,
             "boundary-violation": true,
             "policy-violation": true,
             "invalid-client-export": true,
@@ -323,7 +328,10 @@
             "empty-catalog-groups": true,
             "unresolved-catalog-references": true,
             "unused-dependency-overrides": true,
-            "misconfigured-dependency-overrides": true
+            "misconfigured-dependency-overrides": true,
+            "prop-drilling": true,
+            "thin-wrapper": true,
+            "duplicate-prop-shape": true
           },
           "description": "Toggle individual issue types on or off. Uses kebab-case names matching fallow's rules config.",
           "properties": {
@@ -379,6 +387,9 @@
               "type": "boolean"
             },
             "re-export-cycle": {
+              "type": "boolean"
+            },
+            "package-cycle": {
               "type": "boolean"
             },
             "boundary-violation": {
@@ -445,6 +456,15 @@
               "type": "boolean"
             },
             "misconfigured-dependency-overrides": {
+              "type": "boolean"
+            },
+            "prop-drilling": {
+              "type": "boolean"
+            },
+            "thin-wrapper": {
+              "type": "boolean"
+            },
+            "duplicate-prop-shape": {
               "type": "boolean"
             }
           }
@@ -801,6 +821,10 @@
         },
         {
           "command": "fallow.muteDiagnosticCategory",
+          "when": "false"
+        },
+        {
+          "command": "fallow.copyFindingId",
           "when": "false"
         },
         {

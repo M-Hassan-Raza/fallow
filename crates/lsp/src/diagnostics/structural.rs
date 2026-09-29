@@ -7,7 +7,7 @@ use ls_types::{
 
 use fallow_api::EditorAnalysisResults as AnalysisResults;
 
-use super::{FIRST_LINE_RANGE, doc_link_for_code};
+use super::{FIRST_LINE_RANGE, doc_link_for_code, finding_data, with_finding_id};
 use crate::position::{PositionMapper, line_range_from_byte_col};
 
 /// Basename of `path`, falling back to the full display string.
@@ -48,6 +48,7 @@ fn push_legacy_circular_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_api::editor_results::CircularDependency,
     names: &[String],
+    finding_id: Option<&str>,
     mapper: &mut PositionMapper,
 ) {
     let Some(first_file) = cycle.files.first() else {
@@ -89,6 +90,7 @@ fn push_legacy_circular_diagnostic(
         } else {
             Some(related_info)
         },
+        data: finding_data(finding_id),
         ..Default::default()
     });
 }
@@ -107,11 +109,22 @@ pub fn push_circular_dep_diagnostics(
         // diagnostic so behavior is unchanged for consumers predating `edges`.
         if cycle.cycle.edges.is_empty() {
             let file_names: Vec<String> = files.iter().map(|f| cycle_file_name(f)).collect();
-            push_legacy_circular_diagnostic(map, &cycle.cycle, &file_names, mapper);
+            push_legacy_circular_diagnostic(
+                map,
+                &cycle.cycle,
+                &file_names,
+                cycle.finding_id.as_deref(),
+                mapper,
+            );
             continue;
         }
 
-        push_circular_cycle_edge_diagnostics(map, &cycle.cycle, mapper);
+        push_circular_cycle_edge_diagnostics(
+            map,
+            &cycle.cycle,
+            cycle.finding_id.as_deref(),
+            mapper,
+        );
     }
 }
 
@@ -120,6 +133,7 @@ pub fn push_circular_dep_diagnostics(
 fn push_circular_cycle_edge_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_api::editor_results::CircularDependency,
+    finding_id: Option<&str>,
     mapper: &mut PositionMapper,
 ) {
     // Names are derived from the EDGES (not `files`) so all the rotated
@@ -170,9 +184,12 @@ fn push_circular_cycle_edge_diagnostics(
             // Shared cycle identity so editors / agents can correlate the
             // N per-file squigglies into one cycle. `attach_changed_since_data`
             // merges `changedSince` into this object without clobbering it.
-            data: Some(serde_json::json!({
-                "circularDependency": { "cycleId": cycle_id, "fileCount": n }
-            })),
+            data: with_finding_id(
+                Some(serde_json::json!({
+                    "circularDependency": { "cycleId": cycle_id, "fileCount": n }
+                })),
+                finding_id,
+            ),
             ..Default::default()
         });
     }
@@ -204,6 +221,93 @@ fn circular_cycle_related_info(
     related
 }
 
+/// Push one `WARNING` diagnostic per hop of each package cycle, anchored at
+/// the example import of that hop. The other hops are related information.
+pub fn push_package_cycle_diagnostics(
+    map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
+    results: &AnalysisResults,
+    mapper: &mut PositionMapper,
+) {
+    for cycle in &results.package_cycles {
+        let packages = &cycle.cycle.packages;
+        let n = packages.len();
+        if n == 0 {
+            continue;
+        }
+        let suffix = if n == 1 { "" } else { "s" };
+        for (i, edge) in cycle.cycle.edges.iter().enumerate() {
+            let Some(uri) = Uri::from_file_path(&edge.path) else {
+                continue;
+            };
+            let range =
+                line_range_from_byte_col(mapper, &edge.path, edge.line.saturating_sub(1), edge.col);
+            // Rotate the chain so the message reads from the package of the
+            // file the user is standing in.
+            let rotated: Vec<&str> = (0..=n).map(|k| packages[(i + k) % n].as_str()).collect();
+            let type_tag = if edge.type_only {
+                " (type-only hop)"
+            } else {
+                ""
+            };
+            let note = if cycle.cycle.group_truncated {
+                format!(
+                    "; {}",
+                    fallow_api::editor_results::PackageCycle::GROUP_TRUNCATED_NOTE
+                )
+            } else {
+                String::new()
+            };
+            let message = format!(
+                "Package cycle ({n} package{suffix}): {}{type_tag}{note}",
+                rotated.join(" \u{2192} "),
+            );
+            let related_info: Vec<DiagnosticRelatedInformation> = cycle
+                .cycle
+                .edges
+                .iter()
+                .enumerate()
+                .filter(|(j, _)| *j != i)
+                .filter_map(|(_, other)| {
+                    let other_uri = Uri::from_file_path(&other.path)?;
+                    let other_range = line_range_from_byte_col(
+                        mapper,
+                        &other.path,
+                        other.line.saturating_sub(1),
+                        other.col,
+                    );
+                    Some(DiagnosticRelatedInformation {
+                        location: Location {
+                            uri: other_uri,
+                            range: other_range,
+                        },
+                        message: format!("{} imports {}", other.from_package, other.to_package),
+                    })
+                })
+                .collect();
+            map.entry(uri).or_default().push(Diagnostic {
+                range,
+                severity: Some(DiagnosticSeverity::WARNING),
+                source: Some("fallow".to_string()),
+                code: Some(NumberOrString::String("package-cycle".to_string())),
+                code_description: doc_link_for_code("package-cycle"),
+                message,
+                related_information: (!related_info.is_empty()).then_some(related_info),
+                data: with_finding_id(
+                    Some(serde_json::json!({
+                        "packageCycle": {
+                            "packages": packages,
+                            "packageCount": n,
+                            "groupTruncated": cycle.cycle.group_truncated,
+                        }
+                    })),
+                    cycle.finding_id.as_deref(),
+                ),
+                ..Default::default()
+            });
+        }
+    }
+}
+
 pub fn push_re_export_cycle_diagnostics(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     results: &AnalysisResults,
@@ -211,7 +315,12 @@ pub fn push_re_export_cycle_diagnostics(
     for cycle in &results.re_export_cycles {
         let message = re_export_cycle_message(&cycle.cycle);
         for (idx, member_path) in cycle.cycle.files.iter().enumerate() {
-            push_re_export_member_diagnostic(map, &cycle.cycle, member_path, idx, &message);
+            let member = ReExportMember {
+                path: member_path,
+                idx,
+                finding_id: cycle.finding_id.as_deref(),
+            };
+            push_re_export_member_diagnostic(map, &cycle.cycle, &member, &message);
         }
     }
 }
@@ -240,15 +349,26 @@ fn re_export_cycle_message(cycle: &fallow_api::editor_results::ReExportCycle) ->
     )
 }
 
+/// One member file of a re-export cycle.
+struct ReExportMember<'a> {
+    path: &'a std::path::Path,
+    idx: usize,
+    finding_id: Option<&'a str>,
+}
+
 /// Push one `WARNING` re-export-cycle diagnostic for the member at `idx`, with
 /// the other members linked as related info.
 fn push_re_export_member_diagnostic(
     map: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     cycle: &fallow_api::editor_results::ReExportCycle,
-    member_path: &std::path::Path,
-    idx: usize,
+    member: &ReExportMember<'_>,
     message: &str,
 ) {
+    let ReExportMember {
+        path: member_path,
+        idx,
+        finding_id,
+    } = *member;
     let Some(uri) = Uri::from_file_path(member_path) else {
         return;
     };
@@ -282,6 +402,7 @@ fn push_re_export_member_diagnostic(
         } else {
             Some(related_info)
         },
+        data: finding_data(finding_id),
         ..Default::default()
     });
 }
@@ -347,6 +468,7 @@ fn push_boundary_import_violation_diagnostics(
             code_description: doc_link_for_code("boundary-violation"),
             message,
             related_information: related_info,
+            data: finding_data(v.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -372,6 +494,7 @@ fn push_boundary_coverage_violation_diagnostics(
             code_description: doc_link_for_code("boundary-violation"),
             message: "Boundary coverage: file does not match any configured zone".to_string(),
             related_information: None,
+            data: finding_data(v.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -400,6 +523,7 @@ fn push_boundary_call_violation_diagnostics(
                 v.violation.callee, v.violation.pattern, v.violation.zone
             ),
             related_information: None,
+            data: finding_data(v.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -445,6 +569,7 @@ pub fn push_policy_violation_diagnostics(
             code_description: doc_link_for_code("policy-violation"),
             message,
             related_information: None,
+            data: finding_data(v.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -478,6 +603,7 @@ pub fn push_invalid_client_export_diagnostics(
             code_description: doc_link_for_code("invalid-client-export"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -513,6 +639,7 @@ pub fn push_mixed_client_server_barrel_diagnostics(
             code_description: doc_link_for_code("mixed-client-server-barrel"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -550,6 +677,7 @@ pub fn push_misplaced_directive_diagnostics(
             code_description: doc_link_for_code("misplaced-directive"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -583,6 +711,7 @@ pub fn push_unprovided_inject_diagnostics(
             code_description: doc_link_for_code("unprovided-inject"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -622,6 +751,7 @@ pub fn push_route_collision_diagnostics(
             code_description: doc_link_for_code("route-collision"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -663,6 +793,7 @@ pub fn push_dynamic_segment_name_conflict_diagnostics(
             code_description: doc_link_for_code("dynamic-segment-name-conflict"),
             message,
             related_information: None,
+            data: finding_data(finding.finding_id.as_deref()),
             ..Default::default()
         });
     }
@@ -1493,5 +1624,48 @@ mod tests {
         let duplication = empty_duplication();
         let diags = build_diagnostics_for_test(&results, &duplication, &root);
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn package_cycle_in_a_truncated_group_says_so() {
+        use fallow_api::editor_results::{PackageCycle, PackageCycleEdge, PackageCycleFinding};
+
+        let root = test_root();
+        let file_a = root.join("packages/a/src/x.ts");
+        let file_b = root.join("packages/b/src/y.ts");
+        let hop = |from: &str, to: &str, path: &PathBuf, target: &PathBuf| PackageCycleEdge {
+            from_package: from.to_string(),
+            to_package: to.to_string(),
+            path: path.clone(),
+            target_path: target.clone(),
+            line: 1,
+            col: 0,
+            type_only: false,
+        };
+        let mut results = AnalysisResults::default();
+        results
+            .package_cycles
+            .push(PackageCycleFinding::with_actions(PackageCycle {
+                packages: vec!["a".to_string(), "b".to_string()],
+                package_roots: vec![root.join("packages/a"), root.join("packages/b")],
+                length: 2,
+                edges: vec![
+                    hop("a", "b", &file_a, &file_b),
+                    hop("b", "a", &file_b, &file_a),
+                ],
+                group_truncated: true,
+            }));
+
+        let duplication = empty_duplication();
+        let diags = build_diagnostics_for_test(&results, &duplication, &root);
+        let uri_a = Uri::from_file_path(&file_a).unwrap();
+        let d = &diags[&uri_a][0];
+        assert_eq!(
+            d.message,
+            "Package cycle (2 packages): a \u{2192} b \u{2192} a; \
+             this package group has more cycles than listed"
+        );
+        let data = d.data.as_ref().unwrap();
+        assert_eq!(data["packageCycle"]["groupTruncated"], true);
     }
 }

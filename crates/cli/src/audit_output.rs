@@ -147,6 +147,19 @@ fn print_audit_format(
     explain: bool,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
+    // Human, compact and markdown go through the dead-code printer, which
+    // prints its own config pattern notes.
+    if !matches!(
+        result.output,
+        OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown
+    ) && let Some(check) = result.check.as_ref()
+    {
+        report::config_pattern_text::print_stderr_notes(
+            &check.workspace_diagnostics,
+            result.output,
+            quiet,
+        );
+    }
     match result.output {
         OutputFormat::Json => print_audit_json(result, json_style),
         OutputFormat::Human | OutputFormat::Compact | OutputFormat::Markdown => {
@@ -221,7 +234,7 @@ fn print_audit_pr_comment(
     result: &AuditResult,
     provider: report::ci::pr_comment::Provider,
 ) -> ExitCode {
-    let value = build_audit_codeclimate(result);
+    let issues = build_audit_codeclimate_issues(result);
     let incomplete = report::ci::required_type_aware_incomplete(
         result
             .check
@@ -246,14 +259,15 @@ fn print_audit_pr_comment(
         None,
         None,
     );
-    report::ci::pr_comment::print_pr_comment_with_status(
+    report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
         "audit",
         provider,
-        &value,
-        conclusion,
+        &issues,
+        Some(conclusion),
         report::ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &report::gate_outcome_text::gate_rows_for_gates(gates.as_ref()),
+            config_patterns: audit_config_patterns(result),
         },
     )
 }
@@ -262,7 +276,7 @@ fn print_audit_review(
     result: &AuditResult,
     provider: report::ci::pr_comment::Provider,
 ) -> ExitCode {
-    let value = build_audit_codeclimate(result);
+    let issues = build_audit_codeclimate_issues(result);
     let incomplete = report::ci::required_type_aware_incomplete(
         result
             .check
@@ -274,24 +288,36 @@ fn print_audit_review(
     } else {
         audit_decision_conclusion(result.verdict)
     };
-    report::ci::review::print_review_envelope_with_conclusion(
+    let note = report::ci_status_note(
+        incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
+        audit_baseline_advisory(result).as_deref(),
+        audit_gate_outcomes(result).as_ref(),
+        // Audit publishes no `request_outcomes`: it exits 2 rather than
+        // widen when its base ref will not resolve, and it states its own
+        // scope through `base_ref` and `base_description`. It has no
+        // `--group-by` either.
+        None,
+        None,
+    );
+    report::ci::review::print_review_envelope_from_codeclimate_issues_with_conclusion(
         "audit",
         provider,
-        &value,
+        &issues,
         conclusion,
-        report::ci_status_note(
-            incomplete.then_some(report::ci::TYPE_AWARE_INCOMPLETE_MESSAGE),
-            audit_baseline_advisory(result).as_deref(),
-            audit_gate_outcomes(result).as_ref(),
-            // Audit publishes no `request_outcomes`: it exits 2 rather than
-            // widen when its base ref will not resolve, and it states its own
-            // scope through `base_ref` and `base_description`. It has no
-            // `--group-by` either.
-            None,
-            None,
-        )
-        .as_deref(),
+        report::ci::review::ReviewSummaryNotes {
+            message: note.as_deref(),
+            config_patterns: audit_config_patterns(result),
+        },
     )
+}
+
+/// The dead-code diagnostics of an audit, which hold its unmatched config
+/// patterns. Empty when the dead-code section did not run.
+fn audit_config_patterns(result: &AuditResult) -> &[fallow_config::WorkspaceDiagnostic] {
+    result
+        .check
+        .as_ref()
+        .map_or(&[], |check| check.workspace_diagnostics.as_slice())
 }
 
 /// The advisory for the baselines this audit loaded, rendered off the same
@@ -390,7 +416,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
 
     if !has_dupe_groups && let Some(ref dupes) = result.dupes {
         crate::dupes::print_default_ignore_note(dupes, quiet);
-        crate::dupes::print_min_occurrences_note(dupes, quiet);
+        crate::dupes::print_audit_min_occurrences_note(dupes, quiet);
     }
 
     if !quiet {
@@ -469,15 +495,15 @@ fn print_audit_duplication_section(
         show_headers,
         "── Duplication ────────────────────────────────────",
     );
-    crate::dupes::print_dupes_result(
-        dupes,
+    crate::dupes::print_audit_dupes_result(&crate::dupes::DupesRenderOptions {
+        result: dupes,
         quiet,
         explain,
-        false,
-        true,
-        false,
-        crate::json_style::JsonStyle::Compact,
-    );
+        summary: false,
+        summary_heading: true,
+        show_explain_tip: false,
+        json_style: crate::json_style::JsonStyle::Compact,
+    });
 }
 
 /// Per-group demotion detail under `--explain`: one line per introduced clone
@@ -1309,6 +1335,7 @@ fn print_audit_sarif(result: &AuditResult) -> ExitCode {
         let mut sarif =
             report::api_sarif_document(&check.results, &check.config.root, &check.config.rules);
         report::sarif::annotate_type_aware_sarif(&mut sarif, check.type_aware_meta.as_ref());
+        report::sarif::annotate_config_pattern_sarif(&mut sarif, &check.workspace_diagnostics);
         sarif
     });
     let health_sarif = result
@@ -1330,7 +1357,13 @@ fn print_audit_codeclimate(result: &AuditResult) -> ExitCode {
 }
 
 fn build_audit_codeclimate(result: &AuditResult) -> serde_json::Value {
-    fallow_api::build_audit_codeclimate(AuditCodeClimateOutputInput {
+    fallow_output::codeclimate_issues_to_value(&build_audit_codeclimate_issues(result))
+}
+
+/// Typed audit CodeClimate issues. The CI comment and review renderers take
+/// these, so the legacy fingerprint of a dead-code issue reaches them.
+fn build_audit_codeclimate_issues(result: &AuditResult) -> Vec<fallow_output::CodeClimateIssue> {
+    fallow_api::build_audit_codeclimate_issues(AuditCodeClimateOutputInput {
         dead_code: result.check.as_ref().map_or_else(Vec::new, |check| {
             fallow_api::build_codeclimate(&check.results, &check.config.root, &check.config.rules)
         }),

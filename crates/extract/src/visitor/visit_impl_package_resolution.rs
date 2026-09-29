@@ -6,11 +6,19 @@ use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::DynamicImportInfo;
+use fallow_types::extract::ImportLoadKind;
+
 use super::super::ModuleInfoExtractor;
 use super::{
     StaticPackageLoopBindings, for_of_binding_name, object_values_or_entries_argument_name,
 };
 
+/// The name of the CommonJS `require` function.
+const REQUIRE: &str = "require";
+
+/// Whether `expr` is `require.resolve`, by syntax only. The caller checks
+/// that no local binding shadows `require`.
 fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
     let Expression::StaticMemberExpression(member) = expr else {
         return false;
@@ -18,7 +26,20 @@ fn is_require_resolve_callee(expr: &Expression<'_>) -> bool {
     let Expression::Identifier(object) = &member.object else {
         return false;
     };
-    object.name == "require" && member.property.name == "resolve"
+    object.name == REQUIRE && member.property.name == "resolve"
+}
+
+/// The value of a string literal or of a template literal without expressions.
+fn static_string_argument<'a>(argument: &'a Argument<'_>) -> Option<&'a str> {
+    match argument {
+        Argument::StringLiteral(lit) => Some(lit.value.as_str()),
+        Argument::TemplateLiteral(tpl) if tpl.expressions.is_empty() => tpl
+            .quasis
+            .first()
+            .and_then(|quasi| quasi.value.cooked.as_ref())
+            .map(|cooked| cooked.as_str()),
+        _ => None,
+    }
 }
 
 fn package_from_resolution_specifier(specifier: &str) -> Option<String> {
@@ -111,6 +132,17 @@ fn collect_static_object_string_property_values(
 }
 
 impl ModuleInfoExtractor {
+    /// Whether `callee` is `require.resolve` on the `require` of the module.
+    ///
+    /// A parameter or a declaration named `require` in a nested scope, such
+    /// as `function f(require) { require.resolve('./x') }`, is some other
+    /// function, so its calls reference nothing. A module-level
+    /// `const require = createRequire(import.meta.url)` stays the module
+    /// `require`: it resolves relative to the same file.
+    fn is_module_require_resolve(&self, callee: &Expression<'_>) -> bool {
+        is_require_resolve_callee(callee) && !self.nested_scope_shadows(REQUIRE)
+    }
+
     pub(super) fn record_static_package_values(&mut self, name: &str, init: &Expression<'_>) {
         match init {
             Expression::StringLiteral(lit) => {
@@ -142,7 +174,7 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn try_record_package_path_reference(&mut self, call: &CallExpression<'_>) {
-        if is_require_resolve_callee(&call.callee)
+        if self.is_module_require_resolve(&call.callee)
             && let Some(arg) = call.arguments.first()
         {
             let references = self.package_references_from_argument(arg);
@@ -159,6 +191,39 @@ impl ModuleInfoExtractor {
             let references = self.package_references_from_argument(arg);
             self.push_package_path_references(references);
         }
+    }
+
+    /// Record `require.resolve('./file')` as a reference to a project file.
+    ///
+    /// The call returns a path, and code hands that path to a consumer that
+    /// static analysis cannot follow, such as a webpack module replacement or
+    /// a worker. That consumer uses the whole module, so the edge credits every
+    /// export. The call does not load the module, so the edge is a path
+    /// reference and never closes a cycle.
+    ///
+    /// The argument is a string literal or a template literal without
+    /// expressions. A call with a second argument (the `paths` option)
+    /// resolves from other directories, so it is not recorded. The reference
+    /// is speculative: a target that is not on disk, such as build output or a
+    /// native addon, is dropped and does not become an unresolved import.
+    pub(super) fn try_record_relative_require_resolve(&mut self, call: &CallExpression<'_>) {
+        if !self.is_module_require_resolve(&call.callee) || call.arguments.len() != 1 {
+            return;
+        }
+        let Some(source) = call.arguments.first().and_then(static_string_argument) else {
+            return;
+        };
+        if !(source.starts_with("./") || source.starts_with("../")) {
+            return;
+        }
+        self.dynamic_imports.push(DynamicImportInfo {
+            source: source.to_string(),
+            span: call.span,
+            destructured_names: Vec::new(),
+            local_name: Some(String::new()),
+            is_speculative: true,
+        });
+        self.mark_import_load_kind(call.span, ImportLoadKind::PathReference);
     }
 
     fn push_package_path_references(&mut self, references: Vec<String>) {
@@ -300,10 +365,14 @@ pub(super) fn package_resolution_arg_index(
         })
         .collect();
     let param_set: FxHashSet<String> = param_names.iter().cloned().collect();
+    if params_bind_require(params) {
+        return None;
+    }
     let mut collector = PackageResolutionParamCollector {
         params: &param_set,
         known_helpers,
         matched: FxHashSet::default(),
+        require_shadow_depth: 0,
     };
     collector.visit_function_body(body);
 
@@ -312,15 +381,45 @@ pub(super) fn package_resolution_arg_index(
         .position(|name| collector.matched.contains(name))
 }
 
+/// Whether a parameter list binds the name `require`, also through a
+/// destructuring pattern.
+fn params_bind_require(params: &FormalParameters<'_>) -> bool {
+    params.items.iter().any(|param| {
+        param
+            .pattern
+            .get_binding_identifiers()
+            .iter()
+            .any(|id| id.name == REQUIRE)
+    })
+}
+
 struct PackageResolutionParamCollector<'p> {
     params: &'p FxHashSet<String>,
     known_helpers: &'p FxHashMap<String, usize>,
     matched: FxHashSet<String>,
+    /// How many enclosing nested functions bind a `require` parameter. Inside
+    /// such a function, `require.resolve` is not the module `require`.
+    require_shadow_depth: usize,
 }
 
 impl<'a> Visit<'a> for PackageResolutionParamCollector<'_> {
+    fn visit_function(&mut self, func: &Function<'a>, flags: oxc_semantic::ScopeFlags) {
+        let shadows = params_bind_require(&func.params);
+        self.require_shadow_depth += usize::from(shadows);
+        walk::walk_function(self, func, flags);
+        self.require_shadow_depth -= usize::from(shadows);
+    }
+
+    fn visit_arrow_function_expression(&mut self, expr: &ArrowFunctionExpression<'a>) {
+        let shadows = params_bind_require(&expr.params);
+        self.require_shadow_depth += usize::from(shadows);
+        walk::walk_arrow_function_expression(self, expr);
+        self.require_shadow_depth -= usize::from(shadows);
+    }
+
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
-        if is_require_resolve_callee(&call.callee)
+        if self.require_shadow_depth == 0
+            && is_require_resolve_callee(&call.callee)
             && let Some(arg) = call.arguments.first()
             && let Some(param) = package_resolution_param_from_argument(arg, self.params)
         {

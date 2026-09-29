@@ -1,3 +1,4 @@
+mod component_health;
 mod quality;
 pub mod security;
 mod structural;
@@ -23,6 +24,38 @@ fn doc_link_for_code(code: &str) -> Option<CodeDescription> {
     let anchor = issue_meta_by_code(code)?.docs_anchor()?;
     let url = format!("{DOCS_BASE}{anchor}");
     url.parse::<Uri>().ok().map(|href| CodeDescription { href })
+}
+
+/// Key of the dead-code finding id inside `Diagnostic.data`.
+const FINDING_ID_KEY: &str = "findingId";
+
+/// The `Diagnostic.data` object for a dead-code finding: `{ "findingId": id }`.
+///
+/// Returns `None` when the finding has no id, so an unstamped finding keeps
+/// `data` absent.
+fn finding_data(finding_id: Option<&str>) -> Option<serde_json::Value> {
+    with_finding_id(None, finding_id)
+}
+
+/// Merge `findingId` into an existing `Diagnostic.data` value.
+///
+/// An object gets the key added next to its other keys. A non-object value is
+/// kept as it is, because a key cannot go into it without a change to its shape.
+fn with_finding_id(
+    data: Option<serde_json::Value>,
+    finding_id: Option<&str>,
+) -> Option<serde_json::Value> {
+    let Some(id) = finding_id else {
+        return data;
+    };
+    match data {
+        None => Some(serde_json::json!({ FINDING_ID_KEY: id })),
+        Some(serde_json::Value::Object(mut obj)) => {
+            obj.insert(FINDING_ID_KEY.to_string(), id.into());
+            Some(serde_json::Value::Object(obj))
+        }
+        Some(other) => Some(other),
+    }
 }
 
 /// LSP range covering the entire first line — used for file-level and package.json diagnostics.
@@ -80,6 +113,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     quality::push_duplication_diagnostics(&mut map, duplication, &mut mapper);
     structural::push_circular_dep_diagnostics(&mut map, results, &mut mapper);
     structural::push_re_export_cycle_diagnostics(&mut map, results);
+    structural::push_package_cycle_diagnostics(&mut map, results, &mut mapper);
     structural::push_boundary_violation_diagnostics(&mut map, results, &mut mapper);
     structural::push_policy_violation_diagnostics(&mut map, results, &mut mapper);
     structural::push_invalid_client_export_diagnostics(&mut map, results, &mut mapper);
@@ -90,6 +124,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     structural::push_dynamic_segment_name_conflict_diagnostics(&mut map, results);
     quality::push_stale_suppression_diagnostics(&mut map, results, &mut mapper);
     security::push_security_diagnostics(&mut map, results, &mut mapper);
+    component_health::push_component_health_diagnostics(&mut map, results, &mut mapper);
 
     map
 }
@@ -113,6 +148,33 @@ mod tests {
         AnalysisResults, SecuritySeverity, UnresolvedImport, UnresolvedImportFinding, UnusedExport,
         UnusedExportFinding, UnusedFile, UnusedFileFinding,
     };
+
+    #[test]
+    fn finding_id_merges_into_an_existing_data_object() {
+        let data = serde_json::json!({ "circularDependency": { "cycleId": "cycle:1" } });
+        let merged = with_finding_id(Some(data), Some("dc1:circular-dependency:0123456789abcdef"))
+            .expect("data present");
+        assert_eq!(merged["circularDependency"]["cycleId"], "cycle:1");
+        assert_eq!(
+            merged["findingId"],
+            "dc1:circular-dependency:0123456789abcdef"
+        );
+    }
+
+    #[test]
+    fn finding_id_leaves_data_alone_without_an_id() {
+        assert_eq!(finding_data(None), None);
+        let data = serde_json::json!({ "security": {} });
+        assert_eq!(with_finding_id(Some(data.clone()), None), Some(data));
+        let scalar = serde_json::Value::String("token".to_string());
+        assert_eq!(
+            with_finding_id(
+                Some(scalar.clone()),
+                Some("dc1:unused-file:0123456789abcdef")
+            ),
+            Some(scalar),
+        );
+    }
 
     fn test_root() -> PathBuf {
         if cfg!(windows) {
@@ -397,7 +459,7 @@ mod severity_gate {
     use fallow_api::editor_duplicates::{DuplicationReport, DuplicationStats};
     use fallow_api::editor_results::AnalysisResults;
     use fallow_config::{RulesConfig, Severity};
-    use ls_types::DiagnosticSeverity;
+    use ls_types::Diagnostic;
 
     use crate::diagnostics::build_diagnostics_for_test;
 
@@ -468,6 +530,7 @@ mod severity_gate {
             dev_dependencies_in_production: _,
             circular_dependencies: _,
             re_export_cycles: _,
+            package_cycles: _,
             boundary_violations: _,
             boundary_coverage_violations: _,
             boundary_call_violations: _,
@@ -531,24 +594,48 @@ mod severity_gate {
         } = AnalysisResults::default();
     }
 
-    /// Build a one-finding `AnalysisResults` for a single dead-code kind, run
-    /// `build_diagnostics`, and return the lone emitted severity. Panics if the
-    /// kind produced anything other than exactly one diagnostic (a wiring change
-    /// that splits or drops the kind should fail loudly, not silently pass).
-    fn emitted_severity(
+    /// Build a one-finding `AnalysisResults` for a single dead-code kind, stamp
+    /// its `finding_id` like the engine does, run `build_diagnostics`, and
+    /// return the lone emitted diagnostic with the stamped id of the finding.
+    /// Panics if the kind produced anything other than exactly one diagnostic
+    /// or one stamped id (a wiring change that splits or drops the kind should
+    /// fail loudly, not silently pass).
+    fn emitted_diagnostic(
         build: impl FnOnce(&PathBuf, &mut AnalysisResults),
-    ) -> Option<DiagnosticSeverity> {
+    ) -> (Diagnostic, String) {
         let root = test_root();
         let mut results = AnalysisResults::default();
         build(&root, &mut results);
+        fallow_types::identity::stamp_dead_code_finding_ids(&mut results, &root);
+        let stamped = stamped_finding_ids(&serde_json::to_value(&results).expect("serialize"));
+        assert_eq!(
+            stamped.len(),
+            1,
+            "each gate fixture must stamp exactly one id"
+        );
         let diags = build_diagnostics_for_test(&results, &empty_duplication(), &root);
-        let all: Vec<_> = diags.values().flatten().collect();
+        let mut all: Vec<_> = diags.into_values().flatten().collect();
         assert_eq!(
             all.len(),
             1,
             "each gate fixture must emit exactly one diagnostic",
         );
-        all[0].severity
+        (all.remove(0), stamped[0].clone())
+    }
+
+    /// Every `finding_id` string in a serialized results tree.
+    fn stamped_finding_ids(value: &serde_json::Value) -> Vec<String> {
+        match value {
+            serde_json::Value::Object(obj) => obj
+                .iter()
+                .flat_map(|(key, child)| match (key.as_str(), child) {
+                    ("finding_id", serde_json::Value::String(id)) => vec![id.clone()],
+                    _ => stamped_finding_ids(child),
+                })
+                .collect(),
+            serde_json::Value::Array(items) => items.iter().flat_map(stamped_finding_ids).collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// Severity drift gate: builds one synthetic finding per dead-code kind and
@@ -888,6 +975,33 @@ mod severity_gate {
                 }),
             ),
             (
+                "package-cycle",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.package_cycles.push(
+                        fallow_api::editor_results::PackageCycleFinding::with_actions(
+                            fallow_api::editor_results::PackageCycle {
+                                packages: vec!["a".into(), "b".into()],
+                                package_roots: Vec::new(),
+                                length: 2,
+                                // One hop keeps the fixture to one
+                                // diagnostic; each hop emits its own.
+                                edges: vec![fallow_api::editor_results::PackageCycleEdge {
+                                    from_package: "a".into(),
+                                    to_package: "b".into(),
+                                    path: root.join("a/x.ts"),
+                                    target_path: root.join("b/y.ts"),
+                                    line: 1,
+                                    col: 0,
+                                    type_only: false,
+                                }],
+                                group_truncated: false,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
                 "re-export-cycle",
                 S::WARNING,
                 Box::new(|root, r| {
@@ -990,6 +1104,7 @@ mod severity_gate {
                 Box::new(|root, r| {
                     r.stale_suppressions
                         .push(fallow_api::editor_results::StaleSuppression {
+                            finding_id: None,
                             path: root.join("a.ts"),
                             line: 1,
                             col: 0,
@@ -1321,6 +1436,73 @@ mod severity_gate {
                 }),
             ),
             (
+                // HINT: an opt-in component health signal suggests a
+                // refactor and is never a correctness error.
+                "prop-drilling",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.prop_drilling_chains.push(
+                        fallow_api::editor_results::PropDrillingChainFinding::with_actions(
+                            fallow_api::editor_results::PropDrillingChain {
+                                prop: "user".to_string(),
+                                depth: 3,
+                                hops: vec![
+                                    fallow_api::editor_results::PropDrillHop {
+                                        file: root.join("App.tsx"),
+                                        line: 1,
+                                        component: "App".to_string(),
+                                    },
+                                    fallow_api::editor_results::PropDrillHop {
+                                        file: root.join("Page.tsx"),
+                                        line: 1,
+                                        component: "Page".to_string(),
+                                    },
+                                    fallow_api::editor_results::PropDrillHop {
+                                        file: root.join("Avatar.tsx"),
+                                        line: 1,
+                                        component: "Avatar".to_string(),
+                                    },
+                                ],
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "thin-wrapper",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.thin_wrappers.push(
+                        fallow_api::editor_results::ThinWrapperFinding::with_actions(
+                            fallow_api::editor_results::ThinWrapper {
+                                file: root.join("Wrapper.tsx"),
+                                line: 1,
+                                component: "Wrapper".to_string(),
+                                child_component: "Button".to_string(),
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "duplicate-prop-shape",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.duplicate_prop_shapes.push(
+                        fallow_api::editor_results::DuplicatePropShapeFinding::with_actions(
+                            fallow_api::editor_results::DuplicatePropShape {
+                                file: root.join("Card.tsx"),
+                                line: 1,
+                                component: "Card".to_string(),
+                                shape: vec!["body".to_string(), "title".to_string()],
+                                group_size: 3,
+                                sharing_components: Vec::new(),
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
                 // ERROR, cross-checked against core below.
                 "dynamic-segment-name-conflict",
                 S::ERROR,
@@ -1345,11 +1527,21 @@ mod severity_gate {
         ];
 
         for (code, expected, build) in table {
-            let got = emitted_severity(build);
+            let (diagnostic, stamped) = emitted_diagnostic(build);
             assert_eq!(
-                got,
+                diagnostic.severity,
                 Some(expected),
                 "LSP severity for `{code}` diverged from the gate table",
+            );
+            let finding_id = diagnostic
+                .data
+                .as_ref()
+                .and_then(|data| data.get("findingId"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_else(|| panic!("`{code}` diagnostic has no data.findingId"));
+            assert_eq!(
+                finding_id, stamped,
+                "`{code}` diagnostic must carry the stamped finding_id",
             );
         }
     }

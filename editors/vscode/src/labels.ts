@@ -39,6 +39,7 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "dev-dependencies-in-production": "dev-dependency-in-production",
   "circular-dependencies": "circular-dependency",
   "re-export-cycles": "re-export-cycle",
+  "package-cycles": "package-cycle",
   "boundary-violation": "boundary-violation",
   "policy-violations": "policy-violation",
   "stale-suppressions": "stale-suppression",
@@ -47,6 +48,9 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "unresolved-catalog-references": "unresolved-catalog-reference",
   "unused-dependency-overrides": "unused-dependency-override",
   "misconfigured-dependency-overrides": "misconfigured-dependency-override",
+  "prop-drilling": "prop-drilling",
+  "thin-wrapper": "thin-wrapper",
+  "duplicate-prop-shape": "duplicate-prop-shape",
 } as const;
 
 export type IssueCategory = keyof typeof CATEGORY_TO_REGISTRY_CODE;

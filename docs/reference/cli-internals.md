@@ -61,6 +61,46 @@ maps a gate verdict to the exit code.
 
 ## Invariants
 
+- Dead-code `finding_id` values are owned by `fallow_types::identity`. The
+  engine pipeline (`run_engine_owned_dead_code_pipeline` in
+  `crates/engine/src/session.rs`) stamps them once, after the detectors and
+  before `ignoreFindings`, the scope filters, baselines and rule severities.
+  The CLI, LSP, MCP and napi reach dead-code results only through that
+  pipeline. Type-aware refinement runs after the scope filters, so it calls
+  `stamp_missing_finding_ids`: it keeps each existing id and gives an id only
+  to a finding without one. Do not restamp a filtered set, because the `~k`
+  tiebreak suffix depends on the other findings with the same subject. The
+  same module owns the FNV-1a 64 helpers that CodeClimate and SARIF
+  fingerprints and security ids use; do not add another copy.
+- A dead-code SARIF result has three `partialFingerprints` keys:
+  `tools.fallow.fingerprint/v1` and `primaryLocationLineHash/v1` (rule, URI,
+  normalized snippet and column; GitHub code scanning reads the second) and
+  `fallowFinding/v1` (the `finding_id`). `append_sarif_findings` in
+  `crates/output/src/sarif.rs` writes the third key, and only for a finding
+  that gives exactly one result. The fan-out helpers for unlisted
+  dependencies and duplicate exports do not write it.
+  `ensure_unique_result_fingerprints` rewrites only the two location-based
+  keys. Do not change their inputs: a change reopens every GitHub alert.
+- The canonical key of a dead-code finding (`IdentifiedFinding::canonical_key`
+  in `fallow_types::identity`) is the readable input of its `finding_id`:
+  `<rule>:<path>:<name>...`, never a line or a suppression reason. The
+  dead-code baseline (`crates/engine/src/baseline.rs`) and the audit new-only
+  keys (`crates/api/src/audit_keys.rs`) use only this key, so the id, the
+  baseline and the audit cannot drift. Do not build a dead-code key by hand.
+  - A saved baseline carries `"identity": "dc1"`, stores the key once for
+    each occurrence, and matches by count. A baseline without `identity` is a
+    legacy file: the legacy filter matches each old entry exactly, and the
+    legacy key builders stay only as test helpers. A legacy load prints a
+    stderr note in human output and sets `baseline_staleness.format:
+    "legacy"` in JSON. It never fails the run.
+  - The audit numbers repeated keys with `dead_code_occurrence_keys` (`:~1`,
+    `:~2`, in collection order), so the base and the head compare by count
+    and the rename remap still sees the path as its own segment. An
+    unlisted-dependency finding is the package, not an import site, so a new
+    import site of a package that the base already reports stays inherited.
+    A change to
+    the audit key form must bump `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` in
+    `crates/cli/src/audit_cache.rs`.
 - Health tie ordering and duplication collision handles are owned by the engine.
   Renderers, trace lookup, suppressions and baselines must use the same assigned
   handles. Preserve the [collision migration contract](../backwards-compatibility.md#report-ordering-and-colliding-duplication-handles)
@@ -131,6 +171,18 @@ maps a gate verdict to the exit code.
   review; the content-free "reviewed" row that follows a resolution reply is
   GitHub's own wrapper around a standalone review-comment reply, and no
   available endpoint avoids it.
+- Review comments close with a `fallow-fingerprint:v3:` marker. The dead-code
+  fingerprint in it is the hash of the `finding_id`
+  (`crates/api/src/dead_code_codeclimate.rs::dead_code_issue`), so it holds no
+  line. `CodeClimateIssue::legacy_fingerprint` keeps the older line-based value
+  in memory only (it is not serialized), and the review envelope publishes it
+  per comment as `legacy_fingerprint`. The CI comment and review renderers
+  must take typed CodeClimate issues: a round trip through the CodeClimate
+  JSON drops the legacy value. `ci post-review` and `ci reconcile-review`
+  read v1, v2 and v3 markers (`extract_fallow_fingerprint`) and treat an open
+  lifecycle whose marker holds a comment's `legacy_fingerprint` as that
+  comment (`envelope_legacy_fingerprints`, `reconcile_sets`). Remove the
+  legacy field and this matching one release after the v3 marker shipped.
 - JSON mode emits structured errors on stdout and keeps progress off stdout.
 - Reported project paths remain relative unless an editor or protocol contract
   explicitly requires absolute paths.

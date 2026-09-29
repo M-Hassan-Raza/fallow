@@ -178,6 +178,7 @@ fn saved_annotation_codeclimate_issues(
                 other_locations: Vec::new(),
                 owner: None,
                 group: None,
+                legacy_fingerprint: None,
             }
         })
         .collect::<Vec<_>>();
@@ -1360,6 +1361,7 @@ mod tests {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
         results.stale_suppressions.push(StaleSuppression {
+            finding_id: None,
             path: root.join("src/file.ts"),
             line: 1,
             col: 0,
@@ -1396,6 +1398,7 @@ mod tests {
             kind_known: true,
         };
         results.stale_suppressions.push(StaleSuppression {
+            finding_id: None,
             path: root.join("src/file.ts"),
             line: 1,
             col: 0,
@@ -1405,6 +1408,7 @@ mod tests {
             effective_severity: None,
         });
         results.stale_suppressions.push(StaleSuppression {
+            finding_id: None,
             path: root.join("src/file.ts"),
             line: 1,
             col: 0,

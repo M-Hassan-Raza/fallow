@@ -38,6 +38,7 @@ fn create_ci_issues() -> Vec<CiIssue> {
             end_line: None,
             other_locations: Vec::new(),
             fingerprint: format!("fp-{index:04}"),
+            legacy_fingerprint: None,
         })
         .collect()
 }
@@ -132,6 +133,7 @@ fn component_output_pr_comment_render(c: &mut Criterion) {
                     marker_id: "bench".to_string(),
                     max_comments: 50,
                     category_for_rule: &category_for_rule,
+                    trailing_section: None,
                 })
             },
             BatchSize::LargeInput,

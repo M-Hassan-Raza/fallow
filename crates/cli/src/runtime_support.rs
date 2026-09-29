@@ -336,7 +336,9 @@ pub fn load_config_for_analysis(
     if let Some(mb) = resolve_max_file_size_mb() {
         resolved.max_file_size_bytes = fallow_config::resolve_max_file_size_bytes(Some(mb));
     }
-    apply_cache_dir_env_override(root, &mut resolved, resolve_cache_dir_env());
+    if let Some(dir) = fallow_config::cache_dir_env_override() {
+        resolved.override_cache_dir(dir);
+    }
     crate::cache_notice::record_candidate(
         root,
         &resolved.cache_dir,
@@ -465,17 +467,31 @@ fn report_workspace_diagnostics(
                 && matches!(options.output, OutputFormat::Human)
                 && !options.quiet
             {
-                eprintln!(
-                    "fallow: {} workspace discovery diagnostic{}. \
-                     Run `fallow list --workspaces` for detail.",
-                    diagnostics.len(),
-                    if diagnostics.len() == 1 { "" } else { "s" }
-                );
+                eprintln!("{}", workspace_diagnostics_notice(diagnostics.len()));
             }
             Ok(())
         }
         Err(err) => Err(crate::error::emit_error(err.message(), 2, options.output)),
     }
+}
+
+/// Render the one-line stderr notice that workspace discovery produced
+/// diagnostics.
+///
+/// Built by name so the wording is unit testable rather than only observable
+/// through a subprocess. The notice names the dedicated `fallow workspaces`
+/// command rather than the equivalent `fallow list --workspaces`: both print
+/// the same per-entry block, and the dedicated command is the shorter, more
+/// direct spelling: at the four-digit count this treats as the realistic
+/// ceiling it leaves ten columns of the eighty-column terminal budget, against
+/// three for `fallow list --workspaces`. The pinning test measures the chosen
+/// spelling; the alternative's figure is stated here because nothing measures
+/// it.
+fn workspace_diagnostics_notice(count: usize) -> String {
+    format!(
+        "fallow: {count} workspace discovery diagnostic{}. Run `fallow workspaces`.",
+        crate::report::plural(count)
+    )
 }
 
 fn config_shape_for(
@@ -518,32 +534,6 @@ fn resolve_cache_max_size_env() -> Option<u32> {
         .filter(|mb| *mb > 0)
 }
 
-/// Read the non-empty `FALLOW_CACHE_DIR` override. Callers resolve relative
-/// values from the project root, using the same base as `cache.dir`.
-pub fn resolve_cache_dir_env() -> Option<PathBuf> {
-    std::env::var_os("FALLOW_CACHE_DIR")
-        .map(PathBuf::from)
-        .filter(|path| !path.as_os_str().is_empty())
-}
-
-fn resolve_cache_dir_value(root: &Path, path: PathBuf) -> PathBuf {
-    if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
-    }
-}
-
-fn apply_cache_dir_env_override(
-    root: &Path,
-    resolved: &mut ResolvedConfig,
-    env_value: Option<PathBuf>,
-) {
-    if let Some(path) = env_value {
-        resolved.cache_dir = resolve_cache_dir_value(root, path);
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -579,6 +569,29 @@ mod tests {
         assert!(find_unknown_security_categories(&security).is_empty());
     }
 
+    /// The notice promises a route, so pin the exact sentence in both
+    /// spellings: `fallow workspaces` prints the per-entry block this line
+    /// summarises, and a rename of that command must fail here rather than
+    /// leave the warning pointing at nothing.
+    ///
+    /// The count is the only part that grows, so these two strings are also
+    /// the narrowest and widest plausible renderings: 66 columns at one
+    /// diagnostic, 70 once a monorepo drives the count to four digits. That
+    /// leaves ten columns of headroom under the eighty-column terminal
+    /// budget, so pinning the strings byte for byte is the width guard as
+    /// well; a rewording that spends the headroom fails here.
+    #[test]
+    fn workspace_diagnostics_notice_pins_wording_and_route() {
+        assert_eq!(
+            workspace_diagnostics_notice(1),
+            "fallow: 1 workspace discovery diagnostic. Run `fallow workspaces`."
+        );
+        assert_eq!(
+            workspace_diagnostics_notice(1234),
+            "fallow: 1234 workspace discovery diagnostics. Run `fallow workspaces`."
+        );
+    }
+
     #[test]
     fn config_loaded_notice_dedupes_by_config_path() {
         let dir = tempfile::tempdir().unwrap();
@@ -590,44 +603,5 @@ mod tests {
         assert!(should_log_config_loaded(&first));
         assert!(!should_log_config_loaded(&first));
         assert!(should_log_config_loaded(&second));
-    }
-
-    #[test]
-    fn cache_dir_env_value_resolves_relative_to_project_root() {
-        assert_eq!(
-            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from(".cache/fallow")),
-            PathBuf::from("/repo/.cache/fallow")
-        );
-        assert_eq!(
-            resolve_cache_dir_value(Path::new("/repo"), PathBuf::from("/tmp/fallow-cache")),
-            PathBuf::from("/tmp/fallow-cache")
-        );
-    }
-
-    #[test]
-    fn cache_dir_env_value_wins_over_configured_cache_dir() {
-        let mut resolved = FallowConfig {
-            cache: fallow_config::CacheConfig {
-                dir: Some(PathBuf::from(".cache/from-config")),
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-        .resolve(
-            PathBuf::from("/repo"),
-            OutputFormat::Human,
-            1,
-            false,
-            true,
-            None,
-        );
-
-        apply_cache_dir_env_override(
-            Path::new("/repo"),
-            &mut resolved,
-            Some(PathBuf::from(".cache/from-env")),
-        );
-
-        assert_eq!(resolved.cache_dir, PathBuf::from("/repo/.cache/from-env"));
     }
 }

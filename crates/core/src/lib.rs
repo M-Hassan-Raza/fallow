@@ -2103,19 +2103,19 @@ fn analyze_all_scripts(
 ) {
     let all_dep_names = collect_all_dependency_names(root_pkg, workspace_pkgs);
     let all_dep_set: FxHashSet<String> = all_dep_names.iter().cloned().collect();
-    let all_scripts = collect_all_scripts(root_pkg, workspace_pkgs);
+    let workspace_packages = collect_workspace_packages(&config.root, workspace_pkgs);
+    let all_scripts = collect_all_scripts(root_pkg, workspace_pkgs, &workspace_packages);
 
     let nm_roots = collect_node_modules_roots(config, workspaces);
     let bin_map = scripts::build_bin_to_package_map(&nm_roots, &all_dep_names);
+    let deps = ScriptDependencyContext {
+        bin_map: &bin_map,
+        all_dep_set: &all_dep_set,
+        workspace_packages: &workspace_packages,
+    };
 
-    analyze_root_scripts(config, root_pkg, &bin_map, &all_dep_set, plugin_result);
-    analyze_workspace_scripts(
-        config,
-        workspace_pkgs,
-        &bin_map,
-        &all_dep_set,
-        plugin_result,
-    );
+    analyze_root_scripts(config, root_pkg, &deps, plugin_result);
+    analyze_workspace_scripts(config, workspace_pkgs, &deps, plugin_result);
     analyze_ci_scripts(config, &bin_map, &all_dep_set, &all_scripts, plugin_result);
 
     plugin_result
@@ -2141,10 +2141,43 @@ fn collect_all_dependency_names(
     all_dep_names
 }
 
+/// The binaries, dependencies, and workspace packages that script analysis
+/// resolves commands against.
+struct ScriptDependencyContext<'a> {
+    bin_map: &'a rustc_hash::FxHashMap<String, String>,
+    all_dep_set: &'a FxHashSet<String>,
+    workspace_packages: &'a std::sync::Arc<scripts::WorkspacePackages>,
+}
+
+/// The directory of a workspace package relative to the project root, with
+/// `/` separators.
+fn workspace_dir(root: &std::path::Path, ws: &fallow_config::WorkspaceInfo) -> String {
+    ws.root
+        .strip_prefix(root)
+        .unwrap_or(&ws.root)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Gather the names, directories, and scripts of the workspace packages, so
+/// that a command that selects a package by name (`yarn workspace web node
+/// scripts/a.ts`) resolves its file arguments in that package.
+fn collect_workspace_packages(
+    root: &std::path::Path,
+    workspace_pkgs: &[LoadedWorkspacePackage],
+) -> std::sync::Arc<scripts::WorkspacePackages> {
+    let mut packages = scripts::WorkspacePackages::default();
+    for (ws, ws_pkg) in workspace_pkgs {
+        packages.add(&ws.name, &workspace_dir(root, ws), ws_pkg.scripts.as_ref());
+    }
+    std::sync::Arc::new(packages)
+}
+
 /// Gather the scripts declared by the root and workspace packages.
 fn collect_all_scripts(
     root_pkg: Option<&PackageJson>,
     workspace_pkgs: &[LoadedWorkspacePackage],
+    workspace_packages: &std::sync::Arc<scripts::WorkspacePackages>,
 ) -> scripts::ScriptCatalog {
     let mut catalog = scripts::ScriptCatalog::default();
     if let Some(pkg) = root_pkg
@@ -2157,7 +2190,7 @@ fn collect_all_scripts(
             catalog.merge_workspace_scripts(ws_scripts);
         }
     }
-    catalog
+    catalog.with_workspaces(std::sync::Arc::clone(workspace_packages), "")
 }
 
 /// Collect every directory (root and workspaces) that has a local `node_modules`.
@@ -2181,8 +2214,7 @@ fn collect_node_modules_roots<'a>(
 fn analyze_root_scripts(
     config: &ResolvedConfig,
     root_pkg: Option<&PackageJson>,
-    bin_map: &rustc_hash::FxHashMap<String, String>,
-    all_dep_set: &FxHashSet<String>,
+    deps: &ScriptDependencyContext<'_>,
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
     let Some(pkg) = root_pkg else {
@@ -2197,13 +2229,15 @@ fn analyze_root_scripts(
         pkg_scripts.clone()
     };
     let catalog =
-        scripts::ScriptCatalog::from_scripts_with_bodies(pkg_scripts, &scripts_to_analyze);
+        scripts::ScriptCatalog::from_scripts_with_bodies(pkg_scripts, &scripts_to_analyze)
+            .with_workspaces(std::sync::Arc::clone(deps.workspace_packages), "");
     let script_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &config.root,
-        bin_map,
-        all_dep_set,
+        deps.bin_map,
+        deps.all_dep_set,
         &catalog,
+        scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
     plugin_result.script_used_packages = script_analysis.used_packages;
 
@@ -2231,13 +2265,12 @@ type WsScriptOut = (
 fn analyze_workspace_scripts(
     config: &ResolvedConfig,
     workspace_pkgs: &[LoadedWorkspacePackage],
-    bin_map: &rustc_hash::FxHashMap<String, String>,
-    all_dep_set: &FxHashSet<String>,
+    deps: &ScriptDependencyContext<'_>,
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
     let ws_results: Vec<WsScriptOut> = workspace_pkgs
         .par_iter()
-        .map(|(ws, ws_pkg)| analyze_one_workspace_scripts(config, ws, ws_pkg, bin_map, all_dep_set))
+        .map(|(ws, ws_pkg)| analyze_one_workspace_scripts(config, ws, ws_pkg, deps))
         .collect();
     for (used_packages, discovered_always_used, entry_patterns) in ws_results {
         plugin_result.script_used_packages.extend(used_packages);
@@ -2254,8 +2287,7 @@ fn analyze_one_workspace_scripts(
     config: &ResolvedConfig,
     ws: &fallow_config::WorkspaceInfo,
     ws_pkg: &PackageJson,
-    bin_map: &rustc_hash::FxHashMap<String, String>,
-    all_dep_set: &FxHashSet<String>,
+    deps: &ScriptDependencyContext<'_>,
 ) -> WsScriptOut {
     let mut used_packages = Vec::new();
     let mut discovered_always_used: Vec<(String, String)> = Vec::new();
@@ -2268,21 +2300,19 @@ fn analyze_one_workspace_scripts(
     } else {
         ws_scripts.clone()
     };
-    let catalog = scripts::ScriptCatalog::from_scripts_with_bodies(ws_scripts, &scripts_to_analyze);
+    let ws_prefix = workspace_dir(&config.root, ws);
+    let catalog = scripts::ScriptCatalog::from_scripts_with_bodies(ws_scripts, &scripts_to_analyze)
+        .with_workspaces(std::sync::Arc::clone(deps.workspace_packages), &ws_prefix);
     let ws_analysis = scripts::analyze_scripts_with_dependency_context(
         &scripts_to_analyze,
         &ws.root,
-        bin_map,
-        all_dep_set,
+        deps.bin_map,
+        deps.all_dep_set,
         &catalog,
+        scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
     );
     used_packages.extend(ws_analysis.used_packages);
 
-    let ws_prefix = ws
-        .root
-        .strip_prefix(&config.root)
-        .unwrap_or(&ws.root)
-        .to_string_lossy();
     for config_file in &ws_analysis.config_files {
         discovered_always_used.push((format!("{ws_prefix}/{config_file}"), "scripts".to_string()));
     }
@@ -2302,8 +2332,13 @@ fn analyze_ci_scripts(
     all_scripts: &scripts::ScriptCatalog,
     plugin_result: &mut plugins::AggregatedPluginResult,
 ) {
-    let ci_analysis =
-        scripts::ci::analyze_ci_files(&config.root, bin_map, all_dep_set, all_scripts);
+    let ci_analysis = scripts::ci::analyze_ci_files(
+        &config.root,
+        bin_map,
+        all_dep_set,
+        all_scripts,
+        scripts::IgnoredCommandEntries::new(&config.ignore_command_entries),
+    );
     plugin_result
         .script_used_packages
         .extend(ci_analysis.used_packages);
@@ -2323,11 +2358,19 @@ fn discover_all_entry_points(
     let mut spans = EntryPointSpans::default();
     let mut mark = Instant::now();
     let mut entry_points = discover::CategorizedEntryPoints::default();
+    // Every script pass resolves a command that selects workspace packages
+    // (`yarn workspace web node scripts/a.ts`) against the same packages.
+    let workspace_packages = collect_workspace_packages(&input.config.root, input.workspace_pkgs);
+    let script_workspaces = discover::ScriptWorkspaces {
+        packages: &workspace_packages,
+        project_root: &input.config.root,
+    };
     let root_discovery = discover::discover_entry_points_with_warnings_from_pkg(
         input.config,
         input.files,
         input.root_pkg,
         input.workspaces.is_empty(),
+        script_workspaces,
     );
     spans.root_ms = split_ms(&mut mark);
 
@@ -2356,6 +2399,8 @@ fn discover_all_entry_points(
                 input.files,
                 pkg,
                 &seeds,
+                scripts::IgnoredCommandEntries::new(&input.config.ignore_command_entries),
+                script_workspaces,
             )
         })
         .collect();
@@ -2389,7 +2434,17 @@ fn discover_all_entry_points(
     entry_points.extend(plugin_entries.entries);
     spans.plugins_ms = split_ms(&mut mark);
 
-    let infra_entries = discover::discover_infrastructure_entry_points(&input.config.root);
+    // Dockerfile, Procfile, and fly.toml commands resolve script calls such as
+    // `npm run lint -- src/a.ts` against the same catalog as CI commands.
+    let all_scripts =
+        collect_all_scripts(input.root_pkg, input.workspace_pkgs, &workspace_packages);
+    let infra_entries = discover::discover_infrastructure_entry_points(
+        &input.config.root,
+        discover::CommandRefContext {
+            ignored: scripts::IgnoredCommandEntries::new(&input.config.ignore_command_entries),
+            scripts: &all_scripts,
+        },
+    );
     entry_points.extend_runtime(infra_entries);
     spans.infrastructure_ms = split_ms(&mut mark);
 

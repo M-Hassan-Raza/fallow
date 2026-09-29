@@ -111,9 +111,7 @@ const SCOPING_HINT_THRESHOLD: usize = 500;
 /// exceeds the threshold, so medium-sized projects with dispersed issues still see the hint.
 fn truncation_hint(remaining: usize, total_issues: usize) -> String {
     if remaining > SCOPING_HINT_THRESHOLD || total_issues > SCOPING_HINT_THRESHOLD {
-        format!(
-            "... and {remaining} more \u{2014} try --workspace <name> or --changed-since main to scope"
-        )
+        format!("... and {remaining} more; try --workspace <name> or --changed-since main to scope")
     } else {
         format!("... and {remaining} more (--format json for full list)")
     }
@@ -392,6 +390,7 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ("Duplicate exports", "fallow/duplicate-export"),
         ("Circular dependencies", "fallow/circular-dependency"),
         ("Re-Export Cycles", "fallow/re-export-cycle"),
+        ("Package cycles", "fallow/package-cycle"),
         ("Boundary violations", "fallow/boundary-violation"),
         ("Stale suppressions", "fallow/stale-suppression"),
         ("Unused catalog entries", "fallow/unused-catalog-entry"),
@@ -538,32 +537,176 @@ fn format_unused_member(m: &UnusedMember, caveats: &[ReachabilityCaveat]) -> Str
     )
 }
 
+/// Width a dependency line renders within, including the two-space indent that
+/// `push_human_pkg_dep_section` prepends.
+const DEP_LINE_WIDTH: usize = 80;
+
+/// Fixed cost of `  {name} ({label})`: the indent, the separating space, and
+/// the parentheses. What is left after the package name is the label budget.
+const DEP_LINE_DECORATION: usize = 5;
+
+/// Manifest path of the workspace root. It says nothing beyond "the root", so
+/// the label drops it and keeps only the cross-workspace clause.
+const ROOT_MANIFEST: &str = "package.json";
+
+/// Clause introducing the workspaces that import the package.
+const IMPORTED_IN: &str = "imported in ";
+
+/// Marker for a path shortened from the left.
+const PATH_ELLIPSIS: &str = ".../";
+
+/// Narrowest label worth rendering, the width of a manifest path elided to its
+/// file name. Below it the parenthetical carries nothing, so the package
+/// renders bare.
+const MIN_LABEL_WIDTH: usize = 16;
+
+/// Narrowest workspace clause worth rendering: one elided path plus a
+/// `+N more`.
+const MIN_WORKSPACE_LIST_WIDTH: usize = 18;
+
+/// Shorten a path from the left so a deep manifest or workspace path cannot
+/// push a dependency line past `DEP_LINE_WIDTH`. A path is identified by its
+/// innermost segments, so the head goes first; whole segments are kept wherever
+/// they fit, because a half-eaten directory name reads as a different
+/// directory. Callers keep the budget wider than the marker.
+fn elide_path(path: &str, budget: usize) -> String {
+    if path.chars().count() <= budget {
+        return path.to_string();
+    }
+    let tail_budget = budget.saturating_sub(PATH_ELLIPSIS.chars().count());
+    let tail = path
+        .match_indices('/')
+        .map(|(offset, _)| &path[offset + 1..])
+        .find(|tail| tail.chars().count() <= tail_budget)
+        .map_or_else(
+            // One segment wider than the budget: its tail is where a generated
+            // or numbered name differs.
+            || {
+                let skip = path.chars().count().saturating_sub(tail_budget);
+                path.chars().skip(skip).collect()
+            },
+            str::to_string,
+        );
+    format!("{PATH_ELLIPSIS}{tail}")
+}
+
+/// Whether an elided manifest path still names the directory that declares the
+/// dependency, instead of collapsing onto the `package.json` tail every
+/// manifest shares.
+fn names_owning_directory(manifest: &str) -> bool {
+    manifest
+        .strip_prefix(PATH_ELLIPSIS)
+        .unwrap_or(manifest)
+        .contains('/')
+}
+
+/// Join the importing workspaces under `budget`, collapsing the tail into
+/// `+N more`.
+///
+/// The collapse promises no route. `used_in_workspaces` is uncapped in JSON, so
+/// a `--format json for full list` pointer would hold, but it costs more width
+/// than the whole clause has, and the package name is already on the line for a
+/// reader to query with. This is how the review brief caps an inline list.
+fn summarize_workspaces(workspaces: &[String], budget: usize) -> String {
+    let mut shown = 0usize;
+    let mut width = 0usize;
+    for workspace in workspaces {
+        let separator = usize::from(shown > 0) * ", ".len();
+        let omitted = workspaces.len() - shown - 1;
+        // Keep room for the suffix the omitted workspaces will need.
+        let suffix = if omitted == 0 {
+            0
+        } else {
+            format!(" +{omitted} more").chars().count()
+        };
+        let next = width + separator + workspace.chars().count();
+        if shown > 0 && next + suffix > budget {
+            break;
+        }
+        width = next;
+        shown += 1;
+    }
+    // The first workspace always renders, elided if it alone overruns.
+    let shown = shown.max(1).min(workspaces.len());
+    let joined = workspaces[..shown].join(", ");
+    let omitted = workspaces.len() - shown;
+    if omitted == 0 {
+        return elide_path(&joined, budget);
+    }
+    let suffix = format!(" +{omitted} more");
+    let head = elide_path(&joined, budget.saturating_sub(suffix.chars().count()));
+    format!("{head}{suffix}")
+}
+
+/// Build the parenthetical for a dependency line: where the package is declared
+/// and which workspaces import it, both bounded so the label holds within
+/// `budget`. `None` means there is nothing to say (a root manifest with no
+/// cross-workspace consumers) and the caller renders the name alone.
+///
+/// The manifest path outranks the workspace clause. Once seating a clause has
+/// eroded the path down to `.../package.json`, the label no longer names a
+/// package, and a reader cannot edit a manifest they cannot identify, so the
+/// path takes the whole label and the clause goes.
+///
+/// Split out from the printer so the wording and the width are testable.
+fn dep_label(pkg_label: &str, workspaces: &[String], budget: usize) -> Option<String> {
+    // A package name wide enough to leave no usable budget renders bare. The
+    // name is never shortened: it is the identity a reader looks up and passes
+    // to `fallow fix`, and a truncated one is unusable.
+    if budget < MIN_LABEL_WIDTH {
+        return None;
+    }
+    let manifest = (pkg_label != ROOT_MANIFEST).then_some(pkg_label);
+    if workspaces.is_empty() {
+        return manifest.map(|path| elide_path(path, budget));
+    }
+    let separator = if manifest.is_some() { "; " } else { "" };
+    let clause = separator.chars().count() + IMPORTED_IN.chars().count();
+    let head = match manifest {
+        Some(path) => {
+            let head = elide_path(
+                path,
+                budget.saturating_sub(clause + MIN_WORKSPACE_LIST_WIDTH),
+            );
+            if !names_owning_directory(&head) {
+                return Some(elide_path(path, budget));
+            }
+            head
+        }
+        None => String::new(),
+    };
+    let Some(list_budget) = budget
+        .checked_sub(head.chars().count() + clause)
+        .filter(|width| *width >= MIN_WORKSPACE_LIST_WIDTH)
+    else {
+        return (!head.is_empty()).then_some(head);
+    };
+    let list = summarize_workspaces(workspaces, list_budget);
+    Some(format!("{head}{separator}{IMPORTED_IN}{list}"))
+}
+
+/// Render `name` plus its bounded label. `reserved` is the width of the text
+/// the caller appends to the line, for example a caveat parenthetical, so the
+/// label leaves room for it inside `DEP_LINE_WIDTH`.
 fn format_dep_with_pkg(
     name: &str,
     pkg_path: &Path,
     used_in_workspaces: &[PathBuf],
     root: &Path,
+    reserved: usize,
 ) -> String {
+    // Normalized separators: the label's elision snaps to path segments, and a
+    // Windows-shaped path would otherwise present as one unbreakable segment.
     let pkg_label = format_display_path(pkg_path, root);
-    let workspace_context = if used_in_workspaces.is_empty() {
-        String::new()
-    } else {
-        let workspaces = used_in_workspaces
-            .iter()
-            .map(|path| format_display_path(path, root))
-            .collect::<Vec<_>>()
-            .join(", ");
-        format!("; imported in {workspaces}")
-    };
-    if pkg_label == "package.json" && workspace_context.is_empty() {
-        format!("{}", name.bold())
-    } else {
-        let label = if pkg_label == "package.json" {
-            workspace_context.trim_start_matches("; ").to_string()
-        } else {
-            format!("{pkg_label}{workspace_context}")
-        };
-        format!("{} ({})", name.bold(), label.dimmed())
+    let workspaces: Vec<String> = used_in_workspaces
+        .iter()
+        .map(|path| format_display_path(path, root))
+        .collect();
+    let budget =
+        DEP_LINE_WIDTH.saturating_sub(name.chars().count() + DEP_LINE_DECORATION + reserved);
+    match dep_label(&pkg_label, &workspaces, budget) {
+        Some(label) => format!("{} ({})", name.bold(), label.dimmed()),
+        None => name.bold().to_string(),
     }
 }
 
@@ -707,13 +850,15 @@ fn push_human_pkg_dep_section<T: NamedPkgDep>(input: &mut HumanPkgDepSectionInpu
             total_issues: input.total_issues,
         },
         |dep| {
+            let caveat_width = caveat_suffix(dep.caveats()).map_or(0, |text| text.chars().count());
             vec![format!(
                 "  {}{}",
                 format_dep_with_pkg(
                     dep.pkg_name(),
                     dep.pkg_path(),
                     dep.used_in_workspaces(),
-                    input.root
+                    input.root,
+                    caveat_width,
                 ),
                 dimmed_caveat_suffix(dep.caveats()),
             )]
@@ -1467,6 +1612,7 @@ fn build_structure_section(
     let has_structure = !results.duplicate_exports.is_empty()
         || !results.circular_dependencies.is_empty()
         || !results.re_export_cycles.is_empty()
+        || !results.package_cycles.is_empty()
         || !results.boundary_violations.is_empty()
         || !results.boundary_coverage_violations.is_empty()
         || !results.boundary_call_violations.is_empty();
@@ -1493,6 +1639,13 @@ fn build_structure_section(
         lines,
         &results.re_export_cycles,
         severity_to_level(rules.re_export_cycle),
+        root,
+        total_issues,
+    );
+    build_package_cycles_section(
+        lines,
+        &results.package_cycles,
+        severity_to_level(rules.package_cycle),
         root,
         total_issues,
     );
@@ -2800,6 +2953,68 @@ fn build_re_export_cycles_section(
     }
 }
 
+/// Build package cycles section. Each finding shows the package chain, then
+/// one example import per hop.
+fn build_package_cycles_section(
+    lines: &mut Vec<String>,
+    items: &[fallow_types::output_dead_code::PackageCycleFinding],
+    level: Level,
+    root: &Path,
+    total_issues: usize,
+) {
+    if items.is_empty() {
+        return;
+    }
+    let title = "Package cycles";
+    lines.push(build_section_header(title, items.len(), level));
+
+    let arrow = format!(" {} ", "\u{2192}".dimmed());
+    let shown = items.len().min(MAX_FLAT_ITEMS);
+    for entry in &items[..shown] {
+        let cycle = &entry.cycle;
+        let mut chain: Vec<String> = cycle
+            .packages
+            .iter()
+            .map(|name| name.bold().to_string())
+            .collect();
+        if let Some(first) = chain.first().cloned() {
+            chain.push(first);
+        }
+        lines.push(format!("  {}", chain.join(&arrow)));
+        if cycle.group_truncated {
+            let note = format!(
+                "({})",
+                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
+            );
+            lines.push(format!("    {}", note.dimmed()));
+        }
+        for edge in &cycle.edges {
+            let type_tag = if edge.type_only {
+                format!(" {}", "(type-only)".dimmed())
+            } else {
+                String::new()
+            };
+            lines.push(format!(
+                "    {}:{} {} {}{}",
+                format_display_path(&edge.path, root),
+                edge.line,
+                "\u{2192}".dimmed(),
+                format_display_path(&edge.target_path, root),
+                type_tag,
+            ));
+        }
+    }
+    if items.len() > MAX_FLAT_ITEMS {
+        let remaining = items.len() - MAX_FLAT_ITEMS;
+        lines.push(format!(
+            "  {}",
+            truncation_hint(remaining, total_issues).dimmed()
+        ));
+    }
+    push_section_footer_with_count(lines, title, items.len());
+    lines.push(String::new());
+}
+
 /// Build boundary violations section grouped by importing file.
 fn build_boundary_violations_section(
     lines: &mut Vec<String>,
@@ -2980,6 +3195,9 @@ fn collect_matching_rules(
     collect_boundary_rules(&mut rules, results, root, resolver);
     collect_framework_rules(&mut rules, results, root, resolver);
     collect_suppression_rules(&mut rules, results, root, resolver);
+    collect_dependency_rules(&mut rules, results, root, resolver);
+    collect_workspace_config_rules(&mut rules, results, root, resolver);
+    collect_component_health_rules(&mut rules, results, root, resolver);
 
     let mut sorted: Vec<String> = rules.into_iter().collect();
     sorted.sort();
@@ -3127,6 +3345,86 @@ fn collect_suppression_rules(
     }
 }
 
+/// Uses the same file anchors as the grouping builder, so the header names the
+/// rule that put each finding in its group.
+fn collect_dependency_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for d in &results.unused_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unused_dev_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unused_optional_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.type_only_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.test_only_dependencies {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.dev_dependencies_in_production {
+        insert_matching_rule(rules, &d.dep.path, root, resolver);
+    }
+    for d in &results.unlisted_dependencies {
+        if let Some(site) = d.dep.imported_from.first() {
+            insert_matching_rule(rules, &site.path, root, resolver);
+        }
+    }
+    for d in &results.duplicate_exports {
+        if let Some(location) = d.export.locations.first() {
+            insert_matching_rule(rules, &location.path, root, resolver);
+        }
+    }
+}
+
+fn collect_workspace_config_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for e in &results.unused_catalog_entries {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+    for g in &results.empty_catalog_groups {
+        insert_matching_rule(rules, &g.group.path, root, resolver);
+    }
+    for r in &results.unresolved_catalog_references {
+        insert_matching_rule(rules, &r.reference.path, root, resolver);
+    }
+    for e in &results.unused_dependency_overrides {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+    for e in &results.misconfigured_dependency_overrides {
+        insert_matching_rule(rules, &e.entry.path, root, resolver);
+    }
+}
+
+fn collect_component_health_rules(
+    rules: &mut FxHashSet<String>,
+    results: &AnalysisResults,
+    root: &Path,
+    resolver: &OwnershipResolver,
+) {
+    for c in &results.prop_drilling_chains {
+        if let Some(hop) = c.chain.hops.first() {
+            insert_matching_rule(rules, &hop.file, root, resolver);
+        }
+    }
+    for w in &results.thin_wrappers {
+        insert_matching_rule(rules, &w.wrapper.file, root, resolver);
+    }
+    for s in &results.duplicate_prop_shapes {
+        insert_matching_rule(rules, &s.shape.file, root, resolver);
+    }
+}
+
 /// Print analysis results grouped by owner or directory.
 ///
 /// Each group gets a colored header with its key and issue count, followed by
@@ -3145,6 +3443,15 @@ pub(in crate::report) struct PrintGroupedHumanInput<'a> {
     pub(in crate::report) run_fails: bool,
     /// Files an armed `parse-error` gate failed on; see [`clean_status_line`].
     pub(in crate::report) failed_parse_files: usize,
+}
+
+/// Whether the results carry an opt-in component health signal. These do not
+/// count toward `total_issues`, but the flat report shows them, so a group that
+/// holds only these signals must still render.
+fn has_component_health_signals(results: &AnalysisResults) -> bool {
+    !results.prop_drilling_chains.is_empty()
+        || !results.thin_wrappers.is_empty()
+        || !results.duplicate_prop_shapes.is_empty()
 }
 
 fn grouped_issue_counts(groups: &[crate::report::grouping::ResultGroup]) -> Vec<(&str, usize)> {
@@ -3184,10 +3491,11 @@ fn grouped_header_text(
 ) -> String {
     let issue_word = if total == 1 { "issue" } else { "issues" };
     let breakdown = build_summary_footer(&group.results, 0, 0);
+    let signals = fallow_api::health_signal_header_part(&group.results);
     let header_text = if breakdown.is_empty() {
-        format!("{} ({total} {issue_word})", group.key)
+        format!("{} ({total} {issue_word}{signals})", group.key)
     } else {
-        format!("{} ({total} {issue_word}: {breakdown})", group.key)
+        format!("{} ({total} {issue_word}: {breakdown}{signals})", group.key)
     };
 
     match resolver {
@@ -3281,7 +3589,7 @@ pub(in crate::report) fn print_grouped_human(input: &PrintGroupedHumanInput<'_>)
 
     for group in groups {
         let total = group.results.total_issues();
-        if total == 0 {
+        if total == 0 && !has_component_health_signals(&group.results) {
             continue;
         }
         grand_total += total;
@@ -3325,21 +3633,23 @@ fn emit_config_quality_signal(results: &AnalysisResults, root: &Path) {
         if pct > 80.0 {
             let is_source_dir =
                 matches!(dominant_dir.as_str(), "packages" | "src" | "lib" | "apps");
-            let advice = if is_source_dir {
-                format!(
-                    "Note: {pct:.0}% of unused files are under {dominant_dir}/ \
-                     \u{2014} run `fallow list --entry-points` to verify entry-point detection \
-                     \u{2014} https://docs.fallow.tools/explanations/dead-code#unused-files"
-                )
+            let summary = format!("Note: {pct:.0}% of unused files are under {dominant_dir}/.");
+            let advice: &[&str] = if is_source_dir {
+                &["Run `fallow list --entry-points` to verify entry-point detection."]
             } else {
-                format!(
-                    "Note: {pct:.0}% of unused files are under {dominant_dir}/ \
-                     \u{2014} consider adding it to ignorePatterns or using --production \
-                     (analyzes only production entry points) \
-                     \u{2014} https://docs.fallow.tools/explanations/dead-code#unused-files"
-                )
+                &[
+                    "Add it to ignorePatterns, or use --production to analyze only",
+                    "production entry points.",
+                ]
             };
-            eprintln!("  {}", advice.yellow());
+            eprintln!("  {}", summary.yellow());
+            for line in advice {
+                eprintln!("  {}", line.yellow());
+            }
+            eprintln!(
+                "  {}",
+                "https://docs.fallow.tools/explanations/dead-code#unused-files".yellow()
+            );
         }
     }
 }
@@ -3474,6 +3784,7 @@ fn push_summary_graph_parts(parts: &mut Vec<String>, results: &AnalysisResults) 
         "circular dependencies",
     );
     push_summary_part(parts, results.re_export_cycles.len(), "re-export cycles");
+    push_summary_part(parts, results.package_cycles.len(), "package cycles");
     push_summary_part(parts, results.boundary_violations.len(), "violations");
 }
 
@@ -3820,6 +4131,11 @@ fn check_summary_dependency_categories(
             severity_to_level(rules.re_export_cycle),
         ),
         (
+            "Package cycles",
+            results.package_cycles.len(),
+            severity_to_level(rules.package_cycle),
+        ),
+        (
             "Boundary violations",
             results.boundary_violations.len(),
             severity_to_level(rules.boundary_violation),
@@ -4016,6 +4332,45 @@ mod tests {
         insert_test_src_split(&mut lines, &items, &root, PathBuf::as_path);
 
         assert!(plain(&lines).contains("3 in src, 2 in test files"));
+    }
+
+    #[test]
+    fn collect_matching_rules_covers_dependency_and_component_health_findings() {
+        // `--group-by owner` puts these findings in an owner group, so the
+        // "matched by" header must name the rule that put them there.
+        let root = PathBuf::from("/project");
+        let resolver = OwnershipResolver::Owner(
+            crate::codeowners::CodeOwners::parse("/packages/app/ @app\n/packages/ui/ @ui\n")
+                .unwrap(),
+        );
+
+        let mut deps = AnalysisResults::default();
+        deps.unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: "lodash".to_string(),
+                location: fallow_types::results::DependencyLocation::Dependencies,
+                path: root.join("packages/app/package.json"),
+                line: 5,
+                used_in_workspaces: Vec::new(),
+            }));
+        assert_eq!(
+            collect_matching_rules(&deps, &root, &resolver),
+            vec!["/packages/app/".to_string()]
+        );
+
+        let mut health = AnalysisResults::default();
+        health
+            .thin_wrappers
+            .push(ThinWrapperFinding::with_actions(ThinWrapper {
+                file: root.join("packages/ui/Wrapper.tsx"),
+                line: 3,
+                component: "Wrapper".to_string(),
+                child_component: "Child".to_string(),
+            }));
+        assert_eq!(
+            collect_matching_rules(&health, &root, &resolver),
+            vec!["/packages/ui/".to_string()]
+        );
     }
 
     #[test]
@@ -4837,6 +5192,188 @@ mod tests {
     }
 
     #[test]
+    fn unused_dep_with_many_workspaces_holds_80_columns() {
+        let root = PathBuf::from("/project");
+        let manifest = root.join("packages/design-tokens/package.json");
+        let workspaces = vec![
+            root.join("packages/web-application"),
+            root.join("packages/mobile-application"),
+            root.join("packages/documentation-site"),
+        ];
+        let name = "@acme/tokens";
+        let natural: usize = name.chars().count()
+            + DEP_LINE_DECORATION
+            + relative_path(&manifest, &root)
+                .display()
+                .to_string()
+                .chars()
+                .count()
+            + IMPORTED_IN.chars().count()
+            + workspaces
+                .iter()
+                .map(|path| {
+                    relative_path(path, &root)
+                        .display()
+                        .to_string()
+                        .chars()
+                        .count()
+                        + 2
+                })
+                .sum::<usize>();
+        // Unelided, this line runs well past the ceiling it has to hold.
+        // The bound is a literal: written as DEP_LINE_WIDTH + 30 it would
+        // travel with the constant under test and guard nothing.
+        assert!(natural > 110, "{natural}");
+        let mut results = AnalysisResults::default();
+        results
+            .unused_dependencies
+            .push(UnusedDependencyFinding::with_actions(UnusedDependency {
+                package_name: name.to_string(),
+                location: DependencyLocation::Dependencies,
+                path: manifest,
+                line: 8,
+                used_in_workspaces: workspaces,
+            }));
+        let rules = RulesConfig::default();
+        let lines = build_human_lines(&results, &root, &rules, None);
+        let text = plain(&lines);
+        let rendered = text
+            .lines()
+            .find(|line| line.contains(name))
+            .expect("dependency line rendered");
+        // Eighty columns is the contract with the terminal, not a restatement
+        // of DEP_LINE_WIDTH, so it is asserted as a literal. The fixture is
+        // sized to land on the ceiling exactly, which is what makes widening
+        // the constant fail here instead of passing while the output overruns.
+        assert_eq!(rendered.chars().count(), 80, "{rendered}");
+        // The declaring package survives the elision, and the workspaces the
+        // clause could not seat are disclosed rather than dropped.
+        assert!(rendered.contains("design-tokens/package.json"));
+        assert!(rendered.contains("imported in"));
+        assert!(rendered.contains("+2 more"));
+    }
+
+    #[test]
+    fn a_caveated_dep_line_keeps_its_caveat_inside_80_columns() {
+        let root = PathBuf::from("/project");
+        let name = "react-native-gzip";
+        let mut dep = UnusedDependencyFinding::with_actions(UnusedDependency {
+            package_name: name.to_string(),
+            location: DependencyLocation::Dependencies,
+            path: root.join("packages/mobile-application/package.json"),
+            line: 8,
+            used_in_workspaces: Vec::new(),
+        });
+        dep.reachability_caveats = vec![ReachabilityCaveat::IncompleteImportGraph];
+        let mut results = AnalysisResults::default();
+        results.unused_dependencies.push(dep);
+        let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
+        let text = plain(&lines);
+        let rendered = text
+            .lines()
+            .find(|line| line.contains(name))
+            .expect("dependency line rendered");
+        // The caveat is appended after the label, so the label budget has to
+        // leave room for it. Unreserved, this line renders at 95 columns.
+        assert!(
+            rendered.chars().count() <= 80,
+            "{} columns: {rendered}",
+            rendered.chars().count()
+        );
+        assert!(
+            rendered.ends_with("(caveat: incomplete import graph)"),
+            "the caveat is never cut: {rendered}"
+        );
+        assert!(
+            rendered.contains("package.json"),
+            "the manifest still renders: {rendered}"
+        );
+    }
+
+    #[test]
+    fn dep_label_caps_the_workspace_list_and_keeps_whole_paths() {
+        let label = dep_label(
+            "packages/tsc/package.json",
+            &[
+                "packages/bench".to_string(),
+                "packages/treeshake".to_string(),
+            ],
+            DEP_LINE_WIDTH - "valibot".len() - DEP_LINE_DECORATION,
+        )
+        .expect("label rendered");
+        assert_eq!(
+            label,
+            "packages/tsc/package.json; imported in packages/bench +1 more"
+        );
+    }
+
+    #[test]
+    fn dep_label_elides_a_deep_manifest_on_segment_boundaries() {
+        let label = dep_label(
+            "packages/platform/internal/tooling/generators/package.json",
+            &[],
+            40,
+        )
+        .expect("label rendered");
+        assert!(label.chars().count() <= 40, "{label}");
+        assert_eq!(label, ".../tooling/generators/package.json");
+    }
+
+    #[test]
+    fn dep_label_drops_the_clause_that_would_erode_the_manifest_path() {
+        let label = dep_label(
+            "packages/platform/design-system/package.json",
+            &["packages/platform/web-application".to_string()],
+            DEP_LINE_WIDTH - "@internal/design-system-tokens".len() - DEP_LINE_DECORATION,
+        )
+        .expect("label rendered");
+        // Seating the clause would leave `.../package.json`, which names no
+        // package, so the path takes the label instead.
+        assert_eq!(label, "packages/platform/design-system/package.json");
+    }
+
+    #[test]
+    fn dep_label_is_dropped_when_the_package_name_consumes_the_line() {
+        let manifest = "packages/platform/design-system/package.json";
+        let workspaces = ["packages/platform/web-application".to_string()];
+        // Sixteen columns is the width of a manifest elided to its file name,
+        // the narrowest label that still names something. Both budgets are
+        // literals: as MIN_LABEL_WIDTH +/- 1 they would follow the constant
+        // and leave the boundary it exists to express unpinned.
+        assert_eq!(dep_label(manifest, &workspaces, 15), None);
+        assert_eq!(
+            dep_label(manifest, &workspaces, 16).as_deref(),
+            Some(".../package.json")
+        );
+    }
+
+    #[test]
+    fn summarize_workspaces_reserves_room_for_the_more_suffix() {
+        let workspaces: Vec<String> = ["a/bb", "c/ddddddddddd", "e/ff", "g/hh", "i/jj"]
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect();
+        let list = summarize_workspaces(&workspaces, 30);
+        // Seating a third path leaves no room for the `+N more` that the two
+        // it displaces still need, so the loop stops one earlier and every
+        // path it did seat renders whole. Drop the reservation and the joined
+        // list overruns, gets elided from the left, and silently loses entries
+        // the count is still promising are shown.
+        assert_eq!(list, "a/bb, c/ddddddddddd +3 more");
+        assert!(list.chars().count() <= 30, "{list}");
+    }
+
+    #[test]
+    fn summarize_workspaces_elides_a_single_overlong_path() {
+        let list = summarize_workspaces(
+            &["packages/platform/internal/generators".to_string()],
+            MIN_WORKSPACE_LIST_WIDTH,
+        );
+        assert!(list.chars().count() <= MIN_WORKSPACE_LIST_WIDTH, "{list}");
+        assert_eq!(list, ".../generators");
+    }
+
+    #[test]
     fn unresolved_imports_show_specifier_and_line() {
         let root = PathBuf::from("/project");
         let mut results = AnalysisResults::default();
@@ -5093,6 +5630,43 @@ mod tests {
         assert!(text.contains("b.ts"));
         assert!(text.contains("c.ts"));
         assert!(text.contains("\u{2192}"));
+    }
+
+    #[test]
+    fn package_cycle_in_a_truncated_group_shows_a_note() {
+        let root = PathBuf::from("/project");
+        let hop = |from: &str, to: &str, file: &str| PackageCycleEdge {
+            from_package: from.to_string(),
+            to_package: to.to_string(),
+            path: root.join(file),
+            target_path: root.join(file),
+            line: 1,
+            col: 0,
+            type_only: false,
+        };
+        let cycle = |group_truncated: bool| {
+            PackageCycleFinding::with_actions(PackageCycle {
+                packages: vec!["a".to_string(), "b".to_string()],
+                package_roots: vec![root.join("packages/a"), root.join("packages/b")],
+                length: 2,
+                edges: vec![
+                    hop("a", "b", "packages/a/x.ts"),
+                    hop("b", "a", "packages/b/y.ts"),
+                ],
+                group_truncated,
+            })
+        };
+        let mut results = AnalysisResults::default();
+        results.package_cycles.push(cycle(true));
+        results.package_cycles.push(cycle(false));
+        let rules = RulesConfig::default();
+        let text = plain(&build_human_lines(&results, &root, &rules, None));
+        assert_eq!(
+            text.matches("(this package group has more cycles than listed)")
+                .count(),
+            1,
+            "{text}"
+        );
     }
 
     #[test]

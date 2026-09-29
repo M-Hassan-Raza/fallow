@@ -176,6 +176,8 @@ mod misplaced_directive;
 mod mixed_client_server_barrel;
 #[path = "integration_test/nextjs_route_tree.rs"]
 mod nextjs_route_tree;
+#[path = "integration_test/non_loading_edges.rs"]
+mod non_loading_edges;
 #[path = "integration_test/policy_violations.rs"]
 mod policy_violations;
 #[path = "integration_test/private_type_leaks.rs"]
@@ -190,6 +192,8 @@ mod re_export_chains;
 mod react_component_intel;
 #[path = "integration_test/render_fan_in.rs"]
 mod render_fan_in;
+#[path = "integration_test/require_resolve_relative.rs"]
+mod require_resolve_relative;
 #[path = "integration_test/security_catalogue_categories.rs"]
 mod security_catalogue_categories;
 #[path = "integration_test/security_client_server_leak.rs"]
@@ -323,6 +327,12 @@ mod issue_2753_bundler_entries;
 mod issue_2757_federation_option_shapes;
 #[path = "integration_test/issue_2940_ignore_pattern_negation.rs"]
 mod issue_2940_ignore_pattern_negation;
+#[path = "integration_test/issue_2952_package_imports_workspace_dep.rs"]
+mod issue_2952_package_imports_workspace_dep;
+#[path = "integration_test/issue_2954_lint_targets_not_entries.rs"]
+mod issue_2954_lint_targets_not_entries;
+#[path = "integration_test/workspace_hoisted_package_imports.rs"]
+mod workspace_hoisted_package_imports;
 
 #[path = "integration_test/issue_2794_federation_shared.rs"]
 mod issue_2794_federation_shared;
@@ -391,6 +401,8 @@ mod issue_2069_npm_overrides;
 mod issue_2358_bun_lockb_diagnostic;
 #[path = "integration_test/issue_2367_bun_resolutions.rs"]
 mod issue_2367_bun_resolutions;
+#[path = "integration_test/issue_2955_package_cycles.rs"]
+mod issue_2955_package_cycles;
 #[path = "integration_test/issue_317_namespace_barrel_ignore_exports.rs"]
 mod issue_317_namespace_barrel_ignore_exports;
 #[path = "integration_test/issue_329_pnpm_catalog.rs"]
@@ -531,3 +543,5 @@ mod issue_740_pinia_store_auto_imports;
 mod issue_744_tsdown_config;
 #[path = "integration_test/pkg_utils_plugin.rs"]
 mod pkg_utils_plugin;
+#[path = "integration_test/webpack_inline_loaders.rs"]
+mod webpack_inline_loaders;

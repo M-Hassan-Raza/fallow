@@ -16,6 +16,9 @@ import type {
 } from "./types.js";
 import { ISSUE_CATEGORY_LABELS } from "./types.js";
 
+/** Shown on a package cycle whose package group has more cycles than the CLI lists. */
+const PACKAGE_GROUP_TRUNCATED_NOTE = "this package group has more cycles than listed";
+
 /** Icons per issue category. */
 const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unused-files": "file-code",
@@ -50,6 +53,7 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "dev-dependencies-in-production": "package",
   "circular-dependencies": "sync",
   "re-export-cycles": "sync-ignored",
+  "package-cycles": "sync",
   "boundary-violation": "symbol-namespace",
   "policy-violations": "symbol-namespace",
   "stale-suppressions": "trash",
@@ -58,6 +62,9 @@ const CATEGORY_ICONS: Record<IssueCategory, string> = {
   "unresolved-catalog-references": "error",
   "unused-dependency-overrides": "package",
   "misconfigured-dependency-overrides": "error",
+  "prop-drilling": "symbol-property",
+  "thin-wrapper": "symbol-misc",
+  "duplicate-prop-shape": "symbol-structure",
 };
 
 /** Icons for individual issue items. Only these categories use a different icon. */
@@ -560,6 +567,21 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       );
     }
 
+    if (this.result.package_cycles) {
+      addCategory(
+        "package-cycles",
+        this.result.package_cycles.map(
+          (c) =>
+            new CycleItem(
+              [...c.packages, c.packages[0]].join(" -> ") +
+                (c.group_truncated ? ` (${PACKAGE_GROUP_TRUNCATED_NOTE})` : ""),
+              c.edges.map((edge) => edge.path),
+              "package-cycles",
+            ),
+        ),
+      );
+    }
+
     const boundaryItems = [
       ...(this.result.boundary_violations?.map(
         (v) =>
@@ -687,7 +709,67 @@ export class DeadCodeTreeProvider implements vscode.TreeDataProvider<DeadCodeIte
       );
     }
 
+    this.addComponentHealthCategories(addCategory);
+
     return categories;
+  }
+
+  /**
+   * The opt-in component health signals. Each item sits at the component the
+   * CLI anchors the finding to: the source hop of a prop drilling chain, the
+   * wrapper, or the component with the shared prop shape.
+   */
+  private addComponentHealthCategories(
+    addCategory: (category: IssueCategory, items: ReadonlyArray<IssueItem>) => void,
+  ): void {
+    if (!this.result) {
+      return;
+    }
+    if (this.result.prop_drilling_chains) {
+      addCategory(
+        "prop-drilling",
+        this.result.prop_drilling_chains.flatMap((chain) => {
+          const source = chain.hops[0];
+          if (!source) {
+            return [];
+          }
+          const trail = chain.hops.map((hop) => hop.component).join(" -> ");
+          return [
+            new IssueItem(`${chain.prop}: ${trail}`, source.file, source.line, 0, "prop-drilling"),
+          ];
+        }),
+      );
+    }
+    if (this.result.thin_wrappers) {
+      addCategory(
+        "thin-wrapper",
+        this.result.thin_wrappers.map(
+          (wrapper) =>
+            new IssueItem(
+              `${wrapper.component} -> ${wrapper.child_component}`,
+              wrapper.file,
+              wrapper.line,
+              0,
+              "thin-wrapper",
+            ),
+        ),
+      );
+    }
+    if (this.result.duplicate_prop_shapes) {
+      addCategory(
+        "duplicate-prop-shape",
+        this.result.duplicate_prop_shapes.map(
+          (shape) =>
+            new IssueItem(
+              `${shape.component} {${shape.shape.join(", ")}}`,
+              shape.file,
+              shape.line,
+              0,
+              "duplicate-prop-shape",
+            ),
+        ),
+      );
+    }
   }
 
   dispose(): void {

@@ -4,6 +4,56 @@ Use this before large changes, reviews, commits, and pushes.
 
 ## One-time local setup
 
+### Git hooks with hk
+
+[hk](https://hk.jdx.dev) runs the git hooks. The root `hk.pkl` defines the
+`pre-commit`, `commit-msg` and `pre-push` hooks. hk evaluates `hk.pkl` with the
+`pkl` CLI, so install both, then run `hk install` once per clone:
+
+```bash
+mise install
+hk install --mise
+```
+
+Without mise, install `hk` and `pkl` at the versions in `mise.toml` and run
+`hk install`. `--mise` starts the hooks through `mise x`, so a shell or git
+client without mise activation still finds hk. `HK=0 git commit` skips the
+hooks for one command.
+
+hk runs the steps of a hook in parallel. A pre-commit step with a `glob` runs
+only when a staged file matches it, so a commit without Rust inputs skips
+`cargo fmt`, Clippy and the Miri cfg check. hk does not match deleted files, so
+a commit that only deletes a Rust file also skips them. The pre-push hook runs
+`cargo fmt` and Clippy with no glob and catches that case. The pre-commit hook only checks.
+Run `hk fix` to apply the fix commands, for example `cargo fmt --all`. The
+hooks use `stash = "none"`, because every worktree of this repository shares
+one git stash stack.
+
+Run one hook by hand with `hk run pre-commit` or `hk run pre-push`. Add
+`--plan` to see which steps run and why.
+
+### Pinned tools with mise (optional)
+
+The root `mise.toml` pins the local tools that the hooks and quality gates
+call: hk, pkl, Node.js, `typos`, `cargo-shear`, `cargo-deny`, `cargo-audit`,
+`cargo-nextest`, `cargo-llvm-cov` and `cargo-insta`. With
+[mise](https://mise.jdx.dev) installed, run `mise install` to get the pinned
+set. mise downloads prebuilt binaries, so the install does not compile tools.
+
+mise is optional. Without mise, install each tool by hand at the version in
+`mise.toml`. When a hook does not find a tool, it prints one hint line with the
+pinned version and skips that check. `rust-toolchain.toml` owns the Rust
+version through rustup, so `mise.toml` does not pin Rust.
+
+Where CI pins a tool version, `mise.toml` uses the same version.
+`scripts/workflow-policy.test.mjs` fails when the CI Node.js version or a
+`tool: name@version` pin changes and `mise.toml` does not follow. The test
+does not check typos and cargo-deny, because their CI actions fix the tool
+version in the action commit. A Dependabot action bump then does not fail.
+Update those two versions by hand.
+
+### Package installs
+
 A root-only `npm ci` is enough for the type-aware CLI test targets. The
 type-aware CLI tests launch the real sidecar from `tools/type-aware-sidecar/`;
 without a sidecar-local install it resolves `typescript` from ancestor
@@ -183,6 +233,12 @@ On pull requests:
 - `Ecosystem CI`, when Rust sources or `tests/ecosystem/**` change.
 - `Type-aware Benchmarks`, when `tools/type-aware-sidecar/**` changes.
 - `Protocol parity`, when `crates/cli/Cargo.toml` or `Cargo.lock` changes.
+- `PGO Validate`, when `scripts/pgo-train.sh`,
+  `.github/scripts/pgo-compare.mjs`, `.github/scripts/pgo-profile-match.mjs`,
+  `benchmarks/download-fixtures.mjs`, `.github/actions/setup-rust/**`,
+  `.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`,
+  `Cargo.lock`, or `rust-toolchain.toml` changes. It compares a PGO build with
+  a base build of the same pull request.
 - `Review Electron` and `Test GitHub Action`, when their own paths change.
 
 On push to `main` only (each one also has `workflow_dispatch`):
@@ -254,6 +310,10 @@ before and after a CI change.
 - Give every lint suppression a reason.
 - Preserve size assertions when touching hot-path types.
 - Normalize path separators in tests.
+- In a timing assertion, measure only the operation under test. Read the
+  elapsed time before you wait for a killed descendant to exit. The init
+  process must reap an orphan, some container init processes reap zombies
+  only after seconds, and `kill -0` reports a zombie as live.
 - Redact versions, durations, temporary roots, and other volatile data in
   snapshots.
 
@@ -277,8 +337,11 @@ npm run fmt:js:check
 
 The JavaScript checks run only when staged files touch a lintable JavaScript or
 TypeScript scope. `typos`, Python, and Node checks run only when the matching
-tool is installed, exactly as in `.githooks/pre-commit`. The Miri cfg check
-runs only when staged files include a Rust file.
+tool is installed, exactly as in the `hk.pkl` pre-commit hook. When `typos` or Node
+is missing, the hook prints a hint with the version in `mise.toml`. The Miri cfg check
+runs only when staged files include a Rust file. `cargo fmt` and Clippy run
+only when staged files include a Rust file or a Cargo, toolchain, rustfmt or
+Clippy config file.
 
 The Miri cfg check reads the crates that the CI `miri` job tests. It fails when
 code that Miri compiles names a module declared under `not(miri)`, for example
@@ -303,7 +366,8 @@ before the push. With no change the step takes under 1 s.
 
 The `cargo shear` step is the same command as the required
 `Unused Dependencies` CI job. It catches a dependency whose last use a change
-removes. The hook skips it with a note when `cargo-shear` is not installed.
+removes. When `cargo-shear` is not installed, the hook skips the step and
+prints a hint with the version in `mise.toml`.
 
 Recommended full local verification before review:
 
@@ -341,6 +405,17 @@ and that the cache (`.fallow/`) does not serve an older result.
 - Read every snapshot diff before you accept it.
 - Fix the pattern, not the instance. Search for the other places where the
   same defect shape occurs and cover them in the same change.
+- When a test waits for a child process, wait for a readiness signal. Stop
+  early when the worker thread or process ends. Use a wall-clock bound only to
+  prevent a hang.
+- Put a timing assertion far below the duration of the failure case, not just
+  above the normal duration. For example, use 20 seconds when a regression
+  blocks for 30 seconds.
+- To reproduce a timing flake, run the test binary at `nice -n 19` while busy
+  loops such as `yes > /dev/null` fill every core.
+- A test that removes write permission from a directory to force an error does
+  not fail as expected when it runs as root, because root ignores the mode. Do
+  not treat these failures as regressions. Run the tests as a normal user.
 
 ### Behavior comparison on public projects
 

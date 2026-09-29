@@ -20,8 +20,9 @@ use super::used_class_members::UsedClassMemberRule;
 use crate::external_plugin::{ExternalPluginDef, discover_external_plugins};
 
 use super::{
-    BoundaryConfig, FallowConfig, FindingIgnoreMatcher, IgnoreExportsUsedInFileConfig,
-    IgnorePatternSet, ProductionConfig, SecurityConfig, TypeAwareConfig,
+    BoundaryConfig, FallowConfig, FindingIgnoreMatcher, IgnoreDependencyMatcher,
+    IgnoreExportsUsedInFileConfig, IgnorePatternSet, ProductionConfig, SecurityConfig,
+    TypeAwareConfig,
 };
 
 /// Process-local dedup state for inter-file rule warnings.
@@ -244,9 +245,12 @@ pub struct ResolvedConfig {
     /// names), mixed into cache keys so plugin changes invalidate cached
     /// extractions instead of serving stale results.
     pub cache_config_hash: u64,
-    /// Exact package names excluded from both unused-dependency and
-    /// unlisted-dependency detection.
-    pub ignore_dependencies: Vec<String>,
+    /// Package names and package-name globs excluded from both
+    /// unused-dependency and unlisted-dependency detection.
+    pub ignore_dependencies: IgnoreDependencyMatcher,
+    /// Command names whose file arguments do not become entry points; `*`
+    /// matches every command.
+    pub ignore_command_entries: Vec<String>,
     /// Compiled globs matched against raw import specifiers (not filesystem
     /// paths) whose `unresolved-import` findings are suppressed.
     pub ignore_unresolved_imports: Vec<GlobMatcher>,
@@ -424,6 +428,21 @@ fn hash_str(hasher: &mut xxhash_rust::xxh3::Xxh3, value: &str) {
     hasher.update(value.as_bytes());
 }
 
+/// Environment variable that moves the persistent analysis cache.
+pub const CACHE_DIR_ENV: &str = "FALLOW_CACHE_DIR";
+
+/// Read the non-empty `FALLOW_CACHE_DIR` value from the process environment.
+///
+/// Every host that loads a project config (CLI, LSP, MCP, Node bindings)
+/// applies this value with [`ResolvedConfig::override_cache_dir`], so the
+/// variable has one meaning on every surface. It wins over `cache.dir`.
+#[must_use]
+pub fn cache_dir_env_override() -> Option<PathBuf> {
+    std::env::var_os(CACHE_DIR_ENV)
+        .map(PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+}
+
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     let Some(dir) = configured else {
         return root.join(".fallow");
@@ -432,6 +451,42 @@ fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
         dir
     } else {
         root.join(dir)
+    }
+}
+
+fn cache_dir_is_inside_root(root: &Path, cache_dir: &Path) -> bool {
+    if cache_dir.starts_with(root) {
+        return true;
+    }
+    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let canonical_cache =
+        dunce::canonicalize(cache_dir).unwrap_or_else(|_| cache_dir.to_path_buf());
+    canonical_cache.starts_with(&canonical_root)
+}
+
+/// Name of the subdirectory that one project root owns inside a shared cache
+/// directory: the root's folder name for a reader, then a hash of the full
+/// root path, so two roots with the same folder name stay apart.
+fn per_root_cache_subdir(root: &Path) -> String {
+    let path = root.to_string_lossy().replace('\\', "/");
+    let hash = xxhash_rust::xxh3::xxh3_64(path.as_bytes());
+    let name: String = root
+        .file_name()
+        .map(|name| name.to_string_lossy())
+        .unwrap_or_default()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if name.is_empty() {
+        format!("{hash:016x}")
+    } else {
+        format!("{name}-{hash:016x}")
     }
 }
 
@@ -849,7 +904,8 @@ impl FallowConfig {
             no_cache,
             cache_max_size_mb: cache.max_size_mb,
             cache_config_hash: cache.config_hash,
-            ignore_dependencies: self.ignore_dependencies,
+            ignore_dependencies: IgnoreDependencyMatcher::compile(&self.ignore_dependencies),
+            ignore_command_entries: self.ignore_command_entries,
             ignore_unresolved_imports: compiled_ignores.unresolved_imports,
             ignore_export_rules: self.ignore_exports,
             compiled_ignore_exports: compiled_ignores.exports,
@@ -891,6 +947,30 @@ impl FallowConfig {
 }
 
 impl ResolvedConfig {
+    /// Replace the resolved cache directory with a host override, such as
+    /// `FALLOW_CACHE_DIR`. A relative path resolves from the project root,
+    /// the same base as `cache.dir`.
+    pub fn override_cache_dir(&mut self, dir: PathBuf) {
+        self.cache_dir = resolve_cache_dir(&self.root, Some(dir));
+    }
+
+    /// Give this project root its own subdirectory when the cache directory
+    /// is outside the root.
+    ///
+    /// A host that analyzes more than one root in one process, such as the
+    /// language server with a multi-root workspace, calls this. Without it,
+    /// the roots write the same `cache.bin` and `graph-cache.bin`, and each
+    /// save replaces the cache of the other root. The CLI does not call it,
+    /// so a shared CI cache stays valid when the checkout path changes. A
+    /// cache directory inside the root already belongs to that root and
+    /// stays unchanged.
+    pub fn scope_shared_cache_dir_to_root(&mut self) {
+        if cache_dir_is_inside_root(&self.root, &self.cache_dir) {
+            return;
+        }
+        self.cache_dir = self.cache_dir.join(per_root_cache_subdir(&self.root));
+    }
+
     /// Resolve the effective rules for a given file path.
     /// Starts with base rules and applies matching overrides in order.
     #[must_use]
@@ -999,6 +1079,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1057,6 +1138,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1126,6 +1208,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1203,6 +1286,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1332,6 +1416,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1400,6 +1485,7 @@ mod tests {
             framework: vec![],
             workspaces: None,
             ignore_dependencies: vec![],
+            ignore_command_entries: vec![],
             ignore_unresolved_imports: vec![],
             ignore_exports: vec![],
             ignore_catalog_references: vec![],
@@ -1976,10 +2062,24 @@ mod tests {
             true,
             None,
         );
-        assert_eq!(
-            resolved.ignore_dependencies,
-            vec!["postcss", "autoprefixer"]
+        assert!(resolved.ignore_dependencies.is_ignored("postcss"));
+        assert!(resolved.ignore_dependencies.is_ignored("autoprefixer"));
+        assert!(!resolved.ignore_dependencies.is_ignored("postcss-cli"));
+    }
+
+    #[test]
+    fn resolve_passes_through_ignore_command_entries() {
+        let mut config = make_config(false);
+        config.ignore_command_entries = vec!["my-codegen".to_string()];
+        let resolved = config.resolve(
+            PathBuf::from("/project"),
+            OutputFormat::Human,
+            1,
+            true,
+            true,
+            None,
         );
+        assert_eq!(resolved.ignore_command_entries, vec!["my-codegen"]);
     }
 
     #[test]
@@ -2073,6 +2173,94 @@ mod tests {
             resolved.cache_dir,
             PathBuf::from("/my/project/.cache/fallow")
         );
+    }
+
+    #[test]
+    fn cache_dir_override_wins_over_configured_cache_dir() {
+        let config = FallowConfig {
+            cache: crate::CacheConfig {
+                dir: Some(PathBuf::from(".cache/from-config")),
+                ..Default::default()
+            },
+            ..make_config(false)
+        };
+        let mut resolved = config.resolve(
+            PathBuf::from("/my/project"),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+
+        resolved.override_cache_dir(PathBuf::from(".cache/from-env"));
+        assert_eq!(
+            resolved.cache_dir,
+            PathBuf::from("/my/project/.cache/from-env")
+        );
+        resolved.override_cache_dir(PathBuf::from("/tmp/fallow-cache"));
+        assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/fallow-cache"));
+    }
+
+    fn resolved_with_cache_dir(root: &str, cache_dir: &str) -> ResolvedConfig {
+        let mut resolved = make_config(false).resolve(
+            PathBuf::from(root),
+            OutputFormat::Human,
+            1,
+            false,
+            true,
+            None,
+        );
+        resolved.override_cache_dir(PathBuf::from(cache_dir));
+        resolved
+    }
+
+    #[test]
+    fn scoped_shared_cache_dir_gives_each_root_its_own_subdirectory() {
+        let mut first = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        let mut second = resolved_with_cache_dir("/other/app", "/var/cache/fallow");
+        first.scope_shared_cache_dir_to_root();
+        second.scope_shared_cache_dir_to_root();
+
+        assert_eq!(
+            first.cache_dir.parent(),
+            Some(Path::new("/var/cache/fallow"))
+        );
+        assert_eq!(
+            second.cache_dir.parent(),
+            Some(Path::new("/var/cache/fallow"))
+        );
+        assert_ne!(
+            first.cache_dir, second.cache_dir,
+            "two roots with the same folder name must not share a cache"
+        );
+        let name = first
+            .cache_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(name.starts_with("app-"), "the folder name leads: {name}");
+    }
+
+    #[test]
+    fn scoped_cache_dir_is_stable_for_one_root() {
+        let mut first = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        let mut again = resolved_with_cache_dir("/work/app", "/var/cache/fallow");
+        first.scope_shared_cache_dir_to_root();
+        again.scope_shared_cache_dir_to_root();
+        assert_eq!(first.cache_dir, again.cache_dir);
+    }
+
+    #[test]
+    fn scoping_keeps_a_cache_dir_inside_the_root() {
+        let mut relative = resolved_with_cache_dir("/work/app", ".cache/fallow");
+        relative.scope_shared_cache_dir_to_root();
+        assert_eq!(relative.cache_dir, PathBuf::from("/work/app/.cache/fallow"));
+
+        let mut absolute = resolved_with_cache_dir("/work/app", "/work/app/.fallow");
+        absolute.scope_shared_cache_dir_to_root();
+        assert_eq!(absolute.cache_dir, PathBuf::from("/work/app/.fallow"));
     }
 
     #[test]

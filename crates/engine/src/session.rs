@@ -195,7 +195,19 @@ impl AnalysisSession {
     /// config-load warning but should still surface best-effort diagnostics.
     #[must_use]
     pub fn load_default(root: &Path) -> Self {
-        Self::from_config(default_project_config(root))
+        Self::load_default_with_config(root, |_| {})
+    }
+
+    /// Build a session from built-in defaults, apply one caller-supplied
+    /// adjustment, then discover project files.
+    #[must_use]
+    pub fn load_default_with_config(
+        root: &Path,
+        configure: impl FnOnce(&mut ResolvedConfig),
+    ) -> Self {
+        let mut project_config = default_project_config(root);
+        configure(&mut project_config.config);
+        Self::from_config(project_config)
     }
 
     /// Build a session from a previously resolved config.
@@ -1586,6 +1598,9 @@ fn run_engine_owned_dead_code_pipeline(
         collect_usages,
         &entry_points,
     );
+    // Stamp ids on the full set, before any filter removes a finding. The
+    // tiebreak suffix depends on the other findings with the same identity.
+    crate::dead_code::stamp_finding_ids(&mut detector.results, &config.root);
     crate::dead_code::filter_configured_ignored_findings(&mut detector.results, config);
     // The detectors are the longest uninterruptible stage. Without this a
     // token set inside them yields a complete report, so the same request

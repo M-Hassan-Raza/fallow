@@ -29,6 +29,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "dev-dependencies-in-production": true,
   "circular-dependencies": true,
   "re-export-cycle": true,
+  "package-cycle": true,
   "boundary-violation": true,
   "policy-violation": true,
   "invalid-client-export": true,
@@ -50,7 +51,10 @@ export const ISSUE_TYPE_DEFAULTS = {
   "empty-catalog-groups": true,
   "unresolved-catalog-references": true,
   "unused-dependency-overrides": true,
-  "misconfigured-dependency-overrides": true
+  "misconfigured-dependency-overrides": true,
+  "prop-drilling": true,
+  "thin-wrapper": true,
+  "duplicate-prop-shape": true
 } as const;
 
 export type IssueTypeKey = keyof typeof ISSUE_TYPE_DEFAULTS;
@@ -67,6 +71,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "circular-dependency": "circular-dependencies",
   "dev-dependency-in-production": "dev-dependencies-in-production",
   "duplicate-export": "duplicate-exports",
+  "duplicate-prop-shapes": "duplicate-prop-shape",
   "dynamic-segment-name-conflicts": "dynamic-segment-name-conflict",
   "empty-catalog": "empty-catalog-groups",
   "empty-catalog-group": "empty-catalog-groups",
@@ -76,6 +81,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "misconfigured-overrides": "misconfigured-dependency-overrides",
   "misplaced-directives": "misplaced-directive",
   "mixed-client-server-barrels": "mixed-client-server-barrel",
+  "package-cycles": "package-cycle",
   "policy-violations": "policy-violation",
   "private-type-leak": "private-type-leaks",
   "re-export-cycles": "re-export-cycle",
@@ -84,6 +90,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "route-collisions": "route-collision",
   "stale-suppression": "stale-suppressions",
   "test-only-dependency": "test-only-dependencies",
+  "thin-wrappers": "thin-wrapper",
   "type-only-dependency": "type-only-dependencies",
   "unlisted-dependency": "unlisted-dependencies",
   "unprovided-inject": "unprovided-injects",
@@ -198,6 +205,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
     "label": "Re-Export Cycles"
   },
   {
+    "code": "package-cycle",
+    "label": "Package Cycles"
+  },
+  {
     "code": "boundary-violation",
     "label": "Boundary Violations"
   },
@@ -284,5 +295,17 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "misconfigured-dependency-override",
     "label": "Misconfigured Dependency Overrides"
+  },
+  {
+    "code": "prop-drilling",
+    "label": "Prop Drilling"
+  },
+  {
+    "code": "thin-wrapper",
+    "label": "Thin Wrappers"
+  },
+  {
+    "code": "duplicate-prop-shape",
+    "label": "Duplicate Prop Shapes"
   }
 ];

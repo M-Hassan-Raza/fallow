@@ -504,6 +504,76 @@ pub(super) fn try_package_imports_fallback(
     )
 }
 
+/// Return the workspace package that a package `imports` alias reached.
+///
+/// An alias such as `"#lib/*": "@acme/lib/*"` can resolve through the install
+/// symlink straight to the workspace source file. The file edge is correct, but
+/// the dependency on `@acme/lib` must still receive usage credit, the same as a
+/// direct `@acme/lib/...` import.
+///
+/// Only the package that owns `resolved_file` can receive the credit, and only
+/// when an alias target names it. Node.js resolves a fallback array such as
+/// `["./src/x.ts", "@acme/lib/x"]` to the local file, so `@acme/lib` receives
+/// no credit for it. A target that names a package outside the known package
+/// manifests also returns `None`.
+pub(super) fn package_imports_workspace_target(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    resolved_file: &Path,
+) -> Option<String> {
+    if !specifier.starts_with('#') {
+        return None;
+    }
+    let manifest = nearest_package_manifest(ctx.package_manifests, from_file)?;
+    let imports = manifest.package_json.imports.as_ref()?;
+    let PackageMapTarget::Targets(targets) =
+        package_map_target(imports, specifier, ctx.condition_names)
+    else {
+        return None;
+    };
+    let owner = nearest_package_manifest(ctx.package_manifests, resolved_file)?
+        .name
+        .as_deref()?;
+    targets
+        .iter()
+        .filter(|target| !target.starts_with('#'))
+        .filter_map(|target| package_import_external_target(target))
+        .find(|package_name| package_name == owner)
+}
+
+/// Return the workspace package that a direct bare import reached through its
+/// install link.
+///
+/// npm, yarn and pnpm link a workspace package into `node_modules`, so an
+/// import such as `@acme/lib/x` resolves to the source file of the package.
+/// Node.js uses the first `node_modules/@acme/lib` in the ancestor directories
+/// of the importing file. The package receives the credit only when that link
+/// points at the workspace package root and the resolved file is inside it. An
+/// import that only a tsconfig `paths` alias or a bundler alias resolves has no
+/// such link, so it keeps its plain internal edge.
+pub(super) fn installed_workspace_package_target(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+    resolved_file: &Path,
+) -> Option<String> {
+    let package_name = super::specifier::package_usage_name_for_external_bare_specifier(specifier)?;
+    let workspace_root = *ctx.workspace_roots.get(package_name.as_str())?;
+    let resolved = ctx
+        .canonicalize_cache
+        .get(resolved_file)
+        .unwrap_or_else(|| resolved_file.to_path_buf());
+    if !resolved.starts_with(workspace_root) {
+        return None;
+    }
+    let installed = from_file.ancestors().skip(1).find_map(|dir| {
+        ctx.canonicalize_cache
+            .get(&dir.join("node_modules").join(&package_name))
+    })?;
+    (installed == workspace_root).then_some(package_name)
+}
+
 /// Resolve a relative import that lands on a known package root whose built
 /// entry points are absent but whose package metadata points at source files.
 pub(super) fn try_relative_package_root_source_fallback(
@@ -1611,6 +1681,59 @@ mod tests {
                     try_package_imports_fallback(ctx, &root.join("src/index.ts"), "#scoped");
                 assert!(
                     matches!(scoped, Some(ResolveResult::NpmPackage(pkg)) if pkg == "@scope/pkg")
+                );
+            },
+        );
+    }
+
+    #[test]
+    fn package_imports_workspace_target_names_only_known_packages() {
+        let root = PathBuf::from("/project");
+        with_package_map_ctx(
+            root,
+            Some("pkg"),
+            fallow_config::PackageJson {
+                imports: Some(serde_json::json!({
+                    "#self/*": "pkg/*",
+                    "#pad": "left-pad",
+                    "#local/*": "./src/*.ts"
+                })),
+                ..Default::default()
+            },
+            &[],
+            |ctx, _, root| {
+                let from = root.join("src/index.ts");
+                let feature = root.join("src/feature.ts");
+                assert_eq!(
+                    package_imports_workspace_target(ctx, &from, "#self/feature", &feature),
+                    Some("pkg".to_string())
+                );
+                assert_eq!(
+                    package_imports_workspace_target(
+                        ctx,
+                        &from,
+                        "#self/feature",
+                        Path::new("/elsewhere/feature.ts")
+                    ),
+                    None,
+                    "a file outside the named package must not credit it"
+                );
+                assert_eq!(
+                    package_imports_workspace_target(
+                        ctx,
+                        &from,
+                        "#pad",
+                        &root.join("node_modules/left-pad/index.js")
+                    ),
+                    None
+                );
+                assert_eq!(
+                    package_imports_workspace_target(ctx, &from, "#local/feature", &feature),
+                    None
+                );
+                assert_eq!(
+                    package_imports_workspace_target(ctx, &from, "pkg/feature", &feature),
+                    None
                 );
             },
         );

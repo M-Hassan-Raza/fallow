@@ -48,6 +48,13 @@ pub struct CodeClimateIssue {
     /// output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub group: Option<String>,
+    /// The fingerprint an older Fallow version gave this issue, when it is
+    /// different from `fingerprint`. Never serialized: the CodeClimate wire
+    /// shape does not change. The review layer uses it for one release to
+    /// match review threads that carry the older marker.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub legacy_fingerprint: Option<String>,
 }
 
 /// Discriminator value for [`CodeClimateIssue::kind`].
@@ -144,20 +151,11 @@ pub enum CodeClimateAnnotationField {
 
 /// Compute a deterministic fingerprint hash from key fields.
 ///
-/// Uses FNV-1a (64-bit) for guaranteed cross-version stability. `DefaultHasher`
-/// is intentionally not used because it is not specified across Rust versions.
+/// Delegates to [`fallow_types::identity::fnv1a64_parts`], the one FNV-1a 64
+/// implementation that fingerprints and finding ids share.
 #[must_use]
 pub fn codeclimate_fingerprint_hash(parts: &[&str]) -> String {
-    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for part in parts {
-        for byte in part.bytes() {
-            hash ^= u64::from(byte);
-            hash = hash.wrapping_mul(0x0100_0000_01b3);
-        }
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(0x0100_0000_01b3);
-    }
-    format!("{hash:016x}")
+    fallow_types::identity::fnv1a64_parts(parts)
 }
 
 /// Build a single CodeClimate issue from a stable contract descriptor.
@@ -180,6 +178,7 @@ pub fn build_codeclimate_issue(input: CodeClimateIssueInput<'_>) -> CodeClimateI
         other_locations: Vec::new(),
         owner: None,
         group: None,
+        legacy_fingerprint: None,
     }
 }
 
@@ -278,6 +277,22 @@ mod tests {
             a,
             codeclimate_fingerprint_hash(&["FEATURE_X", "src/index.ts", "3"])
         );
+    }
+
+    /// Pins exact digests. CI review threads and CodeClimate consumers match on
+    /// these values, so a change to the hash breaks every saved fingerprint.
+    /// The expected values come from an independent FNV-1a 64 script.
+    #[test]
+    fn codeclimate_fingerprint_hash_golden_values() {
+        assert_eq!(
+            codeclimate_fingerprint_hash(&["src/index.ts", "FEATURE_X", "3"]),
+            "2278c9d9bd9d2dd2"
+        );
+        assert_eq!(
+            codeclimate_fingerprint_hash(&["fallow/unused-file", "src/orphan.ts"]),
+            "c03b925ddb7d871a"
+        );
+        assert_eq!(codeclimate_fingerprint_hash(&[]), "cbf29ce484222325");
     }
 
     #[test]

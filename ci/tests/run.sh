@@ -1247,6 +1247,15 @@ if [ "${1:-}" = "ci" ]; then
   if [ "${2:-}" = "post-pr-comment" ]; then
     printf '{"action":"update","marker_id":"fallow-results","comment_id":"777","body":"ok"}\n'
   elif [ "${2:-}" = "post-review" ]; then
+    if [ -n "${MOCK_CAPTURE_ENVELOPE:-}" ]; then
+      previous=""
+      for arg in "$@"; do
+        if [ "$previous" = "--envelope" ]; then
+          cp "$arg" "$MOCK_CAPTURE_ENVELOPE"
+        fi
+        previous="$arg"
+      done
+    fi
     case "${MOCK_POST_REVIEW_ERRORS:-}" in
       apply)
         printf '{"action":"post_review","comments_posted":1,"apply_errors":["resolve failed"],"post_errors":[],"apply_hint":"refresh provider state","failed_fingerprints":["a"],"unapplied_fingerprints":["a"]}\n'
@@ -1301,6 +1310,12 @@ case "$format" in
     fi
     ;;
   review-gitlab)
+    if [ "${MOCK_V3_REVIEW:-}" = "1" ]; then
+      cat <<'JSON'
+{"body":"### Fallow smoke\n\n<!-- fallow-review -->","summary":{"body":"### Fallow smoke\n\n<!-- fallow-review -->","fingerprint":"aaaaaaaaaaaaaaaa"},"comments":[{"body":"**error** `fallow/unused-export`: smoke\n\n<!-- fallow-fingerprint:v3: 0123456789abcdef -->","position":{"base_sha":"base","start_sha":"start","head_sha":"head","position_type":"text","old_path":"src/a.ts","new_path":"src/a.ts","new_line":9},"fingerprint":"0123456789abcdef","legacy_fingerprint":"fedcba9876543210"}],"marker_regex":"^<!-- fallow-fingerprint:v[23]: ((?:[a-z]+:)?[0-9a-f]{16}) -->\\s*$","marker_regex_flags":"m","meta":{"schema":"fallow-review-envelope/v3","provider":"gitlab"}}
+JSON
+      exit 0
+    fi
     if [ "${MOCK_ZERO_REVIEW:-}" = "1" ]; then
       cat <<'JSON'
 {"body":"### Fallow smoke\n\n<!-- fallow-review -->","comments":[],"meta":{"schema":"fallow-review-envelope/v1","provider":"gitlab"}}
@@ -1387,6 +1402,19 @@ printf '%s\0' check --format json --root . > "$CI_TYPED_WORK/fallow-analysis-arg
     FALLOW_ROOT="." \
     MAX_COMMENTS="5" \
     bash "$SCRIPTS_DIR/review.sh" > /dev/null
+  PATH="$CI_TYPED_BIN:$PATH" \
+    MOCK_LOG="$CI_TYPED_LOG" \
+    MOCK_V3_REVIEW="1" \
+    MOCK_CAPTURE_ENVELOPE="$CI_TYPED_WORK/posted-v3-envelope.json" \
+    GITLAB_TOKEN="test" \
+    CI_API_V4_URL="https://gitlab.example/api/v4" \
+    CI_PROJECT_ID="18" \
+    CI_MERGE_REQUEST_IID="123" \
+    CI_COMMIT_SHA="abcdef1234567890" \
+    FALLOW_COMMAND="check" \
+    FALLOW_ROOT="." \
+    MAX_COMMENTS="5" \
+    bash "$SCRIPTS_DIR/review.sh" > "$CI_TYPED_WORK/review-v3.out"
   PATH="$CI_TYPED_BIN:$PATH" \
     MOCK_LOG="$CI_TYPED_LOG" \
     MOCK_POST_REVIEW_ERRORS="apply" \
@@ -1508,6 +1536,22 @@ else
   fail "review.sh does not receive FALLOW_SUMMARY_SCOPE by default" "$CI_TYPED_OUT"
 fi
 assert_contains "$CI_TYPED_OUT" "fallow ci post-review --provider gitlab" "review.sh invokes GitLab review post command"
+# A v3 envelope: the v3 marker and the legacy fingerprint reach the
+# binary unchanged, because the binary matches older v2 threads through it.
+CI_V3_POSTED="$CI_TYPED_WORK/posted-v3-envelope.json"
+if [ -s "$CI_V3_POSTED" ]; then
+  pass "review.sh posts a v3 review envelope"
+else
+  fail "review.sh posts a v3 review envelope" "$(cat "$CI_TYPED_WORK/review-v3.out")"
+fi
+CI_V3_LEGACY=$(jq -r '.comments[0].legacy_fingerprint' "$CI_V3_POSTED" 2>/dev/null)
+if [ "$CI_V3_LEGACY" = "fedcba9876543210" ]; then
+  pass "review.sh keeps legacy_fingerprint for v2 thread matching"
+else
+  fail "review.sh keeps legacy_fingerprint for v2 thread matching" "got $CI_V3_LEGACY"
+fi
+assert_contains "$(cat "$CI_V3_POSTED" 2>/dev/null)" "fallow-fingerprint:v3: 0123456789abcdef" \
+  "review.sh keeps the v3 marker in the posted comment body"
 assert_contains "$(cat "$CI_TYPED_WORK/review-clean.out")" \
   "0 resolution replies posted, 0 threads resolved" \
   "review.sh exposes successful reconciliation counters"
@@ -2005,6 +2049,44 @@ else
   fail "gitlab gate: an unowned failure leaves the pipeline green" "got $GATE_STATUS"
 fi
 
+# On the bare combined run, --fail-on-issues in FALLOW_ARGS enforces the
+# duplication-threshold entry. FALLOW_FAIL_ON_ISSUES false stays authoritative:
+# the verdict warns and the pipeline stays green. With the variable true, the
+# enforced verdict fails the pipeline.
+COMBINED_THRESHOLD_ENTRY='{"duplication-threshold":{"status":"fail","enforced":true,"observed":40.0,"threshold":5.0}}'
+ENVELOPE=$(gitlab_gate_envelope "$COMBINED_THRESHOLD_ENTRY")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND= \
+  FALLOW_FAIL_ON_ISSUES=false \
+  FALLOW_THRESHOLD=5 \
+  FALLOW_ARGS=--fail-on-issues)
+GATE_STATUS=$?
+assert_contains "$OUT" "WARNING: Fallow duplication-threshold gate reports a failure: duplication 40% exceeds the 5% threshold. It does not fail this pipeline: the combined run enforces that gate through FALLOW_FAIL_ON_ISSUES" \
+  "gitlab gate: a combined threshold verdict that FALLOW_ARGS enforced warns"
+assert_not_contains "$OUT" "ERROR: Fallow duplication-threshold gate failed" \
+  "gitlab gate: a combined threshold verdict that FALLOW_ARGS enforced prints no error"
+if [ "$GATE_STATUS" = "0" ]; then
+  pass "gitlab gate: a combined threshold verdict that FALLOW_ARGS enforced leaves the pipeline green"
+else
+  fail "gitlab gate: a combined threshold verdict that FALLOW_ARGS enforced leaves the pipeline green" "got $GATE_STATUS: $OUT"
+fi
+ENVELOPE=$(gitlab_gate_envelope "$COMBINED_THRESHOLD_ENTRY")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND= \
+  FALLOW_FAIL_ON_ISSUES=true \
+  FALLOW_THRESHOLD=5 \
+  FALLOW_ARGS=--fail-on-issues)
+GATE_STATUS=$?
+assert_contains "$OUT" "ERROR: Fallow duplication-threshold gate failed" \
+  "gitlab gate: a combined threshold verdict fails with FALLOW_FAIL_ON_ISSUES true"
+if [ "$GATE_STATUS" = "1" ]; then
+  pass "gitlab gate: a combined threshold verdict with FALLOW_FAIL_ON_ISSUES true exits 1"
+else
+  fail "gitlab gate: a combined threshold verdict with FALLOW_FAIL_ON_ISSUES true exits 1" "got $GATE_STATUS: $OUT"
+fi
+
 # Every envelope carries its default exit rule, also when no gate was armed.
 # A failing default rule belongs to the count gate: with FALLOW_FAIL_ON_ISSUES
 # false it prints nothing and leaves the pipeline green.
@@ -2068,6 +2150,32 @@ assert_contains "$OUT" "skipped-large-file (2)" "gitlab degraded: kinds and coun
 assert_not_contains "$OUT" "boundaries-not-configured" "gitlab degraded: unconfigured-check kinds are not reported"
 assert_contains "$OUT" "Fallow ran with degraded inputs" \
   "gitlab degraded: the sentence covers a degraded input as well as a narrower file set"
+
+# #2959: config patterns that matched nothing reach the job log in one line,
+# also on a review-only pipeline. Audit keeps the entries under `dead_code`.
+UNMATCHED_PATTERNS='"workspace_diagnostics":[{"path":".","kind":"ignore-findings-pattern-unmatched","pattern":"src/legcy/**","message":"m"},{"path":".","kind":"ignore-dependencies-glob-unmatched","pattern":"@typo/*","message":"m"}]'
+ENVELOPE=$(gitlab_gate_envelope '' "$UNMATCHED_PATTERNS")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "WARNING: Fallow config entries matched nothing in this run, so they have no effect: ignoreDependencies @typo/*, ignoreFindings src/legcy/**." \
+  "gitlab unmatched patterns: one line names each setting and pattern"
+AUDIT_UNMATCHED='"dead_code":{"workspace_diagnostics":[{"path":".","kind":"ignore-dependencies-glob-unmatched","pattern":"@typo/*","message":"m"}]}'
+ENVELOPE=$(gitlab_gate_envelope '' "$AUDIT_UNMATCHED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=audit \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_contains "$OUT" "have no effect: ignoreDependencies @typo/*." \
+  "gitlab unmatched patterns: the audit envelope is read under dead_code"
+ENVELOPE=$(gitlab_gate_envelope '' "$DEGRADED")
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
+  MOCK_GATE_ENVELOPE="$ENVELOPE" \
+  FALLOW_COMMAND=dead-code \
+  FALLOW_FAIL_ON_ISSUES=false) || true
+assert_not_contains "$OUT" "matched nothing in this run" \
+  "gitlab unmatched patterns: no line without an unmatched entry"
 
 # #2689: the health pipeline's own degraded inputs reach the same aggregated
 # line through the same selector, with no change to this template's jq.
