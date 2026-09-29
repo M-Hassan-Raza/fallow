@@ -87,6 +87,9 @@ pub struct CheckJsonExtraOutputs {
     /// leaves this `None`; an entry whose `status` is not `applied` means the
     /// report is wider than what was asked for.
     pub request_outcomes: Option<fallow_output::RequestOutcomes>,
+    /// The answer to a finding-id query, present only when the run received
+    /// one or more finding ids. See [`fallow_output::FindingIdQuery`].
+    pub finding_id_query: Option<fallow_output::FindingIdQuery>,
 }
 
 struct CheckJsonEnvelopeInput<'a> {
@@ -115,6 +118,9 @@ pub struct GroupedCheckJsonOutputInput<'a> {
     /// leaves this `None`; an entry whose `status` is not `applied` means the
     /// report is wider than what was asked for.
     pub request_outcomes: Option<fallow_output::RequestOutcomes>,
+    /// The answer to a finding-id query, present only when the run received
+    /// one or more finding ids. See [`fallow_output::FindingIdQuery`].
+    pub finding_id_query: Option<fallow_output::FindingIdQuery>,
 
     /// Results already partitioned into groups, in output order.
     pub groups: &'a [ResultGroup],
@@ -291,6 +297,7 @@ pub fn serialize_grouped_check_json(
         groups: entries,
         unused_load_data_keys_global_abstain: input.original.unused_load_data_keys_global_abstain,
         baseline_staleness: input.baseline_staleness,
+        finding_id_query: input.finding_id_query,
         gate_outcomes: input.gate_outcomes,
         meta: input.meta,
         workspace_diagnostics: input.workspace_diagnostics,
@@ -421,6 +428,7 @@ fn build_check_json_envelope(input: CheckJsonEnvelopeInput<'_>) -> CheckOutput {
     output.gate_outcomes = input.extras.gate_outcomes;
     output.request_outcomes = input.extras.request_outcomes;
     output.package_baselines = input.extras.package_baselines;
+    output.finding_id_query = input.extras.finding_id_query;
     output
 }
 
@@ -450,6 +458,7 @@ mod tests {
             package_baselines: Vec::new(),
             gate_outcomes: None,
             request_outcomes: None,
+            finding_id_query: None,
             baseline_staleness: None,
             groups: &[],
             original: &AnalysisResults::default(),

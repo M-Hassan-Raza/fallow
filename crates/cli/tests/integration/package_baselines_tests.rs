@@ -184,6 +184,30 @@ fn package_baselines_scope_each_workspace_and_global_ref_overrides() {
             .any(|path| path.ends_with("packages/legacy/src/utils.ts"))
     );
 
+    let query_report = run_fallow_raw(&[
+        "check",
+        "--root",
+        root.to_str().unwrap(),
+        "--finding-id",
+        "dc1:unused-export:0000000000000000",
+        "--format",
+        "json",
+        "--quiet",
+        "--no-cache",
+    ]);
+    assert!(
+        query_report.code == 0 || query_report.code == 1,
+        "{}",
+        query_report.stderr
+    );
+    let query_json = parse_json(&query_report);
+    assert_eq!(query_json["package_baselines"], json["package_baselines"]);
+    assert_eq!(query_json["finding_id_query"]["conclusive"], false);
+    assert_eq!(
+        query_json["finding_id_query"]["inconclusive_reasons"],
+        serde_json::json!(["changed-since"])
+    );
+
     write_config(root, "missing-ref");
     let global_paths = unused_export_paths(root, &["--changed-since", "HEAD"]);
     let global_report = run_fallow_raw(&[

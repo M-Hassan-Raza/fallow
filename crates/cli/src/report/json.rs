@@ -36,6 +36,7 @@ pub(super) struct PrintJsonInput<'a> {
     pub(super) baseline_matched: Option<(usize, usize)>,
     pub(super) config_fixable: bool,
     pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    pub(super) finding_id_query: Option<fallow_output::FindingIdQuery>,
     pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
@@ -55,15 +56,18 @@ pub(super) fn print_json(input: &PrintJsonInput<'_>) -> ExitCode {
 }
 
 pub(super) fn render_json(input: &PrintJsonInput<'_>) -> Result<String, serde_json::Error> {
-    let mut extras = check_json_extras_with_verdicts(
-        input.regression,
-        None,
-        input.baseline_matched,
-        input.baseline_staleness,
-        input.gate_outcomes.clone(),
-        crate::requests::request_outcomes(),
-    );
-    extras.package_baselines = input.package_baselines.to_vec();
+    let extras = CheckJsonExtraOutputs {
+        package_baselines: input.package_baselines.to_vec(),
+        finding_id_query: input.finding_id_query.clone(),
+        ..check_json_extras_with_verdicts(
+            input.regression,
+            None,
+            input.baseline_matched,
+            input.baseline_staleness,
+            input.gate_outcomes.clone(),
+            crate::requests::request_outcomes(),
+        )
+    };
     let output = api_check_json_document_with_config_fixable_meta_and_extras(
         input.results,
         input.root,
@@ -88,6 +92,7 @@ pub(super) struct PrintGroupedJsonInput<'a> {
     pub(super) resolver: &'a OwnershipResolver,
     pub(super) config_fixable: bool,
     pub(super) baseline_staleness: Option<fallow_output::BaselineStaleness>,
+    pub(super) finding_id_query: Option<fallow_output::FindingIdQuery>,
     pub(super) gate_outcomes: Option<fallow_output::GateOutcomes>,
     pub(super) workspace_diagnostics: &'a [WorkspaceDiagnostic],
     pub(super) json_style: crate::json_style::JsonStyle,
@@ -98,6 +103,7 @@ pub(super) fn print_grouped_json(input: &PrintGroupedJsonInput<'_>) -> ExitCode 
         package_baselines: input.package_baselines.to_vec(),
         gate_outcomes: input.gate_outcomes.clone(),
         request_outcomes: crate::requests::request_outcomes(),
+        finding_id_query: input.finding_id_query.clone(),
         groups: input.groups,
         original: input.original,
         root: input.root,
@@ -641,6 +647,7 @@ pub fn check_json_extras_with_verdicts(
         baseline_deltas,
         baseline: baseline_matched.map(|(entries, matched)| BaselineMatch { entries, matched }),
         baseline_staleness,
+        finding_id_query: None,
     }
 }
 

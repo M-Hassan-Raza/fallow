@@ -110,6 +110,23 @@ fn package_git_baselines_apply_to_programmatic_dead_code() {
             .any(|path| path.contains("packages/legacy/"))
     );
 
+    let query_report = run_dead_code(&DeadCodeOptions {
+        finding_ids: vec!["dc1:unused-export:0000000000000000".to_owned()],
+        analysis: analysis(root),
+        ..DeadCodeOptions::default()
+    })
+    .and_then(serialize_dead_code_programmatic_json)
+    .expect("query a missing id with package baselines");
+    assert_eq!(
+        query_report["package_baselines"],
+        package_report["package_baselines"]
+    );
+    assert_eq!(query_report["finding_id_query"]["conclusive"], false);
+    assert_eq!(
+        query_report["finding_id_query"]["inconclusive_reasons"],
+        serde_json::json!(["changed-since"])
+    );
+
     let global_report = dead_code(AnalysisOptions {
         changed_since: Some("HEAD".to_owned()),
         ..analysis(root)
