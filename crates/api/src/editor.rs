@@ -1663,6 +1663,7 @@ pub(crate) mod tests {
                 },
             )],
             stale_suppressions: vec![super::editor_results::StaleSuppression {
+                finding_id: None,
                 path: "/f.ts".into(),
                 line: 15,
                 col: 0,

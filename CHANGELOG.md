@@ -109,6 +109,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   Thanks [@azu](https://github.com/azu) for the report.
 
+- **Dead-code findings carry a stable `finding_id` in JSON output.** Each
+  dead-code finding, stale suppressions included, now has an id such as
+  `dc1:unused-export:81a349a3b9ea3b15`. The id comes from the rule and the
+  subject of the finding: the root-relative path and the symbol name. The line
+  and the column are not inputs, so the id stays the same when you add lines
+  above a finding, reformat a file or reorder declarations. A rename of the
+  file or the symbol gives a new id. When two findings of one type have the
+  same subject, for example a static and an instance member with one name, the
+  second gets the suffix `~1`. Workspace scope, `--changed-since`,
+  `ignoreFindings` and baselines do not change the id of a finding that stays
+  in the report. The field is optional in the JSON schema, so
+  `schema_version` does not change. SARIF, CodeClimate, LSP diagnostics and
+  baseline files do not use the id yet.
+
+- **The MCP `analyze` and `check_changed` tools name `finding_id`.** Their
+  descriptions tell an agent that each dead-code finding has a stable id. They
+  also say that an id that is absent from a scoped run, or from a run with
+  other config, means unknown and not resolved. The typed path and the CLI
+  fallback return the same ids, and the Node bindings return the ids of the
+  CLI. The per-flag detail of `analyze` (the `boundary_violations` alias, the
+  `group_by` modes and the `next_steps[]` dispatch rule) moved into the
+  `fallow://tools/analyze` guide resource.
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take
@@ -373,6 +396,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for the shared key did not apply. Now a verdict that matches by
   `candidate_id` can repeat a `review_key`. A `review_key` must stay unique
   only among verdicts that match by `review_key`.
+- **`fallow agent install` writes the complete skill.** The embedded copy
+  was missing `references/issue-types.md` and `references/similar-code.md`,
+  so two links in the installed `SKILL.md` pointed to files that did not
+  exist. This affected projects without `node_modules/fallow`.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
