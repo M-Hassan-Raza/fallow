@@ -3,6 +3,7 @@ pub mod baseline_advisory_text;
 pub mod ci;
 pub(crate) mod codeclimate;
 mod compact;
+pub(crate) mod config_pattern_text;
 pub mod dupes_grouping;
 pub(crate) mod gate_outcome_text;
 pub mod github;
@@ -436,10 +437,17 @@ pub(crate) fn print_results(
             compact::print_type_aware_compact(ctx.type_aware, ctx.type_aware_scope);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => sarif::print_sarif(results, ctx.root, ctx.rules, ctx.type_aware),
+        OutputFormat::Sarif => sarif::print_sarif(
+            results,
+            ctx.root,
+            ctx.rules,
+            ctx.type_aware,
+            ctx.workspace_diagnostics,
+        ),
         OutputFormat::Markdown => {
             markdown::print_markdown(results, ctx.root);
             markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
+            markdown::print_config_pattern_markdown(ctx.workspace_diagnostics);
             ExitCode::SUCCESS
         }
         OutputFormat::CodeClimate => codeclimate::print_codeclimate(results, ctx.root, ctx.rules),
@@ -596,6 +604,7 @@ fn print_results_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: status_message.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
+            config_patterns: ctx.workspace_diagnostics,
         },
     )
     .unwrap_or_else(|| {
@@ -651,11 +660,17 @@ fn print_grouped_results(
         OutputFormat::Markdown => {
             markdown::print_grouped_markdown(groups, ctx.root);
             markdown::print_type_aware_markdown(ctx.type_aware, ctx.type_aware_scope);
+            markdown::print_config_pattern_markdown(ctx.workspace_diagnostics);
             ExitCode::SUCCESS
         }
-        OutputFormat::Sarif => {
-            sarif::print_grouped_sarif(original, ctx.root, ctx.rules, resolver, ctx.type_aware)
-        }
+        OutputFormat::Sarif => sarif::print_grouped_sarif(
+            original,
+            ctx.root,
+            ctx.rules,
+            resolver,
+            ctx.type_aware,
+            ctx.workspace_diagnostics,
+        ),
         OutputFormat::CodeClimate => {
             codeclimate::print_grouped_codeclimate(original, ctx.root, ctx.rules, resolver)
         }
@@ -812,6 +827,7 @@ fn print_duplication_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
+            config_patterns: &[],
         },
     )
     .unwrap_or_else(|| {
@@ -1215,6 +1231,7 @@ fn print_health_ci_comment(
         ci::pr_comment::PrCommentStatus {
             message: note.as_deref(),
             gates: &gate_outcome_text::gate_rows_for_gates(ctx.gate_outcomes.as_ref()),
+            config_patterns: &[],
         },
     )
     .unwrap_or_else(|| {

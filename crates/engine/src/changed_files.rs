@@ -7,7 +7,8 @@ use std::sync::OnceLock;
 use fallow_types::{
     output_dead_code::{
         CircularDependencyFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
-        PropDrillingChainFinding, ReExportCycleFinding, UnlistedDependencyFinding,
+        PackageCycleFinding, PropDrillingChainFinding, ReExportCycleFinding,
+        UnlistedDependencyFinding,
     },
     results::{AnalysisResults, SecurityFinding},
 };
@@ -723,6 +724,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         dev_dependencies_in_production: _dev_dependencies_in_production,
         circular_dependencies: _circular_dependencies,
         re_export_cycles: _re_export_cycles,
+        package_cycles: _package_cycles,
         boundary_violations: _boundary_violations,
         boundary_coverage_violations: _boundary_coverage_violations,
         boundary_call_violations: _boundary_call_violations,
@@ -792,6 +794,7 @@ fn retain_graph_findings_by_changed_files(
     retain_duplicate_exports_by_changed_locations(&mut results.duplicate_exports, scope);
     retain_circular_dependencies_by_changed_file(&mut results.circular_dependencies, scope);
     retain_re_export_cycles_by_changed_file(&mut results.re_export_cycles, scope);
+    retain_package_cycles_by_changed_file(&mut results.package_cycles, scope);
 }
 
 fn retain_boundary_policy_and_suppression_findings(
@@ -959,6 +962,19 @@ fn retain_re_export_cycles_by_changed_file(
     scope: &impl ChangedPathScope,
 ) {
     cycles.retain(|cycle| cycle.cycle.files.iter().any(|file| scope.contains(file)));
+}
+
+fn retain_package_cycles_by_changed_file(
+    cycles: &mut Vec<PackageCycleFinding>,
+    scope: &impl ChangedPathScope,
+) {
+    cycles.retain(|cycle| {
+        cycle
+            .cycle
+            .edges
+            .iter()
+            .any(|edge| scope.contains(&edge.path))
+    });
 }
 
 fn retain_security_findings_by_changed_path(

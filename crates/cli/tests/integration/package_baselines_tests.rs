@@ -1,6 +1,60 @@
-use crate::common::{git, parse_json, run_fallow_raw};
+use crate::common::{
+    commit_all, copy_fixture, git, parse_json, run_fallow_in_root, run_fallow_raw,
+};
 use std::fs;
 use std::path::Path;
+
+#[test]
+fn package_baselines_keep_complete_cycles_touching_an_eligible_import() {
+    let temp = copy_fixture("package-cycle-workspace");
+    let root = temp.path();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    )
+    .expect("config");
+    git(root, &["init", "-q"]);
+    commit_all(root, "base");
+
+    let report = || {
+        let output = run_fallow_in_root(
+            "dead-code",
+            root,
+            &[
+                "--package-cycles",
+                "--format",
+                "json",
+                "--quiet",
+                "--no-cache",
+            ],
+        );
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        parse_json(&output)
+    };
+    assert_eq!(report()["package_cycles"], serde_json::json!([]));
+
+    fs::write(
+        root.join("packages/a/src/x.ts"),
+        "import { y } from '@repro/b/y';\nexport const x = () => y() + '!';\n",
+    )
+    .expect("changed import owner");
+    let changed = report();
+    assert_eq!(
+        changed["package_cycles"].as_array().expect("cycles").len(),
+        1
+    );
+    assert_eq!(
+        changed["package_cycles"][0]["packages"],
+        serde_json::json!(["@repro/a", "@repro/b"])
+    );
+    assert_eq!(
+        changed["package_cycles"][0]["edges"]
+            .as_array()
+            .expect("edges")
+            .len(),
+        2
+    );
+}
 
 fn write_config(root: &Path, web_ref: &str) {
     fs::write(

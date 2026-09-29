@@ -196,15 +196,15 @@ pub mod editor_results {
         DuplicateExportFinding, DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding,
         EmptyCatalogGroupFinding, InvalidClientExportFinding,
         MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
-        MixedClientServerBarrelFinding, PolicyViolationFinding, PrivateTypeLeakFinding,
-        PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
-        TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
-        UnlistedDependencyFinding, UnprovidedInjectFinding, UnrenderedComponentFinding,
-        UnresolvedCatalogReferenceFinding, UnresolvedImportFinding, UnusedCatalogEntryFinding,
-        UnusedClassMemberFinding, UnusedComponentEmitFinding, UnusedComponentInputFinding,
-        UnusedComponentOutputFinding, UnusedComponentPropFinding, UnusedDependencyFinding,
-        UnusedDependencyOverrideFinding, UnusedDevDependencyFinding, UnusedEnumMemberFinding,
-        UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
+        MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
+        PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding,
+        RouteCollisionFinding, TestOnlyDependencyFinding, ThinWrapperFinding,
+        TypeOnlyDependencyFinding, UnlistedDependencyFinding, UnprovidedInjectFinding,
+        UnrenderedComponentFinding, UnresolvedCatalogReferenceFinding, UnresolvedImportFinding,
+        UnusedCatalogEntryFinding, UnusedClassMemberFinding, UnusedComponentEmitFinding,
+        UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
+        UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
+        UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
         UnusedOptionalDependencyFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
         UnusedSvelteEventFinding, UnusedTypeFinding,
     };
@@ -216,11 +216,11 @@ pub mod editor_results {
         DuplicateExport, DuplicateLocation, DuplicatePropShape, DuplicatePropShapeMember,
         DynamicSegmentNameConflict, EmptyCatalogGroup, EntryPointSummary, ExportUsage, FeatureFlag,
         FlagConfidence, FlagKind, ImportSite, InvalidClientExport, MisconfiguredDependencyOverride,
-        MisplacedDirective, MixedClientServerBarrel, PolicyRuleKind, PolicyViolation,
-        PolicyViolationSeverity, PrivateTypeLeak, PropDrillHop, PropDrillingChain, ReExportCycle,
-        ReExportCycleKind, ReactComponentIntel, ReactHookSummary, ReactPropDrill, ReactPropIntel,
-        ReferenceLocation, RenderFanInComponent, RenderFanInMetric, RouteCollision,
-        SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
+        MisplacedDirective, MixedClientServerBarrel, PackageCycle, PackageCycleEdge,
+        PolicyRuleKind, PolicyViolation, PolicyViolationSeverity, PrivateTypeLeak, PropDrillHop,
+        PropDrillingChain, ReExportCycle, ReExportCycleKind, ReactComponentIntel, ReactHookSummary,
+        ReactPropDrill, ReactPropIntel, ReferenceLocation, RenderFanInComponent, RenderFanInMetric,
+        RouteCollision, SecurityAttackSurfaceEntry, SecurityCandidate, SecurityCandidateBoundary,
         SecurityCandidateSink, SecurityDeadCodeContext, SecurityDeadCodeKind,
         SecurityDefensiveBoundary, SecurityDefensiveControl, SecurityFinding, SecurityFindingKind,
         SecurityNetworkContext, SecurityReachability, SecurityRuntimeContext, SecurityRuntimeState,
@@ -519,6 +519,15 @@ impl EditorAnalysisSession {
         )
     }
 
+    /// `workspace_diagnostics[]` entries for the config patterns
+    /// (`ignoreFindings`, `ignoreDependencies`) that matched nothing in the
+    /// latest analysis of this session. The CLI and the programmatic API
+    /// build the same entries with the same engine function.
+    #[must_use]
+    pub fn unmatched_config_patterns(&self) -> Vec<fallow_config::WorkspaceDiagnostic> {
+        fallow_engine::dead_code::config_pattern_diagnostics(self.inner.config(), true)
+    }
+
     /// Config file path when one was loaded.
     #[must_use]
     pub fn config_path(&self) -> Option<&Path> {
@@ -800,7 +809,7 @@ impl EditorAnalysisOutput {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use fallow_types::duplicates::{CloneFamily, CloneGroup, CloneInstance, DuplicationStats};
@@ -1260,6 +1269,7 @@ mod tests {
         assert_eq!(target.test_only_dependencies.len(), 1);
         assert_eq!(target.circular_dependencies.len(), 1);
         assert_eq!(target.re_export_cycles.len(), 1);
+        assert_eq!(target.package_cycles.len(), 1);
         assert_eq!(target.boundary_violations.len(), 1);
         assert_eq!(target.boundary_call_violations.len(), 1);
         assert_eq!(target.policy_violations.len(), 1);
@@ -1433,7 +1443,7 @@ mod tests {
         clippy::too_many_lines,
         reason = "intentionally names every EditorAnalysisResults field (no ..Default::default()) so a new field is a compile error here; see #444"
     )]
-    fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
+    pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
         EditorAnalysisResults {
             unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
                 path: "/f.ts".into(),
@@ -1633,6 +1643,23 @@ mod tests {
                 super::editor_results::ReExportCycle {
                     files: vec!["/barrel.ts".into()],
                     kind: super::editor_results::ReExportCycleKind::SelfLoop,
+                },
+            )],
+            package_cycles: vec![super::editor_results::PackageCycleFinding::with_actions(
+                super::editor_results::PackageCycle {
+                    packages: vec!["a".into(), "b".into()],
+                    package_roots: Vec::new(),
+                    length: 2,
+                    edges: vec![super::editor_results::PackageCycleEdge {
+                        from_package: "a".into(),
+                        to_package: "b".into(),
+                        path: "/a/x.ts".into(),
+                        target_path: "/b/y.ts".into(),
+                        line: 1,
+                        col: 0,
+                        type_only: false,
+                    }],
+                    group_truncated: false,
                 },
             )],
             stale_suppressions: vec![super::editor_results::StaleSuppression {

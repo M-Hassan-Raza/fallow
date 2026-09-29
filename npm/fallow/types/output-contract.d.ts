@@ -740,6 +740,18 @@ kind: "flag-age-shallow-clone"
  */
 cause: string
 kind: "flag-age-unavailable"
+} | {
+/**
+ * The `ignoreDependencies` entry, as written in the config.
+ */
+pattern: string
+kind: "ignore-dependencies-glob-unmatched"
+} | {
+/**
+ * The `ignoreFindings` entry, as written in the config.
+ */
+pattern: string
+kind: "ignore-findings-pattern-unmatched"
 })
 /**
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -2819,6 +2831,12 @@ circular_dependencies: CircularDependencyFinding[]
  */
 re_export_cycles?: ReExportCycleFinding[]
 /**
+ * Dependency cycles between workspace packages, built from resolved
+ * cross-package imports. Wrapped in [`PackageCycleFinding`] so each
+ * entry carries a typed `actions` array natively.
+ */
+package_cycles?: PackageCycleFinding[]
+/**
  * Imports that cross architecture boundary rules. Wrapped in
  * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
  * array natively.
@@ -3095,7 +3113,10 @@ _meta?: (Meta | null)
  *   detectors: `malformed-pnpm-workspace-yaml`,
  *   `bun-lockb-override-resolution-skipped`;
  * - framework plugins, while they read their own build configs:
- *   `plugin-config-unreadable`, `plugin-effect-not-modeled`.
+ *   `plugin-config-unreadable`, `plugin-effect-not-modeled`;
+ * - the dead-code result, for config patterns that matched nothing:
+ *   `ignore-dependencies-glob-unmatched`,
+ *   `ignore-findings-pattern-unmatched`.
  *
  * Analysis-stage and plugin-stage kinds therefore reach only the envelopes
  * whose run includes a dead-code analyze pass, never a standalone
@@ -3277,6 +3298,10 @@ circular_dependencies: number
  * re-exporting from each other in a loop).
  */
 re_export_cycles?: number
+/**
+ * Dependency cycles between workspace packages.
+ */
+package_cycles?: number
 /**
  * Imports that cross architecture boundary rules.
  */
@@ -4547,6 +4572,101 @@ introduced?: (AuditIntroduced | null)
  * part of the finding identity, baseline keys or fingerprints.
  */
 effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * Wire-shape envelope for a [`PackageCycle`] finding. Mirrors
+ * [`CircularDependencyFinding`]: flattens the bare finding and carries a
+ * typed `actions` array (`refactor-cycle` primary plus `suppress-line`
+ * secondary).
+ */
+export interface PackageCycleFinding {
+/**
+ * Workspace package labels in cycle order. The first entry is the
+ * lexicographically smallest label; the last entry imports the first.
+ * A label is the package name. When two or more workspace packages
+ * share a name, the label is `name (root)` with the project-relative
+ * package root, so that each label names one package.
+ */
+packages: string[]
+/**
+ * Package root directories in cycle order: `package_roots[i]` is the
+ * root of `packages[i]`.
+ */
+package_roots: string[]
+/**
+ * Number of packages in the cycle.
+ */
+length: number
+/**
+ * One example import per hop, in cycle order: `edges[i]` goes from
+ * `packages[i]` to `packages[(i + 1) % length]`.
+ */
+edges: PackageCycleEdge[]
+/**
+ * True when the group of packages that holds this cycle has more
+ * cycles than fallow lists. The listing stops at 20 cycles per group,
+ * or earlier on a very dense package graph. Break a listed cycle and
+ * run again to see the rest.
+ */
+group_truncated: boolean
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * One package hop in a [`PackageCycle`]: `from_package` imports
+ * `to_package`, and `path` holds one example import for that hop.
+ *
+ * The example import is the first runtime import by `(path, line)`. When
+ * every import on the hop is type-only, it is the first type-only import.
+ */
+export interface PackageCycleEdge {
+/**
+ * Label of the importing workspace package, as in
+ * [`PackageCycle::packages`].
+ */
+from_package: string
+/**
+ * Label of the imported workspace package, as in
+ * [`PackageCycle::packages`].
+ */
+to_package: string
+/**
+ * File in `from_package` that holds the example import.
+ */
+path: string
+/**
+ * File in `to_package` that the example import resolves to.
+ */
+target_path: string
+/**
+ * 1-based line number of the example import.
+ */
+line: number
+/**
+ * 0-based byte column offset of the example import.
+ */
+col: number
+/**
+ * True when every import from `from_package` to `to_package` is
+ * type-only. A type-only hop has no runtime effect, but it can still
+ * force a build order (for example with declaration builds).
+ */
+type_only: boolean
 }
 /**
  * Wire-shape envelope for a [`BoundaryViolation`] finding. Mirrors
@@ -11033,7 +11153,8 @@ type_only: boolean
 /**
  * Whether the edge carries a runtime value but no static one: the target
  * loads only on demand (`import()`, a lazy glob or template pattern) or
- * on another thread (a worker URL, `child_process.fork`). False for a
+ * on another thread (a worker URL, a worker loader request,
+ * `child_process.fork`). False for a
  * static hop and for a type-only hop.
  */
 dynamic: boolean
@@ -12367,6 +12488,14 @@ total_issues: number
  */
 groups: CheckGroupedEntry[]
 /**
+ * `true` when the `unused-load-data-key` detector abstained for the whole
+ * project. The abstain has no file, so it is on the root and not in a
+ * group. An empty `unused_load_data_keys` with this flag set does not
+ * mean the project is clean: the rule could not run safely. Serialized
+ * only when `true`, like the flat `CheckOutput` field.
+ */
+unused_load_data_keys_global_abstain?: boolean
+/**
  * This run's view of the loaded baseline, present only in baseline runs.
  * Carries the staleness counts, the advisory verdict and `gate_trips`, the
  * same boolean `--fail-on-stale-baseline` exits on, so a CI integration
@@ -12558,6 +12687,12 @@ circular_dependencies: CircularDependencyFinding[]
  * suppression breaks the cycle).
  */
 re_export_cycles?: ReExportCycleFinding[]
+/**
+ * Dependency cycles between workspace packages, built from resolved
+ * cross-package imports. Wrapped in [`PackageCycleFinding`] so each
+ * entry carries a typed `actions` array natively.
+ */
+package_cycles?: PackageCycleFinding[]
 /**
  * Imports that cross architecture boundary rules. Wrapped in
  * [`BoundaryViolationFinding`] so each entry carries a typed `actions`
@@ -16988,6 +17123,16 @@ export type EmptyCatalogGroup = EmptyCatalogGroupFinding;
  * this alias; new code should prefer `MisconfiguredDependencyOverrideFinding`.
  */
 export type MisconfiguredDependencyOverride = MisconfiguredDependencyOverrideFinding;
+
+/**
+ * Backwards-compat alias for the pre-#384 bare `PackageCycle` name.
+ * The wire shape is byte-identical: `PackageCycleFinding` flattens the bare
+ * finding's fields via `#[serde(flatten)]` and adds `actions[]` plus
+ * the optional audit-mode `introduced` flag. Consumers that imported
+ * `PackageCycle` from `fallow/types` pre-migration continue to work via
+ * this alias; new code should prefer `PackageCycleFinding`.
+ */
+export type PackageCycle = PackageCycleFinding;
 
 /**
  * Backwards-compat alias for the pre-#384 bare `PrivateTypeLeak` name.
