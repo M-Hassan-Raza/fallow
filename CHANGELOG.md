@@ -513,6 +513,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a textlint rules directory, also stays reachable. A command that executes a
   file, such as `node src/a.ts`, still creates an entry point. Thanks @azu for
   the report and the reproduction.
+- **A command in another workspace package resolves its files in that
+  package (#2954).** Before, these forms in a `package.json` script, a CI
+  file, or a Dockerfile made a file argument an entry point of the package
+  that contains the command. The path was resolved against the wrong
+  directory, so a formatter or linter target such as `src/a.ts` stayed
+  hidden, and a script that the command runs stayed unused:
+  - a binary in other packages: `yarn workspace web eslint src/a.ts`,
+    `pnpm --filter web eslint src/a.ts`, `pnpm -r eslint src/a.ts`, and
+    `npm exec -w web -- eslint src/a.ts`.
+  - a script call in other packages: `pnpm -r run lint -- src/a.ts`,
+    `pnpm --filter web run lint src/a.ts`, `npm -w web run lint -- src/a.ts`,
+    `yarn workspace web lint src/a.ts`,
+    `yarn workspaces foreach -A run lint src/a.ts`, and the yarn classic
+    form `yarn workspaces run lint src/a.ts`.
+  - a task runner: `turbo run lint -- src/a.ts`, `nx`, and `lerna`.
+
+  A package that the command selects now resolves the file against its own
+  directory. `pnpm --filter web exec tsx scripts/a.ts`,
+  `yarn workspace web node scripts/a.ts`, and a call of a script of that
+  package such as `npm run -w web gen -- scripts/a.ts` make `scripts/a.ts` in
+  `web` an entry point. A pnpm filter can be a name, a name glob, a
+  directory glob, or an exclusion (`'!web'`). A selection of several packages
+  resolves the file in each package where the file exists. This includes
+  every package: `pnpm -r`, `yarn workspaces foreach -A` (narrowed by
+  `--include` and `--exclude`), `yarn workspaces run`, and
+  `npm --workspaces`. A script call in the directory of a workspace package
+  (`pnpm -C packages/web run gen scripts/a.ts`,
+  `npm --prefix packages/web run gen -- scripts/a.ts`,
+  `yarn --cwd packages/web gen scripts/a.ts`) runs the script of that
+  package with the forwarded arguments. The scripts of the root package and
+  of each workspace package resolve these selections in the same way, so a
+  `start` script that selects a package makes a runtime entry point. A linter
+  target in a selected package still makes no entry point. A selection that
+  Fallow cannot resolve (`--filter 'web...'`, `yarn workspaces foreach
+  --since`) or a task runner makes no entry point. The binary still counts as
+  a used dependency. A command in another directory (`pnpm -C docs exec tsx
+  scripts/a.ts`, `npm --prefix`, `yarn --cwd`) now resolves its file
+  arguments against that directory. `yarn node <file>` runs the file, also
+  after `yarn --cwd <dir>` and `yarn workspace <name>`.
+- **npm config flags that take a value no longer forward the value (#2954).**
+  `npm run gen --tag next src/a.ts` forwards only `src/a.ts` to the script.
+  Before, Fallow knew only a few of these flags, so a value such as the one
+  after `--tag`, `--scope`, `--otp`, `--before`, `--node-options`,
+  `--include`, `--omit`, `--registry`, or `--userconfig` could become an entry
+  point or be read as the script name. The list now contains every npm config
+  flag that takes a value.
+- **A script named after a tool runs instead of the tool (#2954).** With a
+  script such as `"eslint": "node tools/check.js"`, `yarn eslint src/a.ts`
+  runs the script, not the `eslint` binary. Fallow now keeps `src/a.ts` as an
+  entry point in all command sources. Before, a Dockerfile, a Procfile, or
+  `fly.toml` dropped the file in two cases: a call through a command wrapper
+  such as `varlock run --`, and a call of a name that several packages declare
+  with different bodies. In both cases Fallow read the call as an `eslint`
+  target. A command wrapper also no longer makes an entry point from a call of
+  a linter script, such as `varlock run -- yarn lint src/a.ts`.
 - **More package-manager forms credit the binary's package.** When no script
   has the name, `yarn <bin>`, `yarn run <bin>` and `bun run <bin>` run a
   binary of a declared dependency, as `pnpm <bin>` already did.
