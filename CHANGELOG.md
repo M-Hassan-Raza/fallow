@@ -383,6 +383,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The programmatic combined runner reports the same health duplication as
+  `fallow health`.** `run_combined` gave health the duplication report of the
+  run and recomputed its stats from all parsed files. Files that
+  `duplicates.ignore` excludes then counted in the duplication percentage, so
+  the score could differ from `fallow health --score`. When health covers
+  every file, it now uses the report unchanged.
 - **`--quiet` removes the level notes of `fallow report --from`.** When a
   saved report has findings without `effective_severity` and no config is
   found, `report --from` prints a note that the default rules set their
@@ -771,6 +777,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fallow` command take 32 s. Large candidates now share one ordered position
   set with their nested candidates. `fallow dupes` now takes 1.3 s and the
   bare command 5 s. The findings do not change.
+- **The bare `fallow` command detects duplicates once.** Health ran its own
+  duplicate detection after the duplication section had done the same work.
+  Health now uses the report of the duplication section when both cover the
+  same files with the same duplicates config. That is the case without
+  `--dupes-*` overrides, `--changed-since`, a workspace scope, or different
+  production modes. The bare command then runs one duplicate detection in
+  place of two. On the next.js repository, one detection takes about 1.3 s.
+  The output does not change.
 
 ## [3.30.0] - 2026-09-26
 
