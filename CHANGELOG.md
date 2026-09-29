@@ -50,6 +50,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a long-lived process (watch mode, the LSP, an engine session) does not
   keep a match from an earlier pass.
 
+- **`ignoreCommandEntries` stops a command's file arguments from becoming
+  entry points (#2954).** List the command name, for example
+  `"ignoreCommandEntries": ["my-codegen"]`, when a command reads files as data
+  and does not run them. The option applies to `package.json` scripts, CI
+  files, Dockerfiles, Procfiles and `fly.toml`. The command still counts as a
+  used dependency, and its `--config` file is still tracked. `["*"]` turns
+  off entry points from all commands, also for the modules that a linter
+  loads through a flag (`eslint -f ./fmt.js`), so you can declare the real
+  entries in `entry`.
+
 - **`circularDependencies.ignoreLazyImports` skips lazy edges in cycle
   detection.** The option is off by default. When it is on, an import edge
   that loads its target only on demand or on another thread does not take
@@ -236,6 +246,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   existing `ignoreUnresolvedImports` entries still match. The graph cache
   version changes to 63, so the first run after the upgrade rebuilds the
   graph cache.
+- **Formatter and linter targets no longer become entry points (#2954).**
+  Before, a script such as `oxfmt --check "**/*.ts"` or `eslint src/a.ts` in
+  `package.json`, in a CI file, or in a Dockerfile made its file arguments
+  entry points. A glob target made every matching file reachable, so Fallow
+  reported no unused files. Fallow now ignores the file arguments of
+  formatters, linters, spell checkers and code checkers: alex, Biome, CSpell,
+  dependency-cruiser, dprint, EditorConfig checkers, ember-template-lint,
+  ESLint (and `eslint_d`), HTMLHint, jscpd, JSHint, madge, markdownlint,
+  markuplint, Oxfmt, Oxlint, Prettier, remark, Secretlint, Standard, Stylelint,
+  textlint, TSLint and XO. This applies to these command forms:
+  - a direct call, `npx`, `npm exec --`, `yarn run` and `bun run`.
+  - `pnpm exec`, also with workspace flags such as `pnpm --filter web exec`
+    and `pnpm -r exec`.
+  - env prefixes such as `CI=1`, `cross-env`, `dotenv -e .env.ci --` and
+    `env`, and wrappers such as `varlock run --`.
+  - a call of a `package.json` script that runs the tool, such as
+    `npm run lint -- src/a.ts`, `npm run lint src/a.ts`, `yarn lint src/a.ts`
+    or `pnpm fmt src/a.ts`. Fallow resolves the call to the script body plus
+    the forwarded arguments, as the package manager does. For npm, the
+    positional arguments are forwarded without `--`, and the `-`-prefixed
+    arguments before `--` are npm config, as in npm 7 and later. The same
+    resolution applies to `ignoreCommandEntries`, also for a flag value such
+    as `npm run gen -- --input=src/a.ts`. A call that runs the script in
+    other workspace packages, such as `npm run lint -w web src/a.ts` or
+    `pnpm -F web lint src/a.ts`, makes no entry points, because those
+    packages resolve the paths against their own directories.
+
+  The tool still counts as a used dependency, and its `--config` file is
+  still tracked. A module that the tool loads through a flag, such as a
+  custom formatter (`eslint -f ./tools/fmt.js`), a local Prettier plugin, or
+  a textlint rules directory, also stays reachable. A command that executes a
+  file, such as `node src/a.ts`, still creates an entry point. Thanks @azu for
+  the report and the reproduction.
+- **More package-manager forms credit the binary's package.** When no script
+  has the name, `yarn <bin>`, `yarn run <bin>` and `bun run <bin>` run a
+  binary of a declared dependency, as `pnpm <bin>` already did.
+  `pnpm --filter <pattern> exec <bin>`, `pnpm -r exec <bin>` and
+  `dotenv -e <file> -- <bin>` now credit `<bin>` too. Before, the dependency
+  could be reported as unused.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
