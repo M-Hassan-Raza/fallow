@@ -109,8 +109,17 @@ test("review Electron holds majors that exceed its wrapper and runtime", () => {
 /** README prose outside fenced code blocks. Sample output keeps its own numbers. */
 const readmeProse = (readme) => readme.replace(/^```[\s\S]*?^```$/gmu, "");
 
+/** Other analysis tools. The README states fallow's own results only. */
+const COMPARED_TOOLS = /\b(?:knip|jscpd|madge|dpdm)\b/iu;
+
 const missingBenchmarkNumbers = (readme, benchmarks) =>
   quotedBenchmarkNumbers(readmeProse(readme)).filter((value) => !benchmarks.includes(value));
+
+/** Prose lines that quote a timing and also name another tool. */
+const comparisonLines = (readme) =>
+  readmeProse(readme)
+    .split("\n")
+    .filter((line) => quotedBenchmarkNumbers(line).length > 0 && COMPARED_TOOLS.test(line));
 
 /** The fallow version the README names as the vintage of the numbers it quotes. */
 const readmeBenchmarkVintage = (readme) =>
@@ -120,7 +129,7 @@ const readmeBenchmarkVintage = (readme) =>
 const benchmarksEnvironmentVersion = (benchmarks) =>
   benchmarks.match(/^Environment:.*?\bfallow (\d+\.\d+\.\d+)/mu)?.[1];
 
-test("README benchmark numbers stay anchored to the benchmark capture", () => {
+test("README quotes only fallow's own benchmark results", () => {
   const readme = readFileSync("README.md", "utf8");
   const benchmarks = readFileSync("BENCHMARKS.md", "utf8");
 
@@ -130,7 +139,7 @@ test("README benchmark numbers stay anchored to the benchmark capture", () => {
     [],
     `README quotes numbers absent from BENCHMARKS.md: ${missing.join(", ")}`,
   );
-
+  assert.deepEqual(comparisonLines(readme), [], "README must not compare timings with other tools");
   if (quotedBenchmarkNumbers(readmeProse(readme)).length > 0) {
     assert.equal(
       readmeBenchmarkVintage(readme),
@@ -139,10 +148,11 @@ test("README benchmark numbers stay anchored to the benchmark capture", () => {
     );
   }
 
-  // Mutation control: a timing that BENCHMARKS.md does not contain has to be reported.
+  // Mutation controls: an unknown timing and a comparison are both reported.
   assert.deepEqual(missingBenchmarkNumbers(`${readme}\nfallow takes 9999ms.`, benchmarks), [
     "9999ms",
   ]);
+  assert.equal(comparisonLines("fallow takes 74ms, where knip 6 takes 2.01s.\n").length, 1);
   assert.deepEqual(missingBenchmarkNumbers("```\n9999ms\n```\n", benchmarks), []);
 });
 
