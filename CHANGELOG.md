@@ -120,9 +120,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   second gets the suffix `~1`. Workspace scope, `--changed-since`,
   `ignoreFindings` and baselines do not change the id of a finding that stays
   in the report. The field is optional in the JSON schema, so
-  `schema_version` does not change. CodeClimate, LSP diagnostics and
-  baseline files do not use the id yet.
-
+  `schema_version` does not change. Baseline files do not use the id yet.
+  CodeClimate fingerprints and CI review markers use it (see Fixed).
+- **LSP dead-code diagnostics carry the finding id in `data.findingId`.** Each
+  dead-code diagnostic now has the same `finding_id` as the JSON output, so an
+  editor client or an agent can join a diagnostic to a CLI or CI report. The
+  key goes into the existing `data` object, next to `changedSince` and the
+  circular-dependency `cycleId`. The VS Code extension adds a quick fix, "Copy
+  Fallow finding id", that copies the id to the clipboard. Security
+  diagnostics do not carry the key yet.
 - **The MCP `analyze` and `check_changed` tools name `finding_id`.** Their
   descriptions tell an agent that each dead-code finding has a stable id. They
   also say that an id that is absent from a scoped run, or from a run with
@@ -214,6 +220,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   applies it as an exception.
 
 ### Changed
+
+- **The release workflow builds the Linux x64 (glibc) and macOS arm64
+  binaries with profile-guided optimization.** The release workflow trains a profile on
+  pinned public projects for each of these targets. It then builds the
+  `fallow`, `fallow-lsp`, and `fallow-mcp` binaries and the npm `fallow`
+  binary with that profile. The binaries for other targets do not change. The
+  command line, the output, and the exit codes do not change.
 
 - **More human output lines stay inside eighty columns, and the duplication
   notes name controls that work.** Before, these lines were too wide:
@@ -410,6 +423,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was missing `references/issue-types.md` and `references/similar-code.md`,
   so two links in the installed `SKILL.md` pointed to files that did not
   exist. This affected projects without `node_modules/fallow`.
+- **PR and MR review threads for dead code survive line shifts.** A dead-code
+  CodeClimate fingerprint held the line of the finding. When you added lines
+  above an unused export, the fingerprint changed, so the GitHub Action and
+  the GitLab template resolved the review thread and opened a new one. The
+  fingerprint now comes from the `finding_id`, so it stays the same. The same
+  package unused in two workspaces also shared one fingerprint; the two
+  findings now have two fingerprints. Review comments now end with a
+  `fallow-fingerprint:v3` marker, and each `review-github` / `review-gitlab`
+  comment carries the old value as `legacy_fingerprint`. For one release,
+  `fallow ci post-review` and `fallow ci reconcile-review` match an open
+  thread with the old `v2` marker through that value, so the upgrade does not
+  post a second thread. GitLab Code Quality and other CodeClimate consumers
+  that key on the fingerprint see each dead-code finding as resolved and new
+  once, on the first run after the upgrade. Health, duplication and security
+  fingerprints do not change. A saved report without finding ids
+  (`fallow report --from`) keeps the old fingerprint.
 - **Unused-member detection recognizes casted reads in TypeScript type
   guards.** Receiver casts, imported type aliases and shadowed bindings retain
   scoped attribution. The extraction and graph cache versions change, so the
