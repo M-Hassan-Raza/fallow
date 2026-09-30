@@ -1,6 +1,6 @@
 use crate::common::{
     CommandOutput, commit_all, copy_fixture, git, parse_json, run_fallow_in_root, run_fallow_raw,
-    run_fallow_raw_with_type_aware_sidecar,
+    run_fallow_raw_with_env, run_fallow_raw_with_type_aware_sidecar,
 };
 use std::fs;
 use std::path::Path;
@@ -565,11 +565,10 @@ fn a_malformed_key_fails_every_command_at_config_load() {
     }
 }
 
-/// The package map applies to every run, so a baseline saved under it is
-/// partial. `--no-package-baselines` gives the whole-project run that can save
-/// and gate a baseline.
+/// A baseline saved under the package map is partial. The save warns, the file
+/// records the scope, and a wider run that loads it warns before it compares.
 #[test]
-fn no_package_baselines_saves_and_gates_a_whole_project_baseline() {
+fn a_baseline_saved_under_the_map_records_its_scope() {
     let temp = two_package_repository(
         r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
     );
@@ -587,6 +586,31 @@ fn no_package_baselines_saves_and_gates_a_whole_project_baseline() {
             .contains("Save it with --no-package-baselines"),
         "a partial save warns: {}",
         partial.stderr
+    );
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(baseline).expect("saved baseline"))
+            .expect("baseline JSON");
+    assert_eq!(
+        saved["scope_reasons"],
+        serde_json::json!(["package-baselines"])
+    );
+    let wider = run_in(
+        root,
+        &[
+            "dead-code",
+            "--no-package-baselines",
+            "--baseline",
+            baseline,
+            "--format",
+            "json",
+        ],
+    );
+    assert!(
+        wider
+            .stderr
+            .contains("was saved from a run narrowed by package-baselines"),
+        "a wider run warns about the partial baseline: {}",
+        wider.stderr
     );
     let narrowed = run_in(
         root,
@@ -610,6 +634,19 @@ fn no_package_baselines_saves_and_gates_a_whole_project_baseline() {
             "{step}"
         );
     }
+}
+
+/// The package map applies to every run, so a baseline saved under it is
+/// partial. `--no-package-baselines` gives the whole-project run that can save
+/// and gate a baseline.
+#[test]
+fn no_package_baselines_saves_and_gates_a_whole_project_baseline() {
+    let temp = two_package_repository(
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    );
+    let root = temp.path();
+    let baseline = root.join("baseline.json");
+    let baseline = baseline.to_str().expect("baseline path");
 
     let full = run_in(
         root,
@@ -627,6 +664,10 @@ fn no_package_baselines_saves_and_gates_a_whole_project_baseline() {
         "{}",
         full.stderr
     );
+    let full_saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(baseline).expect("saved baseline"))
+            .expect("baseline JSON");
+    assert!(full_saved.get("scope_reasons").is_none(), "{full_saved}");
     let full_json = parse_json(&full);
     assert!(full_json.get("package_baselines").is_none());
     assert!(full_json.get("request_outcomes").is_none());
@@ -673,4 +714,27 @@ fn security_rejects_no_package_baselines() {
         &["security", "--no-package-baselines", "--format", "json"],
     );
     assert_eq!(output.code, 2, "{}", output.stderr);
+}
+
+/// `FALLOW_PACKAGE_BASELINES=false` turns the map off for every run of the
+/// process, so a CI job that saves or gates a whole-project baseline sets it
+/// once instead of passing the flag to each command.
+#[test]
+fn package_baselines_env_false_turns_the_map_off() {
+    let temp = two_package_repository(
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    );
+    let root = temp.path().to_str().expect("root path");
+    let args = ["dead-code", "--root", root, "--format", "json", "--quiet"];
+    let mapped = parse_json(&run_fallow_raw(&args));
+    assert_eq!(mapped["unused_exports"], serde_json::json!([]));
+
+    let output = run_fallow_raw_with_env(&args, &[("FALLOW_PACKAGE_BASELINES", "false")]);
+    let json = parse_json(&output);
+    assert!(json.get("package_baselines").is_none(), "{json}");
+    assert_eq!(
+        json["unused_exports"].as_array().map(Vec::len),
+        Some(2),
+        "every package is in full scope: {json}"
+    );
 }

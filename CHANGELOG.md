@@ -31,6 +31,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `noPackageBaselines` and the MCP parameter `no_package_baselines` of
     `analyze` and `find_dupes` do the same. A dead-code baseline saved under
     the map prints a warning that the file is partial.
+  - `FALLOW_PACKAGE_BASELINES=false` turns the map off for every run of a
+    process, and the VS Code setting `fallow.packageBaselines` turns it off
+    in the editor.
+  - A dead-code baseline saved under the map records `scope_reasons`. A
+    later run without that narrowing warns before it compares, because it
+    can report findings outside the saved scope as new.
   - A run that the map narrowed reports `package-baselines` in
     `baseline_staleness.scope_reasons`. The GitHub Action and the GitLab
     template then add `--no-package-baselines` to their baseline re-read, and

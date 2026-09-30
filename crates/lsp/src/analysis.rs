@@ -151,6 +151,8 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub run_cancellation: &'a Arc<AtomicBool>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
     pub global_changed_since_requested: bool,
+    /// The client turned `workspaces.changedSince` off.
+    pub no_package_baselines: bool,
     pub sessions: &'a SharedSessionStore,
     pub parse_work: &'a mut RunParseWork,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
@@ -167,6 +169,8 @@ pub struct BlockingAnalysisInput {
     pub allow_remote_extends: bool,
     pub duplication_options: Option<LspDuplicationOptions>,
     pub production_override: Option<bool>,
+    /// The client turned `workspaces.changedSince` off.
+    pub no_package_baselines: bool,
     pub inline_complexity_enabled: bool,
     pub type_aware_options: Option<LspTypeAwareOptions>,
     pub type_aware_sessions: Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
@@ -473,7 +477,7 @@ fn resolve_project_change_scope(
         global_ref: input.global_changed_since_requested,
         files: input.changed_files,
         cache: None,
-        no_package_baselines: false,
+        no_package_baselines: input.no_package_baselines,
     };
     let scope = match session.change_scope(request) {
         Ok(scope) => scope,
@@ -612,6 +616,7 @@ pub fn run_blocking_analysis(
             run_cancellation: &input.run_cancellation,
             changed_files: changed_scope.files.as_ref(),
             global_changed_since_requested: input.changed_since.is_some(),
+            no_package_baselines: input.no_package_baselines,
             sessions: &input.sessions,
             parse_work: &mut parse_work,
             merged_analysis: &mut analysis,

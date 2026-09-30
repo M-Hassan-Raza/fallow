@@ -81,15 +81,20 @@ editor narrows once, after refinement.
 
 The global `--no-package-baselines` flag sets
 `ChangeScopeRequest::no_package_baselines`, so the run never reads the map and
-reports every package in full scope; the programmatic option and the MCP
-parameter set the same field. A narrowed run reports the map as the
+reports every package in full scope; the programmatic option, the MCP
+parameter and the LSP initialization option `packageBaselines: false` set the
+same field. `FALLOW_PACKAGE_BASELINES=false` empties
+`ResolvedConfig::workspace_changed_since` at config load, in the engine for the
+LSP, MCP and Node hosts and in `runtime_support.rs` for the CLI. A narrowed run reports the map as the
 `package-baselines` scope reason, separate from `changed-since`, so a consumer
 knows that dropping `--changed-since` does not widen it.
 
 The saved baselines differ on purpose. `check` compares and saves its baseline
 after the scope, so a baseline saved under the map is partial, records the
 `package-baselines` scope reason, and prints a warning that names
-`--no-package-baselines`. `dupes` compares its
+`--no-package-baselines`. The file records the saving run's `scope_reasons`;
+a later run that lacks one of them prints a warning before the comparison,
+because it can report findings outside the saved scope as new. `dupes` compares its
 baseline with the report before the package map narrows it, so the baseline
 sees every clone group and no scope reason is recorded.
 

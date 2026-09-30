@@ -42,9 +42,11 @@ pub use resolution::{
     AnalysisSnapshot, CACHE_DIR_ENV, CACHE_MAX_SIZE_ENV, CompiledIgnoreCatalogReferenceRule,
     CompiledIgnoreDependencyOverrideRule, CompiledIgnoreExportRule, ConfigOverride,
     DEFAULT_IGNORE_PATTERNS, DEFAULT_MAX_FILE_SIZE_BYTES, DEFAULT_MAX_FILE_SIZE_MB,
-    IgnoreCatalogReferenceRule, IgnoreDependencyOverrideRule, IgnoreExportRule, ResolvedConfig,
-    ResolvedOverride, cache_config_hash, cache_dir_env_override, cache_dir_from_env_value,
-    cache_max_size_env_override, cache_max_size_from_env_value, resolve_max_file_size_bytes,
+    IgnoreCatalogReferenceRule, IgnoreDependencyOverrideRule, IgnoreExportRule,
+    PACKAGE_BASELINES_ENV, ResolvedConfig, ResolvedOverride, cache_config_hash,
+    cache_dir_env_override, cache_dir_from_env_value, cache_max_size_env_override,
+    cache_max_size_from_env_value, package_baselines_disabled_by_env_value,
+    resolve_max_file_size_bytes,
 };
 pub use resolve::ResolveConfig;
 pub use rules::{

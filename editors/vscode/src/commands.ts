@@ -22,6 +22,7 @@ import {
   getComplexityDecorationCap,
   getIssueTypes,
   getChangedSince,
+  getPackageBaselines,
   getResolvedConfigPath,
   getAutoDownload,
   getTypeAwareSettings,
@@ -717,6 +718,7 @@ export const runAnalysis = async (
     const { args: analysisArgs, skipped } = buildAnalysisArgs({
       production: getProductionOverride(),
       changedSince: getChangedSince(),
+      packageBaselines: getPackageBaselines(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
       dupesMode: getDuplicationModeOverride(),

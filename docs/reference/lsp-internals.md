@@ -145,6 +145,8 @@ metadata such as `circularDependency: { cycleId, fileCount }`. Circular
 findings share a cycle identifier and use each import edge for their ranges;
 legacy results without edges retain the first-file fallback.
 
+The initialization option `packageBaselines: false` sets
+`ChangeScopeRequest::no_package_baselines`, so no project reads the map.
 Each project resolves one `ChangeScope` after workspace discovery, with the
 engine rule that the CLI and the programmatic API use. When
 `workspaces.changedSince` is configured and no global editor ref was requested,

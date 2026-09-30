@@ -2020,7 +2020,8 @@ fn save_baseline_file(
         return Err(emit_error(&refusal, 2, io.output));
     }
     let baseline_data =
-        BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone());
+        BaselineData::from_results_with_identity(results, io.root, io.analysis_identity.clone())
+            .with_scope_reasons(io.scope_reasons);
     let mut json = serde_json::to_string_pretty(&baseline_data)
         .map_err(|e| emit_error(&format!("failed to serialize baseline: {e}"), 2, io.output))?;
     json.push('\n');
@@ -2065,6 +2066,42 @@ fn save_baseline_file(
     Ok(())
 }
 
+/// A baseline saved from a narrowed run holds only part of the findings. A
+/// wider run that loads it reports the findings outside the saved scope as
+/// new, so the run says why before the report does.
+///
+/// Printed regardless of `--quiet`, like the note for a baseline of another
+/// format: no report states this fact, and `--ci` implies `--quiet`.
+fn warn_about_a_narrower_saved_baseline(
+    content: &str,
+    baseline_path: &std::path::Path,
+    io: &BaselineIo<'_>,
+) {
+    let current: Vec<&str> = io
+        .scope_reasons
+        .iter()
+        .map(fallow_output::ScopeReason::as_str)
+        .collect();
+    let wider: Vec<String> = fallow_engine::baseline::saved_scope_reasons(content)
+        .into_iter()
+        .filter(|reason| !current.contains(&reason.as_str()))
+        .collect();
+    if wider.is_empty() {
+        return;
+    }
+    let remedy = if wider.iter().any(|reason| reason == "package-baselines") {
+        " Save it again with --no-package-baselines to cover the whole project."
+    } else {
+        " Save it again from a run without that narrowing to cover the whole project."
+    };
+    eprintln!(
+        "Warning: the baseline {} was saved from a run narrowed by {}, so it lists only part of \
+         the findings. This run is wider and can report old findings as new.{remedy}",
+        baseline_path.display(),
+        wider.join(", "),
+    );
+}
+
 /// Load a baseline file, filter out matched issues, and return this run's view
 /// of the loaded baseline.
 ///
@@ -2082,6 +2119,7 @@ fn load_and_compare_baseline(
 
     let content = std::fs::read_to_string(baseline_path)
         .map_err(|e| emit_error(&format!("failed to read baseline: {e}"), 2, io.output))?;
+    warn_about_a_narrower_saved_baseline(&content, baseline_path, io);
     let outcome = apply_dead_code_baseline(
         results,
         &content,

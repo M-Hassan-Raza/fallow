@@ -47,6 +47,7 @@ fn analyze_project_root_for_test(
         run_cancellation: &cancellation,
         changed_files: None,
         global_changed_since_requested: false,
+        no_package_baselines: false,
         sessions: &Arc::default(),
         parse_work: &mut analysis::RunParseWork::default(),
         merged_analysis: &mut merged_analysis,
@@ -310,6 +311,7 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
         allow_remote_extends: false,
         duplication_options: None,
         production_override: None,
+        no_package_baselines: false,
         inline_complexity_enabled: false,
         type_aware_options: None,
         type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
@@ -2212,6 +2214,44 @@ fn package_baseline_fixture() -> tempfile::TempDir {
     temp
 }
 
+/// `initializationOptions.packageBaselines: false` turns the package map off,
+/// as `--no-package-baselines` does on the CLI.
+#[test]
+fn package_baselines_false_keeps_every_package_in_full_scope() {
+    let options = parse_initialization_options(Some(&json!({ "packageBaselines": false })));
+    assert_eq!(options.package_baselines, Some(false));
+    assert_eq!(
+        parse_initialization_options(Some(&json!({}))).package_baselines,
+        None
+    );
+
+    let temp = package_baseline_fixture();
+    let root = temp.path();
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/other":"HEAD"}}}"#,
+    )
+    .expect("map the unchanged package");
+    let mapped = run_blocking_analysis(&BlockingAnalysisInput {
+        changed_since: None,
+        ..changed_since_input(root, "HEAD", None)
+    })
+    .expect("package analysis succeeds");
+    let opted_out = run_blocking_analysis(&BlockingAnalysisInput {
+        changed_since: None,
+        no_package_baselines: true,
+        ..changed_since_input(root, "HEAD", None)
+    })
+    .expect("full-scope analysis succeeds");
+    assert!(!mapped.package_scopes.is_empty());
+    assert!(opted_out.package_scopes.is_empty());
+    assert!(
+        opted_out.analysis.results.unused_exports.len()
+            > mapped.analysis.results.unused_exports.len(),
+        "the opt-out reports the findings the map hid"
+    );
+}
+
 #[test]
 fn package_baselines_scope_lsp_results_and_stamp_each_document_ref() {
     let temp = package_baseline_fixture();
@@ -2351,6 +2391,7 @@ fn changed_since_input(
         allow_remote_extends: false,
         duplication_options,
         production_override: None,
+        no_package_baselines: false,
         inline_complexity_enabled: false,
         type_aware_options: None,
         type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),

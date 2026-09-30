@@ -352,6 +352,9 @@ struct FallowLspServer {
     /// mirroring the CLI default. Without this the sidebar and editor squiggles
     /// disagree whenever `fallow.production` is set (issue #1055).
     production_override: Arc<RwLock<Option<bool>>>,
+    /// `initializationOptions.packageBaselines: false` turns
+    /// `workspaces.changedSince` off, as `--no-package-baselines` does.
+    no_package_baselines: Arc<AtomicBool>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
     /// Optional semantic TypeScript refinement for editor diagnostics.
@@ -451,6 +454,10 @@ impl LanguageServer for FallowLspServer {
             *self.allow_remote_extends.write().await = parsed_options.allow_remote_extends;
             *self.duplication_options.write().await = parsed_options.duplication;
             *self.production_override.write().await = parsed_options.production;
+            self.no_package_baselines.store(
+                parsed_options.package_baselines == Some(false),
+                Ordering::SeqCst,
+            );
             *self.inline_complexity_enabled.write().await = parsed_options
                 .health
                 .and_then(|health| health.inline_complexity)
@@ -774,6 +781,7 @@ impl FallowLspServer {
             allow_remote_extends: Arc::new(RwLock::new(false)),
             duplication_options: Arc::new(RwLock::new(None)),
             production_override: Arc::new(RwLock::new(None)),
+            no_package_baselines: Arc::new(AtomicBool::new(false)),
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
             type_aware_options: Arc::new(RwLock::new(None)),
             type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
@@ -1035,6 +1043,7 @@ impl FallowLspServer {
         let allow_remote_extends = *self.allow_remote_extends.read().await;
         let duplication_options = self.duplication_options.read().await.clone();
         let production_override = *self.production_override.read().await;
+        let no_package_baselines = self.no_package_baselines.load(Ordering::SeqCst);
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
         let type_aware_options = self.type_aware_options.read().await.clone();
         let type_aware_sessions = Arc::clone(&self.type_aware_sessions);
@@ -1061,6 +1070,7 @@ impl FallowLspServer {
                 allow_remote_extends,
                 duplication_options,
                 production_override,
+                no_package_baselines,
                 inline_complexity_enabled,
                 type_aware_options,
                 type_aware_sessions,

@@ -540,6 +540,24 @@ pub fn cache_max_size_from_env_value(raw: &OsStr) -> Option<u32> {
         .filter(|mb| *mb > 0)
 }
 
+/// Environment variable that turns `workspaces.changedSince` off for every
+/// run of a process, like `--no-package-baselines` does for one run. A CI job
+/// that saves or gates a whole-project baseline sets it once.
+pub const PACKAGE_BASELINES_ENV: &str = "FALLOW_PACKAGE_BASELINES";
+
+/// Whether a raw `FALLOW_PACKAGE_BASELINES` value turns the package map off.
+/// `false`, `0`, `no` and `off` do, in any case. Every other value keeps the
+/// map, so a typo never widens a run.
+#[must_use]
+pub fn package_baselines_disabled_by_env_value(raw: &OsStr) -> bool {
+    raw.to_str().is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "false" | "0" | "no" | "off"
+        )
+    })
+}
+
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     let Some(dir) = configured else {
         return root.join(".fallow");
@@ -1062,6 +1080,14 @@ impl FallowConfig {
 }
 
 impl ResolvedConfig {
+    /// Apply a `FALLOW_PACKAGE_BASELINES` value: a false value empties
+    /// `workspaces.changedSince`, so no run of the process reads the map.
+    pub fn apply_package_baselines_env(&mut self, raw: Option<&OsStr>) {
+        if raw.is_some_and(package_baselines_disabled_by_env_value) {
+            self.workspace_changed_since.clear();
+        }
+    }
+
     /// Replace the resolved cache directory with a host override, such as
     /// `FALLOW_CACHE_DIR`. A relative path resolves from the project root,
     /// the same base as `cache.dir`.
