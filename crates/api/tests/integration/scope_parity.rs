@@ -16,7 +16,7 @@ use fallow_api::{
 };
 use serde_json::Value;
 
-use crate::common::{commit, git, write};
+use crate::common::{commit, git, rerun_with_type_aware_sidecar, write};
 
 fn analysis(root: &Path) -> AnalysisOptions {
     AnalysisOptions {
@@ -364,4 +364,181 @@ fn a_workspace_scope_keeps_a_clone_group_with_one_instance_in_the_workspace() {
         "`workspace: pkg-a` keeps the whole group, as `fallow dupes --workspace pkg-a` \
          does: a clone group is in scope when one of its instances is. Got {scoped:?}"
     );
+}
+
+/// Two workspace packages with one unused export each, a package map for
+/// both packages, and an uncommitted change to the used function of
+/// `packages/b`.
+fn audit_package_map_repository() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"root","private":true,"workspaces":["packages/*"]}"#,
+    );
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    );
+    for name in ["a", "b"] {
+        write(
+            root,
+            &format!("packages/{name}/package.json"),
+            &format!(r#"{{"name":"{name}","main":"src/index.ts"}}"#),
+        );
+        write(
+            root,
+            &format!("packages/{name}/src/index.ts"),
+            "import { used } from './utils';\nused();\n",
+        );
+        write(
+            root,
+            &format!("packages/{name}/src/utils.ts"),
+            &format!("export const used = () => 1;\nexport const unused_{name} = 1;\n"),
+        );
+    }
+    git(root, &["init", "-q"]);
+    commit(root, "base");
+    write(
+        root,
+        "packages/b/src/utils.ts",
+        "export const used = () => 2;\nexport const unused_b = 1;\n",
+    );
+    dir
+}
+
+/// Audit scopes head and base itself. No section may read the package map,
+/// whichever production modes split the sections into separate runs.
+#[test]
+fn audit_ignores_package_baselines_for_every_production_mode_split() {
+    let dir = audit_package_map_repository();
+    for mask in 0_u8..8 {
+        let output = fallow_api::run_audit(&fallow_api::AuditOptions {
+            analysis: analysis(dir.path()),
+            base: Some("HEAD".to_string()),
+            production_dead_code: Some(mask & 1 != 0),
+            production_health: Some(mask & 2 != 0),
+            production_dupes: Some(mask & 4 != 0),
+            ..fallow_api::AuditOptions::default()
+        })
+        .unwrap_or_else(|error| panic!("audit mask {mask:03b} failed: {error}"));
+        let json = fallow_api::serialize_audit_programmatic_json(output)
+            .unwrap_or_else(|error| panic!("serialize mask {mask:03b}: {error}"));
+        assert_eq!(json["verdict"], "pass", "mask {mask:03b}: {json}");
+        let exports = json["dead_code"]["unused_exports"]
+            .as_array()
+            .unwrap_or_else(|| panic!("mask {mask:03b}: {json}"));
+        assert_eq!(exports.len(), 1, "mask {mask:03b}: {json}");
+        assert_eq!(exports[0]["export_name"], "unused_b");
+        assert_eq!(exports[0]["introduced"], false, "mask {mask:03b}: {json}");
+    }
+}
+
+/// Type-aware reconciliation adds private-type leaks after the syntactic
+/// pass. A leak in a package without changes stays out of the report.
+#[test]
+fn type_aware_leaks_follow_the_package_scope() {
+    if std::env::var_os("FALLOW_TYPE_AWARE_BIN").is_none() {
+        rerun_with_type_aware_sidecar("scope_parity::type_aware_leaks_follow_the_package_scope");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"leak-root","private":true,"workspaces":["packages/*"]}"#,
+    );
+    write(
+        root,
+        "tsconfig.json",
+        r#"{"compilerOptions":{"strict":true,"module":"esnext","moduleResolution":"bundler","target":"es2022"},"include":["packages/*/src"]}"#,
+    );
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"publicPackages":["a"],"rules":{"private-type-leaks":"warn"},"workspaces":{"changedSince":{"packages/a":"HEAD"}}}"#,
+    );
+    write(
+        root,
+        "packages/a/package.json",
+        r#"{"name":"a","main":"src/index.ts"}"#,
+    );
+    write(root, "packages/a/src/index.ts", "export * from './lib';\n");
+    write(
+        root,
+        "packages/a/src/lib.ts",
+        "type Internal = { id: string };\nconst make = (): Internal => ({ id: 'a' });\nexport const build = () => make();\n",
+    );
+    git(root, &["init", "-q"]);
+    commit(root, "base");
+
+    let options = DeadCodeOptions {
+        analysis: AnalysisOptions {
+            type_aware: fallow_api::TypeAwareOptions {
+                enabled: true,
+                projects: Vec::new(),
+                require: fallow_api::TypeAwareRequire::Complete,
+            },
+            ..analysis(root)
+        },
+        filters: fallow_api::DeadCodeFilters {
+            private_type_leaks: true,
+            ..fallow_api::DeadCodeFilters::default()
+        },
+        ..DeadCodeOptions::default()
+    };
+    let report = run_dead_code(&options)
+        .and_then(serialize_dead_code_programmatic_json)
+        .expect("run the programmatic dead-code analysis");
+    assert_eq!(
+        report["package_baselines"],
+        serde_json::json!([{"workspace_root":"packages/a","reference":"HEAD"}])
+    );
+    assert_eq!(
+        report["private_type_leaks"],
+        serde_json::json!([]),
+        "a leak in an unchanged package must stay out of the report"
+    );
+}
+
+/// The combined run shares one session between dead code and duplication.
+/// Its clone groups follow the same change scope as a standalone run, for a
+/// global ref and for the package map.
+#[test]
+fn shared_combined_duplication_follows_the_change_scope() {
+    let dir = cross_workspace_clone_repository();
+    let root = dir.path();
+    write(root, "notes.ts", "export const note = 1;\n");
+    let combined_groups = |analysis: AnalysisOptions| {
+        let combined = serialize_combined_programmatic_json(
+            run_combined(&CombinedOptions {
+                analysis,
+                health: false,
+                ..CombinedOptions::default()
+            })
+            .expect("combined analysis"),
+        )
+        .expect("combined JSON");
+        clone_group_files(&combined["dupes"])
+    };
+
+    let global = AnalysisOptions {
+        changed_since: Some("HEAD".to_string()),
+        ..analysis(root)
+    };
+    assert!(clone_group_files(&duplication(global.clone())).is_empty());
+    assert!(
+        combined_groups(global).is_empty(),
+        "a global ref must narrow shared combined clone groups as it narrows a standalone run"
+    );
+
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    );
+    assert!(combined_groups(analysis(root)).is_empty());
 }

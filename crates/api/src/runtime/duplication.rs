@@ -2,6 +2,7 @@ use std::time::Instant;
 
 use fallow_config::{DetectionMode, DuplicatesConfig, ProductionAnalysis};
 use fallow_engine::{
+    change_scope::ChangeScope,
     project_config::{ProjectConfig, ProjectConfigOptions},
     session::AnalysisSession,
 };
@@ -34,7 +35,16 @@ pub fn run_duplication(
     options: &DuplicationOptions,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context_deferred_workspace(&options.analysis)?;
-    resolved.install(|| run_duplication_inner(options, &resolved))
+    run_duplication_in_context(options, &resolved)
+}
+
+/// Run duplication analysis in a context that the caller resolved. Audit uses
+/// this to hand the change scope of every section to itself.
+pub(super) fn run_duplication_in_context(
+    options: &DuplicationOptions,
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
+    resolved.install(|| run_duplication_inner(options, resolved))
 }
 
 fn run_duplication_inner(
@@ -61,13 +71,11 @@ pub(super) fn run_duplication_with_session(
     } else {
         changed_files_for_run(resolved)?
     };
-    let package_scope = if changed_files.is_some() {
-        None
-    } else {
-        resolved.package_change_scope(session.config(), session.workspaces())?
-    };
+    let global_files = changed_files.or(resolved_changed_files.as_ref());
+    let change_scope =
+        resolved.change_scope(global_files, session.config(), session.workspaces())?;
     let cache_dir = (!resolved.no_cache).then_some(session.config().cache_dir.as_path());
-    let report = if let Some(changed_files) = changed_files.or(resolved_changed_files.as_ref()) {
+    let report = if let Some(changed_files) = global_files {
         resolved
             .measure_changed_since_scope(session.files().iter().map(|file| file.path.as_path()));
         let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
@@ -83,14 +91,7 @@ pub(super) fn run_duplication_with_session(
     // Duplication detection cannot fail, so a token set while it ran has to be
     // reported here rather than dressed up as a complete report.
     resolved.ensure_not_cancelled("the duplication report")?;
-    run_duplication_report_with_session(
-        options,
-        resolved,
-        session,
-        report,
-        package_scope.as_ref(),
-        start,
-    )
+    run_duplication_report_with_session(options, resolved, session, report, &change_scope, start)
 }
 
 pub(super) fn run_duplication_report_with_session(
@@ -98,7 +99,7 @@ pub(super) fn run_duplication_report_with_session(
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
     mut report: fallow_engine::duplicates::DuplicationReport,
-    package_scope: Option<&fallow_engine::package_baselines::PackageChangeScope>,
+    change_scope: &ChangeScope<'_>,
     start: Instant,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
@@ -106,7 +107,7 @@ pub(super) fn run_duplication_report_with_session(
     fallow_engine::duplicates::apply_scope(
         &mut report,
         &fallow_engine::duplicates::DuplicationScope {
-            changes: package_scope.map(fallow_engine::duplicates::ChangedFileScope::Packages),
+            changes: Some(change_scope),
             diff: resolved.diff.as_ref(),
             workspace_roots: workspace_roots.as_deref(),
         },
@@ -156,9 +157,7 @@ pub(super) fn run_duplication_report_with_session(
             workspace_diagnostics: session.workspace_diagnostics().to_vec(),
             next_steps,
         });
-    output.package_baselines = package_scope.map_or_else(Vec::new, |scope| {
-        crate::package_baseline_statuses(std::slice::from_ref(scope), session.root())
-    });
+    output.package_baselines = change_scope.package_baselines();
     Ok(DuplicationProgrammaticOutput {
         output,
         root: session.root().to_path_buf(),

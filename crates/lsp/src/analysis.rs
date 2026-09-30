@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use fallow_api::{ChangeScopeOwner, ChangeScopeRequest};
 use fallow_api::{
     EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
     EditorAnalysisSession as AnalysisSession, EditorDuplicationReport as DuplicationReport,
@@ -377,13 +378,13 @@ fn run_typed_project_analysis(
     if input.run_cancellation.load(Ordering::SeqCst) {
         return Err(ProjectAnalysisError::cancelled(input.project_root));
     }
-    let package_scope = if input.global_changed_since_requested {
-        None
-    } else {
-        session
-            .package_change_scope()
-            .map_err(|error| ProjectAnalysisError::failed(input.project_root, error.to_string()))?
-    };
+    let change_scope = session
+        .change_scope(ChangeScopeRequest {
+            owner: ChangeScopeOwner::Run,
+            global_ref: input.global_changed_since_requested,
+            files: input.changed_files,
+        })
+        .map_err(|error| ProjectAnalysisError::failed(input.project_root, error.to_string()))?;
     let mut output = session
         .analyze_project_with_changed_files(
             duplicates_config,
@@ -450,22 +451,17 @@ fn run_typed_project_analysis(
             session.unmatched_config_patterns(),
         ));
     // The type-aware pass reads `unused_files` as its set of unreachable
-    // files, so the changed-files scope runs after it.
-    session.apply_changed_files_scope(&mut output.dead_code, input.changed_files);
-    if let Some(packages) = package_scope.as_ref() {
-        session.apply_package_change_scope(&mut output, packages);
-    }
+    // files, so the change scope runs after it.
+    session.apply_change_scope(&mut output, &change_scope);
     if input.inline_complexity_enabled {
         let mut findings =
             fallow_api::collect_inline_complexity(session.config(), &output.dead_code);
-        if let Some(packages) = package_scope.as_ref() {
-            fallow_api::filter_inline_complexity_by_package_scope(&mut findings, packages);
-        }
+        fallow_api::filter_inline_complexity_by_change_scope(&mut findings, &change_scope);
         input.merged_inline_complexity.extend(findings);
     }
     input.merged_analysis.merge_project_output(output);
-    if let Some(packages) = package_scope {
-        input.package_scopes.push(packages);
+    if let Some(packages) = change_scope.packages() {
+        input.package_scopes.push(packages.clone());
     }
     Ok(())
 }

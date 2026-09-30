@@ -351,6 +351,9 @@ pub struct CheckOptions<'a> {
     pub fail_on_issues: bool,
     pub filters: &'a IssueFilters,
     pub changed_since: Option<&'a str>,
+    /// Who owns the change scope. `audit` owns it, so its runs never read
+    /// `workspaces.changedSince`.
+    pub change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner,
     pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
     pub use_shared_diff_index: bool,
     pub baseline: Option<&'a std::path::Path>,
@@ -794,7 +797,7 @@ fn apply_scope_filters(
     config: &ResolvedConfig,
     results: &mut AnalysisResults,
     ws_roots: Option<&Vec<std::path::PathBuf>>,
-    changes: Option<fallow_engine::dead_code::ChangedFileScope<'_>>,
+    change_scope: &fallow_engine::change_scope::ChangeScope<'_>,
 ) {
     let diff_index = match opts.diff_index {
         Some(index) => Some(index),
@@ -806,7 +809,7 @@ fn apply_scope_filters(
         results,
         &fallow_engine::dead_code::DeadCodeScope {
             workspace_roots: ws_roots.map(Vec::as_slice),
-            changes,
+            changes: Some(change_scope),
             diff: diff_index.map(|index| (index, opts.root)),
             files: files.as_ref(),
         },
@@ -1138,31 +1141,26 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         fallow_engine::dead_code::FindingIdTrace::start(filter.clone(), &mut data.results)
     });
 
-    let package_scope = if opts.changed_since.is_none() {
-        process_clock::time(ProcessSpan::Git, || {
-            fallow_engine::package_baselines::PackageChangeScope::resolve(
-                &config.root,
-                &config.workspace_changed_since,
-                &data.workspaces,
-            )
-        })
-        .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?
-    } else {
-        None
-    };
-    let package_baselines = package_scope.as_ref().map_or_else(Vec::new, |scope| {
-        fallow_api::package_baseline_statuses(std::slice::from_ref(scope), &config.root)
-    });
-    let changes = changed_files
-        .as_ref()
-        .map(fallow_engine::dead_code::ChangedFileScope::Global)
-        .or_else(|| {
-            package_scope
-                .as_ref()
-                .map(fallow_engine::dead_code::ChangedFileScope::Packages)
-        });
+    let change_scope = process_clock::time(ProcessSpan::Git, || {
+        fallow_engine::change_scope::ChangeScope::resolve(
+            fallow_engine::change_scope::ChangeScopeRequest {
+                owner: opts.change_scope_owner,
+                global_ref: opts.changed_since.is_some(),
+                files: changed_files.as_ref(),
+            },
+            &config,
+            &data.workspaces,
+        )
+    })
+    .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
 
-    apply_scope_filters(opts, &config, &mut data.results, ws_roots.as_ref(), changes);
+    apply_scope_filters(
+        opts,
+        &config,
+        &mut data.results,
+        ws_roots.as_ref(),
+        &change_scope,
+    );
 
     apply_rules_and_filters(opts, &config, &mut data.results);
     if let Some(trace) = finding_id_trace.as_mut() {
@@ -1245,6 +1243,18 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         (None, None)
     };
     if config.type_aware.enabled {
+        // Reconciliation can add findings anywhere in the project, such as
+        // private-type leaks. Every scope filter (workspace, change scope,
+        // diff, file list) narrows the final result, so they run again over
+        // the refined set. They only remove findings, so this pass keeps what
+        // the first pass kept. The first pass only saves sidecar work.
+        apply_scope_filters(
+            opts,
+            &config,
+            &mut data.results,
+            ws_roots.as_ref(),
+            &change_scope,
+        );
         // Reconciliation can add findings a syntactic pass never produced, so
         // effective severities are resolved once more over the refined set.
         // The pass removes findings and writes each gate severity again, so a
@@ -1278,7 +1288,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
             quiet: opts.quiet,
             output: opts.output,
             analysis_identity: &analysis_identity,
-            scope_reasons: baseline_scope_reasons(opts, &config),
+            scope_reasons: baseline_scope_reasons(opts, &config, &change_scope),
         },
     )?;
 
@@ -1290,12 +1300,12 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         trace.finish(
             &mut data.results,
             &config,
-            finding_id_run_reasons(opts, &config, &package_baselines),
+            finding_id_run_reasons(opts, &config, &change_scope),
         )
     });
 
     Ok(complete_check_execution(CheckCompletionInput {
-        package_baselines,
+        package_baselines: change_scope.package_baselines(),
         opts,
         config,
         data,
@@ -1314,16 +1324,13 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 fn finding_id_run_reasons(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    package_baselines: &[fallow_api::PackageBaselineStatus],
+    change_scope: &fallow_engine::change_scope::ChangeScope<'_>,
 ) -> Vec<fallow_output::FindingIdQueryReason> {
     let mut reasons: Vec<fallow_output::FindingIdQueryReason> =
-        baseline_scope_reasons(opts, config)
+        baseline_scope_reasons(opts, config, change_scope)
             .iter()
             .map(Into::into)
             .collect();
-    if !package_baselines.is_empty() {
-        reasons.push(fallow_output::FindingIdQueryReason::ChangedSince);
-    }
     if opts.baseline.is_some() {
         reasons.push(fallow_output::FindingIdQueryReason::Baseline);
     }
@@ -1356,6 +1363,7 @@ pub fn benchmark_dead_code_json(
         fail_on_issues: false,
         filters: &filters,
         changed_since: None,
+        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
         diff_index: None,
         use_shared_diff_index: true,
         baseline: None,
@@ -1927,6 +1935,7 @@ struct BaselineIo<'a> {
 fn baseline_scope_reasons(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
+    change_scope: &fallow_engine::change_scope::ChangeScope<'_>,
 ) -> fallow_output::BaselineScopeReasons {
     use fallow_output::ScopeReason;
 
@@ -1935,7 +1944,7 @@ fn baseline_scope_reasons(
             && crate::report::ci::diff_filter::shared_diff_index().is_some());
     fallow_output::BaselineScopeReasons::empty()
         .insert_if(diff_scoped, ScopeReason::Diff)
-        .insert_if(opts.changed_since.is_some(), ScopeReason::ChangedSince)
+        .insert_if(change_scope.is_change_scoped(), ScopeReason::ChangedSince)
         .insert_if(opts.workspace.is_some(), ScopeReason::Workspace)
         .insert_if(
             opts.changed_workspaces.is_some(),

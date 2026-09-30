@@ -145,10 +145,12 @@ metadata such as `circularDependency: { cycleId, fileCount }`. Circular
 findings share a cycle identifier and use each import edge for their ranges;
 legacy results without edges retain the first-file fallback.
 
-When `workspaces.changedSince` is configured and no global editor ref was
-requested, the project resolves one typed package scope after workspace
-discovery. Dead-code findings, clone groups, and inline complexity use that
-same scope. Each published document receives its owning package's ref in
+Each project resolves one `ChangeScope` after workspace discovery, with the
+engine rule that the CLI and the programmatic API use. When
+`workspaces.changedSince` is configured and no global editor ref was requested,
+that scope holds the package baselines. `EditorAnalysisSession::apply_change_scope`
+narrows dead-code findings and clone groups after the type-aware pass, and
+inline complexity uses the same scope. Each published document receives its owning package's ref in
 `data.changedSince`; a document in an unlisted package or at the project root
 receives no ref. A cross-package finding can therefore appear in documents
 with different metadata. `fallow/analysisComplete` reports the configured

@@ -1,5 +1,6 @@
 use crate::common::{
-    commit_all, copy_fixture, git, parse_json, run_fallow_in_root, run_fallow_raw,
+    CommandOutput, commit_all, copy_fixture, git, parse_json, run_fallow_in_root, run_fallow_raw,
+    run_fallow_raw_with_type_aware_sidecar,
 };
 use std::fs;
 use std::path::Path;
@@ -251,5 +252,225 @@ fn package_baselines_scope_each_workspace_and_global_ref_overrides() {
         "stdout: {}; stderr: {}",
         failed.stdout,
         failed.stderr
+    );
+}
+
+/// Two workspace packages, `a` and `b`. Each has one used and one unused
+/// export in `src/utils.ts`. The repository has one commit.
+fn two_package_repository(config: &str) -> tempfile::TempDir {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"scope-root","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("root manifest");
+    for name in ["a", "b"] {
+        let package = root.join("packages").join(name);
+        fs::create_dir_all(package.join("src")).expect("package source directory");
+        fs::write(
+            package.join("package.json"),
+            format!(r#"{{"name":"{name}","main":"src/index.ts"}}"#),
+        )
+        .expect("package manifest");
+        fs::write(
+            package.join("src/index.ts"),
+            "import { used } from './utils';\nused();\n",
+        )
+        .expect("entry");
+        fs::write(
+            package.join("src/utils.ts"),
+            format!("export const used = () => 1;\nexport const unused_{name} = 1;\n"),
+        )
+        .expect("utilities");
+    }
+    fs::write(root.join(".fallowrc.json"), config).expect("config");
+    git(root, &["init", "-q"]);
+    commit_all(root, "base");
+    temp
+}
+
+fn run_in(root: &Path, args: &[&str]) -> CommandOutput {
+    let mut command = args.to_vec();
+    command.extend_from_slice(&["--root", root.to_str().expect("root path"), "--quiet"]);
+    run_fallow_raw(&command)
+}
+
+/// Audit narrows head and base itself. The base snapshot is not a Git
+/// repository, so a package map that audit read there would fail the run.
+#[test]
+fn audit_ignores_package_baselines_on_head_and_base() {
+    let temp = two_package_repository(
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    );
+    let root = temp.path();
+    fs::write(
+        root.join("packages/b/src/utils.ts"),
+        "export const used = () => 2;\nexport const unused_b = 1;\n",
+    )
+    .expect("change the used function only");
+
+    let output = run_in(root, &["audit", "--base", "HEAD", "--format", "json"]);
+    assert_eq!(
+        output.code, 0,
+        "stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["verdict"], "pass", "{json}");
+    let exports = json["dead_code"]["unused_exports"]
+        .as_array()
+        .expect("unused exports");
+    assert_eq!(exports.len(), 1, "{json}");
+    assert_eq!(exports[0]["export_name"], "unused_b");
+    assert_eq!(exports[0]["introduced"], false, "{json}");
+    assert!(
+        json["dead_code"].get("package_baselines").is_none(),
+        "{json}"
+    );
+}
+
+/// A package map narrows the report the same way as a global ref, so a saved
+/// full baseline is not stale because of it.
+#[test]
+fn package_baselines_mark_the_report_change_scoped_for_the_stale_baseline_gate() {
+    let temp = two_package_repository("{}");
+    let root = temp.path();
+    let baseline = root.join("baseline.json");
+    let baseline = baseline.to_str().expect("baseline path");
+    let saved = run_in(root, &["dead-code", "--save-baseline", baseline]);
+    assert!(saved.code == 0 || saved.code == 1, "{}", saved.stderr);
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    )
+    .expect("package map");
+    commit_all(root, "baseline and package map");
+
+    let global = run_in(
+        root,
+        &[
+            "dead-code",
+            "--changed-since",
+            "HEAD",
+            "--baseline",
+            baseline,
+            "--fail-on-stale-baseline",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(global.code, 0, "control: {}", global.stderr);
+
+    let mapped = run_in(
+        root,
+        &[
+            "dead-code",
+            "--baseline",
+            baseline,
+            "--fail-on-stale-baseline",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(
+        mapped.code, 0,
+        "stdout: {}\nstderr: {}",
+        mapped.stdout, mapped.stderr
+    );
+    let json = parse_json(&mapped);
+    assert_eq!(
+        json["package_baselines"],
+        serde_json::json!([
+            {"workspace_root":"packages/a","reference":"HEAD"},
+            {"workspace_root":"packages/b","reference":"HEAD"}
+        ])
+    );
+    assert_eq!(json["unused_exports"], serde_json::json!([]));
+}
+
+/// Type-aware reconciliation adds private-type leaks after the syntactic
+/// pass. A leak in a package without changes stays out of the report.
+#[test]
+fn type_aware_leaks_follow_the_package_scope() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let root = temp.path();
+    let files = [
+        (
+            "package.json",
+            r#"{"name":"leak-root","private":true,"workspaces":["packages/*"]}"#,
+        ),
+        (
+            "tsconfig.json",
+            r#"{"compilerOptions":{"strict":true,"module":"esnext","moduleResolution":"bundler","target":"es2022"},"include":["packages/*/src"]}"#,
+        ),
+        (
+            ".fallowrc.json",
+            r#"{"publicPackages":["a"],"rules":{"private-type-leaks":"warn"},"workspaces":{"changedSince":{"packages/a":"HEAD"}}}"#,
+        ),
+        (
+            "packages/a/package.json",
+            r#"{"name":"a","main":"src/index.ts"}"#,
+        ),
+        ("packages/a/src/index.ts", "export * from './lib';\n"),
+        (
+            "packages/a/src/lib.ts",
+            "type Internal = { id: string };\nconst make = (): Internal => ({ id: 'a' });\nexport const build = () => make();\n",
+        ),
+    ];
+    for (path, content) in files {
+        let target = root.join(path);
+        fs::create_dir_all(target.parent().expect("parent")).expect("directory");
+        fs::write(target, content).expect("fixture file");
+    }
+    git(root, &["init", "-q"]);
+    commit_all(root, "base");
+
+    let run = |extra: &[&str]| {
+        let mut args = vec![
+            "dead-code",
+            "--root",
+            root.to_str().expect("root path"),
+            "--type-aware",
+            "--private-type-leaks",
+            "--format",
+            "json",
+            "--quiet",
+            "--no-cache",
+        ];
+        args.extend_from_slice(extra);
+        let output = run_fallow_raw_with_type_aware_sidecar(&args);
+        assert!(output.code == 0 || output.code == 1, "{}", output.stderr);
+        parse_json(&output)
+    };
+    let control = {
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"publicPackages":["a"],"rules":{"private-type-leaks":"warn"}}"#,
+        )
+        .expect("config without map");
+        let json = run(&[]);
+        fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"publicPackages":["a"],"rules":{"private-type-leaks":"warn"},"workspaces":{"changedSince":{"packages/a":"HEAD"}}}"#,
+        )
+        .expect("restore package map");
+        json
+    };
+    assert_eq!(
+        control["private_type_leaks"].as_array().map(Vec::len),
+        Some(1),
+        "the unscoped run must see the leak: {control}"
+    );
+
+    let scoped = run(&[]);
+    assert_eq!(
+        scoped["package_baselines"],
+        serde_json::json!([{"workspace_root":"packages/a","reference":"HEAD"}])
+    );
+    assert_eq!(
+        scoped["private_type_leaks"],
+        serde_json::json!([]),
+        "a leak in an unchanged package must stay out of the report"
     );
 }

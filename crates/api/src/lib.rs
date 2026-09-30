@@ -67,9 +67,7 @@ pub mod security_output;
 /// Local-only advisory similar-code discovery and provider status.
 pub mod similar_code;
 mod type_aware;
-pub use analysis_context::{
-    ProgrammaticAnalysisContext, package_baseline_statuses, resolve_programmatic_analysis_context,
-};
+pub use analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
     AuditSarifOutputInput, AuditSummary, AuditVerdict,
@@ -104,8 +102,8 @@ pub use editor::{
     EditorInlineComplexityExceeded, EditorInlineComplexityFinding, EditorMirroredDirectory,
     EditorProjectAnalysisOutput, EditorRefactoringKind, EditorRefactoringSuggestion,
     EditorSessionParseCounts, collect_inline_complexity, editor_duplicates, editor_extract,
-    editor_results, editor_security, editor_suppress, filter_inline_complexity_by_changed_files,
-    filter_inline_complexity_by_package_scope, resolve_git_toplevel,
+    editor_results, editor_security, editor_suppress, filter_inline_complexity_by_change_scope,
+    filter_inline_complexity_by_changed_files, resolve_git_toplevel,
     try_get_changed_files_with_toplevel,
 };
 pub use explain::{
@@ -116,6 +114,11 @@ pub use explain::{
 };
 pub use fallow_config::levenshtein::closest_match;
 pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
+/// Engine-owned change scope of one run: a global changed-file set or the
+/// per-workspace Git baselines of `workspaces.changedSince`.
+pub use fallow_engine::change_scope::{
+    ChangeScope, ChangeScopeOwner, ChangeScopeRequest, package_baseline_statuses,
+};
 /// Engine-owned per-workspace Git baseline state used by analysis surfaces.
 pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};
 /// Parsed modules that a long-lived process keeps across analysis calls.

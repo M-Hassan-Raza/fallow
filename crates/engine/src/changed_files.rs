@@ -1057,7 +1057,7 @@ pub fn filter_duplication_by_changed_files(
 }
 
 /// Scope clone groups through the same package owner used for findings.
-pub fn filter_duplication_by_package_scope(
+pub(crate) fn filter_duplication_by_package_scope(
     report: &mut DuplicationReport,
     packages: &crate::package_baselines::PackageChangeScope,
     root: &Path,

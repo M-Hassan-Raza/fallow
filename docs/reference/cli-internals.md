@@ -25,18 +25,40 @@ an exit code.
 A decision that more than one command or surface makes has one implementation.
 The scope filters are `fallow_engine::dead_code::apply_scope`,
 `fallow_engine::duplicates::apply_scope` and `fallow_engine::diff_scope`. The
-per-package Git baseline resolver is `fallow_engine::package_baselines`;
-surfaces pass its typed scope into engine filters rather than assembling a
-synthetic changed-file list. An explicit global `--changed-since` takes
-precedence over `workspaces.changedSince`. The map uses exact, project-root-
-relative discovered workspace roots. The nearest workspace owns a file;
-unlisted workspaces and root files remain in full scope. Invalid keys, unknown
-workspaces, and invalid mapped refs fail the scoped analysis as input errors.
-Git refs are resolved once per distinct ref. Dependency-level findings retain
-their existing global behavior, while manifest-owned findings follow their
-owner path. The package map scopes `check`, `dead-code`, `dupes`, and their
-combined sections. Audit supplies its own changed-file scope and does not
-apply package refs.
+change scope of a run is `fallow_engine::change_scope::ChangeScope`. Every
+surface describes its inputs with a `ChangeScopeRequest` (the owner, whether a
+global ref was requested, and the changed files) and calls
+`ChangeScope::resolve`, which owns the precedence rule. The resolved value owns
+the result filter, the `package_baselines` provenance rows, and the
+`is_change_scoped` flag that baseline comparison, `--fail-on-stale-baseline`,
+and finding-id queries read. A surface does not assemble these three from
+separate decisions.
+
+A changed-file set wins. A requested global ref gives the full scope when it
+does not resolve, and it still suppresses `workspaces.changedSince`. A run whose
+owner is `ChangeScopeOwner::Caller` never reads the package map: `audit` owns
+the scope of its head and base runs, on the CLI and in the programmatic API, in
+every production-mode split. The base snapshot may not be a Git repository,
+and a package map that hid a base finding would report the head finding as
+introduced.
+
+The package map uses exact, project-root-relative discovered workspace roots.
+The nearest workspace owns a file; unlisted workspaces and root files remain in
+full scope. Invalid keys, unknown workspaces, and invalid mapped refs fail the
+scoped analysis as input errors. Git refs are resolved once per distinct ref.
+Dependency-level findings retain their existing global behavior, while
+manifest-owned findings follow their owner path. The package map scopes
+`check`, `dead-code`, `dupes`, and their combined sections.
+
+The scope always narrows the final result: the last scope filters run after
+type-aware refinement and before baseline comparison and gates. `check` and the
+programmatic dead-code runtime also narrow before refinement to save sidecar
+work. They apply every scope filter again after refinement, because refinement
+can add findings such as private-type leaks. The filters only remove findings,
+so the second pass is idempotent for the findings that the first pass kept. The editor narrows once,
+after refinement. `dupes` is the explicit exception for the package map: it
+compares the saved baseline with the full report and scopes the report after
+that, so the baseline sees every clone group.
 
 For example, `.fallowrc.json` can contain
 `"workspaces": { "changedSince": { "packages/web": "main" } }`. The map
