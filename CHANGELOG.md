@@ -423,6 +423,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The human summary footer spells the dev dependencies in production
+  count correctly.** The footer printed "2 dev dependencies in productions"
+  and "1 dev dependencies in production". It now prints "1 dev dependency in
+  production" and "2 dev dependencies in production". For a count of one,
+  the status line, the React context line of `fallow health` and the runtime
+  coverage findings now print "1 issue", "1 prop", "1 hook" and "1
+  invocation". When only one hotspot has ownership data, the ownership
+  summary prints "1 hotspot depends" instead of "all 1 hotspots depend".
 - **The programmatic combined runner reports the same health duplication as
   `fallow health`.** `run_combined` gave health the duplication report of the
   run and recomputed its stats from all parsed files. Files that
@@ -618,6 +626,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scripts/a.ts`, `npm --prefix`, `yarn --cwd`) now resolves its file
   arguments against that directory. `yarn node <file>` runs the file, also
   after `yarn --cwd <dir>` and `yarn workspace <name>`.
+- **Package selections also reach the root package, and every selection
+  form marks runtime scripts.** These gaps remained after the fix for
+  #2954:
+  - `yarn workspaces foreach -A` runs in the root workspace too, so
+    `yarn workspaces foreach -A exec node scripts/a.ts` now makes the root
+    `scripts/a.ts` an entry point. `--include` and `--exclude` match the
+    workspace name or its directory (`.` is the root), as in yarn.
+  - `pnpm -w` (`--workspace-root`), a pnpm filter with the name or
+    directory of the root package, and `yarn workspace` with the name of
+    the root package (yarn berry) also run in the root package. An npm workspace name or
+    directory does not select the root, as in npm. `--include-workspace-root`
+    adds the root package: in pnpm to `-r` and to a filter that only
+    excludes packages (`--filter '!web'`), and in npm to every workspace
+    selection (`-w web`, `--workspaces`), also with the short form `-iwr`.
+    Without it, `pnpm -r`,
+    `npm --workspaces` and `yarn workspaces run` leave out the root
+    package.
+  - A `start` script that calls a script in other packages with
+    `pnpm -r run serve`, `pnpm -C packages/web run serve`,
+    `npm --prefix packages/web run serve`, `yarn --cwd packages/web serve` or
+    `yarn workspaces foreach -A run serve` now makes `serve` a runtime script
+    of each selected package. Before, only a selection by name did this.
+    Such a package no longer falls back to its default entry
+    (`src/index.ts`), the same as with a selection by name, so an unused
+    default entry there can now show as an unused file.
+  - The type-aware refinement used entry points that ignored package
+    selections. It now gets the same package entry points as the analysis.
 - **npm config flags that take a value no longer forward the value (#2954).**
   `npm run gen --tag next src/a.ts` forwards only `src/a.ts` to the script.
   Before, Fallow knew only a few of these flags, so a value such as the one
