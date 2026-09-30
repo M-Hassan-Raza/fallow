@@ -101,6 +101,16 @@
       "description": "Only report issues in files changed since this git ref (e.g., main, HEAD~5)"
     },
     {
+      "name": "--no-package-baselines",
+      "type": "bool",
+      "required": false,
+      "description": "Ignore the per-package refs of `workspaces.changedSince` for this run",
+      "possible_values": [
+        "true",
+        "false"
+      ]
+    },
+    {
       "name": "--diff-file",
       "type": "string",
       "required": false,

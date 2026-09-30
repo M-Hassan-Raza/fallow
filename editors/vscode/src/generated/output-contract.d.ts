@@ -460,7 +460,7 @@ export type BaselineStalenessAdvisory = ("none" | "zero-overlap" | "partial")
  * `--workspace` and `--changed-workspaces` for the same reason. A consumer
  * must therefore not assume a given command emits a given name.
  */
-export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports")
+export type ScopeReason = ("diff" | "changed-since" | "package-baselines" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports")
 /**
  * One reason why a missing id does not prove that the finding is gone.
  *
@@ -468,7 +468,7 @@ export type ScopeReason = ("diff" | "changed-since" | "changed-files" | "workspa
  * name this build does not emit means "some reason", not an error, and the
  * query stays inconclusive.
  */
-export type FindingIdQueryReason = ("diff" | "changed-since" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports" | "baseline" | "rule-off" | "filtered")
+export type FindingIdQueryReason = ("diff" | "changed-since" | "package-baselines" | "changed-files" | "workspace" | "changed-workspaces" | "scope" | "file" | "issue-type-filter" | "production" | "include-entry-exports" | "baseline" | "rule-off" | "filtered")
 /**
  * Status of a regression-check pass.
  */

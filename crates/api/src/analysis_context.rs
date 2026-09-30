@@ -44,6 +44,8 @@ pub struct ProgrammaticAnalysisContext {
     /// Who owns the change scope of the call's analyses. Audit owns it, so
     /// its sections never read `workspaces.changedSince`.
     pub(crate) change_scope_owner: ChangeScopeOwner,
+    /// The caller turned `workspaces.changedSince` off for this call.
+    pub(crate) no_package_baselines: bool,
     /// The package map as the call's first analysis resolved it. Later
     /// analyses of the call reuse it, and its outcome is the call's
     /// `package-baselines` request outcome.
@@ -121,6 +123,7 @@ fn resolve_programmatic_analysis_context_inner(
         changed_since_request,
         changed_since_files,
         change_scope_owner: ChangeScopeOwner::Run,
+        no_package_baselines: options.no_package_baselines,
         package_baselines: PackageBaselineCache::new(),
         changed_since_analyzed: Mutex::new(None),
         workspace: options.workspace.clone(),
@@ -345,6 +348,7 @@ impl ProgrammaticAnalysisContext {
             global_ref: self.changed_since.is_some() || self.changed_since_request.get().is_some(),
             files,
             cache: Some(&self.package_baselines),
+            no_package_baselines: self.no_package_baselines,
         };
         ChangeScope::resolve(request, config, workspaces).map_err(|err| {
             ProgrammaticError::new(format!("workspace baseline error: {err}"), 2)

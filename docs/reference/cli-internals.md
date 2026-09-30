@@ -31,7 +31,7 @@ global ref was requested, the changed files, and the run-wide
 `PackageBaselineCache`) and calls `ChangeScope::resolve`, which owns the
 precedence rule and the failure policy. The resolved value owns the result
 filter, the `package_baselines` provenance rows, the `package-baselines`
-request outcome, and the `is_change_scoped` flag that the `check` baseline
+request outcome, and the `scope_reason` that the `check` baseline
 comparison, `--fail-on-stale-baseline`, and finding-id queries read. A surface
 does not assemble these from separate decisions.
 
@@ -79,9 +79,17 @@ can add findings such as private-type leaks. The filters only remove findings,
 so the second pass is idempotent for the findings that the first pass kept. The
 editor narrows once, after refinement.
 
+The global `--no-package-baselines` flag sets
+`ChangeScopeRequest::no_package_baselines`, so the run never reads the map and
+reports every package in full scope; the programmatic option and the MCP
+parameter set the same field. A narrowed run reports the map as the
+`package-baselines` scope reason, separate from `changed-since`, so a consumer
+knows that dropping `--changed-since` does not widen it.
+
 The saved baselines differ on purpose. `check` compares and saves its baseline
-after the scope, so a baseline saved under the map is partial and records the
-`changed-since` scope reason, as under a global ref. `dupes` compares its
+after the scope, so a baseline saved under the map is partial, records the
+`package-baselines` scope reason, and prints a warning that names
+`--no-package-baselines`. `dupes` compares its
 baseline with the report before the package map narrows it, so the baseline
 sees every clone group and no scope reason is recorded.
 

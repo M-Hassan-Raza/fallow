@@ -54,6 +54,7 @@ fn run_duplication_inner(
     let start = Instant::now();
     resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = load_duplication_session(options, resolved)?;
+    super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
     run_duplication_with_session(options, resolved, &session, None, start)
 }
 
@@ -189,12 +190,10 @@ pub(super) fn load_duplication_session(
             .with_context("analysis.configPath")
     })?;
     let project_config = configure_project_for_duplication(project_config, options);
-    let session = super::dead_code::attach_cancellation(
+    Ok(super::dead_code::attach_cancellation(
         AnalysisSession::from_config(project_config),
         resolved,
-    );
-    super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
-    Ok(session)
+    ))
 }
 
 fn configure_project_for_duplication(

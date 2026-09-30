@@ -80,12 +80,13 @@ pub(super) fn run_dead_code_in_context(
         resolved.ensure_not_cancelled("config load and file discovery")?;
         let finding_ids = parse_finding_ids(options)?;
         let session = load_dead_code_session(options, resolved)?;
+        resolve_package_map_before_analysis(resolved, &session)?;
         let (mut results, finished) =
             analyze_dead_code_results(options, resolved, &session, finding_ids)?;
         let FinishedDeadCode {
             type_aware_meta,
             mut finding_id_trace,
-            change_scoped,
+            change_reason,
             package_baselines,
         } = finished;
         if let Some(trace) = finding_id_trace.as_mut() {
@@ -109,7 +110,7 @@ pub(super) fn run_dead_code_in_context(
                     resolved,
                     &session,
                     RunScope {
-                        change_scoped,
+                        change_reason,
                         baseline: baseline.is_some(),
                     },
                 ),
@@ -159,8 +160,9 @@ fn reject_finding_ids(options: &DeadCodeOptions) -> ProgrammaticResult<()> {
 /// The run facts that finding-id reasons read beyond the options.
 #[derive(Clone, Copy)]
 struct RunScope {
-    /// A global ref or the package map narrowed the run.
-    change_scoped: bool,
+    /// The change channel that narrowed the run: a global ref or the package
+    /// map.
+    change_reason: Option<fallow_output::ScopeReason>,
     /// A saved baseline hid findings.
     baseline: bool,
 }
@@ -179,8 +181,13 @@ fn finding_id_run_reasons(
     [
         (resolved.diff.is_some(), Reason::Diff),
         (
-            run.change_scoped || options.analysis.ambient_changed_since.is_some(),
+            run.change_reason == Some(fallow_output::ScopeReason::ChangedSince)
+                || options.analysis.ambient_changed_since.is_some(),
             Reason::ChangedSince,
+        ),
+        (
+            run.change_reason == Some(fallow_output::ScopeReason::PackageBaselines),
+            Reason::PackageBaselines,
         ),
         (resolved.workspace().is_some(), Reason::Workspace),
         (
@@ -259,6 +266,7 @@ fn run_dead_code_inner(
     let start = Instant::now();
     resolved.ensure_not_cancelled("config load and file discovery")?;
     let session = load_dead_code_session(options, resolved)?;
+    resolve_package_map_before_analysis(resolved, &session)?;
     run_dead_code_with_session(options, resolved, &session, None, post_filter, start)
 }
 
@@ -466,8 +474,8 @@ struct DeadCodeReportInputs<'a> {
 struct FinishedDeadCode {
     type_aware_meta: Option<fallow_types::envelope::TypeAwareMeta>,
     finding_id_trace: Option<fallow_engine::dead_code::FindingIdTrace>,
-    /// A global ref or the package map narrowed the run.
-    change_scoped: bool,
+    /// The change channel that narrowed the run.
+    change_reason: Option<fallow_output::ScopeReason>,
     /// The package baselines that narrowed the run.
     package_baselines: Vec<fallow_output::PackageBaselineStatus>,
 }
@@ -546,7 +554,7 @@ fn finish_dead_code_results(
     Ok(FinishedDeadCode {
         type_aware_meta,
         finding_id_trace,
-        change_scoped: change_scope.is_change_scoped(),
+        change_reason: change_scope.scope_reason(),
         package_baselines: change_scope.package_baselines(),
     })
 }
@@ -697,13 +705,18 @@ pub(super) fn load_dead_code_session(
             .with_context("analysis.configPath")
     })?;
     let project_config = configure_project_for_dead_code(project_config, options);
-    let session = attach_cancellation(AnalysisSession::from_config(project_config), resolved);
-    resolve_package_map_before_analysis(resolved, &session)?;
-    Ok(session)
+    Ok(attach_cancellation(
+        AnalysisSession::from_config(project_config),
+        resolved,
+    ))
 }
 
-/// Resolve the package map before the analysis starts, so a map that names no
-/// workspace fails fast. The call context keeps the result for the scope step.
+/// Resolve the package map before the analysis starts, so a malformed map
+/// fails fast. The call context keeps the result for the scope step.
+///
+/// Only the entry points that apply the change scope call this. Their changed
+/// files come from the call's own ref, so the request here matches the one
+/// the scope step makes. Trace and decision-surface sessions never read the map.
 pub(super) fn resolve_package_map_before_analysis(
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,

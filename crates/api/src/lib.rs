@@ -342,6 +342,10 @@ pub struct AnalysisOptions {
     /// full scope and `request_outcomes["changed-since"]` states the reason,
     /// exactly as the CLI does for `--changed-since`.
     pub ambient_changed_since: Option<String>,
+    /// Ignore the per-package refs of `workspaces.changedSince` for this call,
+    /// as `--no-package-baselines` does on the CLI. Every workspace package is
+    /// then analyzed in full scope.
+    pub no_package_baselines: bool,
     /// Restrict analysis to the named workspace packages.
     pub workspace: Option<Vec<String>>,
     /// Restrict analysis to workspaces changed since the given git reference.

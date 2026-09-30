@@ -88,6 +88,8 @@ pub struct DupesOptions<'a> {
     /// Who owns the change scope. `audit` owns it, so its runs never read
     /// `workspaces.changedSince`.
     pub change_scope_owner: ChangeScopeOwner,
+    /// `--no-package-baselines`: ignore `workspaces.changedSince` for this run.
+    pub no_package_baselines: bool,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub explain: bool,
@@ -361,6 +363,20 @@ fn validate_dupes_flag_combination(opts: &DupesOptions<'_>) -> Result<(), ExitCo
     Ok(())
 }
 
+/// The change-scope request of one `dupes` run.
+fn change_scope_request<'a>(
+    opts: &DupesOptions<'_>,
+    files: Option<&'a rustc_hash::FxHashSet<std::path::PathBuf>>,
+) -> ChangeScopeRequest<'a> {
+    ChangeScopeRequest {
+        owner: opts.change_scope_owner,
+        global_ref: opts.changed_since.is_some(),
+        files,
+        cache: Some(crate::requests::package_baseline_cache()),
+        no_package_baselines: opts.no_package_baselines,
+    }
+}
+
 fn resolve_change_scope(
     opts: &DupesOptions<'_>,
     config: &ResolvedConfig,
@@ -408,12 +424,7 @@ fn execute_dupes_inner(
     let changed_files_from_since = resolve_changed_since(opts);
     let effective_changed_files: Option<&rustc_hash::FxHashSet<std::path::PathBuf>> =
         opts.changed_files.or(changed_files_from_since.as_ref());
-    let change_scope_request = ChangeScopeRequest {
-        owner: opts.change_scope_owner,
-        global_ref: opts.changed_since.is_some(),
-        files: effective_changed_files,
-        cache: Some(crate::requests::package_baseline_cache()),
-    };
+    let change_scope_request = change_scope_request(opts, effective_changed_files);
 
     let mut workspace_diagnostics = Vec::new();
     let (mut report, default_ignore_skips, change_scope) = match pre_discovered {
@@ -1400,6 +1411,7 @@ mod tests {
             use_shared_diff_index: true,
             changed_files: None,
             change_scope_owner: ChangeScopeOwner::Run,
+            no_package_baselines: false,
             workspace: None,
             changed_workspaces: None,
             explain: false,

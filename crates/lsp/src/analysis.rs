@@ -473,6 +473,7 @@ fn resolve_project_change_scope(
         global_ref: input.global_changed_since_requested,
         files: input.changed_files,
         cache: None,
+        no_package_baselines: false,
     };
     let scope = match session.change_scope(request) {
         Ok(scope) => scope,

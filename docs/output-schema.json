@@ -27786,6 +27786,11 @@
         },
         {
           "type": "string",
+          "const": "package-baselines",
+          "description": "The per-package refs of `workspaces.changedSince` in the config.\n`--no-package-baselines` turns them off for one run."
+        },
+        {
+          "type": "string",
           "const": "changed-files",
           "description": "A resolved changed-file set, on the commands that see the set rather\nthan the flag that produced it."
         },
@@ -29175,7 +29180,12 @@
         {
           "type": "string",
           "const": "changed-since",
-          "description": "A global changed-since ref or applied workspace package refs."
+          "description": "A global changed-since ref."
+        },
+        {
+          "type": "string",
+          "const": "package-baselines",
+          "description": "The per-package refs of `workspaces.changedSince` in the config."
         },
         {
           "type": "string",

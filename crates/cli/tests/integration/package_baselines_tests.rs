@@ -214,7 +214,7 @@ fn package_baselines_scope_each_workspace_and_global_ref_overrides() {
     assert_eq!(query_json["finding_id_query"]["conclusive"], false);
     assert_eq!(
         query_json["finding_id_query"]["inconclusive_reasons"],
-        serde_json::json!(["changed-since"])
+        serde_json::json!(["package-baselines"])
     );
 
     write_config(root, "missing-ref");
@@ -563,4 +563,114 @@ fn a_malformed_key_fails_every_command_at_config_load() {
             "{command}: {rendered}"
         );
     }
+}
+
+/// The package map applies to every run, so a baseline saved under it is
+/// partial. `--no-package-baselines` gives the whole-project run that can save
+/// and gate a baseline.
+#[test]
+fn no_package_baselines_saves_and_gates_a_whole_project_baseline() {
+    let temp = two_package_repository(
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    );
+    let root = temp.path();
+    let baseline = root.join("baseline.json");
+    let baseline = baseline.to_str().expect("baseline path");
+
+    let partial = run_in(
+        root,
+        &["dead-code", "--save-baseline", baseline, "--format", "json"],
+    );
+    assert!(
+        partial
+            .stderr
+            .contains("Save it with --no-package-baselines"),
+        "a partial save warns: {}",
+        partial.stderr
+    );
+    let narrowed = run_in(
+        root,
+        &["dead-code", "--baseline", baseline, "--format", "json"],
+    );
+    let narrowed_json = parse_json(&narrowed);
+    assert_eq!(
+        narrowed_json["baseline_staleness"]["scope_reasons"],
+        serde_json::json!(["package-baselines"])
+    );
+    let recheck = narrowed_json["next_steps"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|step| step["id"] == "recheck-baseline");
+    if let Some(step) = recheck {
+        assert!(
+            step["command"]
+                .as_str()
+                .is_some_and(|command| command.ends_with("--no-package-baselines")),
+            "{step}"
+        );
+    }
+
+    let full = run_in(
+        root,
+        &[
+            "dead-code",
+            "--no-package-baselines",
+            "--save-baseline",
+            baseline,
+            "--format",
+            "json",
+        ],
+    );
+    assert!(
+        !full.stderr.contains("--no-package-baselines to cover"),
+        "{}",
+        full.stderr
+    );
+    let full_json = parse_json(&full);
+    assert!(full_json.get("package_baselines").is_none());
+    assert!(full_json.get("request_outcomes").is_none());
+    let exports = full_json["unused_exports"]
+        .as_array()
+        .expect("unused exports");
+    assert_eq!(
+        exports.len(),
+        2,
+        "every package is in full scope: {full_json}"
+    );
+
+    // The gate runs on the whole-project run and trips on a stale entry.
+    fs::write(
+        root.join("packages/a/src/utils.ts"),
+        "export const used = () => 1;\n",
+    )
+    .expect("remove the unused export");
+    let gated = run_in(
+        root,
+        &[
+            "dead-code",
+            "--no-package-baselines",
+            "--baseline",
+            baseline,
+            "--fail-on-stale-baseline",
+            "--format",
+            "json",
+        ],
+    );
+    assert_eq!(gated.code, 1, "{}", gated.stderr);
+    assert!(
+        gated.stderr.contains("Baseline gate failed"),
+        "{}",
+        gated.stderr
+    );
+}
+
+#[test]
+fn security_rejects_no_package_baselines() {
+    let temp = two_package_repository("{}");
+    let output = run_in(
+        temp.path(),
+        &["security", "--no-package-baselines", "--format", "json"],
+    );
+    assert_eq!(output.code, 2, "{}", output.stderr);
 }

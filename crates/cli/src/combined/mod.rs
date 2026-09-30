@@ -32,6 +32,8 @@ pub struct CombinedOptions<'a> {
     pub fail_on_issues: bool,
     pub sarif_file: Option<&'a std::path::Path>,
     pub changed_since: Option<&'a str>,
+    /// `--no-package-baselines`: ignore `workspaces.changedSince` for this run.
+    pub no_package_baselines: bool,
     /// Import churn from a `fallow-churn/v1` file (`--churn-file`) for the
     /// health hotspots / ownership pass instead of `git log`. Resolved relative
     /// to `root` inside the health pipeline.
@@ -196,6 +198,7 @@ fn build_combined_check_options<'a>(
         filters,
         changed_since: opts.changed_since,
         change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
+        no_package_baselines: opts.no_package_baselines,
         diff_index: None,
         use_shared_diff_index: true,
         baseline: opts.baseline,
@@ -578,6 +581,7 @@ fn build_combined_dupes_options<'a>(
         use_shared_diff_index: true,
         changed_files: None,
         change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
+        no_package_baselines: opts.no_package_baselines,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
         explain: opts.explain,
@@ -842,6 +846,7 @@ mod tests {
             json_style: crate::json_style::JsonStyle::Compact,
             no_cache: false,
             threads: 1,
+            no_package_baselines: false,
             quiet: true,
             allow_remote_extends: false,
             fail_on_issues: false,

@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     reports every package in full scope and prints a warning, as an
     unresolved `--changed-since` does.
   - A malformed key or ref is invalid input and exits with code 2.
+  - `--no-package-baselines` turns the map off for one run, for example to
+    save or gate a whole-project baseline. The Node API option
+    `noPackageBaselines` and the MCP parameter `no_package_baselines` of
+    `analyze` and `find_dupes` do the same. A dead-code baseline saved under
+    the map prints a warning that the file is partial.
+  - A run that the map narrowed reports `package-baselines` in
+    `baseline_staleness.scope_reasons`. The GitHub Action and the GitLab
+    template then add `--no-package-baselines` to their baseline re-read, and
+    the `recheck-baseline` next step carries the flag.
 
   Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza) for the
   contribution.

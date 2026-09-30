@@ -333,6 +333,14 @@ struct Cli {
     #[arg(long, visible_alias = "base", global = true)]
     changed_since: Option<String>,
 
+    /// Ignore the per-package refs of `workspaces.changedSince` for this run
+    ///
+    /// Every workspace package is then analyzed in full scope, for example to
+    /// save or gate a whole-project baseline. A global `--changed-since`,
+    /// `--workspace` or `--diff-file` scope still applies.
+    #[arg(hide_short_help = true, long, global = true)]
+    no_package_baselines: bool,
+
     /// Unified diff for line-level scoping.
     /// Use `-` to read from stdin. Project-level findings still bypass this
     /// filter. When both this and `--changed-since` are set, the diff filter
@@ -3093,6 +3101,8 @@ fn unsupported_security_global(cli: &Cli) -> Option<&'static str> {
         Some("--production")
     } else if cli.no_production {
         Some("--no-production")
+    } else if cli.no_package_baselines {
+        Some("--no-package-baselines")
     } else if cli.group_by.is_some() {
         Some("--group-by")
     } else if cli.performance {
@@ -3821,6 +3831,7 @@ fn unsupported_doctor_option(cli: &Cli) -> Option<&'static str> {
         (cli.save_baseline.is_some(), "--save-baseline"),
         (cli.production, "--production"),
         (cli.no_production, "--no-production"),
+        (cli.no_package_baselines, "--no-package-baselines"),
         (cli.production_dead_code, "--production-dead-code"),
         (cli.production_health, "--production-health"),
         (cli.production_dupes, "--production-dupes"),
@@ -4021,6 +4032,7 @@ fn run_combined_scoped(
         fail_on_issues,
         sarif_file: cli.sarif_file.as_deref(),
         changed_since: cli.changed_since.as_deref(),
+        no_package_baselines: cli.no_package_baselines,
         churn_file: cli.churn_file.as_deref(),
         baseline: cli.baseline.as_deref(),
         save_baseline: cli.save_baseline.as_deref(),
@@ -6108,6 +6120,7 @@ fn dispatch_check_run(
         filters: &args.filters,
         changed_since: cli.changed_since.as_deref(),
         change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
+        no_package_baselines: cli.no_package_baselines,
         diff_index: None,
         use_shared_diff_index: true,
         baseline: cli.baseline.as_deref(),
@@ -6302,6 +6315,7 @@ fn dispatch_dupes_run(
         use_shared_diff_index: true,
         changed_files: None,
         change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
+        no_package_baselines: cli.no_package_baselines,
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         explain: cli.explain,
@@ -7429,6 +7443,10 @@ mod tests {
     fn security_unsupported_global_validator_matches_hidden_help_contract() {
         for (argv, expected) in [
             (vec!["fallow", "security", "--performance"], "--performance"),
+            (
+                vec!["fallow", "security", "--no-package-baselines"],
+                "--no-package-baselines",
+            ),
             (
                 vec!["fallow", "security", "--baseline", "base.json"],
                 "--baseline",

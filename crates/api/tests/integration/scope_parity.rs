@@ -124,8 +124,22 @@ fn package_git_baselines_apply_to_programmatic_dead_code() {
     assert_eq!(query_report["finding_id_query"]["conclusive"], false);
     assert_eq!(
         query_report["finding_id_query"]["inconclusive_reasons"],
-        serde_json::json!(["changed-since"])
+        serde_json::json!(["package-baselines"])
     );
+
+    let opted_out = dead_code(AnalysisOptions {
+        no_package_baselines: true,
+        ..analysis(root)
+    });
+    assert!(opted_out.get("package_baselines").is_none());
+    assert!(opted_out.get("request_outcomes").is_none());
+    let opted_out_paths = paths(&opted_out);
+    for package in ["packages/web/", "packages/legacy/"] {
+        assert!(
+            opted_out_paths.iter().any(|path| path.contains(package)),
+            "{package} is in full scope: {opted_out_paths:?}"
+        );
+    }
 
     let global_report = dead_code(AnalysisOptions {
         changed_since: Some("HEAD".to_owned()),
@@ -561,4 +575,28 @@ fn shared_combined_duplication_follows_the_change_scope() {
         r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
     );
     assert!(combined_groups(analysis(root)).is_empty());
+}
+
+/// A trace never applies the change scope, so it never reads the package map.
+/// A map that would fail a scoped run leaves the trace unaffected.
+#[test]
+fn trace_does_not_read_the_package_map() {
+    let dir = audit_package_map_repository();
+    let root = dir.path();
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"workspaces":{"changedSince":{"packages/a":"-malformed"}}}"#,
+    );
+    fallow_api::run_trace_file(&fallow_api::TraceFileOptions {
+        analysis: analysis(root),
+        file: "packages/a/src/utils.ts".to_string(),
+    })
+    .expect("a trace ignores workspaces.changedSince");
+    let err = run_dead_code(&DeadCodeOptions {
+        analysis: analysis(root),
+        ..DeadCodeOptions::default()
+    })
+    .expect_err("a scoped run rejects the malformed ref");
+    assert_eq!(err.code.as_deref(), Some("FALLOW_PACKAGE_BASELINE_FAILED"));
 }

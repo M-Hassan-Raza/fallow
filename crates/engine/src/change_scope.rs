@@ -69,6 +69,10 @@ pub struct ChangeScopeRequest<'a> {
     /// share it, so Git resolves each mapped ref once per run. `None`
     /// resolves the map without a memo.
     pub cache: Option<&'a PackageBaselineCache>,
+    /// `--no-package-baselines`: this run ignores `workspaces.changedSince`
+    /// and reports every package in full scope, for example to save or gate a
+    /// whole-project baseline.
+    pub no_package_baselines: bool,
 }
 
 impl ChangeScopeRequest<'_> {
@@ -78,6 +82,7 @@ impl ChangeScopeRequest<'_> {
     #[must_use]
     pub fn reads_package_baselines(&self, config: &ResolvedConfig) -> bool {
         self.owner == ChangeScopeOwner::Run
+            && !self.no_package_baselines
             && !self.global_ref
             && self.files.is_none()
             && !config.workspace_changed_since.is_empty()
@@ -259,13 +264,18 @@ impl ChangeScope {
         }
     }
 
-    /// Whether a change ref narrows the run. The saved-baseline comparison of
+    /// The `scope_reasons` channel that narrowed the run, when a change ref
+    /// did: the package map, or a global ref. The saved-baseline comparison of
     /// `check` and finding-id queries read this: a finding outside the scope
     /// is hidden, not gone. `dupes` compares its baseline with the report
     /// before the package map narrows it, so it reads only the global ref.
     #[must_use]
-    pub const fn is_change_scoped(&self) -> bool {
-        self.global_ref || matches!(self.kind, ChangeScopeKind::Packages(_))
+    pub const fn scope_reason(&self) -> Option<fallow_output::ScopeReason> {
+        match (&self.kind, self.global_ref) {
+            (ChangeScopeKind::Packages(_), _) => Some(fallow_output::ScopeReason::PackageBaselines),
+            (_, true) => Some(fallow_output::ScopeReason::ChangedSince),
+            (_, false) => None,
+        }
     }
 
     /// The applied package baselines, when the configured map scopes the run.
@@ -434,7 +444,7 @@ mod tests {
         };
         assert!(!request.reads_package_baselines(&config));
         let scope = ChangeScope::resolve(request, &config, &[]).expect("caller-owned scope");
-        assert!(!scope.is_change_scoped());
+        assert!(scope.scope_reason().is_none());
         assert!(scope.package_baselines().is_empty());
         assert!(scope.contains(&temp.path().join("packages/a/index.ts")));
     }
@@ -448,7 +458,7 @@ mod tests {
             ..ChangeScopeRequest::default()
         };
         let scope = ChangeScope::resolve(request, &config, &[]).expect("global scope");
-        assert!(scope.is_change_scoped());
+        assert!(scope.scope_reason().is_some());
         assert!(scope.packages().is_none());
     }
 
@@ -462,7 +472,7 @@ mod tests {
             ..ChangeScopeRequest::default()
         };
         let scope = ChangeScope::resolve(request, &config, &[]).expect("file scope");
-        assert!(scope.is_change_scoped());
+        assert!(scope.scope_reason().is_some());
         assert!(scope.contains(&temp.path().join("a.ts")));
         assert!(!scope.contains(&temp.path().join("b.ts")));
     }
@@ -481,7 +491,7 @@ mod tests {
         }];
         let scope = ChangeScope::resolve(ChangeScopeRequest::default(), &config, &workspaces)
             .expect("an unknown key stands down");
-        assert!(!scope.is_change_scoped());
+        assert!(scope.scope_reason().is_none());
         assert!(scope.packages().is_none());
         assert!(scope.package_baselines().is_empty());
         let outcome = scope.request_outcome().expect("the map was read");
@@ -541,7 +551,7 @@ mod tests {
         assert_eq!(later.request_outcome(), cache.request_outcome().as_ref());
         let empty = ChangeScope::resolve(ChangeScopeRequest::default(), &later_config, &[])
             .expect("no map, full scope");
-        assert!(!empty.is_change_scoped());
+        assert!(empty.scope_reason().is_none());
         assert!(empty.request_outcome().is_none());
     }
 }

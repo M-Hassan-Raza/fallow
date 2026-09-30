@@ -1849,6 +1849,7 @@ Available on all commands:
 | `--no-cache` | `bool` | `false` | Disable incremental caching |
 | `--threads` | `string` | - | Number of parser threads |
 | `--changed-since` | `string` | - | Only report issues in files changed since this git ref (e.g., main, HEAD~5) |
+| `--no-package-baselines` | `bool` | `false` | Ignore the per-package refs of `workspaces.changedSince` for this run |
 | `--diff-file` | `string` | - | Unified diff for line-level scoping. Use `-` to read from stdin. Project-level findings still bypass this filter. When both this and `--changed-since` are set, the diff filter wins for finding scope while `--changed-since` still drives file discovery |
 | `--diff-stdin` | `bool` | `false` | Read the unified diff from stdin. Equivalent to `--diff-file -` |
 | `--churn-file` | `string` | - | Import change history from a `fallow-churn/v1` JSON file instead of `git log`, powering hotspots, ownership, and bus-factor on projects with no git repository (Yandex Arc, Mercurial, Perforce). A small wrapper translates your VCS log into the contract. Resolved relative to `--root`. Affects `health --hotspots` / `--ownership` / `--targets` only; `audit`, `impact`, and `--changed-since` still require git |

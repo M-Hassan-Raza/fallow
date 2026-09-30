@@ -354,6 +354,8 @@ pub struct CheckOptions<'a> {
     /// Who owns the change scope. `audit` owns it, so its runs never read
     /// `workspaces.changedSince`.
     pub change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner,
+    /// `--no-package-baselines`: ignore `workspaces.changedSince` for this run.
+    pub no_package_baselines: bool,
     pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
     pub use_shared_diff_index: bool,
     pub baseline: Option<&'a std::path::Path>,
@@ -591,6 +593,7 @@ fn run_check_analysis(
             global_ref: opts.changed_since.is_some(),
             files: None,
             cache: Some(crate::requests::package_baseline_cache()),
+            no_package_baselines: opts.no_package_baselines,
         },
         config,
         session.workspaces(),
@@ -1161,6 +1164,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                 global_ref: opts.changed_since.is_some(),
                 files: changed_files.as_ref(),
                 cache: Some(crate::requests::package_baseline_cache()),
+                no_package_baselines: opts.no_package_baselines,
             },
             &config,
             &data.workspaces,
@@ -1379,6 +1383,7 @@ pub fn benchmark_dead_code_json(
         filters: &filters,
         changed_since: None,
         change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
+        no_package_baselines: false,
         diff_index: None,
         use_shared_diff_index: true,
         baseline: None,
@@ -1959,7 +1964,14 @@ fn baseline_scope_reasons(
             && crate::report::ci::diff_filter::shared_diff_index().is_some());
     fallow_output::BaselineScopeReasons::empty()
         .insert_if(diff_scoped, ScopeReason::Diff)
-        .insert_if(change_scope.is_change_scoped(), ScopeReason::ChangedSince)
+        .insert_if(
+            change_scope.scope_reason() == Some(ScopeReason::ChangedSince),
+            ScopeReason::ChangedSince,
+        )
+        .insert_if(
+            change_scope.scope_reason() == Some(ScopeReason::PackageBaselines),
+            ScopeReason::PackageBaselines,
+        )
         .insert_if(opts.workspace.is_some(), ScopeReason::Workspace)
         .insert_if(
             opts.changed_workspaces.is_some(),
@@ -2035,6 +2047,20 @@ fn save_baseline_file(
     }
     if !io.quiet {
         eprintln!("Baseline saved to {}", baseline_path.display());
+    }
+    // The package map comes from the config and applies to every run, so a
+    // saved baseline is partial unless the run turned the map off. A later run
+    // that edits an unchanged package then reports its old findings as new.
+    if io
+        .scope_reasons
+        .contains(fallow_output::ScopeReason::PackageBaselines)
+    {
+        eprintln!(
+            "Warning: workspaces.changedSince narrowed this run, so the baseline {} holds only the \
+             findings in changed files of the mapped packages. Save it with \
+             --no-package-baselines to cover the whole project.",
+            baseline_path.display()
+        );
     }
     Ok(())
 }
