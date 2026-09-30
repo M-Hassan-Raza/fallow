@@ -68,7 +68,7 @@ pub fn refresh_scoped_report(report: &mut DuplicationReport, root: &Path) {
 pub struct DuplicationScope<'a> {
     /// The resolved change scope: a global changed-file set or the
     /// configured package baselines.
-    pub changes: Option<&'a crate::change_scope::ChangeScope<'a>>,
+    pub changes: Option<&'a crate::change_scope::ChangeScope>,
     /// A unified diff. Finding paths resolve against the report root.
     pub diff: Option<&'a fallow_output::DiffIndex>,
     /// `--workspace`, `--changed-workspaces` and a positional path: the union

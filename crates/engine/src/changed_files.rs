@@ -666,8 +666,7 @@ pub fn filter_results_by_changed_files(
     results: &mut AnalysisResults,
     changed_files: &FxHashSet<PathBuf>,
 ) {
-    let cf = NormalizedChangedFiles(normalize_changed_files_set(changed_files));
-    filter_results_by_path_scope(results, &cf);
+    filter_results_by_path_scope(results, &NormalizedChangedFiles::new(changed_files));
 }
 
 /// Path membership for one resolved result scope. Implementations own path
@@ -679,7 +678,15 @@ pub(crate) trait ChangedPathScope {
     }
 }
 
-struct NormalizedChangedFiles(FxHashSet<PathBuf>);
+/// A changed-file set normalized the way every changed-file filter reads it.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct NormalizedChangedFiles(FxHashSet<PathBuf>);
+
+impl NormalizedChangedFiles {
+    pub(crate) fn new(changed_files: &FxHashSet<PathBuf>) -> Self {
+        Self(normalize_changed_files_set(changed_files))
+    }
+}
 
 impl ChangedPathScope for NormalizedChangedFiles {
     fn contains(&self, path: &Path) -> bool {
@@ -1052,20 +1059,10 @@ pub fn filter_duplication_by_changed_files(
     changed_files: &FxHashSet<PathBuf>,
     root: &Path,
 ) {
-    let cf = NormalizedChangedFiles(normalize_changed_files_set(changed_files));
-    filter_duplication_by_path_scope(report, &cf, root);
+    filter_duplication_by_path_scope(report, &NormalizedChangedFiles::new(changed_files), root);
 }
 
-/// Scope clone groups through the same package owner used for findings.
-pub(crate) fn filter_duplication_by_package_scope(
-    report: &mut DuplicationReport,
-    packages: &crate::package_baselines::PackageChangeScope,
-    root: &Path,
-) {
-    filter_duplication_by_path_scope(report, packages, root);
-}
-
-fn filter_duplication_by_path_scope(
+pub(crate) fn filter_duplication_by_path_scope(
     report: &mut DuplicationReport,
     scope: &impl ChangedPathScope,
     root: &Path,

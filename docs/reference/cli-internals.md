@@ -27,12 +27,13 @@ The scope filters are `fallow_engine::dead_code::apply_scope`,
 `fallow_engine::duplicates::apply_scope` and `fallow_engine::diff_scope`. The
 change scope of a run is `fallow_engine::change_scope::ChangeScope`. Every
 surface describes its inputs with a `ChangeScopeRequest` (the owner, whether a
-global ref was requested, and the changed files) and calls
-`ChangeScope::resolve`, which owns the precedence rule. The resolved value owns
-the result filter, the `package_baselines` provenance rows, and the
-`is_change_scoped` flag that baseline comparison, `--fail-on-stale-baseline`,
-and finding-id queries read. A surface does not assemble these three from
-separate decisions.
+global ref was requested, the changed files, and the run-wide
+`PackageBaselineCache`) and calls `ChangeScope::resolve`, which owns the
+precedence rule and the failure policy. The resolved value owns the result
+filter, the `package_baselines` provenance rows, the `package-baselines`
+request outcome, and the `is_change_scoped` flag that the `check` baseline
+comparison, `--fail-on-stale-baseline`, and finding-id queries read. A surface
+does not assemble these from separate decisions.
 
 A changed-file set wins. A requested global ref gives the full scope when it
 does not resolve, and it still suppresses `workspaces.changedSince`. A run whose
@@ -42,33 +43,58 @@ every production-mode split. The base snapshot may not be a Git repository,
 and a package map that hid a base finding would report the head finding as
 introduced.
 
-The package map uses exact, project-root-relative discovered workspace roots.
-The nearest workspace owns a file; unlisted workspaces and root files remain in
-full scope. Invalid keys, unknown workspaces, and invalid mapped refs fail the
-scoped analysis as input errors. Git refs are resolved once per distinct ref.
-Dependency-level findings retain their existing global behavior, while
-manifest-owned findings follow their owner path. The package map scopes
-`check`, `dead-code`, `dupes`, and their combined sections.
+A key of the package map is a workspace root exactly as discovery reports it,
+which is what `fallow list --workspaces` prints. A symlinked workspace is
+mapped under its link path. The nearest workspace owns a file; unlisted
+workspaces and root files remain in full scope. Dependency-level findings
+retain their existing global behavior, while manifest-owned findings follow
+their owner path. The map scopes `check`, `dead-code`, `dupes`, and those
+sections of a combined run. It does not scope `health` or `security`, alone or
+in a combined run. A `--diff-file` or `--workspace` scope applies on top of the
+map, so a finding must be in both.
+
+The failure policy follows `--changed-since`. The config loader rejects a
+malformed key (absolute, `..`, `.`, empty segment, trailing slash, backslash)
+for every command, and a malformed ref fails the run with exit 2. A map that
+cannot apply as written stands down as a whole: a key that names no workspace
+of this project (for example in a run from a package subdirectory, which loads
+the parent config), or a well-formed ref that Git cannot resolve (for example
+in a shallow CI clone). The run then reports in full scope, writes a warning,
+and publishes `request_outcomes["package-baselines"]` as `not-applied` with
+the reason `unknown-workspace`, `git-failed`, `git-missing`, or
+`not-a-repository`. A run that applies the map publishes the entry as
+`applied`. The report is wider than asked, never narrower.
+
+The analyses of one run share one resolution: the CLI keeps it in
+`requests::package_baseline_cache`, and the programmatic API keeps it on the
+call context. `check`, the API runtimes, and `dupes` resolve the map right after
+the session discovers the workspaces, before the analysis, so a map error fails
+fast. Git resolves each distinct ref once per run.
 
 The scope always narrows the final result: the last scope filters run after
 type-aware refinement and before baseline comparison and gates. `check` and the
 programmatic dead-code runtime also narrow before refinement to save sidecar
 work. They apply every scope filter again after refinement, because refinement
 can add findings such as private-type leaks. The filters only remove findings,
-so the second pass is idempotent for the findings that the first pass kept. The editor narrows once,
-after refinement. `dupes` is the explicit exception for the package map: it
-compares the saved baseline with the full report and scopes the report after
-that, so the baseline sees every clone group.
+so the second pass is idempotent for the findings that the first pass kept. The
+editor narrows once, after refinement.
+
+The saved baselines differ on purpose. `check` compares and saves its baseline
+after the scope, so a baseline saved under the map is partial and records the
+`changed-since` scope reason, as under a global ref. `dupes` compares its
+baseline with the report before the package map narrows it, so the baseline
+sees every clone group and no scope reason is recorded.
 
 For example, `.fallowrc.json` can contain
-`"workspaces": { "changedSince": { "packages/web": "main" } }`. The map
-does not change standalone health or security reports. Machine-readable CLI
-`check`, `dead-code`, `dupes`, and combined reports include optional
-`package_baselines` provenance when package refs are applied. Each row has an
-exact project-relative `workspace_root` and its `reference`. The field is
-absent for unconfigured runs, a global ref override, and standalone health or
-security reports. The LSP publishes the same row type in
-`fallow/analysisComplete`.
+`"workspaces": { "changedSince": { "packages/web": "main" } }`. JSON `check`,
+`dead-code`, `dupes`, and combined reports include optional
+`package_baselines` provenance when the map applies; SARIF, CodeClimate,
+compact, Markdown, and badge output do not carry it. Each row has an exact
+project-relative `workspace_root` and its `reference`. The rows list the
+applied map, including packages that a `--workspace` scope does not report.
+The field is absent for unconfigured runs, a global ref override, a map that
+stood down, and `health`, `security`, and `audit` reports. The LSP publishes
+the same row type in `fallow/analysisComplete`.
 
 The production mode of each analysis is
 `fallow_engine::project_config::ProductionFlags`. The error-severity rule is

@@ -130,8 +130,25 @@ fn package_baselines_scope_standalone_and_combined_dupes() {
         r#"{"workspaces":{"changedSince":{"packages/ui":"missing-ref"}}}"#,
     )
     .unwrap();
-    let invalid = run_fallow_raw(&["dupes", "--root", root_arg, "--format", "json", "--quiet"]);
-    assert_eq!(invalid.code, 2, "{}", invalid.stderr);
+    let stood_down = run_fallow_raw(&["dupes", "--root", root_arg, "--format", "json", "--quiet"]);
+    assert_eq!(stood_down.code, 0, "{}", stood_down.stderr);
+    let json = parse_json(&stood_down);
+    assert!(
+        count_clone_groups(&json) > 0,
+        "an unresolved ref gives full scope"
+    );
+    assert!(json.get("package_baselines").is_none());
+    assert_eq!(
+        json["request_outcomes"]["package-baselines"]["status"],
+        "not-applied"
+    );
+    assert!(
+        stood_down
+            .stderr
+            .contains("workspaces.changedSince was ignored"),
+        "{}",
+        stood_down.stderr
+    );
 }
 
 #[test]

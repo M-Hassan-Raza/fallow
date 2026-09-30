@@ -449,13 +449,19 @@ These are documented for the rare CI script that depended on the old behavior. N
 
 - **Workspace package baselines.** `workspaces.changedSince` maps exact,
   project-relative workspace roots to Git refs. It scopes source findings in
-  `check`, `dead-code`, `dupes`, their combined report, and editor diagnostics;
-  unlisted packages and root files remain in full scope. An explicit global
-  changed-since ref takes precedence. JSON reports expose applied refs through
-  an optional `package_baselines[]` array of `{ workspace_root, reference }`
-  rows; the LSP sends the same rows as `packageBaselines`. The field is absent
-  without an applied package map, so no `schema_version` changes. Standalone
-  health and security reports keep their own scope controls.
+  `check`, `dead-code`, `dupes`, those sections of a combined report, and
+  editor diagnostics, including editor inline complexity. It does not scope
+  `health` or `security`, alone or in a combined report, and `audit` never
+  reads it. Unlisted packages and root files remain in full scope. An explicit
+  global changed-since ref takes precedence. JSON reports expose applied refs
+  through an optional `package_baselines[]` array of
+  `{ workspace_root, reference }` rows; the LSP sends the same rows as
+  `packageBaselines`. `request_outcomes` gains the open-set name
+  `package-baselines` (`affects: scope`): `applied` when the map scoped the
+  run, and `not-applied` with the reason `unknown-workspace`, `git-failed`,
+  `git-missing`, or `not-a-repository` when the map stood down and the report
+  covers every package in full scope. Both additions are absent without a
+  package map, so no `schema_version` changes.
 
 - **The audit new-only gate compares dead-code findings by canonical key and count.**
   `fallow audit` keys each dead-code finding with the canonical key that the

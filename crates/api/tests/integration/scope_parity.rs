@@ -324,11 +324,31 @@ fn package_baselines_scope_standalone_and_combined_duplication() {
         ".fallowrc.json",
         r#"{"workspaces":{"changedSince":{"packages/a":"missing-ref"}}}"#,
     );
+    let stood_down = duplication(analysis(root));
+    assert!(
+        !clone_group_files(&stood_down).is_empty(),
+        "an unresolved ref stands the map down to full scope"
+    );
+    assert!(stood_down.get("package_baselines").is_none());
+    assert_eq!(
+        stood_down["request_outcomes"]["package-baselines"]["status"],
+        "not-applied"
+    );
+    assert_eq!(
+        stood_down["request_outcomes"]["package-baselines"]["reason"],
+        "git-failed"
+    );
+
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"workspaces":{"changedSince":{"packages/a":"-malformed"}}}"#,
+    );
     let err = run_duplication(&DuplicationOptions {
         analysis: analysis(root),
         ..DuplicationOptions::default()
     })
-    .expect_err("invalid configured refs fail duplication");
+    .expect_err("a malformed configured ref fails duplication");
     assert_eq!(err.code.as_deref(), Some("FALLOW_PACKAGE_BASELINE_FAILED"));
 }
 

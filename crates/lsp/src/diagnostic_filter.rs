@@ -52,6 +52,11 @@ pub fn attach_changed_since_data(
 }
 
 /// Stamp each document with its effective package ref, if it has one.
+///
+/// The deepest project root that covers a document owns it. A project without
+/// an applied map pushes no scope, so a document of a nested project that
+/// analyzed in full scope must not take the ref of an outer project; the
+/// server analyzes one project root today, so the case cannot arise yet.
 pub fn attach_package_changed_since_data(
     diagnostics_by_file: &mut FxHashMap<Uri, Vec<Diagnostic>>,
     scopes: &[PackageChangeScope],

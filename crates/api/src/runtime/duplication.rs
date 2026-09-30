@@ -99,7 +99,7 @@ pub(super) fn run_duplication_report_with_session(
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
     mut report: fallow_engine::duplicates::DuplicationReport,
-    change_scope: &ChangeScope<'_>,
+    change_scope: &ChangeScope,
     start: Instant,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let dupes_config = build_dupes_config(options, &session.config().duplicates);
@@ -189,10 +189,12 @@ pub(super) fn load_duplication_session(
             .with_context("analysis.configPath")
     })?;
     let project_config = configure_project_for_duplication(project_config, options);
-    Ok(super::dead_code::attach_cancellation(
+    let session = super::dead_code::attach_cancellation(
         AnalysisSession::from_config(project_config),
         resolved,
-    ))
+    );
+    super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
+    Ok(session)
 }
 
 fn configure_project_for_duplication(

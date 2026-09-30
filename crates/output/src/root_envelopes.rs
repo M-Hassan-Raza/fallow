@@ -268,7 +268,8 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     /// never "nothing failed". See [`crate::RequestOutcomes`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub request_outcomes: Option<crate::RequestOutcomes>,
-    /// Applied package Git refs for this combined analysis.
+    /// Applied package Git refs of the `check` and `dupes` sections. The map
+    /// does not narrow the `health` section.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub package_baselines: Vec<crate::PackageBaselineStatus>,
     /// Per-section `_meta` blocks, when `--explain` was passed.

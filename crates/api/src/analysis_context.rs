@@ -5,7 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use fallow_config::{ResolvedConfig, WorkspaceInfo};
-use fallow_engine::change_scope::{ChangeScope, ChangeScopeOwner, ChangeScopeRequest};
+use fallow_engine::change_scope::{
+    ChangeScope, ChangeScopeOwner, ChangeScopeRequest, PackageBaselineCache,
+};
 use fallow_engine::workspace_scope::{WorkspaceScopeError, WorkspaceScopeMode};
 use fallow_output::{DiffIndex, MAX_DIFF_BYTES, RequestName, RequestOutcome, RequestOutcomes};
 use fallow_types::path_util::is_absolute_path_any_platform;
@@ -42,6 +44,10 @@ pub struct ProgrammaticAnalysisContext {
     /// Who owns the change scope of the call's analyses. Audit owns it, so
     /// its sections never read `workspaces.changedSince`.
     pub(crate) change_scope_owner: ChangeScopeOwner,
+    /// The package map as the call's first analysis resolved it. Later
+    /// analyses of the call reuse it, and its outcome is the call's
+    /// `package-baselines` request outcome.
+    pub(crate) package_baselines: PackageBaselineCache,
     /// The changed files the call's analyses kept, over every analysis that
     /// measured: the `scope_size` of the `changed-since` entry.
     pub(crate) changed_since_analyzed: Mutex<Option<FxHashSet<PathBuf>>>,
@@ -115,6 +121,7 @@ fn resolve_programmatic_analysis_context_inner(
         changed_since_request,
         changed_since_files,
         change_scope_owner: ChangeScopeOwner::Run,
+        package_baselines: PackageBaselineCache::new(),
         changed_since_analyzed: Mutex::new(None),
         workspace: options.workspace.clone(),
         changed_workspaces: options.changed_workspaces.clone(),
@@ -228,6 +235,10 @@ impl ProgrammaticAnalysisContext {
         let mut requests = RequestOutcomes::new();
         requests.insert_if(RequestName::ChangedSince, self.changed_since_outcome());
         requests.insert_if(RequestName::DiffFilter, self.diff_request.clone());
+        requests.insert_if(
+            RequestName::PackageBaselines,
+            self.package_baselines.request_outcome(),
+        );
         requests.into_option()
     }
 
@@ -323,16 +334,17 @@ impl ProgrammaticAnalysisContext {
     /// `files` is the changed-file set of the analysis: the call's resolved
     /// ref, or a set that the caller supplied. A requested ref that stood
     /// down still suppresses the package map, as on the CLI.
-    pub(crate) fn change_scope<'a>(
+    pub(crate) fn change_scope(
         &self,
-        files: Option<&'a FxHashSet<PathBuf>>,
+        files: Option<&FxHashSet<PathBuf>>,
         config: &ResolvedConfig,
         workspaces: &[WorkspaceInfo],
-    ) -> ProgrammaticResult<ChangeScope<'a>> {
+    ) -> ProgrammaticResult<ChangeScope> {
         let request = ChangeScopeRequest {
             owner: self.change_scope_owner,
             global_ref: self.changed_since.is_some() || self.changed_since_request.get().is_some(),
             files,
+            cache: Some(&self.package_baselines),
         };
         ChangeScope::resolve(request, config, workspaces).map_err(|err| {
             ProgrammaticError::new(format!("workspace baseline error: {err}"), 2)

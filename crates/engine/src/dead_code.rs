@@ -571,7 +571,7 @@ pub struct DeadCodeScope<'a> {
     pub workspace_roots: Option<&'a [PathBuf]>,
     /// The resolved change scope: a global changed-file set or the
     /// configured package baselines.
-    pub changes: Option<&'a ChangeScope<'a>>,
+    pub changes: Option<&'a ChangeScope>,
     /// A unified diff, with the root that finding paths resolve against.
     pub diff: Option<(&'a fallow_output::DiffIndex, &'a Path)>,
     /// `--file`: the only files to report. Dependency findings are dropped,

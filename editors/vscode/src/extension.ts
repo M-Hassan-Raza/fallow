@@ -678,6 +678,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath) ?? [],
       changedSince: () =>
         vscode.workspace.getConfiguration("fallow").get<string>("changedSince", ""),
+      hasPackageBaselines: () => (lastAnalysisScope?.package_baselines?.length ?? 0) > 0,
       confirm: async (message) =>
         (await vscode.window.showWarningMessage(message, { modal: true }, "Set Baseline")) ===
         "Set Baseline",

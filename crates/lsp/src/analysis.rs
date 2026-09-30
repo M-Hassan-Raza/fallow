@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use fallow_api::{ChangeScopeOwner, ChangeScopeRequest};
+use fallow_api::{ChangeScope, ChangeScopeOwner, ChangeScopeRequest};
 use fallow_api::{
     EditorAnalysisOutput, EditorAnalysisResults as AnalysisResults,
     EditorAnalysisSession as AnalysisSession, EditorDuplicationReport as DuplicationReport,
@@ -378,13 +378,7 @@ fn run_typed_project_analysis(
     if input.run_cancellation.load(Ordering::SeqCst) {
         return Err(ProjectAnalysisError::cancelled(input.project_root));
     }
-    let change_scope = session
-        .change_scope(ChangeScopeRequest {
-            owner: ChangeScopeOwner::Run,
-            global_ref: input.global_changed_since_requested,
-            files: input.changed_files,
-        })
-        .map_err(|error| ProjectAnalysisError::failed(input.project_root, error.to_string()))?;
+    let change_scope = resolve_project_change_scope(input, session);
     let mut output = session
         .analyze_project_with_changed_files(
             duplicates_config,
@@ -464,6 +458,41 @@ fn run_typed_project_analysis(
         input.package_scopes.push(packages.clone());
     }
     Ok(())
+}
+
+/// Resolve the change scope of one project. The editor keeps showing
+/// findings when the package map cannot apply: a map error or a ref that Git
+/// cannot resolve gives the full scope and a warning, as a config that fails
+/// to load does.
+fn resolve_project_change_scope(
+    input: &mut ProjectRootAnalysisInput<'_>,
+    session: &AnalysisSession,
+) -> ChangeScope {
+    let request = ChangeScopeRequest {
+        owner: ChangeScopeOwner::Run,
+        global_ref: input.global_changed_since_requested,
+        files: input.changed_files,
+        cache: None,
+    };
+    let scope = match session.change_scope(request) {
+        Ok(scope) => scope,
+        Err(error) => {
+            input.config_messages.push((
+                MessageType::WARNING,
+                format!(
+                    "workspaces.changedSince was ignored for {}: {error}; showing findings in full scope",
+                    input.project_root.display()
+                ),
+            ));
+            return ChangeScope::default();
+        }
+    };
+    if let Some(message) = scope.stand_down_message() {
+        input
+            .config_messages
+            .push((MessageType::WARNING, message.to_owned()));
+    }
+    scope
 }
 
 struct TypeAwareProjectRefinement<'a> {

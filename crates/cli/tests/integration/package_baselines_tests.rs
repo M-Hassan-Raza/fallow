@@ -174,6 +174,14 @@ fn package_baselines_scope_each_workspace_and_global_ref_overrides() {
             {"workspace_root":"packages/web","reference":"HEAD~1"}
         ])
     );
+    assert_eq!(
+        json["request_outcomes"]["package-baselines"],
+        serde_json::json!({
+            "status": "applied",
+            "affects": "scope",
+            "requested": "workspaces.changedSince"
+        })
+    );
     assert!(
         paths
             .iter()
@@ -237,6 +245,44 @@ fn package_baselines_scope_each_workspace_and_global_ref_overrides() {
             .any(|path| path.ends_with("packages/web/src/utils.ts"))
     );
 
+    // A well-formed ref that Git cannot resolve stands the map down, as an
+    // unresolved `--changed-since` does: full scope, a warning, and a
+    // `not-applied` request outcome.
+    let stood_down = run_fallow_raw(&[
+        "check",
+        "--root",
+        root.to_str().expect("root path"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(stood_down.code, 1, "{}", stood_down.stderr);
+    assert!(
+        stood_down
+            .stderr
+            .contains("workspaces.changedSince was ignored"),
+        "{}",
+        stood_down.stderr
+    );
+    let stood_down_json = parse_json(&stood_down);
+    assert!(stood_down_json.get("package_baselines").is_none());
+    let outcome = &stood_down_json["request_outcomes"]["package-baselines"];
+    assert_eq!(outcome["status"], "not-applied");
+    assert_eq!(outcome["affects"], "scope");
+    assert_eq!(outcome["requested"], "workspaces.changedSince");
+    assert_eq!(outcome["reason"], "git-failed");
+    let full_scope_paths = unused_export_paths(root, &[]);
+    for package in ["web", "legacy"] {
+        assert!(
+            full_scope_paths
+                .iter()
+                .any(|path| path.ends_with(&format!("packages/{package}/src/utils.ts"))),
+            "{full_scope_paths:?}"
+        );
+    }
+
+    // A malformed ref is invalid input, as it is for `--changed-since`.
+    write_config(root, "-malformed");
     let failed = run_fallow_raw(&[
         "check",
         "--root",
@@ -247,8 +293,7 @@ fn package_baselines_scope_each_workspace_and_global_ref_overrides() {
     ]);
     assert_eq!(failed.code, 2, "{}", failed.stderr);
     assert!(
-        failed.stderr.contains("Workspace baseline error")
-            || failed.stdout.contains("Workspace baseline error"),
+        failed.stdout.contains("Workspace baseline error"),
         "stdout: {}; stderr: {}",
         failed.stdout,
         failed.stderr
@@ -473,4 +518,49 @@ fn type_aware_leaks_follow_the_package_scope() {
         serde_json::json!([]),
         "a leak in an unchanged package must stay out of the report"
     );
+}
+
+/// A run from a package subdirectory loads the parent config. Its keys name no
+/// workspace of that project, so the map stands down instead of failing the run.
+#[test]
+fn a_run_from_a_package_directory_stands_the_map_down() {
+    let temp = two_package_repository(
+        r#"{"workspaces":{"changedSince":{"packages/a":"HEAD","packages/b":"HEAD"}}}"#,
+    );
+    let package = temp.path().join("packages/b");
+    let output = run_in(&package, &["dead-code", "--format", "json"]);
+    assert_eq!(
+        output.code, 1,
+        "stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    assert!(
+        output
+            .stderr
+            .contains("workspaces.changedSince was ignored"),
+        "{}",
+        output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(
+        json["request_outcomes"]["package-baselines"]["reason"],
+        "unknown-workspace"
+    );
+    assert_eq!(json["unused_exports"][0]["export_name"], "unused_b");
+}
+
+/// The shape of a key is checked when the config loads, so every command
+/// rejects it, including one that never reads the map.
+#[test]
+fn a_malformed_key_fails_every_command_at_config_load() {
+    let temp = two_package_repository(r#"{"workspaces":{"changedSince":{"./packages/a":"HEAD"}}}"#);
+    for command in ["dead-code", "health"] {
+        let output = run_in(temp.path(), &[command, "--format", "json"]);
+        assert_eq!(output.code, 2, "{command}: {}", output.stderr);
+        let rendered = format!("{}{}", output.stdout, output.stderr);
+        assert!(
+            rendered.contains("is not an exact workspace root"),
+            "{command}: {rendered}"
+        );
+    }
 }

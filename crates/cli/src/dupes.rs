@@ -2,7 +2,9 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use fallow_config::{OutputFormat, ResolvedConfig};
-use fallow_engine::change_scope::{ChangeScope, ChangeScopeOwner, ChangeScopeRequest};
+use fallow_engine::change_scope::{
+    ChangeScope, ChangeScopeOwner, ChangeScopeRequest, PackageBaselineCache,
+};
 use fallow_types::duplicates::{DefaultIgnoreSkips, DuplicationReport};
 
 use crate::baseline::{DuplicationBaselineData, filter_new_clone_groups};
@@ -294,7 +296,7 @@ fn filter_dupes_report(
     report: &mut DuplicationReport,
     opts: &DupesOptions<'_>,
     config: &ResolvedConfig,
-    change_scope: &ChangeScope<'_>,
+    change_scope: &ChangeScope,
 ) -> Result<(), ExitCode> {
     let diff_index = match opts.diff_index {
         Some(index) => Some(index),
@@ -359,24 +361,28 @@ fn validate_dupes_flag_combination(opts: &DupesOptions<'_>) -> Result<(), ExitCo
     Ok(())
 }
 
-fn resolve_change_scope<'a>(
+fn resolve_change_scope(
     opts: &DupesOptions<'_>,
     config: &ResolvedConfig,
-    request: ChangeScopeRequest<'a>,
+    request: ChangeScopeRequest<'_>,
     workspaces: &[fallow_config::WorkspaceInfo],
-) -> Result<ChangeScope<'a>, ExitCode> {
-    ChangeScope::resolve(request, config, workspaces)
-        .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))
+) -> Result<ChangeScope, ExitCode> {
+    let scope = ChangeScope::resolve(request, config, workspaces)
+        .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
+    crate::requests::warn_if_package_baselines_stood_down(&scope);
+    Ok(scope)
 }
 
 /// Resolve the change scope when the caller discovered the files. Workspaces
-/// are discovered only when the package map needs them.
-fn resolve_change_scope_for_pre_discovered_files<'a>(
+/// are discovered only when the package map needs them and no earlier
+/// analysis of the run resolved it.
+fn resolve_change_scope_for_pre_discovered_files(
     opts: &DupesOptions<'_>,
     config: &ResolvedConfig,
-    request: ChangeScopeRequest<'a>,
-) -> Result<ChangeScope<'a>, ExitCode> {
-    if !request.reads_package_baselines(config) {
+    request: ChangeScopeRequest<'_>,
+) -> Result<ChangeScope, ExitCode> {
+    let resolved_earlier = request.cache.is_some_and(PackageBaselineCache::is_resolved);
+    if !request.reads_package_baselines(config) || resolved_earlier {
         return resolve_change_scope(opts, config, request, &[]);
     }
     let (workspaces, _) = fallow_engine::discover::discover_workspace_packages_with_diagnostics(
@@ -406,6 +412,7 @@ fn execute_dupes_inner(
         owner: opts.change_scope_owner,
         global_ref: opts.changed_since.is_some(),
         files: effective_changed_files,
+        cache: Some(crate::requests::package_baseline_cache()),
     };
 
     let mut workspace_diagnostics = Vec::new();

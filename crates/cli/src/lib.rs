@@ -327,6 +327,9 @@ struct Cli {
     threads: Option<usize>,
 
     /// Only report issues in files changed since this git ref (e.g., main, HEAD~5)
+    ///
+    /// For this run, the ref replaces the per-package refs of
+    /// `workspaces.changedSince` in the config.
     #[arg(long, visible_alias = "base", global = true)]
     changed_since: Option<String>,
 

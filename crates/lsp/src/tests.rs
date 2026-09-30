@@ -2280,24 +2280,60 @@ fn package_baselines_scope_lsp_results_and_stamp_each_document_ref() {
     assert!(dropped.package_scopes.is_empty());
 }
 
+/// A package map that cannot apply keeps the editor useful: the project shows
+/// its findings in full scope, and a warning says why.
 #[test]
-fn invalid_package_ref_is_a_project_error_unless_global_ref_overrides_it() {
+fn package_map_that_cannot_apply_warns_and_keeps_full_scope() {
     let temp = package_baseline_fixture();
     let root = temp.path();
+    let package_input = BlockingAnalysisInput {
+        changed_since: None,
+        ..changed_since_input(root, "HEAD", None)
+    };
+    for (map, cause) in [
+        (
+            r#"{"workspaces":{"changedSince":{"packages/web":"missing-ref"}}}"#,
+            "missing-ref",
+        ),
+        (
+            r#"{"workspaces":{"changedSince":{"packages/wbe":"HEAD"}}}"#,
+            "did you mean 'packages/web'?",
+        ),
+    ] {
+        std::fs::write(root.join(".fallowrc.json"), map).expect("package map");
+        let output = run_blocking_analysis(&package_input)
+            .unwrap_or_else(|error| panic!("{map}: the analysis must continue: {error}"));
+        assert!(output.package_scopes.is_empty(), "{map}");
+        assert!(
+            output.config_messages.iter().any(|(kind, message)| {
+                *kind == MessageType::WARNING
+                    && message.contains("workspaces.changedSince was ignored")
+                    && message.contains(cause)
+            }),
+            "{map}: {:?}",
+            output.config_messages
+        );
+        let legacy_findings = output
+            .analysis
+            .results
+            .unused_exports
+            .iter()
+            .any(|finding| {
+                finding
+                    .export
+                    .path
+                    .to_string_lossy()
+                    .replace('\\', "/")
+                    .contains("packages/legacy/")
+            });
+        assert!(legacy_findings, "{map}: full scope keeps every package");
+    }
+
     std::fs::write(
         root.join(".fallowrc.json"),
         r#"{"workspaces":{"changedSince":{"packages/web":"missing-ref"}}}"#,
     )
     .expect("invalid config ref");
-    let package_input = BlockingAnalysisInput {
-        changed_since: None,
-        ..changed_since_input(root, "HEAD", None)
-    };
-    let Err(error) = run_blocking_analysis(&package_input) else {
-        panic!("invalid package ref must fail");
-    };
-    assert!(error.to_string().contains("missing-ref"));
-
     let overridden = run_blocking_analysis(&changed_since_input(root, "HEAD", None))
         .expect("global ref overrides invalid package ref");
     assert!(overridden.package_scopes.is_empty());

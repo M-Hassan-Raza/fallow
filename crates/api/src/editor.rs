@@ -357,7 +357,7 @@ pub fn filter_inline_complexity_by_changed_files(
 /// Retain the inline complexity findings in a resolved change scope.
 pub fn filter_inline_complexity_by_change_scope(
     findings: &mut Vec<EditorInlineComplexityFinding>,
-    scope: &ChangeScope<'_>,
+    scope: &ChangeScope,
 ) {
     findings.retain(|finding| scope.contains(&finding.path));
 }
@@ -525,10 +525,10 @@ impl EditorAnalysisSession {
     ///
     /// Returns a typed error when the package map names an invalid or unknown
     /// workspace root, or a Git ref that does not resolve.
-    pub fn change_scope<'a>(
+    pub fn change_scope(
         &self,
-        request: ChangeScopeRequest<'a>,
-    ) -> Result<ChangeScope<'a>, PackageBaselineError> {
+        request: ChangeScopeRequest<'_>,
+    ) -> Result<ChangeScope, PackageBaselineError> {
         ChangeScope::resolve(request, self.inner.config(), self.inner.workspaces())
     }
 
@@ -655,7 +655,7 @@ impl EditorAnalysisSession {
     pub fn apply_change_scope(
         &self,
         output: &mut EditorProjectAnalysisOutput,
-        scope: &ChangeScope<'_>,
+        scope: &ChangeScope,
     ) {
         fallow_engine::dead_code::apply_scope(
             &mut output.dead_code.results,

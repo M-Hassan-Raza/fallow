@@ -29,6 +29,8 @@ pub enum PackageBaselineError {
     UnknownWorkspace {
         /// Authored key.
         key: String,
+        /// The closest discovered workspace root, when one is close.
+        suggestion: Option<String>,
     },
     /// Git could not resolve a package's baseline ref.
     Git {
@@ -55,11 +57,15 @@ impl fmt::Display for PackageBaselineError {
                 f,
                 "workspace baseline key '{key}' must be an exact project-relative workspace root"
             ),
-            Self::UnknownWorkspace { key } => {
+            Self::UnknownWorkspace { key, suggestion } => {
                 write!(
                     f,
                     "workspace baseline key '{key}' names no discovered workspace"
-                )
+                )?;
+                match suggestion {
+                    Some(suggestion) => write!(f, "; did you mean '{suggestion}'?"),
+                    None => Ok(()),
+                }
             }
             Self::Git {
                 key,
@@ -80,6 +86,8 @@ impl std::error::Error for PackageBaselineError {}
 enum WorkspaceBaseline {
     Full,
     Changed {
+        /// The authored key, as discovery reports the workspace root.
+        key: String,
         reference: String,
         files: Arc<FxHashSet<PathBuf>>,
     },
@@ -109,11 +117,12 @@ impl PackageChangeScope {
         self.absolute_path(path).starts_with(&self.root)
     }
 
-    /// Authored workspace roots and their resolved refs in path order.
-    pub fn configured_baselines(&self) -> impl Iterator<Item = (&Path, &str)> {
-        self.workspaces.iter().filter_map(|(path, baseline)| {
-            if let WorkspaceBaseline::Changed { reference, .. } = baseline {
-                Some((path.as_path(), reference.as_str()))
+    /// Authored workspace keys and their refs. A key is project-relative and
+    /// uses the path that discovery reports, also for a symlinked workspace.
+    pub fn configured_baselines(&self) -> impl Iterator<Item = (&str, &str)> {
+        self.workspaces.values().filter_map(|baseline| {
+            if let WorkspaceBaseline::Changed { key, reference, .. } = baseline {
+                Some((key.as_str(), reference.as_str()))
             } else {
                 None
             }
@@ -127,7 +136,7 @@ impl PackageChangeScope {
     ///
     /// Returns an error for an invalid workspace key, an undiscovered package,
     /// an unavailable root, or any Git ref that cannot be resolved.
-    pub fn resolve(
+    pub(crate) fn resolve(
         root: &Path,
         configured: &BTreeMap<String, String>,
         workspaces: &[WorkspaceInfo],
@@ -139,27 +148,35 @@ impl PackageChangeScope {
         let authored_root = dunce::simplified(root).to_path_buf();
         let root = canonical_root(root)?;
         let mut packages = BTreeMap::new();
+        // A key names a workspace root exactly as discovery reports it, which
+        // is also what `fallow list --workspaces` prints. A symlinked
+        // workspace is therefore mapped under its link path, and a symlink
+        // that discovery does not report is not an alias for a workspace.
+        let mut roots_by_key = BTreeMap::new();
         for workspace in workspaces {
-            packages.insert(canonical_root(&workspace.root)?, WorkspaceBaseline::Full);
+            let canonical = canonical_root(&workspace.root)?;
+            if let Some(key) = workspace_key(&workspace.root, &authored_root, &root) {
+                roots_by_key.insert(key, canonical.clone());
+            }
+            packages.insert(canonical, WorkspaceBaseline::Full);
         }
 
         let mut validated = Vec::with_capacity(configured.len());
         for (key, reference) in configured {
-            if !valid_workspace_key(key) {
+            if !fallow_config::glob_validation::is_exact_workspace_root(key) {
                 return Err(PackageBaselineError::InvalidWorkspaceKey { key: key.clone() });
             }
-            let candidate = root.join(key);
-            if !candidate.exists() {
-                return Err(PackageBaselineError::UnknownWorkspace { key: key.clone() });
-            }
-            let path = canonical_root(&candidate)?;
-            if candidate != path {
-                return Err(PackageBaselineError::InvalidWorkspaceKey { key: key.clone() });
-            }
-            if !path.starts_with(&root) || !packages.contains_key(&path) {
-                return Err(PackageBaselineError::UnknownWorkspace { key: key.clone() });
-            }
-            validated.push((key, reference, path));
+            let Some(path) = roots_by_key.get(key) else {
+                return Err(PackageBaselineError::UnknownWorkspace {
+                    key: key.clone(),
+                    suggestion: fallow_config::levenshtein::closest_match(
+                        key,
+                        roots_by_key.keys().map(String::as_str),
+                    )
+                    .map(str::to_owned),
+                });
+            };
+            validated.push((key, reference, path.clone()));
         }
 
         let configured_owners: BTreeMap<PathBuf, &str> = validated
@@ -209,6 +226,7 @@ impl PackageChangeScope {
             packages.insert(
                 path,
                 WorkspaceBaseline::Changed {
+                    key: key.clone(),
                     reference: reference.clone(),
                     files,
                 },
@@ -233,7 +251,7 @@ impl PackageChangeScope {
 
     /// Whether a finding owner path belongs to this mixed scope.
     #[must_use]
-    pub fn includes(&self, path: &Path) -> bool {
+    pub(crate) fn includes(&self, path: &Path) -> bool {
         let absolute = self.absolute_path(path);
         match self.owner_absolute(&absolute) {
             Some(WorkspaceBaseline::Changed { files, .. }) => files.contains(&absolute),
@@ -273,13 +291,19 @@ fn canonical_root(path: &Path) -> Result<PathBuf, PackageBaselineError> {
     })
 }
 
-fn valid_workspace_key(key: &str) -> bool {
-    !key.is_empty()
-        && !key.contains('\\')
-        && key
-            .split('/')
-            .all(|segment| !segment.is_empty() && segment != "." && segment != "..")
-        && !Path::new(key).is_absolute()
+/// The project-relative, slash-separated root of a discovered workspace.
+fn workspace_key(workspace_root: &Path, authored_root: &Path, root: &Path) -> Option<String> {
+    let workspace_root = dunce::simplified(workspace_root);
+    let relative = workspace_root
+        .strip_prefix(authored_root)
+        .or_else(|_| workspace_root.strip_prefix(root))
+        .ok()?;
+    let key = relative
+        .components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/");
+    (!key.is_empty()).then_some(key)
 }
 
 #[cfg(test)]
@@ -504,7 +528,48 @@ mod tests {
         let configured = BTreeMap::from([("alias".to_owned(), "HEAD".to_owned())]);
         assert!(matches!(
             PackageChangeScope::resolve(root, &configured, &[workspace(root, "packages/app")]),
-            Err(PackageBaselineError::InvalidWorkspaceKey { .. })
+            Err(PackageBaselineError::UnknownWorkspace { .. })
         ));
+    }
+
+    /// Discovery reports a symlinked workspace under its link path, and
+    /// `fallow list --workspaces` prints that path. The map accepts it.
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_workspace_is_mapped_under_its_discovered_root() {
+        let temp = nested_repo();
+        let root = temp.path();
+        fs::create_dir_all(root.join("external/linked")).expect("link target");
+        fs::write(root.join("external/linked/index.ts"), "export const x = 1;").expect("source");
+        std::os::unix::fs::symlink(root.join("external/linked"), root.join("packages/linked"))
+            .expect("workspace link");
+        let workspaces = [workspace(root, "packages/linked")];
+        let configured = BTreeMap::from([("packages/linked".to_owned(), "HEAD".to_owned())]);
+        let scope = PackageChangeScope::resolve(root, &configured, &workspaces)
+            .expect("the discovered root is a valid key")
+            .expect("package scope");
+        assert_eq!(
+            scope.baseline_for(&root.join("external/linked/index.ts")),
+            Some("HEAD")
+        );
+        assert!(scope.includes(&root.join("external/linked/index.ts")));
+        let rows =
+            crate::change_scope::package_baseline_statuses(std::slice::from_ref(&scope), root);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].workspace_root, "packages/linked");
+    }
+
+    #[test]
+    fn an_unknown_key_suggests_the_closest_workspace_root() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        fs::create_dir_all(root.join("packages/web")).expect("package directory");
+        let configured = BTreeMap::from([("packages/wbe".to_owned(), "HEAD".to_owned())]);
+        let Err(PackageBaselineError::UnknownWorkspace { suggestion, .. }) =
+            PackageChangeScope::resolve(root, &configured, &[workspace(root, "packages/web")])
+        else {
+            panic!("an unknown key must fail to resolve");
+        };
+        assert_eq!(suggestion.as_deref(), Some("packages/web"));
     }
 }

@@ -697,10 +697,20 @@ pub(super) fn load_dead_code_session(
             .with_context("analysis.configPath")
     })?;
     let project_config = configure_project_for_dead_code(project_config, options);
-    Ok(attach_cancellation(
-        AnalysisSession::from_config(project_config),
-        resolved,
-    ))
+    let session = attach_cancellation(AnalysisSession::from_config(project_config), resolved);
+    resolve_package_map_before_analysis(resolved, &session)?;
+    Ok(session)
+}
+
+/// Resolve the package map before the analysis starts, so a map that names no
+/// workspace fails fast. The call context keeps the result for the scope step.
+pub(super) fn resolve_package_map_before_analysis(
+    resolved: &ProgrammaticAnalysisContext,
+    session: &AnalysisSession,
+) -> ProgrammaticResult<()> {
+    resolved
+        .change_scope(None, session.config(), session.workspaces())
+        .map(drop)
 }
 
 /// Hand the caller's cancellation token to the engine session.
@@ -769,7 +779,7 @@ fn apply_dead_code_scope(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
     session: &AnalysisSession,
-    change_scope: &ChangeScope<'_>,
+    change_scope: &ChangeScope,
     results: &mut AnalysisResults,
 ) -> ProgrammaticResult<()> {
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;

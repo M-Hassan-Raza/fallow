@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Per-package `changedSince` baselines for monorepos.** Map a workspace
+  root to its own Git ref in the config, for example
+  `"workspaces": { "changedSince": { "packages/web": "main", "packages/legacy": "release/2024.10" } }`.
+  `check`, `dead-code`, `dupes`, those sections of a combined run and the
+  editor then report the findings of a mapped package only for files that
+  changed since its ref. Unlisted packages and root files stay in full scope.
+  A global `--changed-since` replaces the map for one run, and `audit`,
+  `health` and `security` ignore it. Write each key as
+  `fallow list --workspaces` prints it.
+  - JSON reports list the applied refs in `package_baselines`, and the LSP
+    sends the same rows as `packageBaselines`.
+  - `request_outcomes` gets the entry `package-baselines`. It is `applied`
+    when the map scoped the run. It is `not-applied` when a key names no
+    workspace of the project or Git cannot resolve a ref: the run then
+    reports every package in full scope and prints a warning, as an
+    unresolved `--changed-since` does.
+  - A malformed key or ref is invalid input and exits with code 2.
+
+  Thanks [@M-Hassan-Raza](https://github.com/M-Hassan-Raza) for the
+  contribution.
+
 - **Two scoped Fallow Cloud reads for agents.** An agent can now ask a
   small question without the full runtime-context pull and without a local
   analysis.

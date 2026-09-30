@@ -117,7 +117,8 @@ pub use fallow_config::{AuditGate, HealthConfig, TypeAwareRequire};
 /// Engine-owned change scope of one run: a global changed-file set or the
 /// per-workspace Git baselines of `workspaces.changedSince`.
 pub use fallow_engine::change_scope::{
-    ChangeScope, ChangeScopeOwner, ChangeScopeRequest, package_baseline_statuses,
+    ChangeScope, ChangeScopeOwner, ChangeScopeRequest, first_package_baselines,
+    package_baseline_statuses,
 };
 /// Engine-owned per-workspace Git baseline state used by analysis surfaces.
 pub use fallow_engine::package_baselines::{PackageBaselineError, PackageChangeScope};

@@ -583,6 +583,19 @@ fn run_check_analysis(
 ) -> Result<CheckAnalysisData, ExitCode> {
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .map_err(|e| emit_error(&format!("Analysis error: {e}"), 2, opts.output))?;
+    // Resolve the package map before the analysis, so a map that names no
+    // workspace fails fast. The run-wide memo keeps the result for the scope.
+    fallow_engine::change_scope::ChangeScope::resolve(
+        fallow_engine::change_scope::ChangeScopeRequest {
+            owner: opts.change_scope_owner,
+            global_ref: opts.changed_since.is_some(),
+            files: None,
+            cache: Some(crate::requests::package_baseline_cache()),
+        },
+        config,
+        session.workspaces(),
+    )
+    .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
 
     if opts.retain_modules_for_health {
         return session
@@ -797,7 +810,7 @@ fn apply_scope_filters(
     config: &ResolvedConfig,
     results: &mut AnalysisResults,
     ws_roots: Option<&Vec<std::path::PathBuf>>,
-    change_scope: &fallow_engine::change_scope::ChangeScope<'_>,
+    change_scope: &fallow_engine::change_scope::ChangeScope,
 ) {
     let diff_index = match opts.diff_index {
         Some(index) => Some(index),
@@ -1147,12 +1160,14 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                 owner: opts.change_scope_owner,
                 global_ref: opts.changed_since.is_some(),
                 files: changed_files.as_ref(),
+                cache: Some(crate::requests::package_baseline_cache()),
             },
             &config,
             &data.workspaces,
         )
     })
     .map_err(|err| emit_error(&format!("Workspace baseline error: {err}"), 2, opts.output))?;
+    crate::requests::warn_if_package_baselines_stood_down(&change_scope);
 
     apply_scope_filters(
         opts,
@@ -1324,7 +1339,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
 fn finding_id_run_reasons(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    change_scope: &fallow_engine::change_scope::ChangeScope<'_>,
+    change_scope: &fallow_engine::change_scope::ChangeScope,
 ) -> Vec<fallow_output::FindingIdQueryReason> {
     let mut reasons: Vec<fallow_output::FindingIdQueryReason> =
         baseline_scope_reasons(opts, config, change_scope)
@@ -1935,7 +1950,7 @@ struct BaselineIo<'a> {
 fn baseline_scope_reasons(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
-    change_scope: &fallow_engine::change_scope::ChangeScope<'_>,
+    change_scope: &fallow_engine::change_scope::ChangeScope,
 ) -> fallow_output::BaselineScopeReasons {
     use fallow_output::ScopeReason;
 
